@@ -98,8 +98,8 @@ fun Dial(
     ) {
         Canvas(Modifier.size(220.dp)) {
             val stroke = 20.dp.toPx()
-            drawArc(track, 135f, 270f, false, style = Stroke(stroke, StrokeCap.Round))
-            drawArc(accent, 135f, 270f * fraction, false, style = Stroke(stroke, StrokeCap.Round))
+            drawArc(track, 135f, 270f, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
+            drawArc(accent, 135f, 270f * fraction, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
             val angle = Math.toRadians((135.0 + 270.0 * fraction))
             val radius = (size.minDimension - stroke) / 2f
             drawCircle(
@@ -138,7 +138,7 @@ fun Sparkline(points: List<HistoryPoint>, color: Color, modifier: Modifier = Mod
             val y = size.height - ((p.value - min) / span * size.height).toFloat()
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
-        drawPath(path, color, style = Stroke(3.dp.toPx(), StrokeCap.Round, StrokeJoin.Round))
+        drawPath(path, color, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
