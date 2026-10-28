@@ -16,4 +16,14 @@ class SettingsStore(context: Context) {
     var reduceMotion: Boolean
         get() = prefs.getBoolean("reduce_motion", false)
         set(value) = prefs.edit().putBoolean("reduce_motion", value).apply()
+
+    /** The dashboard url_path last loaded (null = the default dashboard, sent with no url_path). */
+    var selectedDashboardPath: String?
+        get() = prefs.getString("selected_dashboard_path", null)
+        set(value) = prefs.edit().putString("selected_dashboard_path", value).apply()
+
+    /** True once a dashboard choice has been recorded; distinguishes "default dashboard chosen" from "never chosen". */
+    var hasSelectedDashboard: Boolean
+        get() = prefs.getBoolean("has_selected_dashboard", false)
+        set(value) = prefs.edit().putBoolean("has_selected_dashboard", value).apply()
 }

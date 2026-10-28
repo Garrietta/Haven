@@ -94,6 +94,37 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             }
         }
         Spacer(Modifier.height(12.dp))
+        // Dashboard picker: the instance — not Haven — decides which
+        // dashboards exist, so list every one it reports and let him switch.
+        // The "Default" chip loads with no url_path (the YAML-default key).
+        val dashboards by vm.dashboards.collectAsState()
+        val selectedDashboard by vm.selectedDashboard.collectAsState()
+        if (dashboards.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val currentPath = vm.client.lovelaceUrlPath
+                FilterChip(
+                    selected = currentPath == null,
+                    onClick = { vm.selectDashboard(null) },
+                    label = { Text("Default") },
+                )
+                for (d in dashboards) {
+                    FilterChip(
+                        selected = d.urlPath != null && d.urlPath == currentPath,
+                        onClick = { vm.selectDashboard(d.urlPath) },
+                        label = { Text(d.title ?: d.urlPath ?: "Dashboard") },
+                    )
+                }
+            }
+            if (selectedDashboard?.mode == "yaml") {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "This dashboard is stored as a YAML file on your instance — Haven shows it, but edits must be made in the file itself.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }
         if (config == null) {
             if (lovelaceError != null) {
                 Text(lovelaceError!!, color = MaterialTheme.colorScheme.error)
@@ -321,6 +352,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
     var newCardEntity by remember { mutableStateOf("") }
     var newCardTypeExpanded by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+    val editSelectedDashboard by vm.selectedDashboard.collectAsState()
     val cardTypes = listOf("entities", "tile", "button", "light", "thermostat", "sensor", "weather-forecast", "media-control", "glance", "markdown")
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         DetailTopBar("Edit dashboard", onBack)
@@ -428,6 +460,19 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
                     newCardEntity = ""
                 }) { Text("Add card") }
                 Spacer(Modifier.height(16.dp))
+                // YAML-mode dashboards have no storage save path: HA's
+                // lovelace/config/save only writes storage dashboards, so
+                // offering Save here would fail confusingly. Display stays
+                // fully available; only the write is gated, with the reason.
+                val editYamlMode = editSelectedDashboard?.mode == "yaml"
+                if (editYamlMode) {
+                    Text(
+                        "This dashboard is stored as a YAML file on your instance, so Haven can't save edits to it — edit the YAML file directly.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 Button(
                     onClick = {
                         vm.saveEditing { ok ->
@@ -435,6 +480,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
                             if (ok) vm.client.refreshLovelace()
                         }
                     },
+                    enabled = !editYamlMode,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Save dashboard") }
                 status?.let {

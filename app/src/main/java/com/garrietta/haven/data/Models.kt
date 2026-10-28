@@ -94,6 +94,13 @@ data class LovelaceConfig(
     val views: List<LovelaceView>,
 )
 
+/**
+ * One dashboard as listed by `lovelace/dashboards/list`. urlPath is null for
+ * the default dashboard when it is not a named storage dashboard; mode is
+ * "storage" or "yaml" when the instance reports it.
+ */
+data class HaDashboard(val urlPath: String?, val title: String?, val mode: String?)
+
 /** Connection lifecycle shown in the UI. */
 sealed class ConnectionState {
     data object Disconnected : ConnectionState()

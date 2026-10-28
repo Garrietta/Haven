@@ -58,6 +58,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val entityAreas = client.entityAreas
     val lovelace = client.lovelace
     val lovelaceError = client.lovelaceError
+    val dashboards = client.dashboards
+    val selectedDashboard = client.selectedDashboard
+
+    /** Switch Boards to another dashboard (null = the default, sent with no url_path). */
+    fun selectDashboard(path: String?) {
+        client.preferredLovelacePath = path
+        client.hasPreferredLovelacePath = true
+        settingsStore.selectedDashboardPath = path
+        settingsStore.hasSelectedDashboard = true
+        client.refreshLovelace()
+    }
 
     var isAuthenticated by mutableStateOf(false)
         private set
@@ -102,6 +113,14 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     init {
+        // Dashboard choice must be wired before autoConnect: connect ->
+        // auth_ok -> refreshLovelace reads the preference on its first run.
+        client.preferredLovelacePath = settingsStore.selectedDashboardPath
+        client.hasPreferredLovelacePath = settingsStore.hasSelectedDashboard
+        client.onDashboardResolved = { path, has ->
+            settingsStore.selectedDashboardPath = path
+            settingsStore.hasSelectedDashboard = has
+        }
         autoConnect()
     }
 

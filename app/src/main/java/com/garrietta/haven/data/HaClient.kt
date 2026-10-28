@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 object ConfigCommands {
     const val LOVE_LACE_GET = "lovelace/config"
+    const val LOVE_LACE_LIST = "lovelace/dashboards/list"
     const val LOVE_LACE_SAVE = "lovelace/config/save"
     const val TODO_CREATE = "todo/item_create"
     const val TODO_UPDATE = "todo/item_update"
@@ -64,9 +65,29 @@ class HaClient(
     private val _lovelace = MutableStateFlow<LovelaceConfig?>(null)
     val lovelace: StateFlow<LovelaceConfig?> = _lovelace.asStateFlow()
 
-    /** The dashboard this client loads/saves, resolved from get_panels. */
+    /** The dashboard this client loads/saves, resolved by [refreshLovelace]. */
     var lovelaceUrlPath: String? = null
         private set
+
+    /** Every dashboard the instance lists, for the Boards picker. */
+    private val _dashboards = MutableStateFlow<List<HaDashboard>>(emptyList())
+    val dashboards: StateFlow<List<HaDashboard>> = _dashboards.asStateFlow()
+
+    /** The dashboard entry that produced the loaded config, if it was a listed one. */
+    private val _selectedDashboard = MutableStateFlow<HaDashboard?>(null)
+    val selectedDashboard: StateFlow<HaDashboard?> = _selectedDashboard.asStateFlow()
+
+    /** Dashboard the user last picked (persisted by the ViewModel); tried first. */
+    var preferredLovelacePath: String? = null
+    var hasPreferredLovelacePath: Boolean = false
+
+    /**
+     * Called with (urlPath, hasSelection) whenever a dashboard loads, so the
+     * ViewModel can persist the choice. hasSelection is always true here: a
+     * null urlPath means "the default dashboard" won, which is a real choice,
+     * not "unset" — the distinction matters on the next launch.
+     */
+    var onDashboardResolved: ((String?, Boolean) -> Unit)? = null
 
     private val _lovelaceError = MutableStateFlow<String?>(null)
     val lovelaceError: StateFlow<String?> = _lovelaceError.asStateFlow()
@@ -291,54 +312,135 @@ class HaClient(
     }
 
     /**
-     * Loads the Lovelace config. The old code sent lovelace/config with no
-     * url_path, and Home Assistant's handler looks the dashboard up by that
-     * key — a missing key is a config_not_found error, which the old callback
-     * swallowed (it returned early on a missing result object), leaving the
-     * Boards tab on its loading line forever. Now the dashboard is resolved
-     * first via get_panels (preferring the default "lovelace" panel), the
-     * config is fetched WITH url_path, and every failure lands in
-     * [lovelaceError] so the tab can show it with a Retry instead of
-     * spinning forever.
+     * Loads the Lovelace config. Diagnosis of the run #13 Boards failure
+     * ("Unknown config specified: lovelace"): Home Assistant's lovelace
+     * websocket handler looks the dashboard up by url_path in its dashboards
+     * dict and returns config_not_found when the key is absent — so the
+     * instance simply has no dashboard keyed "lovelace". The old code
+     * resolved one path from get_panels and died on that single miss.
+     *
+     * The new resolution never assumes a name: it lists every dashboard via
+     * `lovelace/dashboards/list` (the command the HA frontend itself uses),
+     * falls back to get_panels lovelace panels when the list is unavailable,
+     * then tries candidates in order — the user's last pick, listed
+     * dashboards, panel-derived paths, the default (no url_path sent: YAML
+     * default dashboards are keyed by null, not "lovelace"), then "lovelace"
+     * itself. The first success wins and is persisted; if nothing loads, the
+     * error says so plainly instead of spinning, and Retry re-runs the whole
+     * enumeration. A YAML-mode dashboard still DISPLAYS fine; only saving
+     * is gated (see the edit screen), because HA has no partial-edit API
+     * and YAML dashboards must be edited as files.
      */
     fun refreshLovelace() {
         _lovelaceError.value = null
+        if (_connection.value != ConnectionState.Connected) {
+            _lovelaceError.value = "Not connected to Home Assistant yet — check the connection, then tap Retry."
+            return
+        }
+        sendCommand(ConfigCommands.LOVELACE_LIST, onResult = { listMsg ->
+            val listed = if (listMsg.optBoolean("success", false)) {
+                parseDashboardsList(listMsg.opt("result"))
+            } else {
+                null
+            }
+            if (listed != null) _dashboards.value = listed
+            fetchPanelsThenTry(listed)
+        })
+    }
+
+    private fun fetchPanelsThenTry(listed: List<HaDashboard>?) {
         sendCommand("get_panels", onResult = { panelsMsg ->
-            var urlPath: String? = null
+            val panelPaths = mutableListOf<String>()
             val panels = panelsMsg.optJSONObject("result")
             if (panels != null) {
-                val candidates = mutableListOf<String>()
                 val keys = panels.keys()
                 while (keys.hasNext()) {
                     val panel = panels.optJSONObject(keys.next()) ?: continue
                     if (panel.optString("component_name") == "lovelace") {
-                        panel.optString("url_path").ifEmpty { null }?.let { candidates.add(it) }
+                        panel.optString("url_path").ifEmpty { null }?.let { panelPaths.add(it) }
                     }
                 }
-                urlPath = candidates.firstOrNull { it == "lovelace" } ?: candidates.firstOrNull()
             }
-            val path = urlPath ?: "lovelace"
-            lovelaceUrlPath = path
-            sendCommand("lovelace/config", build = { it.put("url_path", path) }, onResult = { msg ->
-                if (!msg.optBoolean("success", false)) {
-                    val message = msg.optJSONObject("error")?.optString("message") ?: "unknown error"
-                    Log.w("Haven", "lovelace/config FAILED url_path=$path: $message")
-                    _lovelaceError.value = "Couldn't load dashboards: $message"
-                    return@sendCommand
+            val candidates = mutableListOf<DashboardCandidate>()
+            if (hasPreferredLovelacePath) {
+                candidates.add(DashboardCandidate(preferredLovelacePath, listed?.firstOrNull { it.urlPath == preferredLovelacePath }))
+            }
+            listed?.forEach { candidates.add(DashboardCandidate(it.urlPath, it)) }
+            panelPaths.forEach { path ->
+                if (candidates.none { it.urlPath == path }) {
+                    candidates.add(DashboardCandidate(path, listed?.firstOrNull { it.urlPath == path }))
                 }
-                val result = msg.optJSONObject("result")
-                if (result == null) {
-                    _lovelaceError.value = "Couldn't load dashboards: empty response."
-                    return@sendCommand
-                }
-                try {
-                    _lovelace.value = parseLovelace(result)
-                } catch (e: Exception) {
-                    Log.w("Haven", "lovelace parse FAILED: ${e.message}")
-                    _lovelaceError.value = "Couldn't read dashboards: ${e.message}"
-                }
-            })
+            }
+            candidates.add(DashboardCandidate(null, null))
+            if (candidates.none { it.urlPath == "lovelace" }) {
+                candidates.add(DashboardCandidate("lovelace", null))
+            }
+            tryLovelaceCandidates(candidates, 0, listed)
         })
+    }
+
+    private data class DashboardCandidate(val urlPath: String?, val dashboard: HaDashboard?)
+
+    private fun tryLovelaceCandidates(candidates: List<DashboardCandidate>, index: Int, listed: List<HaDashboard>?) {
+        if (index >= candidates.size) {
+            val tried = listed?.takeIf { it.isNotEmpty() }?.joinToString { it.title ?: it.urlPath ?: "default" }
+            _lovelaceError.value = "Couldn't load dashboards: none of your dashboards would open" +
+                (if (tried != null) " (tried: $tried). " else ". ") +
+                "If your dashboards live in YAML files instead of the UI editor, check the dashboard list in Home Assistant, then tap Retry."
+            return
+        }
+        val candidate = candidates[index]
+        sendCommand(ConfigCommands.LOVE_LACE_GET, build = {
+            candidate.urlPath?.let { path -> it.put("url_path", path) }
+        }, onResult = { msg ->
+            if (!msg.optBoolean("success", false)) {
+                val message = msg.optJSONObject("error")?.optString("message") ?: "unknown error"
+                Log.w("Haven", "lovelace/config FAILED url_path=${candidate.urlPath}: $message")
+                tryLovelaceCandidates(candidates, index + 1, listed)
+                return@sendCommand
+            }
+            val result = msg.optJSONObject("result")
+            if (result == null) {
+                tryLovelaceCandidates(candidates, index + 1, listed)
+                return@sendCommand
+            }
+            try {
+                _lovelace.value = parseLovelace(result)
+                lovelaceUrlPath = candidate.urlPath
+                _selectedDashboard.value = candidate.dashboard
+                onDashboardResolved?.invoke(candidate.urlPath, true)
+                _lovelaceError.value = null
+            } catch (e: Exception) {
+                Log.w("Haven", "lovelace parse FAILED: ${e.message}")
+                _lovelaceError.value = "Couldn't read dashboards: ${e.message}"
+            }
+        })
+    }
+
+    /**
+     * Parses `lovelace/dashboards/list` results. The command returns a JSON
+     * array of dashboard objects; a wrapping object is tolerated defensively
+     * so a shape change degrades to "list unavailable" (panel fallback)
+     * instead of a crash.
+     */
+    private fun parseDashboardsList(result: Any?): List<HaDashboard>? {
+        val arr: JSONArray? = when (result) {
+            is JSONArray -> result
+            is JSONObject -> result.optJSONArray("dashboards")
+            else -> null
+        } ?: return null
+        val out = mutableListOf<HaDashboard>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            out.add(
+                HaDashboard(
+                    urlPath = obj.optString("url_path").ifEmpty { null },
+                    title = obj.optString("title").ifEmpty { null },
+                    mode = obj.optString("mode").ifEmpty { null },
+                )
+            )
+        }
+        return out
     }
 
     private fun parseLovelace(result: JSONObject): LovelaceConfig {
