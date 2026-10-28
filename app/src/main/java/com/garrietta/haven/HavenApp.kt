@@ -30,8 +30,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -147,8 +149,43 @@ fun HavenApp(vm: HavenViewModel) {
                     Screen.ScriptBuilder -> ScriptBuilderScreen(vm, goBack)
                     Screen.HelperBuilder -> HelperBuilderScreen(vm, goBack)
                 }
+                // A failed tap used to vanish silently; now it banners here on
+                // every screen until dismissed.
+                val serviceError by vm.serviceError.collectAsState()
+                if (serviceError != null) {
+                    ServiceErrorBanner(
+                        serviceError!!,
+                        onDismiss = vm::dismissServiceError,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(16.dp),
+                    )
+                }
             }
         }
+        }
+    }
+}
+
+/** Dismissible banner for the last service-call failure. */
+@Composable
+private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+        shadowElevation = 6.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                message,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = onDismiss) { Text("Dismiss") }
         }
     }
 }

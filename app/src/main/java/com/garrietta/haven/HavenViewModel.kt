@@ -293,9 +293,36 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Service helpers (thin wrappers over call_service) ----
 
-    fun toggle(id: String) = client.toggle(id)
-    fun turnOn(id: String) = client.callService(id.substringBefore("."), "turn_on", id)
-    fun turnOff(id: String) = client.callService(id.substringBefore("."), "turn_off", id)
+    /** The last service-call failure, surfaced as a banner so a tap can never fail silently again. */
+    val serviceError = client.lastServiceError
+
+    fun dismissServiceError() = client.clearServiceError()
+
+    /**
+     * Runs [call] with an optimistic local state flip, reverted if the call
+     * fails. The next state_changed event reconciles the flip on success.
+     */
+    private fun actuate(id: String, optimisticState: String, call: ((Boolean) -> Unit) -> Unit) {
+        val prev = client.states.value[id]?.state
+        client.setLocalState(id, optimisticState)
+        call { ok ->
+            if (!ok && prev != null) client.setLocalState(id, prev)
+        }
+    }
+
+    fun toggle(id: String) {
+        val next = if (client.states.value[id]?.state == "on") "off" else "on"
+        actuate(id, next) { done -> client.toggle(id, done) }
+    }
+
+    fun turnOn(id: String) = actuate(id, "on") { done ->
+        client.callService(id.substringBefore("."), "turn_on", id, null, done)
+    }
+
+    fun turnOff(id: String) = actuate(id, "off") { done ->
+        client.callService(id.substringBefore("."), "turn_off", id, null, done)
+    }
+
     fun callService(domain: String, service: String, entityId: String? = null, data: JSONObject? = null) =
         client.callService(domain, service, entityId, data)
 

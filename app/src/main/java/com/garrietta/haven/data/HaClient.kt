@@ -2,6 +2,7 @@ package com.garrietta.haven.data
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -62,6 +63,28 @@ class HaClient(
 
     private val _lovelace = MutableStateFlow<LovelaceConfig?>(null)
     val lovelace: StateFlow<LovelaceConfig?> = _lovelace.asStateFlow()
+
+    /**
+     * The last service-call failure, if any. A failed tap used to vanish
+     * silently (fire-and-forget with no result callback and a send() that
+     * ignored its own return value); now every failure lands here so the UI
+     * can show it, and every call is logged under the Haven tag so logcat
+     * proves what left the phone.
+     */
+    private val _lastServiceError = MutableStateFlow<String?>(null)
+    val lastServiceError: StateFlow<String?> = _lastServiceError.asStateFlow()
+
+    fun clearServiceError() {
+        _lastServiceError.value = null
+    }
+
+    /** Immediate local state flip for optimistic UI; the next state_changed event reconciles it. */
+    fun setLocalState(entityId: String, newState: String) {
+        val current = _states.value.toMutableMap()
+        val old = current[entityId] ?: return
+        current[entityId] = old.copy(state = newState)
+        _states.value = current
+    }
 
     private var socket: WebSocket? = null
     private var instanceUrl: String = ""
@@ -138,11 +161,12 @@ class HaClient(
         }
     }
 
-    private fun send(obj: JSONObject) {
-        try {
-            socket?.send(obj.toString())
+    private fun send(obj: JSONObject): Boolean {
+        return try {
+            socket?.send(obj.toString()) ?: false
         } catch (e: Exception) {
             // Socket gone; the reconnect loop will pick it up.
+            false
         }
     }
 
@@ -291,17 +315,53 @@ class HaClient(
         return LovelaceConfig(result.optString("title").ifEmpty { null }, views)
     }
 
-    /** Fire-and-forget service call. */
-    fun callService(domain: String, service: String, entityId: String? = null, data: JSONObject? = null) {
-        sendCommand("call_service") { obj ->
-            obj.put("domain", domain)
-            obj.put("service", service)
-            if (entityId != null) obj.put("target", JSONObject().put("entity_id", entityId))
-            if (data != null) obj.put("service_data", data)
+    /**
+     * Service call. The message shape is Home Assistant's documented
+     * call_service form (type/domain/service/service_data?/target?) — verified
+     * against developers.home-assistant.io/docs/api/websocket and R1HA's
+     * identical implementation. What used to be broken was everything around
+     * it: the call was fire-and-forget with no result callback, and send()
+     * failures were swallowed, so a tap that never reached the instance looked
+     * exactly like success. Now the result is always observed: failures surface
+     * in [lastServiceError], and every call and outcome is logged.
+     */
+    fun callService(
+        domain: String,
+        service: String,
+        entityId: String? = null,
+        data: JSONObject? = null,
+        onDone: ((Boolean) -> Unit)? = null,
+    ) {
+        val id = nextId.getAndIncrement()
+        val obj = JSONObject().put("id", id).put("type", "call_service")
+        obj.put("domain", domain)
+        obj.put("service", service)
+        if (entityId != null) obj.put("target", JSONObject().put("entity_id", entityId))
+        if (data != null) obj.put("service_data", data)
+        Log.d("Haven", "call_service $domain.$service target=$entityId")
+        pending[id] = { msg ->
+            if (msg.optBoolean("success", false)) {
+                Log.d("Haven", "call_service ok $domain.$service -> $entityId")
+                onDone?.invoke(true)
+            } else {
+                val err = msg.optJSONObject("error")
+                val message = err?.optString("message") ?: "Home Assistant rejected the call"
+                val code = err?.optString("code") ?: "error"
+                Log.w("Haven", "call_service FAILED $domain.$service -> $entityId: $code $message")
+                _lastServiceError.value = "$domain.$service: $message"
+                onDone?.invoke(false)
+            }
+        }
+        if (!send(obj)) {
+            pending.remove(id)
+            Log.w("Haven", "call_service NOT SENT (no live socket) $domain.$service -> $entityId")
+            _lastServiceError.value = "Not connected — the action was not sent. Check the connection and try again."
+            onDone?.invoke(false)
         }
     }
 
-    fun toggle(entityId: String) = callService(entityId.substringBefore("."), "toggle", entityId)
+    fun toggle(entityId: String, onDone: ((Boolean) -> Unit)? = null) =
+        callService(entityId.substringBefore("."), "toggle", entityId, null, onDone)
 
     /** Saves a full Lovelace config (views/cards) back to the instance. */
     fun saveLovelace(config: JSONObject, onDone: (Boolean) -> Unit) {
