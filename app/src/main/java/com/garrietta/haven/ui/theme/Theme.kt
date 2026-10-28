@@ -14,7 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 /** The house spring: bouncy, shared by every animated control in Haven. */
-fun <T> havenSpring(): AnimationSpec<T> = spring(stiffness = 380f, dampingRatio = 0.62f)
+fun <T> havenSpring(): FiniteAnimationSpec<T> = spring(stiffness = 380f, dampingRatio = 0.62f)
 
 /** Instant spec used when reduce-motion is on. Finite, so it also serves animateContentSize and expand/shrink. */
 fun <T> havenMotion(reduceMotion: Boolean): FiniteAnimationSpec<T> =
