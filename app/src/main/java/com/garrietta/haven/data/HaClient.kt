@@ -337,7 +337,7 @@ class HaClient(
             _lovelaceError.value = "Not connected to Home Assistant yet — check the connection, then tap Retry."
             return
         }
-        sendCommand(ConfigCommands.LOVELACE_LIST, onResult = { listMsg ->
+        sendCommand(ConfigCommands.LOVE_LACE_LIST, onResult = { listMsg ->
             val listed = if (listMsg.optBoolean("success", false)) {
                 parseDashboardsList(listMsg.opt("result"))
             } else {
@@ -424,11 +424,12 @@ class HaClient(
      * instead of a crash.
      */
     private fun parseDashboardsList(result: Any?): List<HaDashboard>? {
-        val arr: JSONArray? = when (result) {
+        val rawArr: JSONArray? = when (result) {
             is JSONArray -> result
             is JSONObject -> result.optJSONArray("dashboards")
             else -> null
-        } ?: return null
+        }
+        val arr = rawArr ?: return null
         val out = mutableListOf<HaDashboard>()
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
