@@ -30,8 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.ui.controls.stateText
 import org.json.JSONArray
 import org.json.JSONObject
 

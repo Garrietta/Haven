@@ -11,9 +11,9 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.graphics.shapes.CornerRounding
 import androidx.graphics.shapes.Morph
 import androidx.graphics.shapes.RoundedPolygon
-import androidx.graphics.shapes.Rounding
 import androidx.graphics.shapes.toPath
 import kotlin.math.cos
 import kotlin.math.min
@@ -41,22 +41,22 @@ fun expressivePolygon(kind: ExpressiveKind): RoundedPolygon = when (kind) {
     // 12-point sun: alternating long/short rays.
     ExpressiveKind.SUNNY -> RoundedPolygon(
         polygonVertices(12) { i, _ -> if (i % 2 == 0) 1f else 0.70f },
-        0f, 0f, Rounding(0.30f),
+        rounding = CornerRounding(0.30f, 0.6f),
     )
     // 6 soft petals.
     ExpressiveKind.FLOWER -> RoundedPolygon(
         polygonVertices(24) { _, a -> 0.80f + 0.20f * cos(6 * a) },
-        0f, 0f, Rounding(0.30f),
+        rounding = CornerRounding(0.30f, 0.6f),
     )
     // One squishy blob.
     ExpressiveKind.BUN -> RoundedPolygon(
         polygonVertices(20) { _, a -> 0.92f + 0.08f * sin(3 * a) },
-        0f, 0f, Rounding(0.35f),
+        rounding = CornerRounding(0.35f, 0.6f),
     )
     // 8-point soft burst.
     ExpressiveKind.BURST -> RoundedPolygon(
         polygonVertices(24) { _, a -> 0.86f + 0.14f * cos(8 * a) },
-        0f, 0f, Rounding(0.28f),
+        rounding = CornerRounding(0.28f, 0.6f),
     )
 }
 
@@ -93,16 +93,16 @@ fun MorphShape(
         val path = Path()
         var first = true
         morph.forEachCubic(progress) { cubic ->
-            val ax0 = cx + cubic.anchor0.x * scale
-            val ay0 = cy + cubic.anchor0.y * scale
+            val ax0 = cx + cubic.anchor0X * scale
+            val ay0 = cy + cubic.anchor0Y * scale
             if (first) {
                 path.moveTo(ax0, ay0)
                 first = false
             }
             path.cubicTo(
-                cx + cubic.control0.x * scale, cy + cubic.control0.y * scale,
-                cx + cubic.control1.x * scale, cy + cubic.control1.y * scale,
-                cx + cubic.anchor1.x * scale, cy + cubic.anchor1.y * scale,
+                cx + cubic.control0X * scale, cy + cubic.control0Y * scale,
+                cx + cubic.control1X * scale, cy + cubic.control1Y * scale,
+                cx + cubic.anchor1X * scale, cy + cubic.anchor1Y * scale,
             )
         }
         path.close()
