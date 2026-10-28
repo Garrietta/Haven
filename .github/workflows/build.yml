@@ -14,7 +14,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      # No setup-android step: ubuntu runners already ship the Android SDK
+      # (ANDROID_HOME is preset). The setup-android action's license prompt
+      # fails non-interactively ("7 of 8 SDK package licenses not accepted").
       - uses: gradle/actions/setup-gradle@v3
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
