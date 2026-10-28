@@ -18,9 +18,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Thunderstorm
+import androidx.compose.material.icons.filled.Umbrella
+import androidx.compose.material.icons.filled.WbCloudy
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -41,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,6 +62,10 @@ import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 /** Second half of the domain dispatch (called from EntityControlCard). */
 @Composable
@@ -160,17 +173,79 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel) {
         Spacer(Modifier.height(8.dp))
         for (item in forecast.take(6)) {
             val whenRaw = (item["datetime"] as? String) ?: ""
-            val whenLabel = whenRaw.replace('T', ' ').take(16)
+            val whenLabel = friendlyHourLabel(whenRaw)
             val fTemp = (item["temperature"] as? Number)?.toDouble()
             val condition = (item["condition"] as? String) ?: ""
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(whenLabel, fontSize = 13.sp)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Icon(
+                        conditionIcon(condition),
+                        contentDescription = condition,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(whenLabel, fontSize = 13.sp)
+                }
                 Text(condition.replace('_', ' '), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (fTemp != null) Text(fTemp.formatTemp(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                if (fTemp != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(fTemp.formatTemp(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
             Spacer(Modifier.height(4.dp))
         }
     }
+}
+
+/** "2026-10-28T23:00:00" -> "11 PM", "Tomorrow 11 PM", or "Thu 11 PM". Falls back to the raw string. */
+private fun friendlyHourLabel(raw: String): String {
+    val parsed = parseWeatherTime(raw) ?: return raw.replace('T', ' ').take(16)
+    val hour = SimpleDateFormat("h a", Locale.US).format(parsed)
+    val now = Calendar.getInstance()
+    val cal = Calendar.getInstance().apply { time = parsed }
+    val sameDay = now.get(Calendar.YEAR) == cal.get(Calendar.YEAR) &&
+        now.get(Calendar.DAY_OF_YEAR) == cal.get(Calendar.DAY_OF_YEAR)
+    if (sameDay) return hour
+    val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+    val isTomorrow = tomorrow.get(Calendar.YEAR) == cal.get(Calendar.YEAR) &&
+        tomorrow.get(Calendar.DAY_OF_YEAR) == cal.get(Calendar.DAY_OF_YEAR)
+    if (isTomorrow) return "Tomorrow $hour"
+    return "${SimpleDateFormat("EEE", Locale.US).format(parsed)} $hour"
+}
+
+private fun parseWeatherTime(raw: String): Date? {
+    val patterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ssXXX",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd HH:mm:ss",
+    )
+    for (pattern in patterns) {
+        try {
+            return SimpleDateFormat(pattern, Locale.US).parse(raw)
+        } catch (e: Exception) {
+            // Try the next pattern.
+        }
+    }
+    return null
+}
+
+private fun conditionIcon(condition: String): ImageVector = when (condition) {
+    "sunny", "clear" -> Icons.Filled.WbSunny
+    "clear-night" -> Icons.Filled.Nightlight
+    "partlycloudy" -> Icons.Filled.WbCloudy
+    "cloudy" -> Icons.Filled.Cloud
+    "rainy", "pouring", "hail" -> Icons.Filled.Umbrella
+    "snowy", "snowy-rainy" -> Icons.Filled.AcUnit
+    "lightning", "lightning-rainy" -> Icons.Filled.Thunderstorm
+    "windy", "windy-variant" -> Icons.Filled.Air
+    "fog" -> Icons.Filled.Cloud
+    else -> Icons.Filled.WbSunny
 }
 
 @Composable

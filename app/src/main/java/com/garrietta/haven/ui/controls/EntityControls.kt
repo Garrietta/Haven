@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.controls
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -62,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,10 +71,12 @@ import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
+import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.MorphShape
+import com.garrietta.haven.ui.theme.havenMotion
 import com.garrietta.haven.ui.theme.polygonShape
 import org.json.JSONObject
 
@@ -181,15 +185,28 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
     val pct = brightness * 100f / 255f
     val modes = entity.attrList("supported_color_modes")?.mapNotNull { it as? String } ?: emptyList()
     val kelvin = entity.attrInt("color_temp_kelvin")
+    // The bulb used to snap between shapes; now it blooms on the house spring.
+    val reduceMotion = LocalReduceMotion.current
+    val bulbProgress by animateFloatAsState(
+        if (isOn) 1f else 0f,
+        animationSpec = havenMotion(reduceMotion),
+        label = "bulb",
+    )
+    val bulbScale by animateFloatAsState(
+        if (isOn) 1f else 0.9f,
+        animationSpec = havenMotion(reduceMotion),
+        label = "bulbScale",
+    )
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
-            Modifier.size(76.dp).clickable { vm.toggle(entity.entityId) },
+            Modifier.size(76.dp).graphicsLayer(scaleX = bulbScale, scaleY = bulbScale)
+                .clickable { vm.toggle(entity.entityId) },
             contentAlignment = Alignment.Center,
         ) {
             MorphShape(
                 from = ExpressiveKind.BUN,
                 to = ExpressiveKind.SUNNY,
-                progress = if (isOn) 1f else 0f,
+                progress = bulbProgress,
                 color = if (isOn) accent else MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.size(76.dp),
             )
@@ -251,15 +268,21 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
     val accent = accentFor(entity.entityId)
     val isGarage = entity.attrString("device_class") == "garage"
     Row(verticalAlignment = Alignment.CenterVertically) {
-        // Door visual: the door slides up as the cover opens.
+        // Door visual: the door slides up as the cover opens, on the house spring.
+        val reduceMotion = LocalReduceMotion.current
+        val doorFractionTarget = (100 - position) / 100f
+        val animatedDoorFraction by animateFloatAsState(
+            doorFractionTarget.coerceAtLeast(0.08f),
+            animationSpec = havenMotion(reduceMotion),
+            label = "door",
+        )
         Box(
             Modifier.size(width = 84.dp, height = 110.dp)
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
         ) {
-            val doorFraction = (100 - position) / 100f
             Box(
                 Modifier.fillMaxWidth()
-                    .height(110.dp * doorFraction.coerceAtLeast(0.08f))
+                    .height(110.dp * animatedDoorFraction)
                     .background(accent, RoundedCornerShape(16.dp))
                     .align(Alignment.TopCenter),
             )

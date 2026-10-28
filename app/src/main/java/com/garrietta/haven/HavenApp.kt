@@ -1,7 +1,15 @@
 package com.garrietta.haven
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -16,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -24,6 +33,11 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +58,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,17 +77,25 @@ import com.garrietta.haven.ui.screens.SearchScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.components.pillScrub
+import com.garrietta.haven.ui.components.pillScrubItem
+import com.garrietta.haven.ui.components.rememberPillScrubState
 import com.garrietta.haven.ui.theme.HavenTheme
-import com.garrietta.haven.ui.theme.havenSpring
+import com.garrietta.haven.ui.theme.havenMotion
 
-private data class NavItem(val screen: Screen, val label: String, val icon: ImageVector)
+private data class NavItem(
+    val screen: Screen,
+    val label: String,
+    val icon: ImageVector,
+    val outlinedIcon: ImageVector,
+)
 
 private val TOP_NAV = listOf(
-    NavItem(Screen.Today, "Today", Icons.Filled.Home),
-    NavItem(Screen.Dashboards, "Boards", Icons.Filled.GridView),
-    NavItem(Screen.Areas, "Areas", Icons.Filled.LocationOn),
-    NavItem(Screen.Search, "Search", Icons.Filled.Search),
-    NavItem(Screen.Settings, "Settings", Icons.Filled.Settings),
+    NavItem(Screen.Today, "Today", Icons.Filled.Home, Icons.Outlined.Home),
+    NavItem(Screen.Dashboards, "Boards", Icons.Filled.GridView, Icons.Outlined.GridView),
+    NavItem(Screen.Areas, "Areas", Icons.Filled.LocationOn, Icons.Outlined.LocationOn),
+    NavItem(Screen.Search, "Search", Icons.Filled.Search, Icons.Outlined.Search),
+    NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
@@ -190,9 +214,29 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
     }
 }
 
-/** The pill-bar bottom navigation: one pill per destination, springy selection. */
+/**
+ * The pill-bar bottom navigation, with Koda's item treatment: the selected
+ * pill grows (padding 12 -> 20dp) on the house spring, its label fades and
+ * expands in, and its icon fills — while the others shrink back to outlined
+ * icons with no label. Dragging along the bar scrubs the highlight under the
+ * finger (haptic tick per tab) and commits on release, exactly like Koda's
+ * nav scrub. The bar container itself stays Haven's own floating pill.
+ */
 @Composable
 fun PillNav(current: Screen, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
+    val reduceMotion = LocalReduceMotion.current
+    val haptics = LocalHapticFeedback.current
+    val currentIndex = TOP_NAV.indexOfFirst { it.screen == current }.coerceAtLeast(0)
+    val scrub = rememberPillScrubState(
+        tabIds = TOP_NAV.indices.toList(),
+        onHoverChange = { haptics.performHapticFeedback(HapticFeedbackType.SegmentTick) },
+        onCommit = { target ->
+            if (target != currentIndex) {
+                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                onSelect(TOP_NAV[target].screen)
+            }
+        },
+    )
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(50),
@@ -201,41 +245,67 @@ fun PillNav(current: Screen, onSelect: (Screen) -> Unit, modifier: Modifier = Mo
         shadowElevation = 6.dp,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp).pillScrub(scrub),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            for (item in TOP_NAV) {
-                val selected = item.screen == current
-                val bg by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primaryContainer
-                    else Color.Transparent,
-                    animationSpec = havenSpring(),
-                    label = "pill",
+            for ((index, item) in TOP_NAV.withIndex()) {
+                val selected = (scrub.hoveredTab ?: currentIndex) == index
+                val animatedPadding by animateDpAsState(
+                    if (selected) 20.dp else 12.dp,
+                    animationSpec = havenMotion(reduceMotion),
+                    label = "pillPad",
                 )
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(bg)
-                        .clickable { if (!selected) onSelect(item.screen) }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                val animatedContainerColor by animateColorAsState(
+                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    animationSpec = tween(durationMillis = 200),
+                    label = "pillColor",
+                )
+                val animatedContentColor by animateColorAsState(
+                    if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = tween(durationMillis = 200),
+                    label = "pillContent",
+                )
+                Surface(
+                    selected = selected,
+                    onClick = {
+                        if (index != currentIndex) {
+                            haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                            onSelect(item.screen)
+                        }
+                    },
+                    shape = CircleShape,
+                    color = animatedContainerColor,
+                    contentColor = animatedContentColor,
+                    modifier = Modifier.height(48.dp).pillScrubItem(scrub, index),
                 ) {
-                    Icon(
-                        item.icon,
-                        contentDescription = item.label,
-                        modifier = Modifier.size(22.dp),
-                        tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (selected) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            item.label,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    Row(
+                        modifier = Modifier.padding(horizontal = animatedPadding)
+                            .animateContentSize(animationSpec = havenMotion(reduceMotion)),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (selected) item.icon else item.outlinedIcon,
+                            contentDescription = item.label,
+                            modifier = Modifier.size(24.dp),
                         )
+                        AnimatedVisibility(
+                            visible = selected,
+                            enter = fadeIn() + expandHorizontally(animationSpec = havenMotion(reduceMotion)),
+                            exit = fadeOut() + shrinkHorizontally(animationSpec = havenMotion(reduceMotion)),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    item.label,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                     }
                 }
             }

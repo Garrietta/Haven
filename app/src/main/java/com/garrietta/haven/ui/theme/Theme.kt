@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.theme
 
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -15,8 +16,8 @@ import androidx.compose.ui.platform.LocalContext
 /** The house spring: bouncy, shared by every animated control in Haven. */
 fun <T> havenSpring(): AnimationSpec<T> = spring(stiffness = 380f, dampingRatio = 0.62f)
 
-/** Instant spec used when reduce-motion is on. */
-fun <T> havenMotion(reduceMotion: Boolean): AnimationSpec<T> =
+/** Instant spec used when reduce-motion is on. Finite, so it also serves animateContentSize and expand/shrink. */
+fun <T> havenMotion(reduceMotion: Boolean): FiniteAnimationSpec<T> =
     if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else havenSpring()
 
 @Composable
