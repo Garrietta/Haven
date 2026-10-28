@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Stylised house with a spark: Haven's mark. -->
+    <path
+        android:fillColor="#5EEAD4"
+        android:pathData="M54,22 L82,46 V80 H68 V60 H40 V80 H26 V46 Z" />
+    <path
+        android:fillColor="#F0FDFA"
+        android:pathData="M54,14 L58,24 L68,28 L58,32 L54,42 L50,32 L40,28 L50,24 Z" />
+</vector>

@@ -1,0 +1,357 @@
+package com.garrietta.haven
+
+import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.garrietta.haven.data.ConnectionState
+import com.garrietta.haven.data.HaClient
+import com.garrietta.haven.data.LovelaceConfig
+import com.garrietta.haven.data.SettingsStore
+import com.garrietta.haven.data.TokenStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.FormBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.URLEncoder
+
+/** Top-level navigation destinations. Detail screens push on top of these. */
+sealed class Screen {
+    data object Today : Screen()
+    data object Dashboards : Screen()
+    data object Areas : Screen()
+    data object Search : Screen()
+    data object Settings : Screen()
+    data class EntityDetail(val entityId: String) : Screen()
+    data class AreaDetail(val areaId: String) : Screen()
+    data object DashboardEdit : Screen()
+    data object AutomationBuilder : Screen()
+    data object SceneBuilder : Screen()
+    data object ScriptBuilder : Screen()
+    data object HelperBuilder : Screen()
+}
+
+class HavenViewModel(application: Application) : AndroidViewModel(application) {
+
+    val tokenStore = TokenStore(application)
+    val settingsStore = SettingsStore(application)
+    val client = HaClient(viewModelScope)
+
+    val connection = client.connection
+    val states = client.states
+    val areas = client.areas
+    val entityAreas = client.entityAreas
+    val lovelace = client.lovelace
+
+    var isAuthenticated by mutableStateOf(false)
+        private set
+
+    var authError by mutableStateOf<String?>(null)
+        private set
+
+    var pendingOAuthUrl by mutableStateOf<String?>(null)
+        private set
+
+    // ---- Dashboard editing (a deep copy of the Lovelace config, edited in-app) ----
+
+    var editingViews by mutableStateOf<List<JSONObject>>(emptyList())
+        private set
+    var editingTitle by mutableStateOf("")
+        private set
+
+    init {
+        autoConnect()
+    }
+
+    // ---- Auth ----
+
+    private fun autoConnect() {
+        val url = tokenStore.instanceUrl
+        val token = tokenStore.accessToken
+        if (url != null && token != null) {
+            isAuthenticated = true
+            if (tokenStore.refreshToken != null && tokenStore.tokenExpiresAtMs > 0 &&
+                tokenStore.tokenExpiresAtMs < System.currentTimeMillis() + 60_000
+            ) {
+                refreshAndConnect(url)
+            } else {
+                client.connect(url, token)
+            }
+        }
+    }
+
+    fun loginWithToken(url: String, token: String) {
+        val clean = url.trimEnd('/')
+        tokenStore.instanceUrl = clean
+        tokenStore.accessToken = token
+        tokenStore.refreshToken = null
+        tokenStore.tokenExpiresAtMs = 0L
+        authError = null
+        isAuthenticated = true
+        client.connect(clean, token)
+    }
+
+    /** Opens the instance's OAuth authorize page in the system browser (PKCE S256). */
+    fun startOAuth(url: String): Uri {
+        val clean = url.trimEnd('/')
+        tokenStore.instanceUrl = clean
+        pendingOAuthUrl = clean
+        val verifier = generateVerifier()
+        tokenStore.pkceVerifier = verifier
+        val state = generateVerifier().take(16)
+        tokenStore.oauthState = state
+        val authUrl = "$clean/auth/authorize" +
+            "?response_type=code" +
+            "&client_id=${URLEncoder.encode(OAUTH_CLIENT_ID, "UTF-8")}" +
+            "&redirect_uri=${URLEncoder.encode(OAUTH_REDIRECT, "UTF-8")}" +
+            "&state=${URLEncoder.encode(state, "UTF-8")}" +
+            "&code_challenge=${URLEncoder.encode(codeChallenge(verifier), "UTF-8")}" +
+            "&code_challenge_method=S256"
+        return Uri.parse(authUrl)
+    }
+
+    fun handleOAuthIntent(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "haven" || data.host != "auth-callback") return
+        val storedState = tokenStore.oauthState
+        if (storedState != null && data.getQueryParameter("state") != storedState) {
+            authError = "Sign-in response didn't match this request. Try again."
+            return
+        }
+        val code = data.getQueryParameter("code") ?: run {
+            authError = data.getQueryParameter("error") ?: "Sign-in was cancelled."
+            return
+        }
+        val url = pendingOAuthUrl ?: tokenStore.instanceUrl ?: return
+        exchangeCode(url, code)
+    }
+
+    private fun exchangeCode(url: String, code: String) {
+        viewModelScope.launch {
+            val form = FormBody.Builder()
+                .add("grant_type", "authorization_code")
+                .add("code", code)
+                .add("client_id", OAUTH_CLIENT_ID)
+                .add("redirect_uri", OAUTH_REDIRECT)
+            tokenStore.pkceVerifier?.let { form.add("code_verifier", it) }
+            val ok = exchangeToken(url, form.build())
+            if (ok) {
+                isAuthenticated = true
+                client.connect(url, tokenStore.accessToken!!)
+            } else {
+                authError = "Could not finish sign-in. Try the long-lived token option."
+            }
+        }
+    }
+
+    private fun refreshAndConnect(url: String) {
+        viewModelScope.launch {
+            val ok = exchangeToken(
+                url,
+                FormBody.Builder()
+                    .add("grant_type", "refresh_token")
+                    .add("refresh_token", tokenStore.refreshToken ?: "")
+                    .add("client_id", OAUTH_CLIENT_ID)
+                    .build(),
+            )
+            if (ok) {
+                client.connect(url, tokenStore.accessToken!!)
+            } else {
+                // Refresh failed; fall back to asking for sign-in again.
+                isAuthenticated = false
+                authError = "Your session expired. Please sign in again."
+            }
+        }
+    }
+
+    private suspend fun exchangeToken(url: String, body: FormBody): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder().url("$url/auth/token").post(body).build()
+            val resp = OkHttpClient().newCall(req).execute()
+            val text = resp.body?.string() ?: return@withContext false
+            if (!resp.isSuccessful) return@withContext false
+            val json = JSONObject(text)
+            val access = json.optString("access_token")
+            if (access.isEmpty()) return@withContext false
+            tokenStore.accessToken = access
+            val refresh = json.optString("refresh_token")
+            if (refresh.isNotEmpty()) tokenStore.refreshToken = refresh
+            val expiresIn = json.optLong("expires_in", 0L)
+            if (expiresIn > 0) tokenStore.tokenExpiresAtMs = System.currentTimeMillis() + expiresIn * 1000L
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun signOut() {
+        client.disconnect()
+        tokenStore.clear()
+        isAuthenticated = false
+    }
+
+    // ---- Service helpers (thin wrappers over call_service) ----
+
+    fun toggle(id: String) = client.toggle(id)
+    fun turnOn(id: String) = client.callService(id.substringBefore("."), "turn_on", id)
+    fun turnOff(id: String) = client.callService(id.substringBefore("."), "turn_off", id)
+    fun callService(domain: String, service: String, entityId: String? = null, data: JSONObject? = null) =
+        client.callService(domain, service, entityId, data)
+
+    fun setLightBrightness(id: String, pct: Int) =
+        client.callService("light", "turn_on", id, JSONObject().put("brightness_pct", pct))
+
+    fun setLightColorTemp(id: String, kelvin: Int) =
+        client.callService("light", "turn_on", id, JSONObject().put("color_temp_kelvin", kelvin))
+
+    fun setLightHsColor(id: String, hue: Float, saturation: Float) =
+        client.callService("light", "turn_on", id, JSONObject().put("hs_color", JSONArray().put(hue).put(saturation)))
+
+    fun setCoverPosition(id: String, position: Int) =
+        client.callService("cover", "set_cover_position", id, JSONObject().put("position", position))
+
+    fun setClimateTemperature(id: String, temperature: Double, hvacMode: String? = null) {
+        val data = JSONObject().put("temperature", temperature)
+        if (hvacMode != null) data.put("hvac_mode", hvacMode)
+        client.callService("climate", "set_temperature", id, data)
+    }
+
+    fun setClimateHvacMode(id: String, mode: String) =
+        client.callService("climate", "set_hvac_mode", id, JSONObject().put("hvac_mode", mode))
+
+    // ---- Dashboard editing ----
+
+    fun startEditing(config: LovelaceConfig) {
+        editingTitle = config.title ?: "Dashboard"
+        editingViews = config.views.map { view ->
+            val copy = JSONObject()
+            copy.put("title", view.title)
+            if (view.path != null) copy.put("path", view.path)
+            val cards = JSONArray()
+            for (card in view.cards) cards.put(JSONObject(card.toString()))
+            copy.put("cards", cards)
+            copy
+        }
+    }
+
+    fun addView(title: String) {
+        val view = JSONObject().put("title", title).put("cards", JSONArray())
+        editingViews = editingViews + view
+    }
+
+    fun removeView(index: Int) {
+        if (index in editingViews.indices) editingViews = editingViews.filterIndexed { i, _ -> i != index }
+    }
+
+    fun addCard(viewIndex: Int, card: JSONObject) {
+        if (viewIndex !in editingViews.indices) return
+        editingViews[viewIndex].optJSONArray("cards")?.put(card)
+        editingViews = editingViews.toList()
+    }
+
+    fun removeCard(viewIndex: Int, cardIndex: Int) {
+        if (viewIndex !in editingViews.indices) return
+        val cards = editingViews[viewIndex].optJSONArray("cards") ?: return
+        if (cardIndex !in 0 until cards.length()) return
+        val next = JSONArray()
+        for (i in 0 until cards.length()) if (i != cardIndex) next.put(cards.get(i))
+        editingViews[viewIndex].put("cards", next)
+        editingViews = editingViews.toList()
+    }
+
+    fun moveCard(viewIndex: Int, from: Int, to: Int) {
+        if (viewIndex !in editingViews.indices) return
+        val cards = editingViews[viewIndex].optJSONArray("cards") ?: return
+        if (from !in 0 until cards.length() || to !in 0 until cards.length() || from == to) return
+        val list = (0 until cards.length()).map { cards.get(it) }.toMutableList()
+        val item = list.removeAt(from)
+        list.add(to, item)
+        val next = JSONArray()
+        for (item in list) next.put(item)
+        editingViews[viewIndex].put("cards", next)
+        editingViews = editingViews.toList()
+    }
+
+    fun buildEditingConfig(): JSONObject {
+        val views = JSONArray()
+        for (view in editingViews) views.put(view)
+        return JSONObject().put("title", editingTitle).put("views", views)
+    }
+
+    fun saveEditing(onDone: (Boolean) -> Unit) {
+        client.saveLovelace(buildEditingConfig(), onDone)
+    }
+
+    // ---- Creation (guided builders) ----
+
+    /** Automations/scripts/scenes are saved over REST, not WebSocket. */
+    fun saveAutomation(config: JSONObject, onDone: (Boolean) -> Unit) {
+        val slug = slugify(config.optString("alias"))
+        config.put("id", slug)
+        client.saveRestConfig("automation", slug, config, onDone)
+    }
+
+    fun saveScript(config: JSONObject, onDone: (Boolean) -> Unit) {
+        val slug = slugify(config.optString("alias"))
+        config.put("id", slug)
+        client.saveRestConfig("script", slug, config, onDone)
+    }
+
+    fun saveScene(config: JSONObject, onDone: (Boolean) -> Unit) {
+        val slug = slugify(config.optString("name"))
+        config.put("id", slug)
+        client.saveRestConfig("scene", slug, config, onDone)
+    }
+
+    /** Helpers ARE WebSocket storage-collection commands: `<domain>/create`. */
+    fun saveHelper(type: String, config: JSONObject, onDone: (Boolean) -> Unit) {
+        client.sendCommand("$type/create", build = {
+            val keys = config.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                it.put(k, config.get(k))
+            }
+        }, onResult = { msg -> onDone(msg.optBoolean("success", false)) })
+    }
+
+    private fun slugify(text: String): String {
+        val slug = text.lowercase().map { if (it.isLetterOrDigit()) it else '_' }.joinToString("")
+            .trim('_').replace(Regex("_+"), "_")
+        return slug.ifEmpty { "haven_item" }
+    }
+
+    private fun generateVerifier(): String {
+        val bytes = ByteArray(32)
+        java.security.SecureRandom().nextBytes(bytes)
+        return android.util.Base64.encodeToString(
+            bytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        )
+    }
+
+    private fun codeChallenge(verifier: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(verifier.toByteArray(Charsets.US_ASCII))
+        return android.util.Base64.encodeToString(
+            digest,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        )
+    }
+
+    companion object {
+        /** GitHub Pages site that declares haven://auth-callback as a redirect URI. */
+        const val OAUTH_CLIENT_ID = "https://garrietta.github.io/Haven/"
+        const val OAUTH_REDIRECT = "haven://auth-callback"
+    }
+}
+
+/** Convenience: is the connection live right now? */
+fun ConnectionState.isLive(): Boolean = this is ConnectionState.Connected
