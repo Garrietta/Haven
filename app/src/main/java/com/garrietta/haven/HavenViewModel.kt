@@ -67,6 +67,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     var pendingOAuthUrl by mutableStateOf<String?>(null)
         private set
 
+    /** True while an OAuth code exchange is running (in-app WebView flow). */
+    var oauthExchanging by mutableStateOf(false)
+        private set
+
     // ---- Login pre-flight + discovery ----
 
     /** Local-network discovery (mDNS + subnet scan); results feed the login field. */
@@ -199,13 +203,22 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun handleOAuthIntent(intent: Intent?) {
         val data = intent?.data ?: return
         if (data.scheme != "haven" || data.host != "auth-callback") return
+        handleOAuthRedirect(data)
+    }
+
+    /**
+     * Handles a haven://auth-callback redirect, whether it arrived via the
+     * manifest intent-filter (external browser) or was intercepted from the
+     * in-app authorize WebView. Verifies state, then exchanges the code.
+     */
+    fun handleOAuthRedirect(uri: Uri) {
         val storedState = tokenStore.oauthState
-        if (storedState != null && data.getQueryParameter("state") != storedState) {
+        if (storedState != null && uri.getQueryParameter("state") != storedState) {
             authError = "Sign-in response didn't match this request. Try again."
             return
         }
-        val code = data.getQueryParameter("code") ?: run {
-            authError = data.getQueryParameter("error") ?: "Sign-in was cancelled."
+        val code = uri.getQueryParameter("code") ?: run {
+            authError = uri.getQueryParameter("error") ?: "Sign-in was cancelled."
             return
         }
         val url = pendingOAuthUrl ?: tokenStore.instanceUrl ?: return
@@ -214,6 +227,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun exchangeCode(url: String, code: String) {
         viewModelScope.launch {
+            oauthExchanging = true
             val form = FormBody.Builder()
                 .add("grant_type", "authorization_code")
                 .add("code", code)
@@ -221,6 +235,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
                 .add("redirect_uri", OAUTH_REDIRECT)
             tokenStore.pkceVerifier?.let { form.add("code_verifier", it) }
             val ok = exchangeToken(url, form.build())
+            oauthExchanging = false
             if (ok) {
                 isAuthenticated = true
                 client.connect(url, tokenStore.accessToken!!)

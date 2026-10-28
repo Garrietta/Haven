@@ -1,9 +1,6 @@
 package com.garrietta.haven.ui.screens
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import androidx.browser.customtabs.CustomTabsIntent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -48,24 +44,18 @@ import com.garrietta.haven.isLive
 import com.garrietta.haven.ui.controls.EntityControlCard
 import java.util.Calendar
 
-/**
- * Opens the authorize page in a Chrome Custom Tab so the haven://auth-callback
- * redirect returns to Haven; falls back to a plain browser intent when no
- * Custom Tabs provider is available.
- */
-private fun launchAuthTab(context: Context, uri: Uri) {
-    try {
-        CustomTabsIntent.Builder().build().launchUrl(context, uri)
-    } catch (e: Exception) {
-        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-    }
-}
-
 @Composable
 fun LoginScreen(vm: HavenViewModel) {
-    val context = LocalContext.current
     var url by remember { mutableStateOf(vm.tokenStore.instanceUrl ?: "") }
     var token by remember { mutableStateOf("") }
+    // The authorize page renders in-app (see OAuthWebViewScreen): Chrome's stack
+    // cannot load this phone's instance, so no browser-based flow is used.
+    var oauthUrl by remember { mutableStateOf<String?>(null) }
+    if (oauthUrl != null) {
+        BackHandler { oauthUrl = null }
+        OAuthWebViewScreen(vm, oauthUrl!!) { oauthUrl = null }
+        return
+    }
     val discovered by vm.discoveredInstances.collectAsState()
     val connecting = vm.connection.collectAsState().value is ConnectionState.Connecting ||
         vm.connection.collectAsState().value is ConnectionState.Authenticating
@@ -143,16 +133,33 @@ fun LoginScreen(vm: HavenViewModel) {
             onClick = {
                 if (url.isNotBlank()) {
                     // Pre-flight first: a dead address shows an in-app explanation
-                    // instead of a dead browser page.
+                    // instead of a dead page. On success the authorize page opens
+                    // in-app (OAuthWebViewScreen), never in Chrome.
                     vm.preflight(url) { clean ->
-                        launchAuthTab(context, vm.startOAuth(clean))
+                        oauthUrl = vm.startOAuth(clean).toString()
                     }
                 }
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Sign in with Home Assistant") }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Opens the sign-in page inside Haven.",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(20.dp))
-        Text("Or use a long-lived access token", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "Long-lived access token — no browser needed",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            "Signs in directly from the app, so it works even when the phone's browser can't reach your instance.",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = token,

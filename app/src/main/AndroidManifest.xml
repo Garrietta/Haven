@@ -10,7 +10,13 @@
         android:label="Haven"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Haven">
+        android:theme="@style/Theme.Haven"
+        android:usesCleartextTraffic="true">
+        <!-- Home Assistant instances on a LAN are commonly plain http (like
+             http://10.0.0.11:8123). Without this, Android's default policy blocks
+             both the OkHttp client and the in-app WebView from reaching them at
+             all ("CLEARTEXT communication not permitted"). Tokens still only ever
+             go to the user's own instance. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
