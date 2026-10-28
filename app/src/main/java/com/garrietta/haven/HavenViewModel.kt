@@ -57,6 +57,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val areas = client.areas
     val entityAreas = client.entityAreas
     val lovelace = client.lovelace
+    val lovelaceError = client.lovelaceError
 
     var isAuthenticated by mutableStateOf(false)
         private set

@@ -76,6 +76,7 @@ private fun stackCards(card: JSONObject): List<JSONObject> {
 @Composable
 fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val config by vm.lovelace.collectAsState()
+    val lovelaceError by vm.lovelaceError.collectAsState()
     val states by vm.states.collectAsState()
     var selected by remember { mutableStateOf(0) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -93,7 +94,13 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         if (config == null) {
-            Text("Loading your dashboards…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (lovelaceError != null) {
+                Text(lovelaceError!!, color = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { vm.client.refreshLovelace() }) { Text("Retry") }
+            } else {
+                Text("Loading your dashboards…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             return@Column
         }
         val views = config!!.views

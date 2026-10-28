@@ -64,6 +64,13 @@ class HaClient(
     private val _lovelace = MutableStateFlow<LovelaceConfig?>(null)
     val lovelace: StateFlow<LovelaceConfig?> = _lovelace.asStateFlow()
 
+    /** The dashboard this client loads/saves, resolved from get_panels. */
+    var lovelaceUrlPath: String? = null
+        private set
+
+    private val _lovelaceError = MutableStateFlow<String?>(null)
+    val lovelaceError: StateFlow<String?> = _lovelaceError.asStateFlow()
+
     /**
      * The last service-call failure, if any. A failed tap used to vanish
      * silently (fire-and-forget with no result callback and a send() that
@@ -283,10 +290,54 @@ class HaClient(
         refreshLovelace()
     }
 
+    /**
+     * Loads the Lovelace config. The old code sent lovelace/config with no
+     * url_path, and Home Assistant's handler looks the dashboard up by that
+     * key — a missing key is a config_not_found error, which the old callback
+     * swallowed (it returned early on a missing result object), leaving the
+     * Boards tab on its loading line forever. Now the dashboard is resolved
+     * first via get_panels (preferring the default "lovelace" panel), the
+     * config is fetched WITH url_path, and every failure lands in
+     * [lovelaceError] so the tab can show it with a Retry instead of
+     * spinning forever.
+     */
     fun refreshLovelace() {
-        sendCommand(ConfigCommands.LOVE_LACE_GET, onResult = { msg ->
-            val result = msg.optJSONObject("result") ?: return@sendCommand
-            _lovelace.value = parseLovelace(result)
+        _lovelaceError.value = null
+        sendCommand("get_panels", onResult = { panelsMsg ->
+            var urlPath: String? = null
+            val panels = panelsMsg.optJSONObject("result")
+            if (panels != null) {
+                val candidates = mutableListOf<String>()
+                val keys = panels.keys()
+                while (keys.hasNext()) {
+                    val panel = panels.optJSONObject(keys.next()) ?: continue
+                    if (panel.optString("component_name") == "lovelace") {
+                        panel.optString("url_path").ifEmpty { null }?.let { candidates.add(it) }
+                    }
+                }
+                urlPath = candidates.firstOrNull { it == "lovelace" } ?: candidates.firstOrNull()
+            }
+            val path = urlPath ?: "lovelace"
+            lovelaceUrlPath = path
+            sendCommand("lovelace/config", build = { it.put("url_path", path) }, onResult = { msg ->
+                if (!msg.optBoolean("success", false)) {
+                    val message = msg.optJSONObject("error")?.optString("message") ?: "unknown error"
+                    Log.w("Haven", "lovelace/config FAILED url_path=$path: $message")
+                    _lovelaceError.value = "Couldn't load dashboards: $message"
+                    return@sendCommand
+                }
+                val result = msg.optJSONObject("result")
+                if (result == null) {
+                    _lovelaceError.value = "Couldn't load dashboards: empty response."
+                    return@sendCommand
+                }
+                try {
+                    _lovelace.value = parseLovelace(result)
+                } catch (e: Exception) {
+                    Log.w("Haven", "lovelace parse FAILED: ${e.message}")
+                    _lovelaceError.value = "Couldn't read dashboards: ${e.message}"
+                }
+            })
         })
     }
 
@@ -365,7 +416,12 @@ class HaClient(
 
     /** Saves a full Lovelace config (views/cards) back to the instance. */
     fun saveLovelace(config: JSONObject, onDone: (Boolean) -> Unit) {
-        sendCommand(ConfigCommands.LOVE_LACE_SAVE, build = { it.put("config", config) }, onResult = { msg ->
+        // The save handler looks the dashboard up by url_path too; saving
+        // without it failed the same silent way the fetch did.
+        sendCommand(ConfigCommands.LOVE_LACE_SAVE, build = {
+            it.put("config", config)
+            lovelaceUrlPath?.let { path -> it.put("url_path", path) }
+        }, onResult = { msg ->
             onDone(msg.optBoolean("success", false))
         })
     }
