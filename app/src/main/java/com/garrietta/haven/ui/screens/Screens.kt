@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ConnectionState
+import com.garrietta.haven.data.DiscoverySource
 import com.garrietta.haven.isLive
 import com.garrietta.haven.ui.controls.EntityControlCard
 import java.util.Calendar
@@ -63,8 +66,14 @@ fun LoginScreen(vm: HavenViewModel) {
     val context = LocalContext.current
     var url by remember { mutableStateOf(vm.tokenStore.instanceUrl ?: "") }
     var token by remember { mutableStateOf("") }
+    val discovered by vm.discoveredInstances.collectAsState()
     val connecting = vm.connection.collectAsState().value is ConnectionState.Connecting ||
         vm.connection.collectAsState().value is ConnectionState.Authenticating
+    // mDNS discovery runs only while the login screen is visible.
+    DisposableEffect(Unit) {
+        vm.discovery.startMdns()
+        onDispose { vm.discovery.stopMdns() }
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -85,6 +94,51 @@ fun LoginScreen(vm: HavenViewModel) {
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(12.dp))
+        Text(
+            "Find on my network",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.height(4.dp))
+        if (discovered.isEmpty()) {
+            Text(
+                "Looking for Home Assistant on your Wi-Fi…",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            for (instance in discovered) {
+                Row(
+                    Modifier.fillMaxWidth().clickable {
+                        url = instance.url
+                        vm.preflight(instance.url) {}
+                    }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(instance.name, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(instance.url, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(
+                        if (instance.source == DiscoverySource.MDNS) "Nearby" else "Scan",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { vm.scanNetwork() },
+            enabled = !vm.scanning,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (vm.scanning) "Scanning…" else "Scan network") }
+        vm.scanMessage?.let { message ->
+            Spacer(Modifier.height(8.dp))
+            Text(message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(16.dp))
         Button(
             onClick = {
                 if (url.isNotBlank()) {

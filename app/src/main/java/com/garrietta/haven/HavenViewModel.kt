@@ -10,8 +10,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.HaClient
+import com.garrietta.haven.data.HaDiscovery
 import com.garrietta.haven.data.LovelaceConfig
 import com.garrietta.haven.data.ProbeResult
+import com.garrietta.haven.data.ScanOutcome
 import com.garrietta.haven.data.SettingsStore
 import com.garrietta.haven.data.TokenStore
 import com.garrietta.haven.data.isNetworkAvailable
@@ -65,7 +67,11 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     var pendingOAuthUrl by mutableStateOf<String?>(null)
         private set
 
-    // ---- Login pre-flight ----
+    // ---- Login pre-flight + discovery ----
+
+    /** Local-network discovery (mDNS + subnet scan); results feed the login field. */
+    val discovery = HaDiscovery(application)
+    val discoveredInstances = discovery.found
 
     /** True while a pre-flight probe is running. */
     var probing by mutableStateOf(false)
@@ -73,6 +79,14 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Confirmation line after a successful probe (e.g. "Found Home Assistant (2026.10) at …"). */
     var probeOk by mutableStateOf<String?>(null)
+        private set
+
+    /** True while a subnet scan is running. */
+    var scanning by mutableStateOf(false)
+        private set
+
+    /** Plain-language outcome of the last subnet scan, if any. */
+    var scanMessage by mutableStateOf<String?>(null)
         private set
 
     // ---- Dashboard editing (a deep copy of the Lovelace config, edited in-app) ----
@@ -142,6 +156,24 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 else -> authError = probeFailureMessage(result)
             }
+        }
+    }
+
+    /** Scans the local subnet for Home Assistant; results land in [discoveredInstances]. */
+    fun scanNetwork() {
+        viewModelScope.launch {
+            scanning = true
+            scanMessage = null
+            scanMessage = when (val outcome = discovery.scanSubnet(OkHttpClient())) {
+                is ScanOutcome.Done -> if (outcome.found > 0) {
+                    "Found ${outcome.found} instance${if (outcome.found == 1) "" else "s"}."
+                } else {
+                    "No Home Assistant found on this network. Check it's running and on the same Wi-Fi."
+                }
+                ScanOutcome.NeedsWifi -> "Discovery needs your home Wi-Fi — connect to it and try again."
+                ScanOutcome.NoAddress -> "Couldn't read this phone's network address. Check Wi-Fi and try again."
+            }
+            scanning = false
         }
     }
 
