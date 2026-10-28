@@ -1,6 +1,9 @@
 package com.garrietta.haven.ui.screens
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,8 +12,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -39,6 +45,19 @@ import com.garrietta.haven.isLive
 import com.garrietta.haven.ui.controls.EntityControlCard
 import java.util.Calendar
 
+/**
+ * Opens the authorize page in a Chrome Custom Tab so the haven://auth-callback
+ * redirect returns to Haven; falls back to a plain browser intent when no
+ * Custom Tabs provider is available.
+ */
+private fun launchAuthTab(context: Context, uri: Uri) {
+    try {
+        CustomTabsIntent.Builder().build().launchUrl(context, uri)
+    } catch (e: Exception) {
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+    }
+}
+
 @Composable
 fun LoginScreen(vm: HavenViewModel) {
     val context = LocalContext.current
@@ -47,7 +66,7 @@ fun LoginScreen(vm: HavenViewModel) {
     val connecting = vm.connection.collectAsState().value is ConnectionState.Connecting ||
         vm.connection.collectAsState().value is ConnectionState.Authenticating
     Column(
-        Modifier.fillMaxSize().padding(24.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Text("Haven", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -69,8 +88,11 @@ fun LoginScreen(vm: HavenViewModel) {
         Button(
             onClick = {
                 if (url.isNotBlank()) {
-                    val uri = vm.startOAuth(url.trim())
-                    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                    // Pre-flight first: a dead address shows an in-app explanation
+                    // instead of a dead browser page.
+                    vm.preflight(url) { clean ->
+                        launchAuthTab(context, vm.startOAuth(clean))
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth(),
@@ -88,12 +110,28 @@ fun LoginScreen(vm: HavenViewModel) {
         )
         Spacer(Modifier.height(12.dp))
         OutlinedButton(
-            onClick = { if (url.isNotBlank() && token.isNotBlank()) vm.loginWithToken(url.trim(), token.trim()) },
+            onClick = {
+                if (url.isNotBlank() && token.isNotBlank()) {
+                    vm.preflight(url) { clean -> vm.loginWithToken(clean, token.trim()) }
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Connect with token") }
-        if (connecting) {
+        if (connecting || vm.probing) {
             Spacer(Modifier.height(16.dp))
-            CircularProgressIndicator()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(20.dp))
+                Text(
+                    if (vm.probing) "Checking that address…" else "Connecting…",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp),
+                )
+            }
+        }
+        vm.probeOk?.let { ok ->
+            Spacer(Modifier.height(16.dp))
+            Text(ok, color = MaterialTheme.colorScheme.primary)
         }
         vm.authError?.let { error ->
             Spacer(Modifier.height(16.dp))

@@ -11,8 +11,13 @@ import androidx.lifecycle.viewModelScope
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.HaClient
 import com.garrietta.haven.data.LovelaceConfig
+import com.garrietta.haven.data.ProbeResult
 import com.garrietta.haven.data.SettingsStore
 import com.garrietta.haven.data.TokenStore
+import com.garrietta.haven.data.isNetworkAvailable
+import com.garrietta.haven.data.normalizeInstanceUrl
+import com.garrietta.haven.data.probeFailureMessage
+import com.garrietta.haven.data.probeInstance
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,6 +65,16 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     var pendingOAuthUrl by mutableStateOf<String?>(null)
         private set
 
+    // ---- Login pre-flight ----
+
+    /** True while a pre-flight probe is running. */
+    var probing by mutableStateOf(false)
+        private set
+
+    /** Confirmation line after a successful probe (e.g. "Found Home Assistant (2026.10) at …"). */
+    var probeOk by mutableStateOf<String?>(null)
+        private set
+
     // ---- Dashboard editing (a deep copy of the Lovelace config, edited in-app) ----
 
     var editingViews by mutableStateOf<List<JSONObject>>(emptyList())
@@ -89,7 +104,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loginWithToken(url: String, token: String) {
-        val clean = url.trimEnd('/')
+        val clean = normalizeInstanceUrl(url)
         tokenStore.instanceUrl = clean
         tokenStore.accessToken = token
         tokenStore.refreshToken = null
@@ -99,9 +114,40 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         client.connect(clean, token)
     }
 
+    /**
+     * Pre-flights a typed or discovered address: normalizes it, then probes
+     * <base>/manifest.json from inside the app. [onReady] runs with the
+     * normalized URL only when the probe proves a Home Assistant is there;
+     * otherwise [authError] carries the precise failure and nothing is launched.
+     * Both the OAuth button and the token button go through this, so neither
+     * can dump the user on a dead browser page or an opaque socket error.
+     */
+    fun preflight(rawUrl: String, onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            probing = true
+            authError = null
+            probeOk = null
+            val clean = normalizeInstanceUrl(rawUrl)
+            val result = if (!isNetworkAvailable(getApplication())) {
+                ProbeResult.NoNetwork
+            } else {
+                probeInstance(clean, OkHttpClient())
+            }
+            probing = false
+            when (result) {
+                is ProbeResult.Success -> {
+                    probeOk = "Found Home Assistant" +
+                        (result.version?.let { " ($it)" } ?: "") + " at $clean"
+                    onReady(clean)
+                }
+                else -> authError = probeFailureMessage(result)
+            }
+        }
+    }
+
     /** Opens the instance's OAuth authorize page in the system browser (PKCE S256). */
     fun startOAuth(url: String): Uri {
-        val clean = url.trimEnd('/')
+        val clean = normalizeInstanceUrl(url)
         tokenStore.instanceUrl = clean
         pendingOAuthUrl = clean
         val verifier = generateVerifier()

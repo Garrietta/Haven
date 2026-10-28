@@ -18,6 +18,8 @@ jobs:
       # (ANDROID_HOME is preset). The setup-android action's license prompt
       # fails non-interactively ("7 of 8 SDK package licenses not accepted").
       - uses: gradle/actions/setup-gradle@v3
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
       - name: Upload debug APK
