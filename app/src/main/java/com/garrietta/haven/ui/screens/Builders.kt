@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -60,7 +61,7 @@ fun AutomationBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
     var actionService by remember { mutableStateOf("") }
     var actionEntity by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item {
             DetailTopBar("New automation", onBack)
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -203,7 +204,7 @@ fun SceneBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val candidates = states.values
         .filter { it.domain in listOf("light", "switch", "cover", "climate", "fan", "lock", "media_player") }
         .sortedBy { it.friendlyName }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item {
             DetailTopBar("New scene", onBack)
             Text("Tick the devices to capture, then save — their current states become the scene.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -263,7 +264,7 @@ fun ScriptBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val steps = remember { mutableStateListOf<Triple<String, String, String>>() }
     var status by remember { mutableStateOf<String?>(null) }
     if (steps.isEmpty()) steps.add(Triple("", "", ""))
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item {
             DetailTopBar("New script", onBack)
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Script name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -331,7 +332,7 @@ fun HelperBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
     var initial by remember { mutableStateOf("0") }
     var status by remember { mutableStateOf<String?>(null) }
     val types = listOf("input_boolean", "input_number", "input_select", "input_text", "input_datetime", "timer", "counter")
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item {
             DetailTopBar("New helper", onBack)
             Row(verticalAlignment = Alignment.CenterVertically) {

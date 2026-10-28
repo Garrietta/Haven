@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -79,7 +80,7 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val lovelaceError by vm.lovelaceError.collectAsState()
     val states by vm.states.collectAsState()
     var selected by remember { mutableStateOf(0) }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Boards", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -321,7 +322,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
     var newCardTypeExpanded by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     val cardTypes = listOf("entities", "tile", "button", "light", "thermostat", "sensor", "weather-forecast", "media-control", "glance", "markdown")
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         DetailTopBar("Edit dashboard", onBack)
         if (views.isEmpty()) {
             Text("No dashboard loaded. Go back and open Boards first.")

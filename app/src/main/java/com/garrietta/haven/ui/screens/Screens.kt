@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -65,7 +66,7 @@ fun LoginScreen(vm: HavenViewModel) {
         onDispose { vm.discovery.stopMdns() }
     }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Text("Haven", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -232,7 +233,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         it.domain == "binary_sensor" && it.state == "on" &&
             (it.attrString("device_class") in listOf("problem", "safety", "smoke", "co", "moisture", "tamper", "gas"))
     }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item {
             Spacer(Modifier.height(16.dp))
             Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold)
@@ -324,7 +325,7 @@ fun SettingsScreen(
     navigate: (Screen) -> Unit,
 ) {
     val connection by vm.connection.collectAsState()
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
         item {
             Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))

@@ -3,6 +3,10 @@
     <style name="Theme.Haven" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <!-- NOTE: no windowLightStatusBar here on purpose. The icon color is
+             driven dynamically from the background luminance in Compose
+             (StatusBarAppearance in HavenApp, Koda's approach): a hardcoded
+             value is wrong in one theme or the other, and with the transparent
+             bar it made dark-theme icons invisible. -->
     </style>
 </resources>

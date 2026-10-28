@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -57,12 +60,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.ViewCompat
 import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
 import com.garrietta.haven.ui.screens.AutomationBuilderScreen
@@ -113,6 +119,11 @@ fun HavenApp(vm: HavenViewModel) {
         else -> isSystemInDarkTheme()
     }
     HavenTheme(darkTheme = darkTheme) {
+        // Status-bar/navigation-bar icon colors follow the background's
+        // luminance (Koda's approach): light background -> dark icons, dark
+        // background -> light icons. The old theme hardcoded dark icons, which
+        // made them invisible on the dark theme.
+        StatusBarAppearance(MaterialTheme.colorScheme.background)
         if (!vm.isAuthenticated) {
             LoginScreen(vm)
             return@HavenTheme
@@ -130,6 +141,11 @@ fun HavenApp(vm: HavenViewModel) {
         BackHandler(enabled = backstack.size > 1) { goBack() }
         CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
         Scaffold(
+            // Screens consume the status-bar inset themselves
+            // (statusBarsPadding on each root), so the Scaffold must not add
+            // it again — otherwise headers sit a full inset too low. The
+            // bottom bar's height is still reserved by the Scaffold.
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 if (isTopLevel(current)) {
                     PillNav(
@@ -180,7 +196,7 @@ fun HavenApp(vm: HavenViewModel) {
                     ServiceErrorBanner(
                         serviceError!!,
                         onDismiss = vm::dismissServiceError,
-                        modifier = Modifier.align(Alignment.TopCenter).padding(16.dp),
+                        modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(16.dp),
                     )
                 }
             }
@@ -308,6 +324,33 @@ fun PillNav(current: Screen, onSelect: (Screen) -> Unit, modifier: Modifier = Mo
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Drives the system-bar icon colors from a background color's luminance,
+ * Koda-style: a light background gets dark icons, a dark background gets
+ * light icons. Restores the previous values on dispose so a screen with a
+ * different background (camera fullscreen) can't leak its choice.
+ */
+@Composable
+fun StatusBarAppearance(background: Color) {
+    val view = LocalView.current
+    val lightIcons = background.luminance() > 0.5f
+    DisposableEffect(view, lightIcons) {
+        val controller = ViewCompat.getWindowInsetsController(view)
+        val prevStatus = controller?.isAppearanceLightStatusBars
+        val prevNav = controller?.isAppearanceLightNavigationBars
+        if (controller != null) {
+            controller.isAppearanceLightStatusBars = lightIcons
+            controller.isAppearanceLightNavigationBars = lightIcons
+        }
+        onDispose {
+            if (controller != null) {
+                if (prevStatus != null) controller.isAppearanceLightStatusBars = prevStatus
+                if (prevNav != null) controller.isAppearanceLightNavigationBars = prevNav
             }
         }
     }

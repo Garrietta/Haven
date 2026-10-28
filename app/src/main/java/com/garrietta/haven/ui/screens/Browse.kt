@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -27,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,7 +52,7 @@ fun AreasScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val entityAreas by vm.entityAreas.collectAsState()
     val unassignedCount = states.values.count { entityAreas[it.entityId] == null }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item {
             Spacer(Modifier.height(16.dp))
             Text("Areas", fontSize = 30.sp, fontWeight = FontWeight.Bold)
@@ -98,7 +102,7 @@ fun AreaDetailScreen(vm: HavenViewModel, areaId: String, onBack: () -> Unit, nav
     val entities = states.values
         .filter { if (areaId == UNASSIGNED_AREA) entityAreas[it.entityId] == null else entityAreas[it.entityId] == areaId }
         .sortedWith(compareBy({ it.domain }, { it.friendlyName }))
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item { DetailTopBar(name, onBack) }
         var lastDomain: String? = null
         for (entity in entities) {
@@ -137,7 +141,7 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 (entityAreas[entity.entityId]?.let { areaId -> areas.firstOrNull { it.id == areaId }?.name?.lowercase()?.contains(q) } == true)
         }.sortedBy { it.friendlyName }.take(60)
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
         Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
@@ -169,7 +173,7 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
 fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item { DetailTopBar(entity?.friendlyName ?: entityId, onBack) }
         if (entity == null) {
             item { Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -177,7 +181,7 @@ fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit)
             item {
                 Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
                 Spacer(Modifier.height(4.dp))
-                Text(entityId, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(16.dp))
                 // Full control, header taps disabled here (already on the detail screen).
                 EntityControlCard(entity, vm) { }
@@ -196,10 +200,7 @@ fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit)
             val attrs = entity.attributes.filterKeys { it != "friendly_name" }.toList().sortedBy { it.first }
             for ((key, value) in attrs) {
                 item {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text(key, fontSize = 13.sp, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(valueToString(value), fontSize = 13.sp)
-                    }
+                    AttributeRow(key, valueToString(value))
                 }
             }
             if (entity.state.toDoubleOrNull() != null) {
@@ -213,6 +214,39 @@ fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit)
             }
         }
         item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+/**
+ * One attribute as a stacked label + full-width value. The old side-by-side
+ * Row let a long unbroken value (a weather attribution sentence, a camera
+ * token URL) measure to a single character wide and stack vertically, one
+ * letter per line. A full-width value can never do that: it wraps normally,
+ * and values over 200 chars truncate with a tap-to-copy affordance instead
+ * of dumping a token URL into the layout.
+ */
+@Composable
+private fun AttributeRow(key: String, value: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(key, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (value.length > 200) {
+            Text(value.take(200) + "\u2026", fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(value))
+                    copied = true
+                }) {
+                    Text(if (copied) "Copied" else "Copy full value")
+                }
+                if (copied) {
+                    Text("Copied to clipboard", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            Text(value, fontSize = 13.sp)
+        }
     }
 }
 
