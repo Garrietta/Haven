@@ -132,6 +132,19 @@ fun detailTargetRect(overlayOrigin: Offset, overlaySize: IntSize): Rect =
     )
 
 /**
+ * Graceful morph origin when the source card never reported bounds
+ * (e.g. a board/Lovelace card, which does not report): the target rect
+ * shifted down by [offsetPx], so the surface rises into place instead
+ * of appearing instantly. Supersedes #51's instant-appearance fallback:
+ * a morph is always possible from this origin, so there is never a
+ * reason to pop in or to crash on missing bounds. The caller lerps
+ * from this rect to the target exactly like a sourced morph; on exit
+ * the same interpolation runs in reverse.
+ */
+fun fallbackFromRect(target: Rect, offsetPx: Float): Rect =
+    Rect(target.left, target.top + offsetPx, target.right, target.bottom + offsetPx)
+
+/**
  * The single morphing surface. [rect] is the interpolated rect in root
  * pixels; [overlayOrigin] is the overlay root's own root-coordinate
  * origin, subtracted so the surface lands correctly regardless of where

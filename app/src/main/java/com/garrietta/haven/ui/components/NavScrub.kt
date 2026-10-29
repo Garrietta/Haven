@@ -7,6 +7,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -85,6 +88,42 @@ fun rememberPillScrubState(
 
 fun Modifier.pillScrubItem(state: PillScrubState, tabId: Int): Modifier =
     onGloballyPositioned { state.registerItem(tabId, it) }
+
+/**
+ * Scroll-away visibility for the pill bar (production-upgrade round).
+ * Pure transition rule, unit-tested: a downward scroll past the
+ * threshold hides the bar, an upward scroll past it shows it again,
+ * anything smaller leaves the state untouched (no twitching on
+ * sub-threshold jitter). Thresholds are in pixels; callers convert
+ * from dp (the spec sample's 8dp).
+ */
+fun scrollVisibilityAfter(isVisible: Boolean, deltaYPx: Float, thresholdPx: Float): Boolean =
+    when {
+        deltaYPx < -thresholdPx -> false
+        deltaYPx > thresholdPx -> true
+        else -> isVisible
+    }
+
+/**
+ * Nested-scroll observer that drives [isVisible] from list scrolling.
+ * Attach to the scaffold content only (never to sheet/detail
+ * overlays, whose inner scrolls must not move the bar). It observes
+ * without consuming (returns Offset.Zero), so scrolling behavior is
+ * unchanged. Combined with the modal rule in HavenApp, the bar is
+ * visible exactly when no modal is open AND scrolling has not hidden
+ * it.
+ */
+class ScrollVisibilityState(private val thresholdPx: Float) {
+    var isVisible by mutableStateOf(true)
+        private set
+
+    val nestedScrollConnection = object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            isVisible = scrollVisibilityAfter(isVisible, available.y, thresholdPx)
+            return Offset.Zero
+        }
+    }
+}
 
 fun Modifier.pillScrub(state: PillScrubState): Modifier = this
     .onGloballyPositioned { state.registerBar(it) }

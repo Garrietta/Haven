@@ -79,6 +79,11 @@ fun <T> pressBounce(): FiniteAnimationSpec<T> =
  * PillSpring (0.78/MediumLow) -> springSpatial (exact) for the pill exit;
  * InteractiveBounce (0.52/Medium) -> pressBounce (0.55/Medium), the one
  * press token. No new tokens were added for this round.
+ *
+ * Production-upgrade mapping (2026-10-29 verdict round): the new
+ * draft's PillSlideSpring (0.85/MediumLow) -> springSpatial as well —
+ * one pill-motion token for modal-exit and scroll-away alike, so the
+ * pill never animates on two different springs at once.
  */
 
 /** ExitFast: the spec's 180ms exit tween on the accelerate easing. */

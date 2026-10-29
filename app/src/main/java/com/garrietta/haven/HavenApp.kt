@@ -34,7 +34,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,6 +74,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +89,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
@@ -136,7 +140,9 @@ import androidx.compose.ui.unit.IntSize
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.MorphSurface
+import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.detailTargetRect
+import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.components.sheetTargetRect
 import com.garrietta.haven.ui.theme.springBounds
@@ -236,14 +242,19 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
 /**
  * Open sheet morph: the entity id plus the source card rect captured
  * at open (null = the card never reported bounds, e.g. a board card;
- * the sheet then appears at its target rect with no morph).
- * [targetSize] is filled by the one-frame measurement pass.
+ * the sheet then morphs from the graceful fallback rect — the target
+ * shifted 80dp down — never an instant appearance, never a crash).
+ * [targetSize] is filled by the one-frame measurement pass. The
+ * overlay always prefers the card's CURRENT bounds over this captured
+ * rect (cards re-report on relayout), so rotation mid-morph and cards
+ * that moved between open and dismiss track correctly; this captured
+ * rect is only the fallback.
  */
 private class SheetAnim(val id: String, val source: Rect?) {
     var targetSize by mutableStateOf<IntSize?>(null)
 }
 
-/** Open detail morph: the backstack screen plus its source card rect. */
+/** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
 private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?)
 
 @Composable
@@ -289,8 +300,15 @@ fun HavenApp(vm: HavenViewModel) {
         var sheetExiting by remember { mutableStateOf(false) }
         var detailExiting by remember { mutableStateOf(false) }
         var sheetSurfaceBounds by remember { mutableStateOf<Rect?>(null) }
+        // Navigation generation: bumped by goTop/signOut. In-flight
+        // dismiss coroutines check it before touching the backstack —
+        // without it, a dismiss that started before a top-level
+        // navigation could pop the NEW destination (or, after a
+        // sign-out, empty the backstack and crash on backstack.last()).
+        var morphGeneration by remember { mutableIntStateOf(0) }
         val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
         val goTop: (Screen) -> Unit = {
+            morphGeneration++
             vm.pageOrigin = null
             vm.closePopup()
             sheetAnim = null
@@ -300,39 +318,65 @@ fun HavenApp(vm: HavenViewModel) {
         }
         val scope = rememberCoroutineScope()
         fun dismissDetail() {
-            if (detailAnim == null || detailExiting) return
+            val anim = detailAnim ?: return
+            if (detailExiting) return
+            // Capture the identity this exit belongs to: if a top-level
+            // navigation (or a new detail open) intervenes before the
+            // animation finishes, the guarded cleanup below must NOT
+            // pop or clear the new destination. try/finally so a
+            // cancelled animation (a new morph snapping the shared
+            // Animatable) still resets the exiting flag.
+            val screenAtStart = anim.screen
+            val genAtStart = morphGeneration
             detailExiting = true
             scope.launch {
-                val anim = detailAnim
-                if (anim?.source != null && !reduceMotion) detailProgress.animateTo(0f, springBounds())
-                else detailProgress.snapTo(0f)
-                // Pop only AFTER the exit morph: the page content must
-                // stay present while its rect shrinks back to the card.
-                if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
-                detailAnim = null
-                detailExiting = false
+                try {
+                    if (!reduceMotion) detailProgress.animateTo(0f, springBounds())
+                    else detailProgress.snapTo(0f)
+                } finally {
+                    // Pop only AFTER the exit morph, and only if this
+                    // is still the same detail on top: the page content
+                    // must stay present while its rect shrinks back to
+                    // the card.
+                    if (morphGeneration == genAtStart && backstack.lastOrNull() == screenAtStart && backstack.size > 1) {
+                        backstack.removeAt(backstack.lastIndex)
+                    }
+                    if (morphGeneration == genAtStart && detailAnim?.screen == screenAtStart) {
+                        detailAnim = null
+                    }
+                    detailExiting = false
+                }
             }
         }
         fun dismissSheet(animated: Boolean) {
             val anim = sheetAnim ?: return
             if (sheetExiting) return
             if (!animated) {
-                vm.closePopup()
-                sheetAnim = null
+                // Instant clear (the sheet -> detail handoff): only
+                // clear state that still belongs to this sheet, so a
+                // popup opened in the meantime is never closed by a
+                // stale tap.
+                if (vm.popupEntityId == anim.id) vm.closePopup()
+                if (sheetAnim?.id == anim.id) sheetAnim = null
                 return
             }
+            val idAtStart = anim.id
+            val genAtStart = morphGeneration
             sheetExiting = true
             scope.launch {
-                val progressJob = launch {
-                    if (anim.source != null && !reduceMotion) sheetProgress.animateTo(0f, springBounds())
-                    else sheetProgress.snapTo(0f)
+                try {
+                    val progressJob = launch {
+                        if (!reduceMotion) sheetProgress.animateTo(0f, springBounds())
+                        else sheetProgress.snapTo(0f)
+                    }
+                    val dragJob = launch { sheetDrag.animateTo(0f, springMorph()) }
+                    progressJob.join()
+                    dragJob.join()
+                } finally {
+                    if (morphGeneration == genAtStart && vm.popupEntityId == idAtStart) vm.closePopup()
+                    if (morphGeneration == genAtStart && sheetAnim?.id == idAtStart) sheetAnim = null
+                    sheetExiting = false
                 }
-                val dragJob = launch { sheetDrag.animateTo(0f, springMorph()) }
-                progressJob.join()
-                dragJob.join()
-                vm.closePopup()
-                sheetAnim = null
-                sheetExiting = false
             }
         }
         val goBack: () -> Unit = {
@@ -340,6 +384,7 @@ fun HavenApp(vm: HavenViewModel) {
             else if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
         }
         val signOut: () -> Unit = {
+            morphGeneration++
             vm.pageOrigin = null
             vm.closePopup()
             sheetAnim = null
@@ -372,7 +417,11 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = sheetAnim
             if (id != null && anim?.id == id) {
                 sheetDrag.snapTo(0f)
-                if (anim.source != null && !reduceMotion) {
+                // Always animate (unless reduce-motion): a sourced
+                // morph interpolates from the card, a sourceless one
+                // from the graceful fallback rect — never an instant
+                // appearance.
+                if (!reduceMotion) {
                     sheetProgress.snapTo(0f)
                     sheetProgress.animateTo(1f, springBounds())
                 } else sheetProgress.snapTo(1f)
@@ -383,7 +432,7 @@ fun HavenApp(vm: HavenViewModel) {
         LaunchedEffect(detailScreen?.let { detailEntityId(it) }) {
             val anim = detailAnim
             if (detailScreen != null && anim != null && detailEntityId(anim.screen) == detailEntityId(detailScreen)) {
-                if (anim.source != null && !reduceMotion) {
+                if (!reduceMotion) {
                     detailProgress.snapTo(0f)
                     detailProgress.animateTo(1f, springBounds())
                 } else detailProgress.snapTo(1f)
@@ -464,8 +513,23 @@ fun HavenApp(vm: HavenViewModel) {
             // the pill-exit below), which replaces the blur as the answer
             // to the scrim problem, and the scrim alone dims the page.
             val modalActive = sheetAnim != null || detailAnim != null
+            // Scroll-away (production-upgrade round): the pill slides
+            // out of view on a downward scroll past 8dp and returns on
+            // an upward scroll past 8dp (the spec sample's thresholds,
+            // converted to pixels). Combined with the modal rule, the
+            // bar is visible exactly when no modal is open AND
+            // scrolling has not hidden it. The connection is attached
+            // to the scaffold content only, so sheet/detail inner
+            // scrolls never move the bar. PillSlideSpring
+            // (0.85/MediumLow) maps onto springSpatial, the single
+            // pill-motion token — no new token.
+            val scrollDensity = LocalDensity.current
+            val scrollVisibility = remember(scrollDensity) {
+                ScrollVisibilityState(with(scrollDensity) { 8.dp.toPx() })
+            }
+            val pillHidden = modalActive || !scrollVisibility.isVisible
             val pillExit by animateFloatAsState(
-                if (modalActive) 1f else 0f,
+                if (pillHidden) 1f else 0f,
                 animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springSpatial(),
                 label = "pillExit",
             )
@@ -503,32 +567,35 @@ fun HavenApp(vm: HavenViewModel) {
                         items = barItems,
                         selectedIndex = selectedIndex,
                         onSelect = goTop,
-                        // Floating island, never pinned edge-to-edge: the
-                        // navigationBars window inset, then 16dp
-                        // horizontal and 12dp bottom padding (the spec's
-                        // literal numbers; reconciles #41's 16dp
-                        // side+bottom margins by keeping 16dp sides and
-                        // taking the spec's 12dp bottom).
+                        // Floating island, auto-width and centered
+                        // (production-upgrade round, superseding #49's
+                        // full-width-minus-margins bar): the navigation
+                        // bars window inset, then 20dp bottom spacing
+                        // above the insets, never pinned edge-to-edge.
                         modifier = Modifier.fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
-                            // Pill exit (overhaul spec item 3): during any
-                            // modal the pill fades out and slides 32dp
-                            // down out of the viewport on the pill
-                            // spring, replacing #49's blur-the-pill
-                            // answer; it returns when the modal closes.
-                            // The scrim (fillMaxSize, above the scaffold)
-                            // already intercepts touches, so the exiting
-                            // pill is never tappable mid-modal.
+                            .padding(bottom = 20.dp)
+                            // Pill exit: during any modal, or while
+                            // scrolled away, the pill fades out and
+                            // slides 96dp down out of the viewport on
+                            // the pill spring; it returns when the
+                            // modal closes or the user scrolls back
+                            // up. The scrim (fillMaxSize, above the
+                            // scaffold) already intercepts touches, so
+                            // the exiting pill is never tappable
+                            // mid-modal.
                             .graphicsLayer {
                                 alpha = 1f - pillExit
-                                translationY = 32.dp.toPx() * pillExit
+                                translationY = 96.dp.toPx() * pillExit
                             },
                     )
                 }
             },
         ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
+            // Scroll-away lives here: nested scrolls from the tab/Home
+            // lists reach this Box (sheet/detail overlays are siblings
+            // outside it, so their inner scrolls never move the bar).
+            Box(Modifier.fillMaxSize().padding(padding).nestedScroll(scrollVisibility.nestedScrollConnection)) {
                 // Detail pages do NOT render here: the scaffold shows
                 // the screen underneath, and the page itself lives in
                 // the overlay below (above all chrome). Every other
@@ -599,8 +666,17 @@ fun HavenApp(vm: HavenViewModel) {
                     }
                 } else {
                     val target = sheetTargetRect(overlayOrigin, overlaySize, targetSize)
-                    val rect = if (anim.source != null) lerpRect(anim.source, target, sheetProgress.value) else target
                     val density = LocalDensity.current
+                    // Current bounds first, captured rect as fallback:
+                    // cards re-report on relayout, so rotation
+                    // mid-morph and cards that moved between open and
+                    // dismiss track correctly instead of landing on a
+                    // stale rect and snapping. Sourceless cards morph
+                    // from the graceful fallback (target + 80dp down),
+                    // never an instant appearance.
+                    val source = cardBounds[anim.id] ?: anim.source
+                    val rect = if (source != null) lerpRect(source, target, sheetProgress.value)
+                        else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, sheetProgress.value)
                     val dismissThresholdPx = with(density) { 120.dp.toPx() }
                     MorphSurface(
                         rect = rect,
@@ -652,7 +728,13 @@ fun HavenApp(vm: HavenViewModel) {
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 val target = detailTargetRect(overlayOrigin, overlaySize)
-                val rect = if (anim.source != null) lerpRect(anim.source, target, detailProgress.value) else target
+                val density = LocalDensity.current
+                // Same current-bounds-first rule as sheets (see above):
+                // rotation mid-morph and moved cards track correctly,
+                // sourceless cards rise from the graceful fallback.
+                val source = cardBounds[anim.entityId] ?: anim.source
+                val rect = if (source != null) lerpRect(source, target, detailProgress.value)
+                    else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, detailProgress.value)
                 MorphSurface(
                     rect = rect,
                     overlayOrigin = overlayOrigin,
@@ -1176,17 +1258,25 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
         label = "pillRight",
     )
     val density = LocalDensity.current
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 3.dp,
-        shadowElevation = 6.dp,
-    ) {
-        Box(
-            Modifier.fillMaxWidth()
-                .onGloballyPositioned { barOrigin = it.boundsInWindow().left },
-        ) {
+    // Auto-width floating island (production-upgrade round): the bar
+    // is only as wide as its items, centered, capped at the screen
+    // width (beyond which the row scrolls exactly as before). Raised
+    // per the spec sample: surfaceContainerHigh at 0.96 alpha, tonal
+    // 8dp, shadow 16dp. The measured sliding indicator, instant label
+    // switch, and >10ch icon-only rule are unchanged.
+    Box(modifier, contentAlignment = Alignment.Center) {
+        BoxWithConstraints {
+            Surface(
+                modifier = Modifier.wrapContentWidth().widthIn(max = maxWidth),
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+                tonalElevation = 8.dp,
+                shadowElevation = 16.dp,
+            ) {
+                Box(
+                    Modifier.wrapContentWidth()
+                        .onGloballyPositioned { barOrigin = it.boundsInWindow().left },
+                ) {
             // The morphing indicator, behind the items.
             if (targetRect != null) {
                 Box(
@@ -1199,7 +1289,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             }
             // Scrolls horizontally once tabs overflow; short bars stay centered.
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 8.dp).pillScrub(scrub),
+                modifier = Modifier.wrapContentWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp).pillScrub(scrub),
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1262,6 +1352,8 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                         }
                     }
                 }
+            }
+        }
             }
         }
     }

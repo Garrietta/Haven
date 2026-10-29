@@ -59,4 +59,21 @@ class MorphMathTest {
             assertEquals(true, r.bottom >= from.bottom)
         }
     }
+
+    @Test
+    fun fallbackFromRect_shiftsDownOnly() {
+        // The graceful sourceless origin is the target rect translated
+        // straight down: same left/right/width/height, never scaled.
+        val target = Rect(0f, 1200f, 1080f, 2400f)
+        assertEquals(Rect(0f, 1280f, 1080f, 2480f), fallbackFromRect(target, 80f))
+        assertEquals(target, fallbackFromRect(target, 0f))
+    }
+
+    @Test
+    fun fallbackFromRect_morphStaysInTargetAtEnd() {
+        // Lerping from the fallback to the target ends exactly on the
+        // target at every edge, so no snap on arrival.
+        val target = Rect(10f, 20f, 1090f, 2420f)
+        assertEquals(target, lerpRect(fallbackFromRect(target, 80f), target, 1f))
+    }
 }
