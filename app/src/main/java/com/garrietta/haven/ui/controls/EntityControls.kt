@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.controls
 
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -215,7 +216,8 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
     // second behind the header text that flips discretely with the state
     // — the "header and bulb disagree" window. The tight spring lands
     // with the text; the bouncy spring stays everywhere else.
-    val bulbSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springSnappy()
+    val bulbSpec: FiniteAnimationSpec<Float> =
+        if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springSnappy()
     val bulbProgress by animateFloatAsState(
         if (isOn) 1f else 0f,
         animationSpec = bulbSpec,
