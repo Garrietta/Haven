@@ -39,7 +39,21 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Wifi
+import com.garrietta.haven.ui.components.KodaMenuRow
+import com.garrietta.haven.ui.components.KodaMenuSection
 import com.garrietta.haven.ui.components.LocalWideLayout
+import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.DiscoverySource
@@ -385,12 +399,16 @@ fun SettingsScreen(
     navigate: (Screen) -> Unit,
 ) {
     val connection by vm.connection.collectAsState()
+    // Koda Settings menu DNA: dark rounded rows with shaped icon badges,
+    // ALL-CAPS muted section headers, and bold title + muted subtitle
+    // rows with chevrons — on Haven's dynamic colors, not Koda's palette.
+    // The explanatory texts the old screen showed under each heading now
+    // live as the rows' subtitles, so nothing is lost in the restyle.
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
         item {
             Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(16.dp))
-            Text("Appearance", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
+            KodaMenuSection("Appearance")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for ((value, label) in listOf("system" to "System", "light" to "Light", "dark" to "Dark")) {
                     FilterChip(
@@ -400,79 +418,125 @@ fun SettingsScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Reduce motion", modifier = Modifier.weight(1f))
-                Switch(checked = reduceMotion, onCheckedChange = onReduceMotion)
-            }
-            Spacer(Modifier.height(24.dp))
-            Text("Connection", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
-            Text("Instance: ${vm.tokenStore.instanceUrl ?: "—"}", fontSize = 14.sp)
-            Text(
-                "Status: " + when (connection) {
+            KodaMenuRow(
+                badgeKey = "appearance-motion",
+                badgeKind = ExpressiveKind.BUN,
+                icon = Icons.Filled.Autorenew,
+                title = "Reduce motion",
+                subtitle = "Keep animations instant and minimal",
+                onClick = null,
+                trailing = { Switch(checked = reduceMotion, onCheckedChange = onReduceMotion) },
+            )
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Connection")
+            KodaMenuRow(
+                badgeKey = "connection-instance",
+                badgeKind = ExpressiveKind.CLOUD,
+                icon = Icons.Filled.Wifi,
+                title = "Instance",
+                subtitle = vm.tokenStore.instanceUrl ?: "—",
+                onClick = null,
+            )
+            Spacer(Modifier.height(8.dp))
+            KodaMenuRow(
+                badgeKey = "connection-status",
+                badgeKind = ExpressiveKind.CLOUD,
+                icon = Icons.Filled.Wifi,
+                title = "Status",
+                subtitle = when (connection) {
                     is ConnectionState.Connected -> "Connected"
                     is ConnectionState.Connecting -> "Connecting…"
                     is ConnectionState.Authenticating -> "Signing in…"
                     is ConnectionState.Error -> (connection as ConnectionState.Error).message
                     else -> "Disconnected"
                 },
-                fontSize = 14.sp,
+                onClick = null,
             )
-            Spacer(Modifier.height(24.dp))
-            Text("Tabs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "The pill bar is your tabs: Home is always first, Settings is always last, and the rest are yours to create, rename, and reorder.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Tabs")
+            KodaMenuRow(
+                badgeKey = "tabs-manage",
+                badgeKind = ExpressiveKind.BURST,
+                icon = Icons.Filled.List,
+                title = "Manage tabs",
+                subtitle = "The pill bar is your tabs: Home is always first, Settings is always last, and the rest are yours to create, rename, and reorder.",
+                onClick = { navigate(Screen.TabManager) },
+            )
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Home page")
+            KodaMenuRow(
+                badgeKey = "home-manage",
+                badgeKind = ExpressiveKind.SUNNY,
+                icon = Icons.Filled.Home,
+                title = "Manage home page",
+                subtitle = "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
+                onClick = { navigate(Screen.HomeEditor) },
+            )
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Browse")
+            KodaMenuRow(
+                badgeKey = "browse-boards",
+                badgeKind = ExpressiveKind.BUN,
+                icon = Icons.Filled.Dashboard,
+                title = "Boards",
+                subtitle = "Your Lovelace dashboards",
+                onClick = { navigate(Screen.Dashboards) },
             )
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
-            Spacer(Modifier.height(24.dp))
-            Text("Home page", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            KodaMenuRow(
+                badgeKey = "browse-areas",
+                badgeKind = ExpressiveKind.BUN,
+                icon = Icons.Filled.GridView,
+                title = "Areas",
+                subtitle = "Rooms and their entities",
+                onClick = { navigate(Screen.Areas) },
             )
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { navigate(Screen.HomeEditor) }) { Text("Manage home page") }
-            Spacer(Modifier.height(24.dp))
-            Text("Browse", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Boards, Areas, and Search live here — your tabs, Home included, are on the pill bar.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            KodaMenuRow(
+                badgeKey = "browse-search",
+                badgeKind = ExpressiveKind.BUN,
+                icon = Icons.Filled.Search,
+                title = "Search",
+                subtitle = "Find any entity",
+                onClick = { navigate(Screen.Search) },
+            )
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Create")
+            KodaMenuRow(
+                badgeKey = "create-automation",
+                badgeKind = ExpressiveKind.WAVE,
+                icon = Icons.Filled.Autorenew,
+                title = "Automation",
+                subtitle = "Guided builder: pick a trigger, a condition, and an action — no YAML, no web UI.",
+                onClick = { navigate(Screen.AutomationBuilder) },
             )
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { navigate(Screen.Dashboards) }) { Text("Boards") }
-                Button(onClick = { navigate(Screen.Areas) }) { Text("Areas") }
-            }
+            KodaMenuRow(
+                badgeKey = "create-scene",
+                badgeKind = ExpressiveKind.WAVE,
+                icon = Icons.Filled.Palette,
+                title = "Scene",
+                subtitle = "Capture the current state of your devices",
+                onClick = { navigate(Screen.SceneBuilder) },
+            )
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { navigate(Screen.Search) }) { Text("Search") }
-            }
-            Spacer(Modifier.height(24.dp))
-            Text("Create", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            KodaMenuRow(
+                badgeKey = "create-script",
+                badgeKind = ExpressiveKind.WAVE,
+                icon = Icons.Filled.Code,
+                title = "Script",
+                subtitle = "A reusable sequence of actions",
+                onClick = { navigate(Screen.ScriptBuilder) },
+            )
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { navigate(Screen.AutomationBuilder) }) { Text("Automation") }
-                Button(onClick = { navigate(Screen.SceneBuilder) }) { Text("Scene") }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { navigate(Screen.ScriptBuilder) }) { Text("Script") }
-                Button(onClick = { navigate(Screen.HelperBuilder) }) { Text("Helper") }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Guided builders: pick a trigger, a condition, and an action — no YAML, no web UI.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            KodaMenuRow(
+                badgeKey = "create-helper",
+                badgeKind = ExpressiveKind.WAVE,
+                icon = Icons.Filled.Build,
+                title = "Helper",
+                subtitle = "Input booleans, numbers, timers, and more",
+                onClick = { navigate(Screen.HelperBuilder) },
             )
             Spacer(Modifier.height(24.dp))
             OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }

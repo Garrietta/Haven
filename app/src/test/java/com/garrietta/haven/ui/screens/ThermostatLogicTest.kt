@@ -89,4 +89,72 @@ class ThermostatLogicTest {
         )
         assertTrue(findLinkedSensors(emptyMap(), climate).isEmpty())
     }
+
+    // ---- Dial interaction model: 1-degree steps, tap-toggle, handle-drag ----
+
+    @Test
+    fun snapToDegreeRoundsToWhole() {
+        assertEquals(69.0, snapToDegree(68.5), 0.0)
+        assertEquals(68.0, snapToDegree(68.4), 0.0)
+        assertEquals(67.0, snapToDegree(67.0), 0.0)
+        assertEquals(70.0, snapToDegree(70.2), 0.0)
+    }
+
+    @Test
+    fun selectorTogglesAndDefaultsByMode() {
+        assertEquals(SetpointSelector.COOLING, toggleSelector(SetpointSelector.HEATING))
+        assertEquals(SetpointSelector.HEATING, toggleSelector(SetpointSelector.COOLING))
+        assertEquals(SetpointSelector.COOLING, defaultSelector("cool"))
+        assertEquals(SetpointSelector.HEATING, defaultSelector("heat"))
+        assertEquals(SetpointSelector.HEATING, defaultSelector("heat_cool"))
+        assertEquals(SetpointSelector.HEATING, defaultSelector("off"))
+        assertEquals(SetpointSelector.HEATING, defaultSelector(null))
+    }
+
+    @Test
+    fun setpointClampsKeepHeatBelowCool() {
+        // Heating can never pass cooling, and stays inside the range.
+        assertEquals(70.0, clampHeatSetpoint(75.0, 50.0, 70.0), 0.0)
+        assertEquals(60.0, clampHeatSetpoint(60.0, 50.0, 70.0), 0.0)
+        assertEquals(50.0, clampHeatSetpoint(40.0, 50.0, 70.0), 0.0)
+        // Cooling can never drop below heating, and stays inside the range.
+        assertEquals(67.0, clampCoolSetpoint(60.0, 67.0, 90.0), 0.0)
+        assertEquals(80.0, clampCoolSetpoint(80.0, 67.0, 90.0), 0.0)
+        assertEquals(90.0, clampCoolSetpoint(95.0, 67.0, 90.0), 0.0)
+        // Snapping happens before clamping: 67.5 heat against a 67 cool
+        // becomes 68, then clamps back to 67.
+        assertEquals(67.0, clampHeatSetpoint(67.5, 50.0, 67.0), 0.0)
+    }
+
+    @Test
+    fun dialAngleMapsSweepAndNullsInGap() {
+        val range = 50f..90f
+        assertEquals(50f, dialValueFromAngle(135f, range))
+        assertEquals(70f, dialValueFromAngle(270f, range))
+        assertEquals(90f, dialValueFromAngle(45f, range))
+        // Bottom gap: 90 and 100 degrees sit past the 270-degree sweep.
+        assertNull(dialValueFromAngle(90f, range))
+        assertNull(dialValueFromAngle(100f, range))
+    }
+
+    @Test
+    fun dialTapZonesSeparateInsideFromRing() {
+        // Track radius 100px, 23px ring tolerance: center is inside, the
+        // ring itself is ring, the corners are outside. Only inside taps
+        // toggle the selector; ring and outside taps change nothing.
+        assertEquals(DialTapZone.INSIDE, dialTapZone(0f, 0f, 0f, 0f, 100f, 23f))
+        assertEquals(DialTapZone.INSIDE, dialTapZone(50f, 0f, 0f, 0f, 100f, 23f))
+        assertEquals(DialTapZone.RING, dialTapZone(100f, 0f, 0f, 0f, 100f, 23f))
+        assertEquals(DialTapZone.RING, dialTapZone(120f, 0f, 0f, 0f, 100f, 23f))
+        assertEquals(DialTapZone.OUTSIDE, dialTapZone(124f, 0f, 0f, 0f, 100f, 23f))
+        assertEquals(DialTapZone.OUTSIDE, dialTapZone(100f, 100f, 0f, 0f, 100f, 23f))
+    }
+
+    @Test
+    fun handleGrabNeedsProximity() {
+        assertTrue(isHandleGrab(10f, 10f, 10f, 10f, 28f))
+        assertTrue(isHandleGrab(38f, 10f, 10f, 10f, 28f))
+        assertTrue(!isHandleGrab(39f, 10f, 10f, 10f, 28f))
+        assertTrue(!isHandleGrab(100f, 100f, 10f, 10f, 28f))
+    }
 }

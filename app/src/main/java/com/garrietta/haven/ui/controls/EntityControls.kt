@@ -79,6 +79,12 @@ import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenMotion
 import com.garrietta.haven.ui.theme.polygonShape
 import org.json.JSONObject
+import com.garrietta.haven.ui.screens.SetpointSelector
+import com.garrietta.haven.ui.screens.clampCoolSetpoint
+import com.garrietta.haven.ui.screens.clampHeatSetpoint
+import com.garrietta.haven.ui.screens.defaultSelector
+import com.garrietta.haven.ui.screens.snapToDegree
+import com.garrietta.haven.ui.screens.toggleSelector
 
 fun Double.formatTemp(): String =
     if (this % 1.0 == 0.0) "${this.toInt()}°" else "%.1f°".format(this)
@@ -313,36 +319,75 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
     ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent)
 }
 
+private val HEAT_COLOR = Color(0xFFD84315)
+private val COOL_COLOR = Color(0xFF1565C0)
+
 @Composable
 fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
     val accent = accentFor(entity.entityId)
     val current = entity.attrDouble("current_temperature")
     // Heat/cool thermostats (like the Ecobee) report target_temp_high/low
-    // instead of a single temperature — the old code fell back to a
-    // hardcoded 21.0 there, which reads as Celsius next to the Fahrenheit
-    // readouts. Use the midpoint of the two setpoints instead, so the dial
-    // always shows a value in the same unit as the readouts (every one of
-    // these attributes arrives from HA in its own unit system).
+    // instead of a single temperature. The sheet dial edits exactly one
+    // setpoint — the active selector, toggled by tapping inside the dial
+    // face — and shows it large with its name in the subtitle, so the
+    // sheet never has to fall back to a hardcoded value or a midpoint.
     val high = entity.attrDouble("target_temp_high")
     val low = entity.attrDouble("target_temp_low")
-    val targetInit = entity.attrDouble("temperature")
-        ?: if (high != null && low != null) (high + low) / 2.0 else 21.0
+    val heatCool = high != null && low != null
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
-    var target by remember(targetInit) { mutableStateOf(targetInit.toFloat().coerceIn(min, max)) }
+    var heat by remember(low) { mutableStateOf(low?.toFloat()?.coerceIn(min, max) ?: min) }
+    var cool by remember(high) { mutableStateOf(high?.toFloat()?.coerceIn(min, max) ?: max) }
+    var single by remember(entity.attrDouble("temperature")) {
+        mutableStateOf(entity.attrDouble("temperature")?.toFloat()?.coerceIn(min, max) ?: min)
+    }
+    var selector by remember(entity.entityId, entity.state) { mutableStateOf(defaultSelector(entity.state)) }
+    val active: Float = if (heatCool) {
+        if (selector == SetpointSelector.HEATING) heat else cool
+    } else {
+        single
+    }
+    val dialAccent: Color = if (heatCool) {
+        if (selector == SetpointSelector.HEATING) HEAT_COLOR else COOL_COLOR
+    } else {
+        accent
+    }
+    val setActive: (Float) -> Unit = {
+        if (heatCool) {
+            if (selector == SetpointSelector.HEATING) heat = it else cool = it
+        } else {
+            single = it
+        }
+    }
     val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
     val presets = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Dial(
-            value = target,
+            value = active,
             range = min..max,
-            onValueChange = { target = it },
-            onFinished = { applyClimateTarget(vm, entity, it.toDouble()) },
-            centerText = target.toDouble().formatTemp(),
-            centerSub = if (current != null) "Now ${current.formatTemp()}" else entity.stateText(),
-            accent = accent,
+            onValueChange = setActive,
+            onFinished = { applyClimateSetpoint(vm, entity, selector, it.toDouble()) },
+            centerText = active.toDouble().formatTemp(),
+            centerSub = if (heatCool) {
+                val name = if (selector == SetpointSelector.HEATING) "Heating setpoint" else "Cooling setpoint"
+                if (current != null) "$name · Now ${current.formatTemp()}" else name
+            } else if (current != null) {
+                "Now ${current.formatTemp()}"
+            } else {
+                entity.stateText()
+            },
+            accent = dialAccent,
+            onInsideTap = if (heatCool) {
+                { selector = toggleSelector(selector) }
+            } else {
+                null
+            },
+            snapToWhole = true,
         )
-        ServiceSlider(target, min..max, { applyClimateTarget(vm, entity, it.toDouble()) }, accent)
+        // The slider moves the same active setpoint and snaps to whole
+        // degrees on release, so every path changes temperature in 1°
+        // intervals.
+        ServiceSlider(active, min..max, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, accent)
         if (modes.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -378,30 +423,26 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
 }
 
 /**
- * Applies a dial/slider temperature. Heat/cool thermostats take a high/low
- * pair, so the dial value moves both setpoints while preserving their gap;
- * single-setpoint thermostats take the value directly.
+ * Applies a thermostat setpoint in whole degrees. Heat/cool thermostats
+ * take a high/low pair, so only the ACTIVE selector's value moves — the
+ * other setpoint is sent back unchanged, clamped so heating can never
+ * pass cooling. Single-setpoint thermostats take the value directly.
+ * This replaces the old midpoint move (both setpoints shifting to
+ * preserve their gap), which the selector model supersedes.
  */
-fun applyClimateTarget(vm: HavenViewModel, entity: HaEntity, value: Double) {
+fun applyClimateSetpoint(vm: HavenViewModel, entity: HaEntity, selector: SetpointSelector, value: Double) {
     val high = entity.attrDouble("target_temp_high")
     val low = entity.attrDouble("target_temp_low")
+    val min = entity.attrDouble("min_temp")
+    val max = entity.attrDouble("max_temp")
     if (high != null && low != null) {
-        val gap = (high - low).coerceAtLeast(0.0)
-        val min = entity.attrDouble("min_temp")
-        val max = entity.attrDouble("max_temp")
-        var newLow = value - gap / 2.0
-        var newHigh = value + gap / 2.0
-        if (min != null && max != null) {
-            // Keep the pair inside the real setpoint range, shifting the
-            // pair rather than crushing one side when it hits an edge.
-            if (newLow < min) { newHigh += min - newLow; newLow = min }
-            if (newHigh > max) { newLow -= newHigh - max; newHigh = max }
-            newLow = newLow.coerceIn(min, max)
-            newHigh = newHigh.coerceIn(min, max)
+        if (selector == SetpointSelector.HEATING) {
+            vm.setClimateTemperatureRange(entity.entityId, clampHeatSetpoint(value, min, high), high)
+        } else {
+            vm.setClimateTemperatureRange(entity.entityId, low, clampCoolSetpoint(value, low, max))
         }
-        vm.setClimateTemperatureRange(entity.entityId, newLow, newHigh)
     } else {
-        vm.setClimateTemperature(entity.entityId, value)
+        vm.setClimateTemperature(entity.entityId, snapToDegree(value))
     }
 }
 

@@ -44,7 +44,7 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.controls.applyClimateTarget
+import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
 import org.json.JSONObject
@@ -59,31 +59,20 @@ private val COOL_COLOR = Color(0xFF1565C0)
  * cards below. Every card reads only what Home Assistant exposes — a card
  * with no backing state hides instead of inventing one.
  *
- * The dial logic is the prior round's, unchanged: Fahrenheit values from
- * HA, the midpoint of high/low for heat/cool thermostats, drag clamped to
- * the real setpoint range with the bottom gap ignored, and a dial move
- * shifts both setpoints while preserving their gap.
+ * The dial edits one setpoint at a time, in whole degrees: in heat/cool
+ * mode an inside tap toggles the active selector between the heating and
+ * cooling setpoints (the active one shows large, in its own color, with a
+ * selector chip); only grabbing the radial handle and dragging it moves
+ * the value, clamped so the setpoints cannot cross and the bottom gap is
+ * ignored. Fahrenheit throughout, and onFinished still reports the
+ * actually-set value.
  */
 @Composable
 fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
-    val accent = accentFor(entityId)
-    // Target state is hoisted unconditionally (hooks must not sit behind
-    // the null check below); it re-initializes whenever HA reports a new
-    // setpoint, same as the sheet's dial did.
-    val highInit = entity?.attrDouble("target_temp_high")
-    val lowInit = entity?.attrDouble("target_temp_low")
-    val targetInit = entity?.attrDouble("temperature")
-        ?: if (highInit != null && lowInit != null) (highInit + lowInit) / 2.0 else 21.0
     val min = entity?.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity?.attrDouble("max_temp")?.toFloat() ?: 30f
-    var target by remember(targetInit) { mutableStateOf(targetInit.toFloat().coerceIn(min, max)) }
-    val modeColor = when (entity?.state) {
-        "heat" -> HEAT_COLOR
-        "cool" -> COOL_COLOR
-        else -> accent
-    }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         DetailTopBar(entity?.friendlyName ?: entityId, onBack)
         if (entity == null) {
@@ -97,7 +86,7 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    ThermostatHero(entity, vm, target, min, max, modeColor) { target = it }
+                    ThermostatHero(entity, vm, min, max)
                     Spacer(Modifier.height(16.dp))
                     HeatCoolRangeBar(entity, min, max)
                 }
@@ -110,7 +99,7 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                ThermostatHero(entity, vm, target, min, max, modeColor) { target = it }
+                ThermostatHero(entity, vm, min, max)
                 Spacer(Modifier.height(16.dp))
                 HeatCoolRangeBar(entity, min, max)
                 Spacer(Modifier.height(16.dp))
@@ -121,45 +110,125 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
     }
 }
 
-/** Hero dial: current (gray) + target (large, mode-colored) with −/+ steppers. */
+/** Hero dial: current (gray) + active setpoint (large, selector-colored) with −/+ steppers.
+ *
+ * Heat/cool thermostats have two setpoints and the dial edits exactly one
+ * of them: the active selector, toggled by tapping inside the dial face
+ * (never by tapping the ring — ring taps change nothing). The active
+ * setpoint shows large in its own color (orange heat, blue cool) under a
+ * selector chip that names it; the other setpoint stays visible on the
+ * gradient bar below. Single-setpoint thermostats edit their one value
+ * and have no selector. Every change — handle drag, steppers — moves in
+ * whole degrees and is clamped so heating can never pass cooling.
+ */
 @Composable
 private fun ThermostatHero(
     entity: HaEntity,
     vm: HavenViewModel,
-    target: Float,
     min: Float,
     max: Float,
-    modeColor: Color,
-    onTargetChange: (Float) -> Unit,
 ) {
     val current = entity.attrDouble("current_temperature")
-    val step = entity.attrDouble("target_temp_step")?.toFloat() ?: 1f
+    val accent = accentFor(entity.entityId)
+    val lowInit = entity.attrDouble("target_temp_low")
+    val highInit = entity.attrDouble("target_temp_high")
+    val singleInit = entity.attrDouble("temperature")
+    val heatCool = lowInit != null && highInit != null
+    // Setpoint state re-initializes whenever HA reports a new setpoint,
+    // same as the old midpoint dial did.
+    var heat by remember(lowInit) { mutableStateOf(lowInit?.toFloat()?.coerceIn(min, max) ?: min) }
+    var cool by remember(highInit) { mutableStateOf(highInit?.toFloat()?.coerceIn(min, max) ?: max) }
+    var single by remember(singleInit) { mutableStateOf(singleInit?.toFloat()?.coerceIn(min, max) ?: min) }
+    // The selector follows the hvac mode (cooling when the thermostat is
+    // cooling, otherwise heating) and survives setpoint updates within a
+    // mode; the user flips it with an inside tap.
+    var selector by remember(entity.entityId, entity.state) { mutableStateOf(defaultSelector(entity.state)) }
+    val active: Float = if (heatCool) {
+        if (selector == SetpointSelector.HEATING) heat else cool
+    } else {
+        single
+    }
+    val dialAccent: Color = if (heatCool) {
+        if (selector == SetpointSelector.HEATING) HEAT_COLOR else COOL_COLOR
+    } else {
+        when (entity.state) {
+            "heat" -> HEAT_COLOR
+            "cool" -> COOL_COLOR
+            else -> accent
+        }
+    }
+    val setActive: (Float) -> Unit = {
+        if (heatCool) {
+            if (selector == SetpointSelector.HEATING) heat = it else cool = it
+        } else {
+            single = it
+        }
+    }
+    val stepActive: (Float) -> Unit = { delta ->
+        val next = if (heatCool) {
+            if (selector == SetpointSelector.HEATING) {
+                clampHeatSetpoint((heat + delta).toDouble(), min.toDouble(), cool.toDouble()).toFloat()
+            } else {
+                clampCoolSetpoint((cool + delta).toDouble(), heat.toDouble(), max.toDouble()).toFloat()
+            }
+        } else {
+            snapToDegree((single + delta).toDouble()).toFloat().coerceIn(min, max)
+        }
+        setActive(next)
+        applyClimateSetpoint(vm, entity, selector, next.toDouble())
+    }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Dial(
-            value = target,
+            value = active,
             range = min..max,
-            onValueChange = onTargetChange,
-            onFinished = { applyClimateTarget(vm, entity, it.toDouble()) },
+            onValueChange = setActive,
+            onFinished = { applyClimateSetpoint(vm, entity, selector, it.toDouble()) },
             centerText = "",
             centerSub = "",
-            accent = modeColor,
+            accent = dialAccent,
             diameter = 300.dp,
+            onInsideTap = if (heatCool) {
+                { selector = toggleSelector(selector) }
+            } else {
+                null
+            },
+            snapToWhole = true,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (current != null) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (current != null) {
+                        Text(
+                            current.formatTemp(),
+                            fontSize = 40.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                    }
                     Text(
-                        current.formatTemp(),
-                        fontSize = 40.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        active.toDouble().formatTemp(),
+                        fontSize = 72.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = dialAccent,
                     )
-                    Spacer(Modifier.width(12.dp))
                 }
-                Text(
-                    target.toDouble().formatTemp(),
-                    fontSize = 72.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = modeColor,
-                )
+                if (heatCool) {
+                    Spacer(Modifier.height(4.dp))
+                    // Display-only indicator: the toggle itself is the
+                    // inside tap, so this chip takes no click handler
+                    // (a clickable chip would risk a double toggle).
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = dialAccent.copy(alpha = 0.20f),
+                    ) {
+                        Text(
+                            if (selector == SetpointSelector.HEATING) "Heating setpoint" else "Cooling setpoint",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = dialAccent,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -167,16 +236,8 @@ private fun ThermostatHero(
             horizontalArrangement = Arrangement.spacedBy(24.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedButton(onClick = {
-                val next = (target - step).coerceIn(min, max)
-                onTargetChange(next)
-                applyClimateTarget(vm, entity, next.toDouble())
-            }) { Text("−") }
-            OutlinedButton(onClick = {
-                val next = (target + step).coerceIn(min, max)
-                onTargetChange(next)
-                applyClimateTarget(vm, entity, next.toDouble())
-            }) { Text("+") }
+            OutlinedButton(onClick = { stepActive(-1f) }) { Text("−") }
+            OutlinedButton(onClick = { stepActive(1f) }) { Text("+") }
         }
     }
 }

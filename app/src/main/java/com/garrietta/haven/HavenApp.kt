@@ -56,7 +56,6 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -101,8 +100,11 @@ import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalWideLayout
-import com.garrietta.haven.ui.components.RisingPageContent
+import com.garrietta.haven.ui.components.SheetPageContent
+import com.garrietta.haven.ui.components.shapeForDomain
+import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.theme.sheetSpring
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
 import com.garrietta.haven.ui.components.rememberPillScrubState
@@ -128,7 +130,6 @@ import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
 import com.garrietta.haven.ui.theme.havenMotion
-import com.garrietta.haven.ui.theme.havenSpring
 
 private data class NavItem(
     val screen: Screen,
@@ -216,9 +217,10 @@ fun HavenApp(vm: HavenViewModel) {
             mutableStateListOf<Screen>(Screen.Today)
         }
         val current = backstack.last()
-        // Page-transition state: a page rises out of the tapped item's
-        // saved bounds (vm.pageOrigin) on the house spring, and settles
-        // back toward them on back. Top-level jumps clear it.
+        // Page-transition state: a page rises as a bottom sheet out of
+        // the tapped item's saved bounds (vm.pageOrigin) on the sheet
+        // spring, and sinks back toward them on back. Top-level jumps
+        // clear it.
         var entering by remember { mutableStateOf(false) }
         var exitingScreen by remember { mutableStateOf<Screen?>(null) }
         val enterProgress = remember { Animatable(0f) }
@@ -265,7 +267,7 @@ fun HavenApp(vm: HavenViewModel) {
                 if (reduceMotion) {
                     enterProgress.snapTo(1f)
                 } else {
-                    enterProgress.animateTo(1f, havenSpring())
+                    enterProgress.animateTo(1f, sheetSpring())
                 }
                 entering = false
             }
@@ -277,7 +279,7 @@ fun HavenApp(vm: HavenViewModel) {
                 if (reduceMotion) {
                     exitProgress.snapTo(0f)
                 } else {
-                    exitProgress.animateTo(0f, havenSpring())
+                    exitProgress.animateTo(0f, sheetSpring())
                 }
                 if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
                 exitingScreen = null
@@ -285,7 +287,8 @@ fun HavenApp(vm: HavenViewModel) {
             }
         }
         // Camera overlay transitions share the same language: the live
-        // view rises out of the tapped camera tile and settles back on close.
+        // view rises as a bottom sheet out of the tapped camera tile and
+        // sinks back on close.
         var cameraExiting by remember { mutableStateOf(false) }
         val cameraEnterProgress = remember { Animatable(0f) }
         val cameraExitProgress = remember { Animatable(1f) }
@@ -296,7 +299,7 @@ fun HavenApp(vm: HavenViewModel) {
                 if (reduceMotion) {
                     cameraEnterProgress.snapTo(1f)
                 } else {
-                    cameraEnterProgress.animateTo(1f, havenSpring())
+                    cameraEnterProgress.animateTo(1f, sheetSpring())
                 }
             }
         }
@@ -306,7 +309,7 @@ fun HavenApp(vm: HavenViewModel) {
                 if (reduceMotion) {
                     cameraExitProgress.snapTo(0f)
                 } else {
-                    cameraExitProgress.animateTo(0f, havenSpring())
+                    cameraExitProgress.animateTo(0f, sheetSpring())
                 }
                 vm.closeCameraFullscreen()
                 vm.pageOrigin = null
@@ -376,18 +379,18 @@ fun HavenApp(vm: HavenViewModel) {
                 val leaving = exitingScreen
                 when {
                     leaving != null && backstack.size > 1 -> {
-                        // Reverse: the page settles back toward its origin
+                        // Reverse: the page sinks back toward its origin
                         // over the screen it came from.
                         content(backstack[backstack.lastIndex - 1])
-                        RisingPageContent(vm.pageOrigin, exitProgress.value) {
+                        SheetPageContent(vm.pageOrigin, exitProgress.value) {
                             content(leaving)
                         }
                     }
                     entering && backstack.size > 1 -> {
-                        // Enter: the page rises out of the tapped item over
-                        // the screen it came from.
+                        // Enter: the page rises as a bottom sheet out of
+                        // the tapped item, over the screen it came from.
                         content(backstack[backstack.lastIndex - 1])
-                        RisingPageContent(vm.pageOrigin, enterProgress.value) {
+                        SheetPageContent(vm.pageOrigin, enterProgress.value) {
                             content(current)
                         }
                     }
@@ -412,11 +415,11 @@ fun HavenApp(vm: HavenViewModel) {
             }
             if (cameraId != null) {
                 if (cameraExiting) {
-                    RisingPageContent(vm.pageOrigin, cameraExitProgress.value, background = Color.Black) {
+                    SheetPageContent(vm.pageOrigin, cameraExitProgress.value, background = Color.Black) {
                         CameraFullscreen(vm, requestCameraClose)
                     }
                 } else {
-                    RisingPageContent(vm.pageOrigin, cameraEnterProgress.value, background = Color.Black) {
+                    SheetPageContent(vm.pageOrigin, cameraEnterProgress.value, background = Color.Black) {
                         CameraFullscreen(vm, requestCameraClose)
                     }
                 }
@@ -482,7 +485,8 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[popupId]
     // The sheet's own bounds become the page origin when Details is tapped,
-    // so the full page rises out of the sheet on the house spring.
+    // so the full page rises as a bottom sheet out of the sheet on the
+    // sheet spring.
     var sheetBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val reduceMotion = LocalReduceMotion.current
     ModalBottomSheet(onDismissRequest = vm::closePopup) {
@@ -528,7 +532,12 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                         EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
                         Spacer(Modifier.height(12.dp))
                         Row {
-                            Button(
+                            KodaMenuRow(
+                                badgeKey = entity.entityId,
+                                badgeKind = shapeForDomain(entity.domain),
+                                icon = domainIcon(entity),
+                                title = "Details",
+                                subtitle = "Open the full page",
                                 onClick = {
                                     sheetBounds?.let { vm.pageOrigin = it }
                                     vm.closePopup()
@@ -539,9 +548,8 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                                         else -> navigate(Screen.EntityDetail(popupId))
                                     }
                                 },
-                                shape = RoundedCornerShape(50),
-                                colors = ButtonDefaults.buttonColors(containerColor = accent),
-                            ) { Text("Details") }
+                                modifier = Modifier.weight(1f),
+                            )
                             Spacer(Modifier.width(8.dp))
                             OutlinedButton(
                                 onClick = vm::closePopup,

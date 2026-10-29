@@ -16,6 +16,14 @@ import androidx.compose.ui.platform.LocalContext
 /** The house spring: bouncy, shared by every animated control in Haven. */
 fun <T> havenSpring(): FiniteAnimationSpec<T> = spring(stiffness = 380f, dampingRatio = 0.62f)
 
+/**
+ * The sheet-rise spring, matched to the recorded Koda mini-player
+ * expansion: a fast rise (~half a second) with a soft settle and almost
+ * no visible overshoot. Stiffer and more damped than the house spring on
+ * purpose — Koda's sheet does not bounce the way its pills do.
+ */
+fun <T> sheetSpring(): FiniteAnimationSpec<T> = spring(stiffness = 500f, dampingRatio = 0.85f)
+
 /** Instant spec used when reduce-motion is on. Finite, so it also serves animateContentSize and expand/shrink. */
 fun <T> havenMotion(reduceMotion: Boolean): FiniteAnimationSpec<T> =
     if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else havenSpring()

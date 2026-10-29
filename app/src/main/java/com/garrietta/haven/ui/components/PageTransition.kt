@@ -13,31 +13,52 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 
 /**
- * Container-transform page transitions, bounds-anchored.
+ * Page transitions that replicate the recorded Koda mini-player expansion.
  *
- * Why bounds-anchored instead of Navigation-Compose shared elements:
- * HavenApp navigates on its own backstack, not a NavHost, so the
- * navigation library's shared-element support isn't available without a
- * full navigation migration. Instead the tapped tile, card, or sheet saves
- * its on-screen rect (see [HavenViewModel.pageOrigin]) and the destination
- * page morphs out of exactly that rect — same effect, no new dependency.
+ * What the recording shows (frame-by-frame): tapping Koda's bottom mini
+ * bar does NOT scale the page out of the bar's bounds. Instead a sheet
+ * rises from the bottom edge — its top edge starts low on the screen with
+ * rounded top corners, and it grows upward until it fills the screen and
+ * the corners flatten to zero. The page underneath stays perfectly static
+ * (no scale, no fade) while the sheet covers it from the bottom up, and
+ * the sheet's own content is laid out at full size and revealed as the
+ * sheet grows — the art first, then title, progress, and controls — never
+ * stretched or scaled. Collapse reverses it exactly: the sheet sinks back
+ * down and the page underneath is revealed. The whole rise takes about
+ * half a second with a soft settle, not a bouncy overshoot.
  *
- * The caller drives [progress] 0 → 1 on the house spring for enter and
- * 1 → 0 for back; this wrapper only maps progress to scale, fade, and
- * corner radius. At progress 1 (or with no origin) it is the identity, so
- * swapping between the animated wrapper and plain content is seamless.
- * Motion follows [LocalReduceMotion]: callers pass progress already
- * snapped to 1 when reduced motion is on.
+ * That is what this wrapper does, and it deliberately replaces the old
+ * RisingPageContent (scale-from-tapped-bounds + fade), which read as a
+ * generic zoom/slide and did not feel like Koda at all:
+ *
+ * - The page starts shifted down so its visible top edge sits at the
+ *   tapped item's bottom edge ([origin].bottom in window coordinates),
+ *   exactly where Koda's sheet starts at its mini bar. With no origin it
+ *   starts fully below the screen (a pure bottom rise).
+ * - As [progress] goes 0 → 1 the shift eases to zero, the top corner
+ *   radius flattens 28dp → 0, and the content fades gently 0.55 → 1.
+ *   The content itself is never scaled.
+ * - Back runs the same mapping 1 → 0: the page sinks back toward the
+ *   tapped item and the origin page is revealed, static, underneath.
+ * - At progress 1 (or with no origin) the transform is the identity, so
+ *   swapping between the animated wrapper and plain content is seamless.
+ *   Motion follows [LocalReduceMotion]: callers pass progress already
+ *   snapped when reduced motion is on.
+ *
+ * No Navigation-Compose migration is needed for this: the recording is a
+ * bottom-anchored sheet rise, not a shared-element morph between two
+ * NavHost destinations, and HavenApp's own backstack plus this wrapper
+ * reproduces it directly. A NavHost migration would be a larger change
+ * for a worse match.
  */
 @Composable
-fun RisingPageContent(
+fun SheetPageContent(
     origin: Rect?,
     progress: Float,
     modifier: Modifier = Modifier,
@@ -46,44 +67,36 @@ fun RisingPageContent(
 ) {
     var pageBounds by remember { mutableStateOf<Rect?>(null) }
     val bounds = pageBounds
-    val active = origin != null && bounds != null && progress < 1f
-    // At the endpoints the transform is the identity; only interpolate mid-flight.
-    val startScaleX = if (origin != null && bounds != null) {
-        (origin.width / bounds.width).coerceIn(0.2f, 1f)
+    // How far the page must shift down so its top edge lands on the tapped
+    // item's bottom edge (or fully below the screen with no origin).
+    // Coerced to the page height: an origin below the page (e.g. a sheet's
+    // bounds) degrades to a pure bottom rise instead of overshooting.
+    val startShift = if (origin != null && bounds != null) {
+        (origin.bottom - bounds.top).coerceIn(0f, bounds.height)
+    } else if (bounds != null) {
+        bounds.height
     } else {
-        1f
+        0f
     }
-    val startScaleY = if (origin != null && bounds != null) {
-        (origin.height / bounds.height).coerceIn(0.2f, 1f)
-    } else {
-        1f
-    }
-    val originCenterX = if (origin != null && bounds != null) {
-        ((origin.center.x - bounds.left) / bounds.width).coerceIn(0f, 1f)
-    } else {
-        0.5f
-    }
-    val originCenterY = if (origin != null && bounds != null) {
-        ((origin.center.y - bounds.top) / bounds.height).coerceIn(0f, 1f)
-    } else {
-        0.5f
-    }
-    val scaleX = startScaleX + (1f - startScaleX) * progress
-    val scaleY = startScaleY + (1f - startScaleY) * progress
-    val alpha = 0.45f + 0.55f * progress
+    val active = bounds != null && progress < 1f
+    val shift = startShift * (1f - progress)
     val radius = 28.dp * (1f - progress)
+    val contentAlpha = 0.55f + 0.45f * progress
     Box(
         modifier
             .onGloballyPositioned { pageBounds = it.boundsInWindow() }
             .graphicsLayer {
-                this.scaleX = if (active) scaleX else 1f
-                this.scaleY = if (active) scaleY else 1f
-                this.alpha = if (active) alpha else 1f
-                this.transformOrigin = TransformOrigin(originCenterX, originCenterY)
+                this.translationY = if (active) shift else 0f
             }
-            .clip(RoundedCornerShape(if (active) radius else 0.dp))
+            .clip(RoundedCornerShape(topStart = if (active) radius else 0.dp, topEnd = if (active) radius else 0.dp))
             .background(background),
     ) {
-        content()
+        Box(
+            Modifier.graphicsLayer {
+                this.alpha = if (active) contentAlpha else 1f
+            },
+        ) {
+            content()
+        }
     }
 }
