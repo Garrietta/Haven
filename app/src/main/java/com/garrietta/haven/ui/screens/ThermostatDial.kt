@@ -181,7 +181,7 @@ fun ThermostatDial(
                 detectTapGestures { offset ->
                     val cx = size.width / 2f
                     val cy = size.height / 2f
-                    val trackRadius = trackRadiusPx(size.minDimension)
+                    val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
                     if (dialTapZone(offset.x, offset.y, cx, cy, trackRadius, 30.dp.toPx()) == DialTapZone.INSIDE) {
                         onInsideTapState.value?.invoke()
                     }
@@ -192,7 +192,7 @@ fun ThermostatDial(
                     onDragStart = { offset ->
                         val cx = size.width / 2f
                         val cy = size.height / 2f
-                        val trackRadius = trackRadiusPx(size.minDimension)
+                        val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
                         val grabR = 32.dp.toPx()
                         fun distTo(angleDeg: Float): Float {
                             val c = thumbCenter(angleDeg, trackRadius, cx, cy)
@@ -288,7 +288,7 @@ fun ThermostatDial(
     ) {
         val cx = size.width / 2f
         val cy = size.height / 2f
-        val trackRadius = trackRadiusPx(size.minDimension)
+        val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
         val stroke = 12.dp.toPx()
         val topLeft = Offset(cx - trackRadius, cy - trackRadius)
         val arcSize = Size(trackRadius * 2f, trackRadius * 2f)

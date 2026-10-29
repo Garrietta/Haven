@@ -3,6 +3,7 @@ package com.garrietta.haven.ui.components
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -527,8 +528,6 @@ fun Dial(
     }
 }
 
-/** A small history sparkline for sensor detail screens. */
-@Composable
 /**
  * Smoothed cubic-bezier sparkline with a gradient alpha area fill under
  * the curve (spec item 7). The smoothing math lives in SparklineMath so

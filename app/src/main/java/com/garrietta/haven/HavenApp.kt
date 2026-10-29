@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -19,6 +20,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -221,7 +223,6 @@ private fun isTopLevel(screen: Screen): Boolean = when (screen) {
 
 @Composable
 @OptIn(ExperimentalSharedTransitionApi::class)
-@Composable
 fun HavenApp(vm: HavenViewModel) {
     var themeMode by remember { mutableStateOf(vm.settingsStore.themeMode) }
     var reduceMotion by remember { mutableStateOf(vm.settingsStore.reduceMotion) }
@@ -633,7 +634,7 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit, pop
                 // Fluid dynamic drag handle: 48x3.5 while entering or
                 // dragging, 32x4 at rest, on spring 0.6/Low.
                 val dragging = dragOffset.value > 1f
-                val handleSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
+                val handleSpec: FiniteAnimationSpec<Dp> = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f)
                     else spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow)
                 val handleWidth by animateDpAsState(
                     if (dragging || !settled) 48.dp else 32.dp,

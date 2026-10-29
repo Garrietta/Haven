@@ -8,6 +8,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -188,7 +189,11 @@ private fun ThermostatHero(
         } else {
             snapToDegree((single + delta).toDouble()).toFloat().coerceIn(min, max)
         }
-        setActive(next)
+        if (heatCool) {
+            if (selector == SetpointSelector.HEATING) heat = next else cool = next
+        } else {
+            single = next
+        }
         applyClimateSetpoint(vm, entity, selector, next.toDouble())
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {

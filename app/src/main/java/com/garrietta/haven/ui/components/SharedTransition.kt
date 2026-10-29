@@ -3,8 +3,8 @@ package com.garrietta.haven.ui.components
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.runtime.composed
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.composed
 import androidx.compose.ui.Modifier
 import com.garrietta.haven.ui.theme.springMorph
 
