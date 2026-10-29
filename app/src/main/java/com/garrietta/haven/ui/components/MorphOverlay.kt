@@ -5,6 +5,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -94,7 +95,7 @@ fun Modifier.reportCardBounds(id: String): Modifier = composed {
  */
 fun Modifier.hideWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenCardId.current
-    androidx.compose.ui.graphics.graphicsLayer {
+    graphicsLayer {
         alpha = if (id == hiddenId) 0f else 1f
     }
 }
