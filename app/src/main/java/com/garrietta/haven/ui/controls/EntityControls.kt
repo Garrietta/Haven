@@ -141,7 +141,7 @@ fun ServiceSlider(
  * so it is hidden instead of rendered as a bar that opens nothing.
  */
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, onDetail: (String) -> Unit, showHeader: Boolean = true) {
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
     Card(
         shape = RoundedCornerShape(28.dp),
