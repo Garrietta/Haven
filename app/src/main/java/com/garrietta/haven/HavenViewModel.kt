@@ -153,10 +153,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         }
         // Starter tabs seed once, from the first full states snapshot. The
         // guard is the persisted flag, not the tab list: a user who deletes
-        // every tab must not get them back on the next launch.
+        // every tab must not get them back on the next launch. The Cameras
+        // curation runs right after seeding, on the same snapshot.
         viewModelScope.launch {
             val first = client.states.first { it.isNotEmpty() }
             maybeSeedTabs(first)
+            maybeMigrateCameras(first)
         }
         autoConnect()
     }
@@ -241,9 +243,9 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Garrett's starter tabs, seeded once from his instance's entities — this
      * is his personal initial configuration, not defaults for fresh users
-     * (a fresh user with none of these entities gets no tabs, just Settings).
-     * Cameras take ALL camera-domain entities, so the Ring front door is
-     * included automatically; no entity id is guessed, only matched.
+     * (a fresh user with none of these entities gets no tabs, just Home and
+     * Settings). Cameras take the curated set (see [curatedCameras]), never
+     * every camera-domain entity; no entity id is guessed, only matched.
      */
     private fun maybeSeedTabs(states: Map<String, com.garrietta.haven.data.HaEntity>) {
         if (tabsStore.seeded) return
@@ -273,7 +275,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         if (livingLights.isNotEmpty()) {
             tabs.add(UserTab("seed_living_lights", "Living Room lights", livingLights.map { card("light", it) }))
         }
-        val cameras = states.values.filter { it.domain == "camera" }.map { it.entityId }
+        val cameras = curatedCameras(states)
         if (cameras.isNotEmpty()) {
             tabs.add(UserTab("seed_cameras", "Cameras", cameras.map { card("camera", it) }))
         }
@@ -281,6 +283,57 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             userTabs = tabs
             tabsStore.saveTabs(tabs)
         }
+    }
+
+    /** Camera entities that must never appear in the Cameras tab. */
+    private val excludedCameras = setOf("camera.eufy_ae_c10_map", "camera.front_door_69a1")
+
+    /**
+     * The curated Cameras set, in tab order: Garage (Tapo C110),
+     * Outdoor/Backyard (Tapo C402), Living Room, and one Ring — the
+     * front_door_live_view, picked as the most reliable. The eufy vacuum
+     * map is not a camera and the second Ring is out. Exact ids win where
+     * they are known; everything else matches on the friendly name, never
+     * on a guessed id.
+     */
+    private fun curatedCameras(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> {
+        val cameras = states.values.filter { it.domain == "camera" && it.entityId !in excludedCameras }
+        fun byId(id: String) = cameras.firstOrNull { it.entityId == id }?.entityId
+        fun byName(vararg words: String) = cameras.firstOrNull { cam ->
+            words.any { cam.friendlyName.contains(it, ignoreCase = true) }
+        }?.entityId
+        return listOfNotNull(
+            byId("camera.tapo_2_live_view") ?: byName("garage"),
+            byName("outdoor", "backyard"),
+            byName("living"),
+            byId("camera.front_door_live_view") ?: byName("ring", "doorbell"),
+        ).distinct()
+    }
+
+    /**
+     * One-time migration of the already-seeded Cameras tab to the curated
+     * set. Changing the seed rule alone would do nothing for him: his tab
+     * is already saved and the seeded flag is set. This runs once (guarded
+     * by its own persisted flag), only rewrites an existing Cameras tab,
+     * and never recreates one he deleted. Later edits in Manage tabs are
+     * untouched — the flag is set the moment migration runs.
+     */
+    private fun maybeMigrateCameras(states: Map<String, com.garrietta.haven.data.HaEntity>) {
+        if (tabsStore.camerasCurated) return
+        val index = userTabs.indexOfFirst { it.id == "seed_cameras" || it.title == "Cameras" }
+        if (index < 0) {
+            // No Cameras tab to migrate (deleted, or never seeded):
+            // consider it done so a later launch can't resurrect one.
+            tabsStore.camerasCurated = true
+            return
+        }
+        val curated = curatedCameras(states)
+        if (curated.isEmpty()) return // Nothing matched yet; try again next launch.
+        val cards = curated.map { "type: camera\nentity: $it\n" }
+        if (userTabs[index].cards != cards) {
+            mutateTab(userTabs[index].id) { it.copy(cards = cards) }
+        }
+        tabsStore.camerasCurated = true
     }
 
     // ---- Auth ----

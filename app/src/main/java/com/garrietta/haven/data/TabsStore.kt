@@ -26,6 +26,11 @@ class TabsStore(context: Context) {
         get() = prefs.getBoolean("seeded", false)
         set(value) = prefs.edit().putBoolean("seeded", value).apply()
 
+    /** True once the Cameras tab has been curated to the 4-camera set (or confirmed absent). */
+    var camerasCurated: Boolean
+        get() = prefs.getBoolean("cameras_curated", false)
+        set(value) = prefs.edit().putBoolean("cameras_curated", value).apply()
+
     fun loadTabs(): List<UserTab> {
         val raw = prefs.getString("tabs_json", null) ?: return emptyList()
         return try {
