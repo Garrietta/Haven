@@ -509,7 +509,7 @@ fun CameraClipsScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) 
         val found = withTimeoutOrNull(20_000) {
             suspend fun browse(id: String, type: String): List<HaClient.MediaChild>? =
                 suspendCancellableCoroutine { cont ->
-                    vm.client.browseMedia(id, type) { cont.resume(it) }
+                    vm.client.browseMedia(id, type) { cont.resumeWith(Result.success(it)) }
                 }
             fun belongs(child: HaClient.MediaChild) =
                 child.title.contains(name, ignoreCase = true) ||
@@ -548,7 +548,7 @@ fun CameraClipsScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) 
         playingUrl = null
         playingUrl = withTimeoutOrNull(15_000) {
             suspendCancellableCoroutine<Pair<String, String>?> { cont ->
-                vm.client.resolveMedia(clip.mediaContentId, clip.mediaContentType) { cont.resume(it) }
+                vm.client.resolveMedia(clip.mediaContentId, clip.mediaContentType) { cont.resumeWith(Result.success(it)) }
             }
         }
         resolving = false
