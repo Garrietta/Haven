@@ -1,6 +1,8 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -32,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,17 +44,31 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.RecordingFullscreen
+import com.garrietta.haven.data.HaClient
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.findRecordingSibling
+import com.garrietta.haven.data.formatHaTimestamp
 import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.data.isRingCamera
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import com.garrietta.haven.ui.components.DomainBadge
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
@@ -118,9 +136,11 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
                 vm.openCameraFullscreen(entityId)
                 onBack()
             }) {
-                // Ring serves its last recording, not live video — the
-                // button must not promise live for it.
-                Text(if (isRingCamera(entity)) "View last recording" else "Open live view")
+                // Fullscreen is live-only now (Ring via WebRTC, others
+                // via MJPEG); recordings live on the long-press
+                // timeline, so the button promises live for every
+                // camera alike.
+                Text("Open live view")
             }
         }
         return
@@ -453,4 +473,296 @@ private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
 private fun fmtDetailHistory(v: Double, unit: String?): String {
     val num = if (v == v.toInt().toDouble()) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
     return if (unit != null) "$num $unit" else num
+}
+
+/**
+ * Scrollable recorded-clips timeline for a camera (long-press on its
+ * tile). Content, honestly sourced:
+ * - the Ring last-recording sibling entity (same id prefix +
+ *   "recording"), with its HA timestamp, played as MJPEG in the
+ *   RecordingFullscreen (labeled Recording, never Live);
+ * - media-source clips found by browsing candidate roots (generic
+ *   camera root, Ring root) to depth 2. A playable node is collected
+ *   only if it names this camera or comes from the Ring root for a
+ *   Ring camera — under-collection is safe, misattribution is not.
+ * Media-source browse responses carry no timestamps, so clips are
+ * listed without invented dates; the dated recording (when present)
+ * leads. Where HA exposes nothing for a camera, the empty state says
+ * so plainly instead of faking a list.
+ */
+@Composable
+fun CameraClipsScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
+    val states by vm.states.collectAsState()
+    val entity = states[entityId]
+    val name = entity?.friendlyName ?: entityId
+    var loading by remember(entityId) { mutableStateOf(true) }
+    var clips by remember(entityId) { mutableStateOf<List<HaClient.MediaChild>>(emptyList()) }
+    var playing by remember(entityId) { mutableStateOf<HaClient.MediaChild?>(null) }
+    var playingUrl by remember(entityId) { mutableStateOf<Pair<String, String>?>(null) }
+    var resolving by remember(entityId) { mutableStateOf(false) }
+    var recordingId by remember(entityId) { mutableStateOf<String?>(null) }
+    val sibling = remember(entityId, states) { findRecordingSibling(entityId, states.values) }
+    val isRing = entity?.let { isRingCamera(it) } == true
+    val objId = entityId.substringAfter(".")
+
+    LaunchedEffect(entityId) {
+        val found = withTimeoutOrNull(20_000) {
+            suspend fun browse(id: String, type: String): List<HaClient.MediaChild>? =
+                suspendCancellableCoroutine { cont ->
+                    vm.client.browseMedia(id, type) { cont.resume(it) }
+                }
+            fun belongs(child: HaClient.MediaChild) =
+                child.title.contains(name, ignoreCase = true) ||
+                    child.mediaContentId.contains(objId, ignoreCase = true)
+            val out = mutableListOf<HaClient.MediaChild>()
+            val ringRoot = "media-source://ring"
+            val roots = listOf("" to "", "media-source://camera" to "media_source", ringRoot to "media_source")
+            for ((rootId, rootType) in roots) {
+                val children = browse(rootId, rootType) ?: continue
+                for (child in children) {
+                    if (child.canPlay) {
+                        if (belongs(child) || (rootId == ringRoot && isRing)) out.add(child)
+                        continue
+                    }
+                    if (!child.canExpand) continue
+                    val generic = child.title.equals("Camera", true) ||
+                        child.title.equals("Cameras", true) ||
+                        (isRing && child.title.equals("Ring", true))
+                    if (!belongs(child) && !generic) continue
+                    val grandchildren = browse(child.mediaContentId, child.mediaContentType) ?: continue
+                    for (gc in grandchildren) {
+                        if (gc.canPlay && (belongs(gc) || (rootId == ringRoot && isRing))) out.add(gc)
+                    }
+                }
+            }
+            out.distinctBy { it.mediaContentId }
+        } ?: emptyList()
+        clips = found
+        loading = false
+    }
+
+    // Resolve a tapped clip, then play it fullscreen.
+    LaunchedEffect(playing) {
+        val clip = playing ?: return@LaunchedEffect
+        resolving = true
+        playingUrl = null
+        playingUrl = withTimeoutOrNull(15_000) {
+            suspendCancellableCoroutine<Pair<String, String>?> { cont ->
+                vm.client.resolveMedia(clip.mediaContentId, clip.mediaContentType) { cont.resume(it) }
+            }
+        }
+        resolving = false
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            DetailTopBar(title = "$name clips", onBack = onBack)
+            when {
+                loading -> {
+                    repeat(4) {
+                        ShimmerBox(Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 16.dp, vertical = 8.dp))
+                    }
+                }
+                sibling == null && clips.isEmpty() -> {
+                    Column(
+                        Modifier.fillMaxSize().padding(horizontal = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text("No recorded clips", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Home Assistant exposes no recorded-clip list for this camera.",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (isRing) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "If your Ring integration has a last-recording entity, enabling it adds it here.",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        if (sibling != null) {
+                            item { TimelineSectionHeader("Last recording") }
+                            item {
+                                RecordingRow(vm, sibling) { recordingId = sibling.entityId }
+                            }
+                        }
+                        if (clips.isNotEmpty()) {
+                            item { TimelineSectionHeader("Recorded clips") }
+                            items(clips, key = { it.mediaContentId }) { clip ->
+                                ClipRow(vm, clip) { playing = clip }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (recordingId != null) {
+            androidx.activity.compose.BackHandler { recordingId = null }
+            RecordingFullscreen(vm, recordingId!!, onClose = { recordingId = null }, enterProgress = 1f)
+        }
+        if (playing != null) {
+            androidx.activity.compose.BackHandler { playing = null }
+            ClipPlayerScreen(vm, playing!!, playingUrl, resolving, onClose = { playing = null })
+        }
+    }
+}
+
+@Composable
+private fun TimelineSectionHeader(text: String) {
+    Text(
+        text,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun RecordingRow(vm: HavenViewModel, sibling: HaEntity, onTap: () -> Unit) {
+    var bitmap by remember(sibling.entityId) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(sibling.entityId) {
+        bitmap = vm.client.fetchCameraBitmap(sibling.entityId)
+    }
+    Row(
+        Modifier.fillMaxWidth().clickable { onTap() }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(96.dp, 64.dp).clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(sibling.friendlyName, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            val stamp = formatHaTimestamp(sibling.lastChanged ?: sibling.lastUpdated)
+            Text(
+                stamp ?: "Last recording",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ClipRow(vm: HavenViewModel, clip: HaClient.MediaChild, onTap: () -> Unit) {
+    var bitmap by remember(clip.mediaContentId) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val thumb = clip.thumbnail
+    LaunchedEffect(clip.mediaContentId) {
+        if (thumb != null) bitmap = vm.client.fetchImageBitmap(thumb)
+    }
+    Row(
+        Modifier.fillMaxWidth().clickable { onTap() }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(96.dp, 64.dp).clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(clip.title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Text(
+                "Tap to play",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Fullscreen playback of one resolved media-source clip (scrubbable). */
+@Composable
+private fun ClipPlayerScreen(
+    vm: HavenViewModel,
+    clip: HaClient.MediaChild,
+    resolved: Pair<String, String>?,
+    resolving: Boolean,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    var player by remember { mutableStateOf<ExoPlayer?>(null) }
+    DisposableEffect(resolved) {
+        if (resolved == null) return@DisposableEffect onDispose {}
+        val p = vm.client.createMediaPlayer(context, resolved.first, resolved.second)
+        player = p
+        onDispose {
+            player = null
+            p.release()
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        when {
+            resolving -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Loading clip…", color = Color.White, fontSize = 16.sp)
+                }
+            }
+            resolved == null -> {
+                Column(
+                    Modifier.fillMaxSize().padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text("Clip unavailable", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Home Assistant could not resolve this clip.",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = onClose) { Text("Close") }
+                }
+            }
+            player != null -> {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            this.player = player
+                            useController = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        TextButton(
+            onClick = onClose,
+            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
+        ) { Text("Close", color = Color.White) }
+    }
 }

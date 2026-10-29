@@ -50,6 +50,8 @@ sealed class Screen {
     data class EntityDetail(val entityId: String) : Screen()
     /** Full-page thermostat experience (hero dial, range bar, pills). */
     data class Thermostat(val entityId: String) : Screen()
+    /** Scrollable recorded-clips timeline for a camera (long-press on its tile). */
+    data class CameraClips(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()
     data object DashboardEdit : Screen()
     data object AutomationBuilder : Screen()

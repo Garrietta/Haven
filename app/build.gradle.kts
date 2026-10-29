@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.core.ktx)
     implementation(libs.okhttp)
     implementation(libs.snakeyaml)
+    implementation(libs.webrtc)
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
 }

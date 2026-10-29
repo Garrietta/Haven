@@ -573,6 +573,144 @@ class HaClient(
     fun toggle(entityId: String, onDone: ((Boolean) -> Unit)? = null) =
         callService(entityId.substringBefore("."), "toggle", entityId, null, onDone)
 
+    /**
+     * WebRTC offer round-trip for Ring live: sends the complete SDP
+     * offer via `camera/webrtc/offer` and parses the answer + session
+     * id (see parseWebRtcAnswer). On an unknown-command error it falls
+     * back to the legacy `camera/web_rtc` command (older HA). The
+     * callback posts to the main thread; it may never fire if the
+     * socket is down, so callers must time out (as the HLS path does).
+     */
+    fun requestWebRtcOffer(entityId: String, offerSdp: String, onResult: (WebRtcAnswer) -> Unit) {
+        val post = { a: WebRtcAnswer ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(a) }
+        }
+        fun send(command: String) {
+            sendCommand(command, build = {
+                it.put("entity_id", entityId)
+                it.put("offer", offerSdp)
+            }, onResult = { msg ->
+                if (msg.optBoolean("success", false)) {
+                    post(parseWebRtcAnswer(msg))
+                } else {
+                    val err = msg.optJSONObject("error")
+                    val code = err?.optString("code")
+                    if (command == "camera/webrtc/offer" && code == "unknown_command") {
+                        send("camera/web_rtc")
+                    } else {
+                        post(WebRtcAnswer(null, null, err?.optString("message")?.ifEmpty { null } ?: "offer rejected"))
+                    }
+                }
+            })
+        }
+        send("camera/webrtc/offer")
+    }
+
+    /**
+     * Best-effort trickle ICE send: a local candidate gathered after
+     * the answer, via `camera/webrtc/candidate`. Failures are ignored
+     * by design — the offer carries the complete gathered set, so
+     * trickle is an accelerator, never a requirement. No callback: the
+     * caller never blocks on it.
+     */
+    fun sendWebRtcCandidate(entityId: String, sessionId: String, candidateSdp: String) {
+        sendCommand("camera/webrtc/candidate", build = {
+            it.put("entity_id", entityId)
+            it.put("session_id", sessionId)
+            it.put("candidate", candidateSdp)
+        })
+    }
+
+    /** One browsable media-source child (a clip, a folder, or a source). */
+    data class MediaChild(
+        val mediaContentId: String,
+        val mediaContentType: String,
+        val title: String,
+        val thumbnail: String?,
+        val canPlay: Boolean,
+        val canExpand: Boolean,
+    )
+
+    /**
+     * Media-source browse: the children of [mediaContentId] (root is
+     * ""). Null means the call failed (unknown source, socket down);
+     * an empty list means a valid but childless node. The callback
+     * posts to the main thread; it may never fire if the socket is
+     * down, so callers must time out.
+     */
+    fun browseMedia(mediaContentId: String, mediaContentType: String, onResult: (List<MediaChild>?) -> Unit) {
+        val post = { v: List<MediaChild>? ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(v) }
+        }
+        sendCommand("media_source/browse_media", build = {
+            it.put("media_content_type", mediaContentType)
+            it.put("media_content_id", mediaContentId)
+        }, onResult = { msg ->
+            if (!msg.optBoolean("success", false)) {
+                post(null)
+                return@sendCommand
+            }
+            val result = msg.optJSONObject("result") ?: run { post(null); return@sendCommand }
+            val arr = result.optJSONArray("children") ?: run { post(emptyList()); return@sendCommand }
+            val out = mutableListOf<MediaChild>()
+            for (i in 0 until arr.length()) {
+                val c = arr.optJSONObject(i) ?: continue
+                out.add(
+                    MediaChild(
+                        mediaContentId = c.optString("media_content_id"),
+                        mediaContentType = c.optString("media_content_type"),
+                        title = c.optString("title"),
+                        thumbnail = c.optString("thumbnail").ifEmpty { null },
+                        canPlay = c.optBoolean("can_play", false),
+                        canExpand = c.optBoolean("can_expand", false),
+                    ),
+                )
+            }
+            post(out)
+        })
+    }
+
+    /**
+     * Media-source resolve: the playable URL + mime type for a
+     * browsed child. Null means unresolvable. Relative URLs resolve
+     * against the instance (as the HLS path does); callers attach the
+     * Bearer token when fetching.
+     */
+    fun resolveMedia(mediaContentId: String, mediaContentType: String, onResult: (Pair<String, String>?) -> Unit) {
+        val post = { v: Pair<String, String>? ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(v) }
+        }
+        sendCommand("media_source/resolve_media", build = {
+            it.put("media_content_type", mediaContentType)
+            it.put("media_content_id", mediaContentId)
+        }, onResult = { msg ->
+            if (!msg.optBoolean("success", false)) {
+                post(null)
+                return@sendCommand
+            }
+            val result = msg.optJSONObject("result") ?: run { post(null); return@sendCommand }
+            val url = result.optString("url").ifEmpty { null }
+            val mime = result.optString("mime_type").ifEmpty { null }
+            post(if (url != null && mime != null) url to mime else null)
+        })
+    }
+
+    /** Fetches an arbitrary image URL (media-source thumbnails) with Bearer auth, resolved against the instance. */
+    suspend fun fetchImageBitmap(url: String): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            val absolute = if (url.startsWith("http")) url else "$instanceUrl$url"
+            val req = Request.Builder()
+                .url(absolute)
+                .header("Authorization", "Bearer $token")
+                .build()
+            val resp = http.newCall(req).execute()
+            val stream = resp.body?.byteStream() ?: return@withContext null
+            BitmapFactory.decodeStream(stream)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Saves a full Lovelace config (views/cards) back to the instance. */
     fun saveLovelace(config: JSONObject, onDone: (Boolean) -> Unit) {
         // The save handler looks the dashboard up by url_path too; saving
@@ -819,6 +957,30 @@ class HaClient(
             .createMediaSource(androidx.media3.common.MediaItem.fromUri(absolute))
         return androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
             setMediaSource(source)
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    /**
+     * Player for a resolved media-source clip (usually mp4): same
+     * Bearer auth + relative-URL resolution as the HLS path, with the
+     * resolved mime type on the MediaItem so ExoPlayer never has to
+     * guess from an extension-less proxy URL. Caller releases.
+     */
+    fun createMediaPlayer(context: android.content.Context, mediaUrl: String, mimeType: String?): androidx.media3.exoplayer.ExoPlayer {
+        val absolute = if (mediaUrl.startsWith("http")) mediaUrl else "$instanceUrl$mediaUrl"
+        val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(mapOf("Authorization" to "Bearer $token"))
+        val item = androidx.media3.common.MediaItem.Builder()
+            .setUri(absolute)
+            .apply { if (mimeType != null) setMimeType(mimeType) }
+            .build()
+        return androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaSource(
+                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                    .createMediaSource(item),
+            )
             prepare()
             playWhenReady = true
         }

@@ -226,7 +226,14 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     tileBounds?.let { vm.pageOrigin = it }
                     openPage(vm, entity, navigate)
                 },
-                onLongClick = { vm.openPopup(entity.entityId) },
+                // Long-press on a camera opens its recorded-clips
+                // timeline (full page); every other domain keeps the
+                // quick sheet. Without a navigator (Boards cards) the
+                // sheet is still the fallback.
+                onLongClick = {
+                    if (entity.domain == "camera" && navigate != null) navigate(Screen.CameraClips(entity.entityId))
+                    else vm.openPopup(entity.entityId)
+                },
             ),
     ) {
         Column(Modifier.padding(16.dp)) {

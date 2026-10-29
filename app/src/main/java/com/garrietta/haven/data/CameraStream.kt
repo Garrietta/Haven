@@ -239,3 +239,39 @@ class MjpegParser(boundaryToken: String) {
         if (data.size > keep) drop(data.size - keep)
     }
 }
+
+/**
+ * The last-recording sibling of a live camera entity, for the clips
+ * timeline: HA core's Ring integration exposes recordings as a
+ * separate `camera.<name>_last_recording` entity (disabled by
+ * default), not as a browsable clip list. Match rule, deliberately
+ * strict: same id prefix (the live id minus `_live_view`, else minus
+ * its last segment) AND "recording" in the id, never the live entity
+ * itself. A non-matching camera yields null — a wrong device's
+ * recording on this timeline would be worse than none. Deterministic
+ * (lowest id wins) when several match.
+ */
+fun findRecordingSibling(liveId: String, entities: Collection<HaEntity>): HaEntity? {
+    val prefix = if (liveId.endsWith("_live_view")) liveId.removeSuffix("_live_view")
+        else liveId.substringBeforeLast("_", liveId)
+    return entities
+        .filter { it.domain == "camera" && it.entityId != liveId }
+        .filter { it.entityId.startsWith(prefix) && "recording" in it.entityId }
+        .minByOrNull { it.entityId }
+}
+
+/**
+ * Formats an HA ISO timestamp (last_changed / last_updated) as
+ * "Oct 29, 7:23 AM" in [zone]; unparseable or null input yields null
+ * (the caller shows no timestamp rather than a raw ISO string).
+ */
+fun formatHaTimestamp(iso: String?, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? {
+    if (iso.isNullOrEmpty()) return null
+    return try {
+        val instant = java.time.OffsetDateTime.parse(iso).toInstant()
+        java.time.format.DateTimeFormatter.ofPattern("MMM d, h:mm a")
+            .withZone(zone).format(instant)
+    } catch (e: Exception) {
+        null
+    }
+}
