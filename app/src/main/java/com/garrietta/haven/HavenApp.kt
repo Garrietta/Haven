@@ -201,7 +201,7 @@ fun HavenApp(vm: HavenViewModel) {
             return@HavenTheme
         }
         val backstack = remember {
-            mutableStateListOf(Screen.Today)
+            mutableStateListOf<Screen>(Screen.Today)
         }
         val current = backstack.last()
         val navigate: (Screen) -> Unit = { backstack.add(it) }
