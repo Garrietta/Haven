@@ -358,15 +358,16 @@ private fun ChipRow(options: List<String>, selected: String?, onSelect: (String)
 /**
  * A Google Home-style row pill: small label above the value, with a
  * chevron that flips when expanded. The pill only toggles [expanded];
- * the caller renders the expanded chips below it.
+ * the caller renders the expanded chips below it. The toggle is the
+ * last parameter so call sites can pass it as a trailing lambda.
  */
 @Composable
 private fun GooglePill(
     label: String,
     value: String,
     expanded: Boolean,
-    onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    onToggle: () -> Unit,
 ) {
     Surface(
         shape = RoundedCornerShape(20.dp),
