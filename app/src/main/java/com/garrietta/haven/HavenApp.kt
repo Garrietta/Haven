@@ -16,8 +16,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
@@ -1147,33 +1148,6 @@ private fun EntityPopupSheetContent(
 }
 
 /**
- * Camera fullscreen, LIVE. The viewer used to lock the Activity to
- * landscape while open and restore the previous orientation on exit,
- * so the feed filled the screen rotated 90 degrees instead of
- * letterboxing in portrait — but that forced rotation animated the
- * whole window through diagonal intermediates on open AND dismiss
- * (2026-10-29 verdict video, camera open/dismiss frames visibly
- * rotated), while the rise itself never rotates. The lock is removed
- * (2026-10-29 crash round): the fullscreen stays in the device's
- * current orientation (portrait when held portrait) and the user
- * rotates the device for landscape. Exit via the X button or the
- * system back gesture — both are always visible.
- *
- * The old viewer fetched one snapshot from `/api/camera_proxy/` and showed
- * it until Refresh was tapped — that was the still-image bug, on every
- * camera: it never opened a stream. This viewer plays the MJPEG proxy
- * stream (`/api/camera_proxy_stream/`) for real, on all four curated
- * cameras. While the stream connects or reconnects it shows the last
- * live frame from memory, dimmed, with a low-profile shimmer skeleton;
- * on return to a previously viewed camera that frame shows instantly
- * while the stream resumes. A failed stream shows an explicit error +
- * Retry — never a silent still pretending to be live. The image region
- * itself interpolates (scale 0.94 -> 1, alpha 0.7 -> 1) with the page
- * progress, so the fullscreen image grows out of the grid slot instead
- * of flashing in at full size — the page rise itself is unchanged.
- */
-@Composable
-/**
  * Fullscreen camera viewer.
  *
  * Live-only by design (his 2026-10-29 13:34 direction: never fall
@@ -1209,6 +1183,13 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     var hlsPlayer by remember(cameraId, attempt) { mutableStateOf<ExoPlayer?>(null) }
     var renderer by remember(cameraId, attempt) { mutableStateOf<SurfaceViewRenderer?>(null) }
     val context = LocalContext.current
+    // Plain (non-state) holder for this attempt's renderer view. The
+    // DisposableEffect below captures it, so the old session is
+    // closed with its own view even though the renderer STATE resets
+    // to null during the Retry recomposition before onDispose runs
+    // (reading state in onDispose would skip the close and leak the
+    // failed session on every Retry).
+    val rendererHolder = remember(cameraId, attempt) { object { var view: SurfaceViewRenderer? = null } }
     // One WebRTC session per attempt; disposed (locally torn down)
     // on Retry and on view close. No WS close command is sent: no
     // confirmed camera/webrtc/close command exists, and the HA-side
@@ -1221,8 +1202,10 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
         )
     }
     DisposableEffect(cameraId, attempt) {
+        val session = webrtcSession
+        val holder = rendererHolder
         onDispose {
-            renderer?.let { webrtcSession.close(it) }
+            holder.view?.let { session.close(it) }
         }
     }
     // Start the session once both the session and the renderer exist.
@@ -1282,17 +1265,24 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // WebRTC renderer: always composed (the session needs it from
         // the start), invisible until the first frame lands, so the
-        // connecting UI covers it meanwhile.
-        AndroidView(
-            factory = { ctx -> SurfaceViewRenderer(ctx) },
-            update = { renderer = it },
+        // connecting UI covers it meanwhile. Keyed on attempt so a
+        // Retry gets a fresh view (the old session released the old
+        // one); the holder feeds the session-close effect above.
+        androidx.compose.runtime.key(attempt) {
+            AndroidView(
+                factory = { ctx -> SurfaceViewRenderer(ctx) },
+                update = {
+                    rendererHolder.view = it
+                    renderer = it
+                },
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 val s = 0.94f + 0.06f * enterProgress
                 scaleX = s
                 scaleY = s
                 alpha = if (webrtcPlaying) 0.7f + 0.3f * enterProgress else 0f
             },
-        )
+            )
+        }
         // HLS-live player, only while it is the live path.
         if (hlsPlayer != null) {
             AndroidView(
