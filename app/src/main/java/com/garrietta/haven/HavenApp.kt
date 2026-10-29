@@ -1,5 +1,8 @@
 package com.garrietta.haven
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -10,6 +13,7 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -32,6 +36,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
@@ -42,9 +48,13 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -52,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -62,9 +73,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -87,6 +101,7 @@ import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.TabManagerScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
 import com.garrietta.haven.ui.components.rememberPillScrubState
@@ -228,6 +243,108 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
+            // Overlays render after the Scaffold so they cover the pill bar
+            // too: the more-info sheet and the landscape camera viewer.
+            if (vm.popupEntityId != null) {
+                EntityPopupSheet(vm, navigate)
+            }
+            if (vm.fullscreenCameraId != null) {
+                CameraFullscreen(vm, vm::closeCameraFullscreen)
+            }
+        }
+    }
+}
+
+/**
+ * More-info popup: tapping any entity now opens this bottom sheet with its
+ * full control (dial, mode, fan, temps for the thermostat) instead of only
+ * pushing a full detail screen. Details is still one tap away.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    val popupId = vm.popupEntityId ?: return
+    val states by vm.states.collectAsState()
+    val entity = states[popupId]
+    ModalBottomSheet(onDismissRequest = vm::closePopup) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+            if (entity == null) {
+                Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                // Header taps disabled here — this IS the detail surface.
+                EntityControlCard(entity, vm) { }
+                Spacer(Modifier.height(12.dp))
+                Row {
+                    Button(onClick = {
+                        vm.closePopup()
+                        navigate(Screen.EntityDetail(popupId))
+                    }) { Text("Details") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = vm::closePopup) { Text("Close") }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/**
+ * Camera fullscreen: the viewer locks the Activity to landscape while open
+ * and restores the previous orientation on exit, so the feed fills the
+ * screen rotated 90 degrees instead of letterboxing in portrait. Exit via
+ * the X button or the system back gesture — both are always visible.
+ */
+@Composable
+private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
+    val cameraId = vm.fullscreenCameraId ?: return
+    val states by vm.states.collectAsState()
+    val entity = states[cameraId]
+    val activity = LocalContext.current as? Activity
+    DisposableEffect(cameraId) {
+        val prev = activity?.requestedOrientation
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        onDispose {
+            if (activity != null && prev != null) {
+                activity.requestedOrientation = prev
+            }
+        }
+    }
+    BackHandler { onClose() }
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var refreshKey by remember { mutableStateOf(0) }
+    LaunchedEffect(cameraId, refreshKey) {
+        bitmap = vm.client.fetchCameraBitmap(cameraId)
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (bitmap != null) {
+            Image(
+                bitmap!!.asImageBitmap(),
+                contentDescription = entity?.friendlyName,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text("Loading camera…", color = Color.White, modifier = Modifier.align(Alignment.Center))
+        }
+        Text(
+            entity?.friendlyName ?: cameraId,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp),
+        )
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
+        ) {
+            Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+        }
+        TextButton(
+            onClick = { refreshKey++ },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = null, tint = Color.White)
+            Spacer(Modifier.width(6.dp))
+            Text("Refresh", color = Color.White)
         }
     }
 }

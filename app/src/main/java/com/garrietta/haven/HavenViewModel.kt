@@ -84,6 +84,22 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         client.refreshLovelace()
     }
 
+    // ---- Entity popups + camera fullscreen ----
+
+    /** Entity id shown in the more-info bottom sheet, if any. */
+    var popupEntityId by mutableStateOf<String?>(null)
+        private set
+
+    fun openPopup(entityId: String) { popupEntityId = entityId }
+    fun closePopup() { popupEntityId = null }
+
+    /** Camera id shown in the landscape fullscreen viewer, if any. */
+    var fullscreenCameraId by mutableStateOf<String?>(null)
+        private set
+
+    fun openCameraFullscreen(entityId: String) { fullscreenCameraId = entityId }
+    fun closeCameraFullscreen() { fullscreenCameraId = null }
+
     var isAuthenticated by mutableStateOf(false)
         private set
 

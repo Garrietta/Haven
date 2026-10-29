@@ -113,7 +113,7 @@ fun AreaDetailScreen(vm: HavenViewModel, areaId: String, onBack: () -> Unit, nav
                 }
             }
             item {
-                EntityControlCard(entity, vm) { navigate(Screen.EntityDetail(it)) }
+                EntityControlCard(entity, vm) { vm.openPopup(it) }
                 Spacer(Modifier.height(12.dp))
             }
         }
@@ -160,7 +160,7 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(results) { entity ->
-                    EntityControlCard(entity, vm) { navigate(Screen.EntityDetail(it)) }
+                    EntityControlCard(entity, vm) { vm.openPopup(it) }
                     Spacer(Modifier.height(12.dp))
                 }
                 item { Spacer(Modifier.height(16.dp)) }

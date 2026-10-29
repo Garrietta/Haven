@@ -255,7 +255,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             item {
                 Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
-                EntityControlCard(weather, vm) { navigate(Screen.EntityDetail(it)) }
+                EntityControlCard(weather, vm) { vm.openPopup(it) }
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -273,7 +273,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(8.dp))
             }
             items(nowPlaying) { player ->
-                EntityControlCard(player, vm) { navigate(Screen.EntityDetail(it)) }
+                EntityControlCard(player, vm) { vm.openPopup(it) }
                 Spacer(Modifier.height(12.dp))
             }
             item { Spacer(Modifier.height(4.dp)) }
@@ -295,7 +295,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(8.dp))
             }
             items(lightsOn.take(4)) { light ->
-                EntityControlCard(light, vm) { navigate(Screen.EntityDetail(it)) }
+                EntityControlCard(light, vm) { vm.openPopup(it) }
                 Spacer(Modifier.height(12.dp))
             }
             item { Spacer(Modifier.height(4.dp)) }
@@ -306,7 +306,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(8.dp))
             }
             items(alerts) { alert ->
-                EntityControlCard(alert, vm) { navigate(Screen.EntityDetail(it)) }
+                EntityControlCard(alert, vm) { vm.openPopup(it) }
                 Spacer(Modifier.height(12.dp))
             }
         }

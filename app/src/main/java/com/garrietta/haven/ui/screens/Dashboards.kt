@@ -178,14 +178,14 @@ fun LovelaceCardView(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 for (id in cardEntities(card)) {
                     val entity = states[id]
-                    if (entity != null) EntityControlCard(entity, vm) { navigate(Screen.EntityDetail(it)) }
+                    if (entity != null) EntityControlCard(entity, vm) { vm.openPopup(it) }
                     else MissingEntityRow(id)
                 }
             }
         }
         "tile", "light", "thermostat", "sensor", "weather", "weather-forecast", "media", "media-control", "camera", "picture-entity" -> {
             val entity = cardEntity(card)?.let { states[it] }
-            if (entity != null) EntityControlCard(entity, vm) { navigate(Screen.EntityDetail(it)) }
+            if (entity != null) EntityControlCard(entity, vm) { vm.openPopup(it) }
             else MissingEntityRow(cardEntity(card) ?: "?")
         }
         "gauge" -> {
@@ -199,7 +199,7 @@ fun LovelaceCardView(
                 Card(
                     shape = RoundedCornerShape(28.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    modifier = Modifier.fillMaxWidth().clickable { navigate(Screen.EntityDetail(entity.entityId)) },
+                    modifier = Modifier.fillMaxWidth().clickable { vm.openPopup(entity.entityId) },
                 ) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -226,7 +226,7 @@ fun LovelaceCardView(
                                 vm.callService(domain, svc, tap.optString("target").ifEmpty { null } ?: entity?.entityId, tap.optJSONObject("service_data"))
                             }
                         }
-                        else -> entity?.let { navigate(Screen.EntityDetail(it.entityId)) }
+                        else -> entity?.let { vm.openPopup(it.entityId) }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -245,7 +245,7 @@ fun LovelaceCardView(
                         val entity = states[id]
                         if (entity != null) {
                             Row(
-                                Modifier.fillMaxWidth().clickable { navigate(Screen.EntityDetail(id)) },
+                                Modifier.fillMaxWidth().clickable { vm.openPopup(id) },
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(entity.friendlyName, fontSize = 14.sp)

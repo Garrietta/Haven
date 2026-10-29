@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Nightlight
@@ -54,7 +53,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
@@ -249,9 +247,14 @@ private fun conditionIcon(condition: String): ImageVector = when (condition) {
 }
 
 @Composable
+/**
+ * Camera card: snapshot plus refresh. Tapping the snapshot opens the
+ * app-level fullscreen viewer (vm-level state, landscape-locked) instead
+ * of a local Dialog — the old Dialog could not rotate the screen, so a
+ * portrait phone showed a sideways letterboxed feed.
+ */
 fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    var fullscreen by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableStateOf(0) }
     LaunchedEffect(entity.entityId, refreshKey) {
         bitmap = vm.client.fetchCameraBitmap(entity.entityId)
@@ -261,7 +264,7 @@ fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
             Box(
                 Modifier.fillMaxWidth().height(180.dp)
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))
-                    .clickable { fullscreen = true },
+                    .clickable { vm.openCameraFullscreen(entity.entityId) },
             ) {
                 Image(
                     bitmap!!.asImageBitmap(),
@@ -284,21 +287,6 @@ fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
             Icon(Icons.Filled.Refresh, contentDescription = null)
             Spacer(Modifier.width(6.dp))
             Text("Refresh snapshot")
-        }
-    }
-    if (fullscreen && bitmap != null) {
-        Dialog(onDismissRequest = { fullscreen = false }) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Image(
-                    bitmap!!.asImageBitmap(),
-                    contentDescription = entity.friendlyName,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().clickable { fullscreen = false },
-                )
-                IconButton(onClick = { fullscreen = false }, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onPrimary)
-                }
-            }
         }
     }
 }
