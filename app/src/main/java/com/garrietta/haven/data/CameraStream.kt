@@ -9,12 +9,27 @@ package com.garrietta.haven.data
  * fallback, just snapshot-only code. The live path is
  * `/api/camera_proxy_stream/<entity>`, which yields a multipart/x-mixed-replace
  * MJPEG stream for every camera HA can serve: native MJPEG cameras stream
- * directly, snapshot-only cameras (Ring) get MJPEG synthesized from their
- * snapshots at snapshot cadence. One endpoint, all four curated cameras.
+ * directly. Ring is the exception: its integration overrides the MJPEG
+ * handler and builds the stream from the most recent motion recording
+ * (ffmpeg transcodes the recording), so the frames are a clip, not live —
+ * the viewer labels Ring cameras "Last recording" (see [isRingCamera])
+ * instead of presenting them as live. The true-live path for Ring through
+ * HA is WebRTC, which this viewer does not implement. One endpoint, all
+ * four curated cameras; only the presentation differs.
  *
  * [MjpegParser] is pure byte handling (no Android types) so it is unit
  * tested on the JVM; decoding to Bitmap happens in [HaClient.streamCamera].
  */
+
+/**
+ * True when HA reports this camera's brand as Ring. Ring's live-view
+ * entities serve their MJPEG proxy stream from the most recent motion
+ * recording, not from a live feed (see the header note), so the viewer
+ * must present them as "Last recording", never as live. Brand only — no
+ * entity id is hardcoded — and every other brand is unaffected.
+ */
+fun isRingCamera(entity: HaEntity): Boolean =
+    entity.attrString("brand")?.equals("Ring", ignoreCase = true) == true
 
 /** What the fullscreen viewer shows: connecting, live frames, or an explicit failure. */
 sealed class CameraStreamState {

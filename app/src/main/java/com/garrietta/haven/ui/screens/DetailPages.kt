@@ -47,6 +47,7 @@ import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.HistoryPoint
+import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
@@ -102,7 +103,11 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
             Button(onClick = {
                 vm.openCameraFullscreen(entityId)
                 onBack()
-            }) { Text("Open live view") }
+            }) {
+                // Ring serves its last recording, not live video — the
+                // button must not promise live for it.
+                Text(if (isRingCamera(entity)) "View last recording" else "Open live view")
+            }
         }
         return
     }

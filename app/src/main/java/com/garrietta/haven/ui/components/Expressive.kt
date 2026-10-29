@@ -38,7 +38,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -197,7 +200,17 @@ fun KodaMenuRow(
  * sits exactly on the track's centerline: the canvas is inset by the
  * handle radius, so neither the track's round caps nor the handle are
  * clipped at the edges.
+ *
+ * [markers] and the current-temperature indicator are display-only:
+ * dots on the ring at their values, plus the current label fixed at the
+ * top of the ring (Google Home style). They take no input — a tap on a
+ * marker lands in the ring zone and does nothing, and a drag starting on
+ * one is ignored because it does not start on the handle.
  */
+
+/** A display-only dot on the dial ring at [value], in [color]. */
+data class DialMarker(val value: Float, val color: Color)
+
 @Composable
 fun Dial(
     value: Float,
@@ -214,6 +227,14 @@ fun Dial(
     onInsideTap: (() -> Unit)? = null,
     // Snap drag values to whole units (thermostat degrees).
     snapToWhole: Boolean = false,
+    // Display-only dots on the ring (the thermostat's heat + cool
+    // setpoints). Empty means no markers.
+    markers: List<DialMarker> = emptyList(),
+    // Current-temperature indicator: a dot on the ring at the current
+    // angle plus the small label fixed at the top of the ring. Both a
+    // value and a label are required; either missing hides both.
+    currentValue: Float? = null,
+    currentLabel: String? = null,
     // When set, replaces the default center text with custom content
     // (the thermostat page uses it for its dual current + target numbers).
     centerContent: (@Composable BoxScope.() -> Unit)? = null,
@@ -231,6 +252,9 @@ fun Dial(
     // start, so only handle grabs move the value.
     var grabbing by remember { mutableStateOf(false) }
     val track = MaterialTheme.colorScheme.surfaceVariant
+    val textMeasurer = rememberTextMeasurer()
+    val currentDotColor = MaterialTheme.colorScheme.onSurface
+    val currentLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         modifier
             .size(diameter)
@@ -284,8 +308,53 @@ fun Dial(
             val stroke = 20.dp.toPx()
             drawArc(track, 135f, 270f, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
             drawArc(accent, 135f, 270f * fraction, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
-            val angle = Math.toRadians((135.0 + 270.0 * fraction))
             val radius = size.minDimension / 2f
+            val fractionFor: (Float) -> Float = {
+                ((it - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+            }
+            // Display-only ring marks: smaller than the handle, drawn
+            // under it, so the handle covers a marker it lands on.
+            for (marker in markers) {
+                val mAngle = Math.toRadians(135.0 + 270.0 * fractionFor(marker.value))
+                drawCircle(
+                    marker.color,
+                    radius = 6.dp.toPx(),
+                    center = Offset(
+                        size.width / 2f + radius * cos(mAngle).toFloat(),
+                        size.height / 2f + radius * sin(mAngle).toFloat(),
+                    ),
+                )
+            }
+            if (currentValue != null && currentLabel != null) {
+                val cAngle = Math.toRadians(135.0 + 270.0 * fractionFor(currentValue))
+                drawCircle(
+                    currentDotColor,
+                    radius = 5.dp.toPx(),
+                    center = Offset(
+                        size.width / 2f + radius * cos(cAngle).toFloat(),
+                        size.height / 2f + radius * sin(cAngle).toFloat(),
+                    ),
+                )
+                // The label sits fixed at the top of the ring, inside it
+                // (Google Home's small current-temperature number), clear
+                // of both the ring and the center content.
+                val labelStyle = TextStyle(fontSize = 14.sp, color = currentLabelColor)
+                val measured = textMeasurer.measure(currentLabel, labelStyle)
+                val labelCenter = Offset(
+                    size.width / 2f,
+                    size.height / 2f - radius + 30.dp.toPx(),
+                )
+                drawText(
+                    textMeasurer,
+                    currentLabel,
+                    topLeft = Offset(
+                        labelCenter.x - measured.size.width / 2f,
+                        labelCenter.y - measured.size.height / 2f,
+                    ),
+                    style = labelStyle,
+                )
+            }
+            val angle = Math.toRadians((135.0 + 270.0 * fraction))
             drawCircle(
                 accent,
                 radius = 13.dp.toPx(),

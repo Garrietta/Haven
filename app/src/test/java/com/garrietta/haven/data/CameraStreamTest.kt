@@ -1,6 +1,7 @@
 package com.garrietta.haven.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -98,5 +99,29 @@ class CameraStreamTest {
         cache.put("cam", "new")
         assertEquals("new", cache.get("cam"))
         assertEquals(1, cache.size())
+    }
+
+    @Test
+    fun isRingCamera_readsBrandAttributeOnly() {
+        // Ring's proxy stream is its last recording, not live — the
+        // viewer labels exactly these cameras "Last recording".
+        assertTrue(
+            isRingCamera(
+                HaEntity("camera.front_door_live_view", "idle", mapOf("brand" to "Ring")),
+            ),
+        )
+        assertTrue(
+            isRingCamera(
+                HaEntity("camera.front_door_live_view", "idle", mapOf("brand" to "ring")),
+            ),
+        )
+        assertFalse(
+            isRingCamera(
+                HaEntity("camera.tapo_1_live_view", "idle", mapOf("brand" to "Tapo")),
+            ),
+        )
+        assertFalse(
+            isRingCamera(HaEntity("camera.front_door_live_view", "idle", emptyMap())),
+        )
     }
 }

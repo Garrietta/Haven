@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +54,7 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.shapeForDomain
+import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
@@ -220,14 +224,126 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             }
             Spacer(Modifier.height(12.dp))
             Text(entity.friendlyName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2)
-            Text(
-                tileStatus(entity),
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            if (entity.domain == "climate") {
+                ClimateTileBody(vm, entity)
+            } else {
+                Text(
+                    tileStatus(entity),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
         }
     }
+}
+
+// Heat/cool colors match the thermostat page's dial colors.
+private val TILE_HEAT_COLOR = Color(0xFFD84315)
+private val TILE_COOL_COLOR = Color(0xFF1565C0)
+
+/**
+ * Google Home Favorites-style climate tile: dual numbers (heat left,
+ * cool right, the active selector at full strength and the inactive one
+ * muted) or the single number, an "Indoor 66°" line when a current
+ * temperature exists, and −/+ steppers stepping the active selector by
+ * one degree. The steppers are real buttons, so their taps are consumed
+ * by the button and never trigger the tile's tap-to-open; tap anywhere
+ * else on the tile still opens the thermostat page, and long-press still
+ * opens the sheet.
+ */
+@Composable
+private fun ClimateTileBody(vm: HavenViewModel, entity: HaEntity) {
+    val low = entity.attrDouble("target_temp_low")
+    val high = entity.attrDouble("target_temp_high")
+    val single = entity.attrDouble("temperature")
+    val current = entity.attrDouble("current_temperature")
+    val heatCool = low != null && high != null
+    val selector = defaultSelector(entity.state)
+    Spacer(Modifier.height(8.dp))
+    if (heatCool) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                low!!.formatTemp(),
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (selector == SetpointSelector.HEATING) {
+                    TILE_HEAT_COLOR
+                } else {
+                    TILE_HEAT_COLOR.copy(alpha = 0.45f)
+                },
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                high!!.formatTemp(),
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (selector == SetpointSelector.COOLING) {
+                    TILE_COOL_COLOR
+                } else {
+                    TILE_COOL_COLOR.copy(alpha = 0.45f)
+                },
+            )
+        }
+    } else if (single != null) {
+        val singleColor = when (entity.state) {
+            "heat" -> TILE_HEAT_COLOR
+            "cool" -> TILE_COOL_COLOR
+            else -> accentFor(entity.entityId)
+        }
+        Text(single.formatTemp(), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = singleColor)
+    }
+    if (current != null) {
+        Text(
+            "Indoor ${current.formatTemp()}",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+    if (heatCool || single != null) {
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    tileStepNext(entity, selector, -1.0)?.let {
+                        applyClimateSetpoint(vm, entity, selector, it)
+                    }
+                },
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.height(32.dp),
+            ) { Text("−") }
+            OutlinedButton(
+                onClick = {
+                    tileStepNext(entity, selector, 1.0)?.let {
+                        applyClimateSetpoint(vm, entity, selector, it)
+                    }
+                },
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.height(32.dp),
+            ) { Text("+") }
+        }
+    }
+}
+
+/**
+ * The tile stepper's next value: the active setpoint stepped by [delta].
+ * Heat/cool clamping happens inside [applyClimateSetpoint]; the single
+ * path snaps to whole degrees and clamps to the real min/max (null
+ * bounds skipped, never invented). Null when there is no setpoint to
+ * step, and then the caller sends nothing.
+ */
+private fun tileStepNext(entity: HaEntity, selector: SetpointSelector, delta: Double): Double? {
+    val low = entity.attrDouble("target_temp_low")
+    val high = entity.attrDouble("target_temp_high")
+    if (low != null && high != null) {
+        return if (selector == SetpointSelector.HEATING) low + delta else high + delta
+    }
+    val single = entity.attrDouble("temperature") ?: return null
+    var next = snapToDegree(single + delta)
+    entity.attrDouble("min_temp")?.let { next = next.coerceAtLeast(it) }
+    entity.attrDouble("max_temp")?.let { next = next.coerceAtMost(it) }
+    return next
 }
 
 /** Camera tiles show the snapshot when one loads; otherwise the camera badge. */

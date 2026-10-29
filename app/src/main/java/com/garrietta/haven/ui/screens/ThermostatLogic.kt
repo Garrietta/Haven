@@ -170,3 +170,65 @@ fun isHandleGrab(
     val dy = touchY - handleY
     return kotlin.math.sqrt(dx * dx + dy * dy) <= grabRadiusPx
 }
+
+/**
+ * Google Home-style mode label for the Mode pill: "heat_cool" reads
+ * "Heat • Cool" (the bullet matches Google Home's "Heat • Cool" pill),
+ * everything else capitalizes the same way [hvacActionLabel] does.
+ */
+fun formatHvacMode(mode: String): String = when (mode) {
+    "heat_cool" -> "Heat • Cool"
+    "heat" -> "Heat"
+    "cool" -> "Cool"
+    "off" -> "Off"
+    "auto" -> "Auto"
+    "dry" -> "Dry"
+    "fan_only" -> "Fan only"
+    else -> mode.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
+
+/**
+ * The outdoor temperature for the Google Home-style Indoor/Outdoor rows,
+ * from real HA state only — never invented. Precedence: (1) the seeded
+ * sensor "<climate object>_outdoor_temperature"; (2) any sensor whose id
+ * or friendly name mentions "outdoor" and whose state is a temperature
+ * reading (see [parseSensorTemp] — an outdoor humidity sensor never
+ * qualifies); (3) the temperature attribute of a lone weather entity.
+ * Null when nothing qualifies, and then the Outdoor row hides.
+ */
+fun findOutdoorTemperature(states: Map<String, HaEntity>, climate: HaEntity): Double? {
+    val objectId = climate.entityId.substringAfter(".")
+    states["sensor.${objectId}_outdoor_temperature"]?.let { parseSensorTemp(it) }?.let { return it }
+    val outdoorSensors = states.values.filter { e ->
+        e.domain == "sensor" &&
+            (e.entityId.contains("outdoor", ignoreCase = true) ||
+                e.friendlyName.contains("outdoor", ignoreCase = true))
+    }.sortedBy { it.entityId }
+    for (sensor in outdoorSensors) {
+        parseSensorTemp(sensor)?.let { return it }
+    }
+    val weather = states.values.filter { it.domain == "weather" }
+    if (weather.size == 1) {
+        weather.first().attrDouble("temperature")?.let { return it }
+    }
+    return null
+}
+
+/**
+ * A sensor's state as a Fahrenheit temperature, or null when it is not a
+ * temperature reading: the state must parse as a number, and the sensor
+ * must look like a temperature source (device_class temperature, a °F/°C
+ * unit, or "temperature" in its id or name). A °C reading is converted to
+ * °F; weather attributes are already in the system unit and bypass this.
+ */
+private fun parseSensorTemp(sensor: HaEntity): Double? {
+    val value = sensor.state.toDoubleOrNull() ?: return null
+    val deviceClass = sensor.attrString("device_class")
+    val unit = sensor.attrString("unit_of_measurement")
+    val looksTemperature = deviceClass == "temperature" ||
+        unit == "°F" || unit == "°C" || unit == "F" || unit == "C" ||
+        sensor.entityId.contains("temperature", ignoreCase = true) ||
+        sensor.friendlyName.contains("temperature", ignoreCase = true)
+    if (!looksTemperature) return null
+    return if (unit == "°C" || unit == "C") value * 9.0 / 5.0 + 32.0 else value
+}

@@ -96,6 +96,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
+import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
@@ -586,6 +587,11 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
     val cameraId = vm.fullscreenCameraId ?: return
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
+    // Ring's proxy stream is its last motion recording, not live video
+    // (see isRingCamera): the viewer says so everywhere it would
+    // otherwise imply live, but the stream, cache, and error paths below
+    // are unchanged for every camera.
+    val isRing = entity?.let { isRingCamera(it) } == true
     val activity = LocalContext.current as? Activity
     DisposableEffect(cameraId) {
         val prev = activity?.requestedOrientation
@@ -642,7 +648,9 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
                     CircularProgressIndicator(color = Color.White)
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (last != null) "Reconnecting…" else "Loading camera…",
+                        if (last != null) "Reconnecting…"
+                        else if (isRing) "Loading last recording…"
+                        else "Loading camera…",
                         color = Color.White,
                     )
                 }
@@ -662,7 +670,12 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
                     Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text("Live view unavailable", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(
+                        if (isRing) "Recording unavailable" else "Live view unavailable",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                    )
                     Spacer(Modifier.height(8.dp))
                     Text(state.message, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
                     Spacer(Modifier.height(16.dp))
@@ -672,12 +685,30 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
                 }
             }
         }
-        Text(
-            entity?.friendlyName ?: cameraId,
-            color = Color.White,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp),
-        )
+        Column(
+            Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp),
+        ) {
+            Text(
+                entity?.friendlyName ?: cameraId,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (isRing) {
+                Spacer(Modifier.height(6.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color.White.copy(alpha = 0.15f),
+                ) {
+                    Text(
+                        "Last recording · Not live",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
+        }
         IconButton(
             onClick = onClose,
             modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),

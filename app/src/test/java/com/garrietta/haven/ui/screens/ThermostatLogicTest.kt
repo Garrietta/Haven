@@ -157,4 +157,84 @@ class ThermostatLogicTest {
         assertTrue(!isHandleGrab(39f, 10f, 10f, 10f, 28f))
         assertTrue(!isHandleGrab(100f, 100f, 10f, 10f, 28f))
     }
+
+    // ---- Google Home display: mode labels + outdoor temperature ----
+
+    @Test
+    fun formatHvacModeReadsHeatCoolAsBulletPair() {
+        assertEquals("Heat • Cool", formatHvacMode("heat_cool"))
+        assertEquals("Heat", formatHvacMode("heat"))
+        assertEquals("Cool", formatHvacMode("cool"))
+        assertEquals("Off", formatHvacMode("off"))
+        assertEquals("Fan only", formatHvacMode("fan_only"))
+        assertEquals("Heat pump", formatHvacMode("heat_pump"))
+    }
+
+    @Test
+    fun outdoorTemperaturePrefersSeededThenOutdoorSensorThenWeather() {
+        val climate = entity("climate.thermostat", "heat_cool")
+        val seeded = mapOf(
+            "sensor.thermostat_outdoor_temperature" to
+                entity("sensor.thermostat_outdoor_temperature", "52"),
+        )
+        assertEquals(52.0, findOutdoorTemperature(seeded, climate)!!, 0.0)
+        val outdoorNamed = mapOf(
+            "sensor.outdoor_temperature" to entity(
+                "sensor.outdoor_temperature", "48",
+                mapOf("device_class" to "temperature", "unit_of_measurement" to "°F"),
+            ),
+        )
+        assertEquals(48.0, findOutdoorTemperature(outdoorNamed, climate)!!, 0.0)
+        val weatherOnly = mapOf(
+            "weather.forecast_home" to entity(
+                "weather.forecast_home", "sunny",
+                mapOf("temperature" to 52.5),
+            ),
+        )
+        assertEquals(52.5, findOutdoorTemperature(weatherOnly, climate)!!, 0.0)
+        // Seeded beats an outdoor-named sensor beats weather.
+        assertEquals(
+            52.0,
+            findOutdoorTemperature(seeded + outdoorNamed + weatherOnly, climate)!!,
+            0.0,
+        )
+        assertEquals(
+            48.0,
+            findOutdoorTemperature(outdoorNamed + weatherOnly, climate)!!,
+            0.0,
+        )
+    }
+
+    @Test
+    fun outdoorTemperatureRejectsHumidityAndAmbiguousWeather() {
+        val climate = entity("climate.thermostat", "heat_cool")
+        // An outdoor humidity sensor never qualifies, even though its id
+        // mentions "outdoor".
+        val humidityOnly = mapOf(
+            "sensor.outdoor_humidity" to entity(
+                "sensor.outdoor_humidity", "61",
+                mapOf("device_class" to "humidity", "unit_of_measurement" to "%"),
+            ),
+        )
+        assertNull(findOutdoorTemperature(humidityOnly, climate))
+        assertNull(findOutdoorTemperature(emptyMap(), climate))
+        // Two weather entities: ambiguous, so no row rather than a guess.
+        val twoWeather = mapOf(
+            "weather.home" to entity("weather.home", "sunny", mapOf("temperature" to 50.0)),
+            "weather.cabin" to entity("weather.cabin", "cloudy", mapOf("temperature" to 40.0)),
+        )
+        assertNull(findOutdoorTemperature(twoWeather, climate))
+    }
+
+    @Test
+    fun outdoorTemperatureConvertsCelsiusSensors() {
+        val climate = entity("climate.thermostat", "heat_cool")
+        val celsius = mapOf(
+            "sensor.outdoor_temperature" to entity(
+                "sensor.outdoor_temperature", "10",
+                mapOf("device_class" to "temperature", "unit_of_measurement" to "°C"),
+            ),
+        )
+        assertEquals(50.0, findOutdoorTemperature(celsius, climate)!!, 0.0)
+    }
 }

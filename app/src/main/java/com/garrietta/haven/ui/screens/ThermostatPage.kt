@@ -18,7 +18,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -34,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -42,6 +46,7 @@ import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
+import com.garrietta.haven.ui.components.DialMarker
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
@@ -53,19 +58,25 @@ private val HEAT_COLOR = Color(0xFFD84315)
 private val COOL_COLOR = Color(0xFF1565C0)
 
 /**
- * The thermostat as a full page, not a sheet: a hero dial showing current
- * and target together, a gradient heat/cool range bar with the live
- * operating state, and Mode / Fan / Hold / Sensors / Schedule / Indoor
- * cards below. Every card reads only what Home Assistant exposes — a card
- * with no backing state hides instead of inventing one.
+ * The thermostat as a full page, not a sheet, laid out the way Google
+ * Home lays its thermostat out: a hero dial showing BOTH setpoints
+ * together (heat left in warm orange, cool right in cool blue, the
+ * active selector at full strength and the inactive one muted) with
+ * −/+ steppers below the numbers inside the dial, heat + cool markers
+ * and a current-temperature indicator on the ring, then a gradient
+ * heat/cool range bar with the live operating state, then Google-style
+ * rows (Mode, Comfort, Fan) and Indoor/Outdoor rows below. Every row
+ * reads only what Home Assistant exposes — a row with no backing state
+ * hides instead of inventing one.
  *
- * The dial edits one setpoint at a time, in whole degrees: in heat/cool
- * mode an inside tap toggles the active selector between the heating and
- * cooling setpoints (the active one shows large, in its own color, with a
- * selector chip); only grabbing the radial handle and dragging it moves
- * the value, clamped so the setpoints cannot cross and the bottom gap is
- * ignored. Fahrenheit throughout, and onFinished still reports the
- * actually-set value.
+ * The dial still edits one setpoint at a time, in whole degrees: in
+ * heat/cool mode an inside tap toggles the active selector between the
+ * heating and cooling setpoints (the highlighted number IS the indicator
+ * now — no separate chip); only grabbing the radial handle and dragging
+ * it moves the value, clamped so the setpoints cannot cross and the
+ * bottom gap is ignored. Google Home's drag-anywhere-on-ring is NOT
+ * adopted: handle-grab-only stays. Fahrenheit throughout, and onFinished
+ * still reports the actually-set value.
  */
 @Composable
 fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
@@ -110,16 +121,23 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
     }
 }
 
-/** Hero dial: current (gray) + active setpoint (large, selector-colored) with −/+ steppers.
+/** Hero dial: Google Home's dual numbers + inside steppers + ring marks.
  *
  * Heat/cool thermostats have two setpoints and the dial edits exactly one
  * of them: the active selector, toggled by tapping inside the dial face
- * (never by tapping the ring — ring taps change nothing). The active
- * setpoint shows large in its own color (orange heat, blue cool) under a
- * selector chip that names it; the other setpoint stays visible on the
- * gradient bar below. Single-setpoint thermostats edit their one value
- * and have no selector. Every change — handle drag, steppers — moves in
- * whole degrees and is clamped so heating can never pass cooling.
+ * (never by tapping the ring — ring taps change nothing). Both numbers
+ * show together, heat left and cool right, the active one at full
+ * strength and the inactive one muted — that highlight is the selector
+ * indicator, so the old display-only chip is gone. Heat + cool dots sit
+ * on the ring at their setpoint angles, and the current temperature
+ * shows as a dot at its angle plus the small number at the top of the
+ * ring. The −/+ steppers sit below the numbers, inside the dial face:
+ * they are real buttons, so their taps are consumed by the button and
+ * never reach the dial's inside-tap toggle, and drags starting on them
+ * are ignored because they do not start on the handle. Single-setpoint
+ * thermostats show their one number large plus steppers, and have no
+ * selector. Every change — handle drag, steppers — moves in whole
+ * degrees and is clamped so heating can never pass cooling.
  */
 @Composable
 private fun ThermostatHero(
@@ -193,51 +211,56 @@ private fun ThermostatHero(
                 null
             },
             snapToWhole = true,
+            markers = if (heatCool) {
+                listOf(DialMarker(heat, HEAT_COLOR), DialMarker(cool, COOL_COLOR))
+            } else {
+                emptyList()
+            },
+            currentValue = current?.toFloat(),
+            currentLabel = current?.let { it.formatTemp() },
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (current != null) {
+                if (heatCool) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            current.formatTemp(),
-                            fontSize = 40.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            heat.toDouble().formatTemp(),
+                            fontSize = 64.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selector == SetpointSelector.HEATING) {
+                                HEAT_COLOR
+                            } else {
+                                HEAT_COLOR.copy(alpha = 0.45f)
+                            },
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Text(
+                            cool.toDouble().formatTemp(),
+                            fontSize = 64.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selector == SetpointSelector.COOLING) {
+                                COOL_COLOR
+                            } else {
+                                COOL_COLOR.copy(alpha = 0.45f)
+                            },
+                        )
                     }
+                } else {
                     Text(
-                        active.toDouble().formatTemp(),
+                        single.toDouble().formatTemp(),
                         fontSize = 72.sp,
                         fontWeight = FontWeight.Bold,
                         color = dialAccent,
                     )
                 }
-                if (heatCool) {
-                    Spacer(Modifier.height(4.dp))
-                    // Display-only indicator: the toggle itself is the
-                    // inside tap, so this chip takes no click handler
-                    // (a clickable chip would risk a double toggle).
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = dialAccent.copy(alpha = 0.20f),
-                    ) {
-                        Text(
-                            if (selector == SetpointSelector.HEATING) "Heating setpoint" else "Cooling setpoint",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = dialAccent,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(onClick = { stepActive(-1f) }) { Text("−") }
+                    OutlinedButton(onClick = { stepActive(1f) }) { Text("+") }
                 }
             }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(onClick = { stepActive(-1f) }) { Text("−") }
-            OutlinedButton(onClick = { stepActive(1f) }) { Text("+") }
         }
     }
 }
@@ -332,19 +355,106 @@ private fun ChipRow(options: List<String>, selected: String?, onSelect: (String)
     }
 }
 
+/**
+ * A Google Home-style row pill: small label above the value, with a
+ * chevron that flips when expanded. The pill only toggles [expanded];
+ * the caller renders the expanded chips below it.
+ */
+@Composable
+private fun GooglePill(
+    label: String,
+    value: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        onClick = onToggle,
+        modifier = modifier,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp).graphicsLayer {
+                    rotationZ = if (expanded) 180f else 0f
+                },
+            )
+        }
+    }
+}
+
+/** One label/value row for the Indoor/Outdoor card. */
+@Composable
+private fun TempRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontSize = 14.sp)
+        Text(value, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 @Composable
 private fun ThermostatCards(entity: HaEntity, vm: HavenViewModel, states: Map<String, HaEntity>) {
+    // Expanded states live here, unconditionally, so the pills below can
+    // appear or disappear with their backing state without breaking the
+    // remember order.
+    var modeExpanded by remember { mutableStateOf(false) }
+    var comfortExpanded by remember { mutableStateOf(false) }
+    var fanExpanded by remember { mutableStateOf(false) }
     val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
     if (modes.isNotEmpty()) {
-        ThermostatCard("Mode") {
+        GooglePill("Mode", formatHvacMode(entity.state), modeExpanded) { modeExpanded = !modeExpanded }
+        if (modeExpanded) {
+            Spacer(Modifier.height(8.dp))
             ChipRow(modes, entity.state) { vm.setClimateHvacMode(entity.entityId, it) }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+    val preset = findPreset(states, entity)
+    val presetModes = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
+    if (preset != null || presetModes.isNotEmpty()) {
+        // The old Schedule card's content lives here now: the current
+        // preset as the pill value (HA exposes no next-schedule
+        // transition, so nothing invented), its modes as the chips.
+        GooglePill(
+            "Comfort",
+            preset?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Choose",
+            comfortExpanded,
+        ) { comfortExpanded = !comfortExpanded }
+        if (comfortExpanded && presetModes.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            ChipRow(presetModes, entity.attrString("preset_mode")) {
+                vm.callService(
+                    "climate",
+                    "set_preset_mode",
+                    entity.entityId,
+                    JSONObject().put("preset_mode", it),
+                )
+            }
         }
         Spacer(Modifier.height(12.dp))
     }
     val fanModes = entity.attrList("fan_modes")?.mapNotNull { it as? String } ?: emptyList()
     if (fanModes.isNotEmpty()) {
-        ThermostatCard("Fan") {
-            ChipRow(fanModes, entity.attrString("fan_mode")) { vm.setClimateFanMode(entity.entityId, it) }
+        val fanMode = entity.attrString("fan_mode")
+        GooglePill(
+            "Fan",
+            fanMode?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Choose",
+            fanExpanded,
+        ) { fanExpanded = !fanExpanded }
+        if (fanExpanded) {
+            Spacer(Modifier.height(8.dp))
+            ChipRow(fanModes, fanMode) { vm.setClimateFanMode(entity.entityId, it) }
         }
         Spacer(Modifier.height(12.dp))
     }
@@ -379,55 +489,28 @@ private fun ThermostatCards(entity: HaEntity, vm: HavenViewModel, states: Map<St
         }
         Spacer(Modifier.height(12.dp))
     }
-    val preset = findPreset(states, entity)
-    val presetModes = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
-    if (preset != null || presetModes.isNotEmpty()) {
-        ThermostatCard("Schedule") {
-            // HA exposes no next-schedule transition for these thermostats,
-            // so the current preset stands in for a schedule line — never
-            // an invented transition time.
-            if (preset != null) {
-                Text(
-                    "Current preset: ${preset.replace('_', ' ').replaceFirstChar { it.uppercase() }}",
-                    fontSize = 14.sp,
-                )
-            }
-            if (presetModes.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                ChipRow(presetModes, entity.attrString("preset_mode")) {
-                    vm.callService(
-                        "climate",
-                        "set_preset_mode",
-                        entity.entityId,
-                        JSONObject().put("preset_mode", it),
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-    }
     val current = entity.attrDouble("current_temperature")
     val humidity = entity.attrDouble("humidity")
-    if (current != null || humidity != null) {
-        ThermostatCard("Indoor") {
-            if (current != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Temperature", fontSize = 14.sp)
-                    Text(
-                        current.formatTemp(),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+    val outdoor = findOutdoorTemperature(states, entity)
+    if (current != null || humidity != null || outdoor != null) {
+        // Google Home's temperature rows: no card label, just the rows —
+        // and the Outdoor row only when a real source backs it.
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                if (current != null) {
+                    TempRow("Indoor temperature", current.formatTemp())
                 }
-            }
-            if (humidity != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Humidity", fontSize = 14.sp)
-                    Text(
-                        "${humidity.toInt()}%",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (outdoor != null) {
+                    if (current != null) Spacer(Modifier.height(8.dp))
+                    TempRow("Outdoor temperature", outdoor.formatTemp())
+                }
+                if (humidity != null) {
+                    if (current != null || outdoor != null) Spacer(Modifier.height(8.dp))
+                    TempRow("Humidity", "${humidity.toInt()}%")
                 }
             }
         }
