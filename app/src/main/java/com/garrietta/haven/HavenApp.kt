@@ -7,7 +7,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
@@ -22,7 +21,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.using
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -1113,15 +1111,16 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                                 // once, so during tab switches the pill
                                 // showed colliding text ("HomeThermostat"
                                 // in the 2026-10-29 evidence video). A
-                                // vertical slide with SizeTransform(clip)
-                                // can never overlap horizontally.
+                                // vertical slide can never overlap
+                                // horizontally, and togetherWith already
+                                // clips to the animated size by default.
                                 slideInVertically(
                                     animationSpec = tween(durationMillis = 180, easing = EmphasizedDecelerate),
                                 ) { it } + fadeIn(animationSpec = tween(durationMillis = 180, easing = EmphasizedDecelerate)) togetherWith
                                     slideOutVertically(
                                         animationSpec = tween(durationMillis = 120, easing = EmphasizedAccelerate),
                                     ) { -it } + fadeOut(animationSpec = tween(durationMillis = 120, easing = EmphasizedAccelerate))
-                            }.using(SizeTransform(clip = true)),
+                            },
                             label = "pillLabel",
                         ) { show ->
                             if (show) {
