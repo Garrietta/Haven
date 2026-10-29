@@ -108,6 +108,7 @@ import com.garrietta.haven.ui.screens.HomeEditorScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.TabManagerScreen
+import com.garrietta.haven.ui.screens.ThermostatPageScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalWideLayout
@@ -273,6 +274,7 @@ fun HavenApp(vm: HavenViewModel) {
                     Screen.TabManager -> TabManagerScreen(vm, goBack, navigate)
                     Screen.HomeEditor -> HomeEditorScreen(vm, goBack)
                     is Screen.EntityDetail -> EntityDetailScreen(vm, screen.entityId, goBack)
+                    is Screen.Thermostat -> ThermostatPageScreen(vm, screen.entityId, goBack)
                     is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
                     Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)
                     Screen.AutomationBuilder -> AutomationBuilderScreen(vm, goBack)
@@ -333,7 +335,13 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Row {
                     Button(onClick = {
                         vm.closePopup()
-                        navigate(Screen.EntityDetail(popupId))
+                        // A climate entity's full control lives on its
+                        // thermostat page, not the generic detail screen.
+                        if (entity.domain == "climate") {
+                            navigate(Screen.Thermostat(popupId))
+                        } else {
+                            navigate(Screen.EntityDetail(popupId))
+                        }
                     }) { Text("Details") }
                     Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = vm::closePopup) { Text("Close") }

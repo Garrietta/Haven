@@ -48,6 +48,8 @@ sealed class Screen {
     data object TabManager : Screen()
     data object HomeEditor : Screen()
     data class EntityDetail(val entityId: String) : Screen()
+    /** Full-page thermostat experience (hero dial, range bar, pills). */
+    data class Thermostat(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()
     data object DashboardEdit : Screen()
     data object AutomationBuilder : Screen()
@@ -595,6 +597,9 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setClimateHvacMode(id: String, mode: String) =
         client.callService("climate", "set_hvac_mode", id, JSONObject().put("hvac_mode", mode))
+
+    fun setClimateFanMode(id: String, mode: String) =
+        client.callService("climate", "set_fan_mode", id, JSONObject().put("fan_mode", mode))
 
     // ---- Dashboard editing ----
 

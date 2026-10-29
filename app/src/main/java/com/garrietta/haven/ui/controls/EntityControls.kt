@@ -337,7 +337,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
             value = target,
             range = min..max,
             onValueChange = { target = it },
-            onFinished = { applyClimateTarget(vm, entity, target.toDouble()) },
+            onFinished = { applyClimateTarget(vm, entity, it.toDouble()) },
             centerText = target.toDouble().formatTemp(),
             centerSub = if (current != null) "Now ${current.formatTemp()}" else entity.stateText(),
             accent = accent,
@@ -382,7 +382,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
  * pair, so the dial value moves both setpoints while preserving their gap;
  * single-setpoint thermostats take the value directly.
  */
-private fun applyClimateTarget(vm: HavenViewModel, entity: HaEntity, value: Double) {
+fun applyClimateTarget(vm: HavenViewModel, entity: HaEntity, value: Double) {
     val high = entity.attrDouble("target_temp_high")
     val low = entity.attrDouble("target_temp_low")
     if (high != null && low != null) {

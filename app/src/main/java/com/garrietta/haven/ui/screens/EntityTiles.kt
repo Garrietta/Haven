@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.accentFor
@@ -56,9 +57,9 @@ import org.json.JSONObject
  * keep their full cards; a tab page shows one tile per entity instead:
  * icon + name + natural status, in an adaptive grid (2 columns folded,
  * more unfolded). Tap is the primary action — light toggles, garage
- * opens/closes, thermostat and everything else open their control sheet,
- * camera opens landscape fullscreen. Long-press always opens the
- * more-info/detail sheet.
+ * opens/closes, thermostat opens its full page, camera opens landscape
+ * fullscreen, everything else opens its control sheet. Long-press always
+ * opens the more-info/detail sheet.
  *
  * Cards that can't tile keep their card rendering through [fallbackCard]:
  * gauge and button cards (their visuals/actions don't survive as a tile),
@@ -70,6 +71,7 @@ fun TabTileGrid(
     vm: HavenViewModel,
     cards: List<String>,
     states: Map<String, HaEntity>,
+    navigate: ((Screen) -> Unit)? = null,
     fallbackCard: @Composable (String) -> Unit,
 ) {
     LazyVerticalGrid(
@@ -97,7 +99,15 @@ fun TabTileGrid(
                 for (id in ids) {
                     val entity = states[id]
                     if (entity != null) {
-                        item { EntityTile(vm, entity) }
+                        item {
+                            EntityTile(
+                                vm,
+                                entity,
+                                onThermostat = navigate?.let { nav ->
+                                    { entityId: String -> nav(Screen.Thermostat(entityId)) }
+                                },
+                            )
+                        }
                     } else {
                         item { MissingEntityTile(id) }
                     }
@@ -145,7 +155,7 @@ private fun tileStatus(entity: HaEntity): String = when (entity.domain) {
     else -> entity.stateText()
 }
 
-private fun primaryAction(vm: HavenViewModel, entity: HaEntity) {
+private fun primaryAction(vm: HavenViewModel, entity: HaEntity, onThermostat: ((String) -> Unit)? = null) {
     when (entity.domain) {
         "light", "switch", "input_boolean" -> vm.toggle(entity.entityId)
         "cover" -> {
@@ -155,7 +165,7 @@ private fun primaryAction(vm: HavenViewModel, entity: HaEntity) {
                 vm.callService("cover", "open_cover", entity.entityId)
             }
         }
-        "climate" -> vm.openPopup(entity.entityId)
+        "climate" -> if (onThermostat != null) onThermostat(entity.entityId) else vm.openPopup(entity.entityId)
         "camera" -> vm.openCameraFullscreen(entity.entityId)
         else -> vm.openPopup(entity.entityId)
     }
@@ -163,7 +173,7 @@ private fun primaryAction(vm: HavenViewModel, entity: HaEntity) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EntityTile(vm: HavenViewModel, entity: HaEntity) {
+fun EntityTile(vm: HavenViewModel, entity: HaEntity, onThermostat: ((String) -> Unit)? = null) {
     val accent = accentFor(entity.entityId)
     val active = ((entity.domain == "light" || entity.domain == "switch" || entity.domain == "input_boolean") &&
         entity.state == "on") || (entity.domain == "cover" && entity.state == "open")
@@ -175,7 +185,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity) {
             MaterialTheme.colorScheme.surfaceContainerLow
         },
         modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = { primaryAction(vm, entity) },
+            onClick = { primaryAction(vm, entity, onThermostat) },
             onLongClick = { vm.openPopup(entity.entityId) },
         ),
     ) {

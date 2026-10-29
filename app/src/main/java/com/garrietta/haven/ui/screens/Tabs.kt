@@ -96,7 +96,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             // Tab pages render Apple Home-style tiles (tap = primary
             // action, long-press = detail sheet); cards that can't tile
             // keep their card rendering below.
-            TabTileGrid(vm, tab.cards, states) { yaml ->
+            TabTileGrid(vm, tab.cards, states, navigate) { yaml ->
                 TabCardView(vm, yaml, states, navigate)
             }
         }

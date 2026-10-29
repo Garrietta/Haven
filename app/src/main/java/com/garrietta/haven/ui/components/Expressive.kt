@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,6 +17,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +31,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,11 +85,15 @@ fun Dial(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     onValueChange: (Float) -> Unit,
-    onFinished: () -> Unit = {},
+    onFinished: (Float) -> Unit = {},
     centerText: String,
     centerSub: String,
     accent: Color,
     modifier: Modifier = Modifier,
+    diameter: Dp = 220.dp,
+    // When set, replaces the default center text with custom content
+    // (the thermostat page uses it for its dual current + target numbers).
+    centerContent: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     val fraction = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
     // Null in the bottom gap: the caller ignores the touch there.
@@ -101,22 +110,31 @@ fun Dial(
         }
     }
     val track = MaterialTheme.colorScheme.surfaceVariant
+    // Last value the user actually set: onFinished reports this, not the
+    // composable's value prop, so a tap applies the tapped value (not the
+    // previous one) and a drag-end applies the final position even if the
+    // parent has not recomposed yet.
+    var lastSet by remember { mutableStateOf(value) }
     Box(
         modifier
-            .size(220.dp)
+            .size(diameter)
             .pointerInput(range) {
                 detectTapGestures { offset ->
                     valueFor(offset, size)?.let {
+                        lastSet = it
                         onValueChange(it)
-                        onFinished()
+                        onFinished(it)
                     }
                 }
             }
             .pointerInput(range) {
                 detectDragGestures(
-                    onDragEnd = { onFinished() },
+                    onDragEnd = { onFinished(lastSet) },
                 ) { change, _ ->
-                    valueFor(change.position, size)?.let { onValueChange(it) }
+                    valueFor(change.position, size)?.let {
+                        lastSet = it
+                        onValueChange(it)
+                    }
                 }
             },
     ) {
@@ -124,7 +142,7 @@ fun Dial(
         // size.minDimension / 2 of the inset canvas, and the handle drawn
         // at that same radius lands exactly on the track instead of 10dp
         // inside it (the old (minDimension - stroke) / 2 math).
-        Canvas(Modifier.size(220.dp).padding(13.dp)) {
+        Canvas(Modifier.size(diameter).padding(13.dp)) {
             val stroke = 20.dp.toPx()
             drawArc(track, 135f, 270f, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
             drawArc(accent, 135f, 270f * fraction, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
@@ -139,12 +157,16 @@ fun Dial(
                 ),
             )
         }
-        Column(
-            Modifier.align(Alignment.Center),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(centerText, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-            Text(centerSub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (centerContent != null) {
+            Box(Modifier.align(Alignment.Center)) { centerContent() }
+        } else {
+            Column(
+                Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(centerText, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text(centerSub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
