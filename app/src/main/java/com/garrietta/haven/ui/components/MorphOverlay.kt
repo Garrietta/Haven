@@ -63,16 +63,28 @@ fun centerTargetRect(overlayOrigin: Offset, overlaySize: IntSize, panelSize: Int
  *    diagonal fly-outs (the garage sheet dismissing toward the top-left
  *    corner): the old exit morph re-resolved its target through the
  *    framework at dismiss time instead of returning to the card.
- * 2. SINGLE SURFACE, SOURCE HIDDEN: while a morph is active, the source
- *    card renders with alpha 0 ([hideWhenMorphSource]) — layout
- *    unchanged, so nothing reflows — and the morph surface is the ONLY
- *    rendering of the content. No doubling at any frame, entering or
- *    exiting.
+ * 2. SINGLE SURFACE, SOURCE FADING (container transform, 2026-10-29
+ *    natural-animations round — supersedes the #62 instant return
+ *    AND the binary hide): while a morph is active, the source card
+ *    renders with the progress-driven alpha from [morphCardAlpha]
+ *    (visible at morph start, gone once the surface is opaque, fading
+ *    back in whole over the last 40% of an animated exit), and the
+ *    surface background fades in over [0, 0.35] via
+ *    [morphBackgroundAlpha] while its content fades in late via
+ *    [morphContentAlpha]. Start content fades out early, end content
+ *    fades in late, symmetric on exit: the card and the surface read
+ *    as ONE element transforming, never a blank solid panel flashing
+ *    in at open, never both contents at full opacity at once (that
+ *    was #49's ghosting), never a staged reappearance, never a snap
+ *    back. Exit is the smooth reverse of enter on the same bounds
+ *    spring — the #62 synchronous removal read on device as "a sudden
+ *    smack back to the previous state" and is gone.
  * 3. NO SCALING: content is laid out once at its target size and
- *    clipped to the interpolated rect, pinned top-left (the header is
- *    visible from the first frame and descends with the surface as it
- *    grows) — revealed as the surface grows, never stretched, per the
- *    recorded Koda language. Sheet target sizes come from a single
+ *    clipped to the interpolated rect, pinned top-left (revealed as
+ *    the surface grows, never stretched, per the recorded Koda
+ *    language — with the content itself fading in late per
+ *    [morphContentAlpha], so no full-size content ever appears inside
+ *    a still-small rect). Sheet target sizes come from a single
  *    invisible measurement frame (alpha 0, below the scrim, so it can
  *    neither flash nor take touches); detail targets are the overlay
  *    size and need no measurement.
@@ -90,6 +102,14 @@ val LocalCardBounds = staticCompositionLocalOf<MutableMap<String, Rect>> { mutab
 val LocalHiddenCardId = staticCompositionLocalOf<String?> { null }
 
 /**
+ * Progress-driven alpha for the active morph source card (see
+ * [hideWhenMorphSource]): 1 when no morph is active. Provided by the
+ * overlay root from the active morph's progress via
+ * [morphCardAlpha].
+ */
+val LocalMorphCardAlpha = staticCompositionLocalOf { 1f }
+
+/**
  * Reports this layout's boundsInRoot into [LocalCardBounds] under [id].
  * Writes only when the rect actually changed, so the post-layout
  * callback cannot schedule a recomposition loop.
@@ -103,15 +123,35 @@ fun Modifier.reportCardBounds(id: String): Modifier = composed {
 }
 
 /**
- * Renders this layout invisible (alpha 0, layout unchanged) while it is
- * the active morph source. Alpha, not removal: removing the card would
- * reflow the grid and invalidate the captured source rect mid-morph.
+ * Renders this layout with the morph source's progress-driven alpha
+ * while it is the active morph source (layout unchanged). The alpha
+ * comes from [LocalMorphCardAlpha]: 1 at morph start (the card is
+ * fully visible under the still-transparent surface), fading to 0
+ * once the surface is opaque, and fading back in over the last 40%
+ * of an animated exit — so the card never vanishes in a single frame
+ * and never pops back in stages. Alpha, not removal: removing the
+ * card would reflow the grid and invalidate the captured source
+ * rect mid-morph.
  */
 fun Modifier.hideWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenCardId.current
+    val cardAlpha = LocalMorphCardAlpha.current
     graphicsLayer {
-        alpha = if (id == hiddenId) 0f else 1f
+        alpha = if (id == hiddenId) cardAlpha else 1f
     }
+}
+
+/**
+ * Smoothstep interpolation between [edge0] and [edge1], clamped to
+ * [0, 1] — the single shared easing for every morph curve below
+ * (see the spring-clamp skill: one shared pure clamping function,
+ * never ad-hoc clamps per call site). Progress is clamped before
+ * computing, so spring overshoot can never push any curve out of
+ * range.
+ */
+fun smoothstep(edge0: Float, edge1: Float, x: Float): Float {
+    val t = ((x.coerceIn(0f, 1f) - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
 }
 
 /** Linear interpolation between two rects; [t] clamped to [0, 1]. */
@@ -194,18 +234,18 @@ fun morphCornerTop(progress: Float): Dp =
  * still-small rect. The 2026-10-29 verdict video shows it on sheets
  * AND detail pages, so scoping the fade to one sheet cannot fix it.
  * With this curve no frame ever shows content meaningfully clipped
- * by the rect edge: while the rect is mid-size the panel is blank
- * (its own background color, growing from the card), and the content
- * materializes only once the panel is nearly full size. The panel
- * motion itself stays fully visible — only the content is delayed.
+ * by the rect edge: while the rect is mid-size the panel is still
+ * fading in over the card (its background ramping via
+ * [morphBackgroundAlpha], the card fading out via [morphCardAlpha]),
+ * and the content materializes only once the panel is nearly full
+ * size. The panel motion itself stays fully visible — only the
+ * content is delayed.
  * Progress is clamped to [0, 1] first, so spring overshoot can never
  * push the alpha out of range (see the spring-clamp skill: one shared
  * pure clamping function, never ad-hoc clamps per call site).
  */
-fun morphContentAlpha(progress: Float): Float {
-    val t = ((progress.coerceIn(0f, 1f) - 0.7f) / 0.3f).coerceIn(0f, 1f)
-    return t * t * (3f - 2f * t)
-}
+fun morphContentAlpha(progress: Float): Float =
+    smoothstep(0.7f, 1.0f, progress)
 
 /**
  * Background blend for a morphing surface at [progress] (0 = card,
@@ -228,10 +268,37 @@ fun morphContentAlpha(progress: Float): Float {
  * softened. Callers pass the card color as [MorphSurface]
  * fromBackground and this curve as its backgroundBlend.
  */
-fun morphBackgroundBlend(progress: Float): Float {
-    val t = (progress.coerceIn(0f, 1f) / 0.3f).coerceIn(0f, 1f)
-    return t * t * (3f - 2f * t)
-}
+fun morphBackgroundBlend(progress: Float): Float =
+    smoothstep(0f, 0.3f, progress)
+
+/**
+ * Source-card alpha for a morphing surface at [progress] (0 = card,
+ * 1 = target): the card stays fully visible at morph start and
+ * fades out over the first 40% of the morph, as the surface
+ * background fades in beneath it. On exit the same curve runs in
+ * reverse, so the card fades back in whole over the last 40% of the
+ * return — never vanishing in one frame, never popping back in
+ * stages (badge first, text later). This is the container-transform
+ * content handoff (2026-10-29 natural-animations round): the old
+ * binary hide (alpha 0 for the whole morph) is what made the card
+ * vanish at open and pop back at close; the progress-driven fade
+ * makes the card and the surface one continuous element.
+ */
+fun morphCardAlpha(progress: Float): Float =
+    1f - smoothstep(0f, 0.4f, progress)
+
+/**
+ * Surface-background alpha for a morphing surface at [progress]:
+ * transparent at the card, opaque once the surface has grown a
+ * little (smoothstep over [0, 0.35]). Together with
+ * [morphCardAlpha] this removes the solid-background flash on open:
+ * at progress 0 the surface is invisible and the card shows through
+ * it — no blank solid rect ever replaces the card in a single frame.
+ * On exit the same curve runs in reverse, so the surface dissolves
+ * onto the card instead of vanishing from under it.
+ */
+fun morphBackgroundAlpha(progress: Float): Float =
+    smoothstep(0f, 0.35f, progress)
 
 /**
  * The single morphing surface. [rect] is the interpolated rect in root
@@ -254,7 +321,12 @@ fun morphBackgroundBlend(progress: Float): Float {
  * so the growing panel reads as the card growing rather than a new
  * surface flashing in — the enter white flash from the 2026-10-29
  * verdict videos. When [fromBackground] is null the surface uses
- * [background] directly (backward-compatible default). [dragOffsetY] shifts the
+ * [background] directly (backward-compatible default). [backgroundAlpha]
+ * fades the surface's background itself (callers pass
+ * [morphBackgroundAlpha] of their progress): transparent at the card,
+ * opaque once grown — so no solid rect ever replaces the card in a
+ * single frame at open, and the surface dissolves onto the card on
+ * exit instead of vanishing from under it. [dragOffsetY] shifts the
  * surface down for the sheet drag gesture without touching the rect
  * math. [onPlaced] reports the surface's window bounds (the sheet's
  * Details action uses them as the camera rise origin, as before).
@@ -271,6 +343,7 @@ fun MorphSurface(
     contentAlpha: Float = 1f,
     fromBackground: Color? = null,
     backgroundBlend: Float = 1f,
+    backgroundAlpha: Float = 1f,
     onPlaced: ((Rect) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -279,11 +352,17 @@ fun MorphSurface(
     val heightDp = with(density) { rect.height.toDp() }
     val targetWidthDp = with(density) { targetSize.width.toDp() }
     val targetHeightDp = with(density) { targetSize.height.toDp() }
-    val effectiveBackground = if (fromBackground != null) {
+    val blendedBackground = if (fromBackground != null) {
         lerp(fromBackground, background, backgroundBlend.coerceIn(0f, 1f))
     } else {
         background
     }
+    // Multiply, never replace: a Transparent surface (the pop-out)
+    // must stay transparent at every alpha, and an opaque surface
+    // ramps 0 -> 1 with the morph.
+    val effectiveBackground = blendedBackground.copy(
+        alpha = blendedBackground.alpha * backgroundAlpha.coerceIn(0f, 1f),
+    )
     Box(
         modifier
             .offset {

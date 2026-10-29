@@ -122,6 +122,7 @@ import kotlinx.coroutines.launch
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
 import com.garrietta.haven.data.RingWebRtcSession
+import com.garrietta.haven.data.cameraSupportsStream
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
@@ -146,9 +147,12 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.unit.IntSize
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHiddenCardId
+import com.garrietta.haven.ui.components.LocalMorphCardAlpha
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.centerTargetRect
+import com.garrietta.haven.ui.components.morphBackgroundAlpha
 import com.garrietta.haven.ui.components.morphBackgroundBlend
+import com.garrietta.haven.ui.components.morphCardAlpha
 import com.garrietta.haven.ui.components.morphContentAlpha
 import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.ScrollVisibilityState
@@ -318,12 +322,21 @@ fun HavenApp(vm: HavenViewModel) {
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
         val popoutProgress = remember { Animatable(0f) }
         var sheetSurfaceBounds by remember { mutableStateOf<Rect?>(null) }
-        // No exiting flags and no morph generation anymore: dismiss
-        // is synchronous (see dismissDetail/dismissSheet/dismissPopout
-        // below), so there is no in-flight exit animation for a
-        // top-level navigation to race with. The #52 async stale-
-        // dismiss race is impossible in a synchronous dismiss, and
-        // the flags that guarded it are gone with the animation.
+        // Morph generation + exiting flags (restored from #52, for
+        // the animated exit below): an exit animation is async
+        // again, so a top-level navigation (goTop/signOut) or a
+        // handoff must be able to cancel it. goTop/signOut bump the
+        // generation and clear instantly; an in-flight exit
+        // coroutine checks the generation + identity in its finally
+        // block and only clears state that still belongs to the
+        // morph that started. The exiting flags keep a second
+        // dismiss (double back-press, scrim + Close together) from
+        // launching a second animation on the same progress
+        // Animatable.
+        var morphGeneration by remember { mutableIntStateOf(0) }
+        var sheetExiting by remember { mutableStateOf(false) }
+        var detailExiting by remember { mutableStateOf(false) }
+        var popoutExiting by remember { mutableStateOf(false) }
         // Scroll-away state lives here, above goTop, so a tab switch
         // can reset it: it used to persist across tabs (remembered on
         // density only), so a pill hidden by scrolling on one tab
@@ -336,6 +349,7 @@ fun HavenApp(vm: HavenViewModel) {
         }
         val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
         val goTop: (Screen) -> Unit = {
+            morphGeneration++
             vm.pageOrigin = null
             vm.closePopup()
             sheetAnim = null
@@ -347,31 +361,34 @@ fun HavenApp(vm: HavenViewModel) {
             backstack.add(it)
         }
         val scope = rememberCoroutineScope()
-        // INSTANT RETURN (2026-10-29 verdict videos on run #60).
-        // Dismiss used to animate progress 1 -> 0 on the bounds spring
-        // and only then unhide the source card: during the whole exit
-        // the card stayed hidden while a shrinking, content-dissolved
-        // panel sat over it, and the card then popped back in stages
-        // (badge first, text later, after async content reloaded).
-        // That is exactly the reported hesitation, white flash,
-        // disappearing polygon, and clipped polygon bottom on return.
-        // The fix is his first offered option: the morph surface is
-        // removed and the source card restored in the SAME
-        // recomposition — no exit shrink, no exit fade. The card was
-        // composed throughout (only alpha-hidden), so unhide is
-        // atomic: all elements present in the same frame, never
-        // staged, never blank, never clipped mid-animation. Enter
-        // morphs are unchanged (grow + steep content fade +
-        // background blend); the sheet drag spring-back on
+        // CONTAINER-TRANSFORM EXIT (2026-10-29 natural-animations
+        // round — SUPERSEDES #62's instant return, explicitly).
+        // #62 chose his first offered option (immediately return),
+        // but on device the instant reads as "a sudden smack back to
+        // the previous state": the surface vanishes and the card
+        // reappears in one frame, which is a snap, not a transition.
+        // The fix is his second option: exit is the smooth reverse
+        // of enter on the same bounds spring, with elements present
+        // throughout — destination content dissolves (the reverse of
+        // the late enter fade), the surface background dissolves onto
+        // the card (the reverse of the background-alpha ramp), and
+        // the card fades back in whole (the reverse of the early
+        // card fade-out). No snap, no blank panel, no staged
+        // reappearance, no doubling: at no frame are both contents at
+        // full opacity, and at no frame is the panel blank-white.
+        // Enter morphs are unchanged in shape (grow + background
+        // blend); only the content/background/card alpha curves
+        // changed (see MorphOverlay). The sheet drag spring-back on
         // release-below-threshold is a gesture cancel, not a return
-        // morph, and is kept. The camera rise/sink keeps its own exit
-        // animation (separate path, not complained about on return).
-        // The dismisses are synchronous, so the #52 async stale-
-        // dismiss race cannot occur; identity checks stay (never pop
-        // or clear a destination that is not this morph's own).
-        // This SUPERSEDES #60's exit morph for sheets, pop-out, and
-        // detail pages (the exit animation is gone, not retuned).
-        fun dismissDetail() {
+        // morph, and is kept; release-past-threshold flings the
+        // sheet off the bottom (see the sheet block). The camera
+        // rise/sink keeps its own exit animation (separate path).
+        // Instant clears exist ONLY for handoffs and top-level
+        // navigation: a sheet -> detail (or pop-out -> page) handoff
+        // MUST clear instantly, because the destination morph starts
+        // from the same card and an animated sheet exit would
+        // overlap the detail enter.
+        fun dismissDetailInstant() {
             val anim = detailAnim ?: return
             if (backstack.lastOrNull() == anim.screen && backstack.size > 1) {
                 backstack.removeAt(backstack.lastIndex)
@@ -380,15 +397,71 @@ fun HavenApp(vm: HavenViewModel) {
                 detailAnim = null
             }
         }
-        fun dismissSheet() {
+        fun dismissSheetInstant() {
             val anim = sheetAnim ?: return
             if (vm.popupEntityId == anim.id) vm.closePopup()
             if (sheetAnim?.id == anim.id) sheetAnim = null
         }
-        fun dismissPopout() {
+        fun dismissPopoutInstant() {
             val anim = popoutAnim ?: return
             if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
             if (popoutAnim?.id == anim.id) popoutAnim = null
+        }
+        // Animated dismisses: Back, scrim tap, and Close all use
+        // these. The progress animates 1 -> 0 on the bounds spring
+        // (snapped under reduce-motion); only then is the trigger
+        // cleared, and only if the generation + identity still
+        // match the morph that started (see above).
+        fun dismissDetail() {
+            val anim = detailAnim ?: return
+            if (detailExiting) return
+            detailExiting = true
+            val gen = morphGeneration
+            scope.launch {
+                try {
+                    if (reduceMotion) detailProgress.snapTo(0f)
+                    else detailProgress.animateTo(0f, springBounds())
+                } finally {
+                    detailExiting = false
+                    if (gen == morphGeneration && detailAnim?.screen == anim.screen) {
+                        dismissDetailInstant()
+                    }
+                }
+            }
+        }
+        fun dismissSheet() {
+            val anim = sheetAnim ?: return
+            if (sheetExiting) return
+            sheetExiting = true
+            val gen = morphGeneration
+            scope.launch {
+                try {
+                    if (reduceMotion) sheetProgress.snapTo(0f)
+                    else sheetProgress.animateTo(0f, springBounds())
+                } finally {
+                    sheetExiting = false
+                    if (gen == morphGeneration && sheetAnim?.id == anim.id) {
+                        dismissSheetInstant()
+                    }
+                }
+            }
+        }
+        fun dismissPopout() {
+            val anim = popoutAnim ?: return
+            if (popoutExiting) return
+            popoutExiting = true
+            val gen = morphGeneration
+            scope.launch {
+                try {
+                    if (reduceMotion) popoutProgress.snapTo(0f)
+                    else popoutProgress.animateTo(0f, springBounds())
+                } finally {
+                    popoutExiting = false
+                    if (gen == morphGeneration && popoutAnim?.id == anim.id) {
+                        dismissPopoutInstant()
+                    }
+                }
+            }
         }
         val goBack: () -> Unit = {
             if (detailAnim != null) dismissDetail()
@@ -396,6 +469,7 @@ fun HavenApp(vm: HavenViewModel) {
             else if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
         }
         val signOut: () -> Unit = {
+            morphGeneration++
             vm.pageOrigin = null
             vm.closePopup()
             sheetAnim = null
@@ -411,10 +485,11 @@ fun HavenApp(vm: HavenViewModel) {
         // synchronously above (falling back to a fade-only appearance
         // when the card never reported bounds, e.g. a board card);
         // these effects animate progress 0 -> 1 on the bounds spring
-        // (snapped under reduce-motion). There is no exit animation:
-        // dismiss drops the anim state instantly (instant return —
-        // see dismissDetail/dismissSheet/dismissPopout), and external
-        // clears (goTop, signOut) do the same.
+        // (snapped under reduce-motion). Exit is the smooth reverse
+        // (see dismissDetail/dismissSheet/dismissPopout): progress
+        // animates 1 -> 0, then the trigger clears. External clears
+        // (goTop, signOut) bump the generation and drop the anim
+        // state instantly, cancelling any in-flight exit.
         // Synchronous capture (mirrors #49's lastDetail/lastPopupId):
         // the morph object exists in the same frame its trigger
         // appears, so the overlay renders (at progress 0, i.e. exactly
@@ -565,6 +640,19 @@ fun HavenApp(vm: HavenViewModel) {
             CompositionLocalProvider(
                 LocalCardBounds provides cardBounds,
                 LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
+                // Progress-driven source-card alpha (container
+                // transform): the active morph's progress drives the
+                // card fade-out on enter and the fade-back-in on
+                // exit, so the card and the surface read as one
+                // element. No morph -> fully visible.
+                LocalMorphCardAlpha provides morphCardAlpha(
+                    when {
+                        sheetAnim != null -> sheetProgress.value
+                        detailAnim != null -> detailProgress.value
+                        popoutAnim != null -> popoutProgress.value
+                        else -> 1f
+                    },
+                ),
             ) {
             // Overlay root: its root-coordinate origin and size anchor
             // every morph rect (see MorphSurface). All morph overlays
@@ -678,19 +766,27 @@ fun HavenApp(vm: HavenViewModel) {
             // first frame (even during the measurement frame below,
             // when progress is still 0). The surface interpolates a
             // single rect from the card captured at open to the measured
-            // panel rect; the source card underneath renders alpha 0
-            // for the whole morph, so nothing ever doubles. Dismissing
-            // is instant (no exit morph — see dismissSheet): the
-            // surface vanishes and the card reappears in the same
-            // frame; the sheet -> detail handoff clears the sheet
-            // instantly and the detail morph starts from the same
-            // card, so the card never flashes back in between.
+            // panel rect; the source card underneath fades out over
+            // the first 40% of enter and back in over the last 40% of
+            // exit (progress-driven alpha, not a binary hide), so
+            // nothing ever doubles and nothing ever pops. Dismiss is
+            // the smooth reverse of enter (see dismissSheet); only
+            // the sheet -> detail handoff clears instantly, so the
+            // detail morph starts from the same card without the card
+            // flashing back in between. Dragging past the threshold
+            // flings the sheet off the bottom (see below) instead of
+            // shrinking it back.
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
                 BackHandler { dismissSheet() }
                 Box(
                     Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f * sheetProgress.value))
+                        .background(
+                            Color.Black.copy(
+                                alpha = 0.4f * sheetProgress.value *
+                                    (1f - (sheetDrag.value / overlaySize.height.toFloat()).coerceIn(0f, 1f)),
+                            ),
+                        )
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -715,7 +811,7 @@ fun HavenApp(vm: HavenViewModel) {
                                 vm, navigate, anim.id, dragging = false,
                                 sheetBounds = sheetSurfaceBounds,
                                 onClose = { dismissSheet() },
-                                onDetails = { dismissSheet() },
+                                onDetails = { dismissSheetInstant() },
                             )
                         }
                     }
@@ -756,17 +852,47 @@ fun HavenApp(vm: HavenViewModel) {
                         background = MaterialTheme.colorScheme.surfaceContainerHigh,
                         fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
                         backgroundBlend = morphBackgroundBlend(sheetP),
+                        // The surface background itself ramps in over
+                        // [0, 0.35] (see morphBackgroundAlpha): at
+                        // progress 0 the surface is invisible and the
+                        // card shows through it — no blank solid rect
+                        // ever replaces the card in a single frame.
+                        backgroundAlpha = morphBackgroundAlpha(sheetP),
                         modifier = Modifier.pointerInput(anim.id) {
                             detectVerticalDragGestures(
                                 onDragEnd = {
                                     if (sheetDrag.value > dismissThresholdPx) {
-                                        dismissSheet()
+                                        // Fling-off: the sheet slides
+                                        // off the bottom on the morph
+                                        // spring, then clears
+                                        // instantly — the scrim is
+                                        // already 0 by then (its alpha
+                                        // is multiplied by 1 - drag /
+                                        // height above), so no snap is
+                                        // visible. Guarded like the
+                                        // animated dismiss (generation
+                                        // + identity in the finally).
+                                        if (!sheetExiting) {
+                                            sheetExiting = true
+                                            val gen = morphGeneration
+                                            scope.launch {
+                                                try {
+                                                    if (reduceMotion) sheetDrag.snapTo(overlaySize.height.toFloat())
+                                                    else sheetDrag.animateTo(overlaySize.height.toFloat(), springMorph())
+                                                } finally {
+                                                    sheetExiting = false
+                                                    if (gen == morphGeneration && sheetAnim?.id == anim.id) {
+                                                        dismissSheetInstant()
+                                                    }
+                                                }
+                                            }
+                                        }
                                     } else {
                                         // Gesture cancel: spring back to
                                         // rest. This is NOT a return
-                                        // morph — the instant-return
-                                        // rule applies to dismiss, not
-                                        // to cancelling a drag.
+                                        // morph — the fling/dismiss
+                                        // rules above do not apply to
+                                        // cancelling a drag.
                                         scope.launch { sheetDrag.animateTo(0f, springMorph()) }
                                     }
                                 },
@@ -785,7 +911,7 @@ fun HavenApp(vm: HavenViewModel) {
                             vm, navigate, anim.id, dragging = sheetDrag.value > 1f,
                             sheetBounds = sheetSurfaceBounds,
                             onClose = { dismissSheet() },
-                            onDetails = { dismissSheet() },
+                            onDetails = { dismissSheetInstant() },
                         )
                     }
                 }
@@ -795,9 +921,16 @@ fun HavenApp(vm: HavenViewModel) {
             // bottom-sheet rise for detail pages is gone — the
             // visual-bugs round replaced it with the container morph,
             // and this round replaces the morph mechanism itself).
-            // Back is instant (see dismissDetail): the surface
-            // vanishes and the card reappears in the same frame —
-            // no exit shrink, no staged reappearance.
+            // Back is the smooth reverse of enter (see
+            // dismissDetail): the page shrinks back onto its card
+            // while the card fades back in whole — no exit shrink
+            // without content, no snap, no staged reappearance. A
+            // non-clickable dim scrim fades with progress (detail
+            // pages dismiss via Back only, never outside tap), so
+            // Home dims progressively as the page grows instead of
+            // staying fully bright behind a translucent page — the
+            // weather-page + Home doubling read in the 2026-10-29
+            // verdict video.
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 val target = detailTargetRect(overlayOrigin, overlaySize)
@@ -812,6 +945,13 @@ fun HavenApp(vm: HavenViewModel) {
                 val detailP = detailProgress.value.coerceIn(0f, 1f)
                 val rect = if (source != null) lerpRect(source, target, detailP)
                     else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, detailP)
+                // Non-clickable: it only dims, it never dismisses
+                // (Back is the detail exit) and it never swallows a
+                // tap meant for the page itself.
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f * detailP)),
+                )
                 MorphSurface(
                     rect = rect,
                     overlayOrigin = overlayOrigin,
@@ -821,6 +961,7 @@ fun HavenApp(vm: HavenViewModel) {
                     contentAlpha = morphContentAlpha(detailP),
                     fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
                     backgroundBlend = morphBackgroundBlend(detailP),
+                    backgroundAlpha = morphBackgroundAlpha(detailP),
                 ) {
                     content(anim.screen)
                 }
@@ -829,12 +970,15 @@ fun HavenApp(vm: HavenViewModel) {
             // bottom sheet, not a full page). The panel is measured
             // once at 16dp side margins, then centered in the overlay;
             // the morph runs card -> centered panel on enter and
-            // returns instantly on dismiss (no exit morph — see
-            // dismissPopout), with the same steep content fade and
-            // current-bounds-first rule as sheets and details. The
-            // morph surface itself is transparent: the panel draws its
-            // own shapes (the scallop disc is the pop-out's own
-            // background, inside a 32dp rounded panel).
+            // reverses smoothly on dismiss (see dismissPopout), with
+            // the same steep content fade and current-bounds-first
+            // rule as sheets and details. The morph surface itself is
+            // transparent: the panel draws its own shapes (the
+            // scallop disc is the pop-out's own background, inside a
+            // 32dp rounded panel), and the panel background ramps in
+            // over [0, 0.35] like every other morph surface so no
+            // solid rect ever replaces the card in a single frame.
+            // Only the pop-out -> page handoff clears instantly.
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
                 BackHandler { dismissPopout() }
@@ -864,7 +1008,7 @@ fun HavenApp(vm: HavenViewModel) {
                             ThermostatPopoutContent(
                                 vm, anim.id,
                                 onDetails = {
-                                    dismissPopout()
+                                    dismissPopoutInstant()
                                     navigate(Screen.Thermostat(anim.id))
                                 },
                                 onClose = { dismissPopout() },
@@ -890,12 +1034,16 @@ fun HavenApp(vm: HavenViewModel) {
                         // from the card color over the first 30% of
                         // enter (same morphBackgroundBlend rule as
                         // sheets/details) so the pop-out grows out of
-                        // the card instead of flashing in white.
+                        // the card instead of flashing in white — and
+                        // its alpha ramps in over [0, 0.35] (same
+                        // morphBackgroundAlpha rule), so at progress 0
+                        // the card shows through the transparent panel
+                        // and no solid rect ever replaces it.
                         val popoutPanelBg = lerp(
                             MaterialTheme.colorScheme.surfaceContainerLow,
                             MaterialTheme.colorScheme.surfaceContainerHigh,
                             morphBackgroundBlend(popoutP),
-                        )
+                        ).copy(alpha = morphBackgroundAlpha(popoutP))
                         Box(
                             Modifier.fillMaxSize().background(
                                 popoutPanelBg,
@@ -905,7 +1053,7 @@ fun HavenApp(vm: HavenViewModel) {
                             ThermostatPopoutContent(
                                 vm, anim.id,
                                 onDetails = {
-                                    dismissPopout()
+                                    dismissPopoutInstant()
                                     navigate(Screen.Thermostat(anim.id))
                                 },
                                 onClose = { dismissPopout() },
@@ -1010,7 +1158,7 @@ private fun ThermostatPopoutContent(
  * surface. [dragging] drives the dynamic handle (wide/thin while
  * entering or dragging, narrow/thick at rest). [sheetBounds] is the
  * surface's window rect for the camera rise origin on Details.
- * [onClose] dismisses instantly (instant return — no exit morph);
+ * [onClose] runs the smooth animated exit (see dismissSheet);
  * [onDetails] dismisses instantly for the sheet -> detail handoff
  * (the detail morph starts from the same card, so the card never
  * flashes back in between).
@@ -1123,11 +1271,19 @@ private fun EntityPopupSheetContent(
  * Live-only by design (his 2026-10-29 13:34 direction: never fall
  * back to the last recorded clip). Non-Ring cameras play their live
  * MJPEG stream exactly as before. Ring cameras negotiate a live
- * session in order: WebRTC (HA's own live routing, WS
- * camera/webrtc/offer) first, then HLS-live (WS camera/stream with a
- * 30s window — Ring session start is slow) — and on total live
- * failure show error + Retry. Recordings live on the long-press
- * clips timeline, never here.
+ * session in order: HLS-live FIRST (WS camera/stream with a 30s
+ * window — Ring session start is slow), then WebRTC (HA's own live
+ * routing, WS camera/webrtc/offer) as the fallback — and on total
+ * live failure show named-stage errors + the raw HA response
+ * diagnostic + a stream-support hint, with Retry. WebRTC is second,
+ * not first: the 2026-10-29 verdict video's "WebRTC: offer: empty
+ * answer" proved HA's Ring integration does not implement native
+ * WebRTC for this camera, so trying it first only burned 20s. The
+ * HLS request shape (type camera/stream + entity_id) and its
+ * result.url parse were verified against HA's documented response
+ * shape and are correct — a parse bug is ruled out; when HA returns
+ * no URL, the error UI now shows what HA actually said. Recordings
+ * live on the long-press clips timeline, never here.
  */
 @Composable
 private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgress: Float) {
@@ -1149,6 +1305,9 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     var webrtcPlaying by remember(cameraId, attempt) { mutableStateOf(false) }
     var hlsUrl by remember(cameraId, attempt) { mutableStateOf<String?>(null) }
     var hlsFailed by remember(cameraId, attempt) { mutableStateOf<String?>(null) }
+    // Raw HA response diagnostic for the HLS failure (error path
+    // only — never a URL, which carries a short-lived token).
+    var hlsDiagnostic by remember(cameraId, attempt) { mutableStateOf<String?>(null) }
     var hlsReady by remember(cameraId, attempt) { mutableStateOf(false) }
     var hlsPlayer by remember(cameraId, attempt) { mutableStateOf<ExoPlayer?>(null) }
     var renderer by remember(cameraId, attempt) { mutableStateOf<SurfaceViewRenderer?>(null) }
@@ -1178,8 +1337,14 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
             holder.view?.let { session.close(it) }
         }
     }
-    // Start the session once both the session and the renderer exist.
-    LaunchedEffect(webrtcSession, renderer) {
+    // Start the WebRTC session only once HLS has failed (WebRTC is
+    // the fallback path now, not the first attempt — see the KDoc
+    // above). The session object itself is created per attempt
+    // above but never started until this gate opens, and the
+    // renderer view below is only composed once the gate opens, so
+    // no WebRTC work happens while HLS is still negotiating.
+    LaunchedEffect(webrtcSession, renderer, hlsFailed) {
+        if (hlsFailed == null) return@LaunchedEffect
         val view = renderer ?: return@LaunchedEffect
         try {
             webrtcSession.start(
@@ -1189,35 +1354,44 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
             )
         } catch (e: Exception) {
             // Defense in depth beside the session's own init guard:
-            // any throw here becomes the named error UI + HLS-live
-            // fallback, never a crash dialog.
+            // any throw here becomes the named error UI + the other
+            // live path, never a crash dialog.
             if (webrtcFailed == null) webrtcFailed = "init: ${e.message ?: e.javaClass.simpleName}"
         }
     }
     // WebRTC negotiation guard: 20s for offer + answer + first track.
     // Without it a stalled negotiation would sit on "Loading" forever.
-    LaunchedEffect(cameraId, attempt) {
+    // Gated on HLS having failed, like the start effect above.
+    LaunchedEffect(cameraId, attempt, hlsFailed) {
+        if (hlsFailed == null) return@LaunchedEffect
         kotlinx.coroutines.delay(20_000)
         if (!webrtcPlaying && webrtcFailed == null) webrtcFailed = "negotiation timed out"
     }
-    // HLS-live, second path, only after WebRTC has failed. The 30s
-    // window (up from the old 10s) is deliberate: Ring SIP + ffmpeg
-    // session start is slow, and a short window was the most plausible
-    // cause of the earlier HLS failures. Late answers are dropped so
-    // no second player appears beside the first.
-    LaunchedEffect(cameraId, attempt, webrtcFailed) {
-        if (webrtcFailed == null) return@LaunchedEffect
+    // HLS-live, FIRST path. The 30s window is deliberate: Ring SIP +
+    // ffmpeg session start is slow, and a short window was the most
+    // plausible cause of the earlier HLS failures. Late answers are
+    // dropped so no second player appears beside the first. On
+    // failure the raw HA diagnostic is kept (see hlsDiagnostic) so
+    // the error UI can show what HA actually said instead of only
+    // "no stream URL".
+    LaunchedEffect(cameraId, attempt) {
         var answered = false
         val timeout = launch {
             kotlinx.coroutines.delay(30_000)
-            if (!answered) hlsFailed = "negotiation timed out"
+            if (!answered) {
+                hlsFailed = "negotiation timed out"
+                hlsDiagnostic = "no response within 30s"
+            }
         }
-        vm.client.requestHlsUrl(cameraId) { url ->
+        vm.client.requestHlsUrl(cameraId) { url, diagnostic ->
             if (answered) return@requestHlsUrl
             answered = true
             timeout.cancel()
             if (hlsFailed != null) return@requestHlsUrl
-            if (url != null) hlsUrl = url else hlsFailed = "no stream URL"
+            if (url != null) hlsUrl = url else {
+                hlsFailed = "no stream URL"
+                hlsDiagnostic = diagnostic
+            }
         }
     }
     DisposableEffect(cameraId, attempt, hlsUrl) {
@@ -1240,25 +1414,29 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     }
     val live = webrtcPlaying || hlsReady
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        // WebRTC renderer: always composed (the session needs it from
-        // the start), invisible until the first frame lands, so the
-        // connecting UI covers it meanwhile. Keyed on attempt so a
-        // Retry gets a fresh view (the old session released the old
-        // one); the holder feeds the session-close effect above.
-        androidx.compose.runtime.key(attempt) {
-            AndroidView(
-                factory = { ctx -> SurfaceViewRenderer(ctx) },
-                update = {
-                    rendererHolder.view = it
-                    renderer = it
+        // WebRTC renderer: composed ONLY once HLS has failed (WebRTC
+        // is the fallback path — no renderer, no session start while
+        // HLS is still negotiating). Invisible until the first frame
+        // lands, so the connecting UI covers it meanwhile. Keyed on
+        // attempt so a Retry gets a fresh view (the old session
+        // released the old one); the holder feeds the session-close
+        // effect above.
+        if (hlsFailed != null) {
+            androidx.compose.runtime.key(attempt) {
+                AndroidView(
+                    factory = { ctx -> SurfaceViewRenderer(ctx) },
+                    update = {
+                        rendererHolder.view = it
+                        renderer = it
+                    },
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    val s = 0.94f + 0.06f * enterProgress
+                    scaleX = s
+                    scaleY = s
+                    alpha = if (webrtcPlaying) 0.7f + 0.3f * enterProgress else 0f
                 },
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                val s = 0.94f + 0.06f * enterProgress
-                scaleX = s
-                scaleY = s
-                alpha = if (webrtcPlaying) 0.7f + 0.3f * enterProgress else 0f
-            },
-            )
+                )
+            }
         }
         // HLS-live player, only while it is the live path. The update
         // block re-binds the player on recomposition: without it the
@@ -1290,11 +1468,40 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
                     Text("Live view unavailable", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "WebRTC: $webrtcFailed\nHLS: $hlsFailed",
+                        "HLS: $hlsFailed\nWebRTC: $webrtcFailed",
                         color = Color.White.copy(alpha = 0.8f),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
                     )
+                    // Raw HA response diagnostic (error path only —
+                    // never a URL, which carries a short-lived token):
+                    // what HA actually said when the HLS request
+                    // failed, so the next verdict can pinpoint the
+                    // HA-side reason instead of only "no stream URL".
+                    if (hlsDiagnostic != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            hlsDiagnostic!!,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    // Stream-support hint from the entity itself: a
+                    // camera that does not advertise SUPPORT_STREAM
+                    // will not get an HLS URL no matter how correct
+                    // the request is.
+                    entity?.let { e ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Camera advertises stream support: " +
+                                if (cameraSupportsStream(e)) "yes" else "no" +
+                                (e.attrInt("supported_features")?.let { " (supported_features=$it)" } ?: ""),
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { attempt++ }) { Text("Retry") }
                     Spacer(Modifier.height(8.dp))
@@ -1311,8 +1518,8 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
                     ) { Text("◉", color = Color.White, fontSize = 28.sp) }
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        if (webrtcFailed == null) "Loading live view…"
-                        else "WebRTC unavailable — trying live stream…",
+                        if (hlsFailed == null) "Loading live view…"
+                        else "HLS unavailable — trying WebRTC…",
                         color = Color.White,
                         fontSize = 16.sp,
                     )

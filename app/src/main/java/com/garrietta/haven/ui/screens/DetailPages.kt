@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -407,11 +408,16 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
             }
         }
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Pills with generous internal padding and spacing (see
+        // PressablePillButton.contentPadding): the door shape above
+        // is untouched — only these controls change, from
+        // tightly-spaced text to proper spaced pills.
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             PressablePillButton(
                 onClick = { vm.callService("cover", "open_cover", entity.entityId) },
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Open", fontWeight = FontWeight.SemiBold)
             }
@@ -419,6 +425,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
                 onClick = { vm.callService("cover", "close_cover", entity.entityId) },
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Close", fontWeight = FontWeight.SemiBold)
             }
@@ -426,6 +433,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
                 onClick = { vm.callService("cover", "stop_cover", entity.entityId) },
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 contentColor = MaterialTheme.colorScheme.onSurface,
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Stop", fontWeight = FontWeight.SemiBold)
             }

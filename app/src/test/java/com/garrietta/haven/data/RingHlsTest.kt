@@ -59,4 +59,55 @@ class RingHlsTest {
         )
         assertNull(parseHlsStreamUrl(blankUrl))
     }
+
+    @Test
+    fun hlsDiagnostic_nullOnSuccess() {
+        // The success path shows nothing, and the URL itself is never
+        // printed (it carries a short-lived token).
+        val ok = JSONObject(
+            "{\"id\": 7, \"type\": \"result\", \"success\": true, " +
+                "\"result\": {\"url\": \"/api/hls/abc123/playlist.m3u8\"}}",
+        )
+        assertNull(diagnoseHlsStreamMessage(ok))
+    }
+
+    @Test
+    fun hlsDiagnostic_namesHaError() {
+        // The 2026-10-29 verdict video's "HLS: no stream URL" hid
+        // this: the old code discarded HA's error entirely.
+        val failed = JSONObject(
+            "{\"id\": 7, \"type\": \"result\", \"success\": false, " +
+                "\"error\": {\"code\": \"unknown_command\", \"message\": \"unknown command\"}}",
+        )
+        assertEquals("HA error unknown_command: unknown command", diagnoseHlsStreamMessage(failed))
+        val bareError = JSONObject("{\"success\": false, \"error\": {}}")
+        assertEquals("HA error", diagnoseHlsStreamMessage(bareError))
+    }
+
+    @Test
+    fun hlsDiagnostic_successWithoutUrl() {
+        val noUrl = JSONObject(
+            "{\"id\": 7, \"type\": \"result\", \"success\": true, \"result\": {}}",
+        )
+        assertEquals("success, but result had no url", diagnoseHlsStreamMessage(noUrl))
+    }
+
+    @Test
+    fun hlsDiagnostic_unexpectedShapeTruncated() {
+        val weird = JSONObject("{\"id\": 7, \"type\": \"result\"}")
+        val d = diagnoseHlsStreamMessage(weird)
+        assertTrue(d != null && d.startsWith("unexpected response: "))
+        assertTrue(d!!.length <= "unexpected response: ".length + 240)
+    }
+
+    @Test
+    fun cameraSupportsStream_readsBit2() {
+        // SUPPORT_STREAM bit only: bit 1 alone is not stream support,
+        // and a missing attribute claims nothing.
+        assertTrue(cameraSupportsStream(entity(mapOf("supported_features" to 2))))
+        assertTrue(cameraSupportsStream(entity(mapOf("supported_features" to 3))))
+        assertFalse(cameraSupportsStream(entity(mapOf("supported_features" to 1))))
+        assertFalse(cameraSupportsStream(entity(mapOf("supported_features" to 0))))
+        assertFalse(cameraSupportsStream(entity()))
+    }
 }

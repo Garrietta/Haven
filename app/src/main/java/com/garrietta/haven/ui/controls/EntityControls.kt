@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -176,6 +177,14 @@ fun PressablePillButton(
     height: Dp = 48.dp,
     containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
     contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer,
+    // Internal padding around the content. Zero by default (steppers
+    // and media transports size themselves by width/height and need
+    // none); text-label pills pass generous padding so the pill
+    // reads as a button, not bare text (the garage Open/Close/Stop
+    // controls, 2026-10-29 verdict video: "expand these buttons so
+    // they're not so tightly spaced — there should be a nice padding
+    // around the text").
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable RowScope.() -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -195,7 +204,11 @@ fun PressablePillButton(
             .clickable(interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, content = content)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(contentPadding),
+            content = content,
+        )
     }
 }
 

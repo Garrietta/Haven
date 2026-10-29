@@ -370,9 +370,21 @@ fun ThermostatHero(
  * Kinetic counter typography: whole degrees — the standing 1-degree rule
  * overrules the spec's %.1f format — sliding + fading + scaling by
  * direction, with tabular figures so digits never jitter.
+ *
+ * The default size is the DUAL-number size (the single-setpoint call
+ * site passes 72.sp explicitly). Dual numbers sit inside the dial's
+ * ring, so their width must clear the track's inner edge: at 64.sp
+ * the "67° + 16dp + 70°" row spans ~208dp (half-width ~104dp),
+ * past the 260dp pop-out dial's ~102dp inner edge at rest — and the
+ * kinetic scale-out (1.15x) pushes it to ~239dp, a definite overlap
+ * with the bar (the 2026-10-29 verdict video's circled 67°/70°).
+ * At 52.sp the row spans ~169dp (~194dp at peak scale), clearing the
+ * bar on both the 260dp pop-out dial and the 300dp page dial (whose
+ * inner edge is ~122dp). The single number stays 72.sp: ~108dp wide,
+ * no overlap.
  */
 @Composable
-private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 64.sp) {
+private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 52.sp) {
     val text = value.toDouble().formatTemp()
     AnimatedContent(
         targetState = text,

@@ -19,11 +19,17 @@ package com.garrietta.haven.data
  * own frontend plays when it shows this entity live (Garrett confirmed the
  * entity serves live, and that it is the SAME entity id Haven uses — the
  * difference was never the entity, it was the path). CameraFullscreen
- * therefore tries HLS first for Ring and falls back to the MJPEG recording
- * with the "Last recording" label when HA cannot stream it. WebRTC remains
- * the fallback if HLS provably cannot deliver, and is NOT built here: a
- * failed HLS attempt must be reported honestly, not silently replaced.
- * One endpoint, all four curated cameras; only the presentation differs.
+ * therefore tries HLS-live FIRST for Ring (30s window — Ring session
+ * start is slow), then WebRTC (WS camera/webrtc/offer) as the fallback,
+ * and on total live failure shows named-stage errors + the raw HA
+ * response diagnostic — never a recording, never a silent still
+ * (live-only per his 2026-10-29 13:34 direction). WebRTC is second,
+ * not first: the 2026-10-29 verdict video's "WebRTC: offer: empty
+ * answer" proved HA's Ring integration does not implement native
+ * WebRTC for this camera (the WS message carries no `result` object,
+ * i.e. the command was rejected), so chasing it first only burned
+ * 20s before the real path was tried. One endpoint, all four curated
+ * cameras; only the presentation differs.
  *
  * [MjpegParser] is pure byte handling (no Android types) so it is unit
  * tested on the JVM; decoding to Bitmap happens in [HaClient.streamCamera].
@@ -60,6 +66,44 @@ fun parseHlsStreamUrl(msg: org.json.JSONObject): String? {
     if (!msg.optBoolean("success", false)) return null
     return msg.optJSONObject("result")?.optString("url")?.ifEmpty { null }
 }
+
+/**
+ * Human-readable diagnosis of a WS `camera/stream` response that did
+ * NOT yield a URL (see [parseHlsStreamUrl]). Pure (JSONObject only)
+ * so it is unit tested on the JVM. Returns null when the message DID
+ * yield a URL: the success path shows nothing, and the URL itself is
+ * never printed anywhere (it carries a short-lived token). Otherwise
+ * it names what HA actually said: its error code/message when the
+ * message carries an `error` object, "success, but result had no url"
+ * when success=true with no URL, or the truncated raw JSON for
+ * anything else. This closes the diagnostic gap behind the 2026-10-29
+ * verdict video's "HLS: no stream URL": the old code discarded HA's
+ * error, so a rejected command and a genuinely unstreamable camera
+ * looked identical. The fullscreen error UI shows this line (error
+ * path only), so the next verdict can pinpoint the HA-side reason.
+ */
+fun diagnoseHlsStreamMessage(msg: org.json.JSONObject): String? {
+    if (parseHlsStreamUrl(msg) != null) return null
+    val error = msg.optJSONObject("error")
+    if (error != null) {
+        val code = error.optString("code").takeIf { it.isNotEmpty() }
+        val message = error.optString("message").takeIf { it.isNotEmpty() }
+        return "HA error" + (code?.let { " $it" } ?: "") + (message?.let { ": $it" } ?: "")
+    }
+    if (msg.optBoolean("success", false)) return "success, but result had no url"
+    return "unexpected response: ${msg.toString().take(240)}"
+}
+
+/**
+ * Whether HA's camera entity advertises stream support: the
+ * SUPPORT_STREAM bit (2) of `supported_features`. HA's frontend
+ * gates HLS eligibility on it, so it is shown as a hint on the
+ * fullscreen error UI — a camera that does not advertise stream
+ * support will not get an HLS URL no matter how correct the request
+ * is. Missing attribute -> false (no claim made).
+ */
+fun cameraSupportsStream(entity: HaEntity): Boolean =
+    (entity.attrInt("supported_features") ?: 0) and 2 != 0
 
 /** What the fullscreen viewer shows: connecting, live frames, or an explicit failure. */
 sealed class CameraStreamState {

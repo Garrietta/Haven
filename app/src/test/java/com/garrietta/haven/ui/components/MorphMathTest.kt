@@ -172,15 +172,38 @@ class MorphMathTest {
     }
 
     @Test
-    fun morphBackgroundBlend_clampsAndOvershoot() {
-        assertEquals(0f, morphBackgroundBlend(-1f), 0.001f)
-        assertEquals(1f, morphBackgroundBlend(1.5f), 0.001f)
-        assertEquals(1f, morphBackgroundBlend(1.00493f), 0.001f)
-        var prev = 0f
-        for (p in listOf(0f, 0.1f, 0.15f, 0.2f, 0.3f, 0.5f, 1f)) {
-            val b = morphBackgroundBlend(p)
-            assertEquals(true, b >= prev)
-            prev = b
-        }
+    fun morphCardAlpha_fadesOutOverFirstFortyPercent() {
+        // Container-transform card handoff: visible at morph start,
+        // gone once the surface is opaque; reversed automatically on
+        // exit (the card fades back in over the last 40% of the
+        // return, whole — never staged, never a snap).
+        assertEquals(1f, morphCardAlpha(0f), 0.001f)
+        assertEquals(0.5f, morphCardAlpha(0.2f), 0.001f)
+        assertEquals(0f, morphCardAlpha(0.4f), 0.001f)
+        assertEquals(0f, morphCardAlpha(1f), 0.001f)
+    }
+
+    @Test
+    fun morphCardAlpha_clampsAndOvershoot() {
+        assertEquals(1f, morphCardAlpha(-1f), 0.001f)
+        assertEquals(0f, morphCardAlpha(1.5f), 0.001f)
+        assertEquals(0f, morphCardAlpha(1.00493f), 0.001f)
+    }
+
+    @Test
+    fun morphBackgroundAlpha_rampsInOverFirstThirtyFivePercent() {
+        // Surface background: transparent at the card, opaque once
+        // grown — no solid rect ever replaces the card in one frame.
+        assertEquals(0f, morphBackgroundAlpha(0f), 0.001f)
+        assertEquals(0.5f, morphBackgroundAlpha(0.175f), 0.001f)
+        assertEquals(1f, morphBackgroundAlpha(0.35f), 0.001f)
+        assertEquals(1f, morphBackgroundAlpha(1f), 0.001f)
+    }
+
+    @Test
+    fun morphBackgroundAlpha_clampsAndOvershoot() {
+        assertEquals(0f, morphBackgroundAlpha(-1f), 0.001f)
+        assertEquals(1f, morphBackgroundAlpha(1.5f), 0.001f)
+        assertEquals(1f, morphBackgroundAlpha(1.00493f), 0.001f)
     }
 }

@@ -931,14 +931,18 @@ class HaClient(
      * is down, so callers must time out and fall back (see
      * CameraFullscreen). This is the Ring true-live attempt: HA's own
      * frontend plays the same entity live through this path, while the
-     * MJPEG proxy serves its last motion recording.
+     * MJPEG proxy serves its last motion recording. The callback also
+     * delivers [diagnoseHlsStreamMessage]'s line (null on success):
+     * the old signature dropped HA's error, so a rejected command and
+     * a genuinely unstreamable camera looked identical — the
+     * diagnostic is what the fullscreen error UI shows.
      */
-    fun requestHlsUrl(entityId: String, onResult: (String?) -> Unit) {
-        val post = { url: String? ->
-            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(url) }
+    fun requestHlsUrl(entityId: String, onResult: (url: String?, diagnostic: String?) -> Unit) {
+        val post = { url: String?, diagnostic: String? ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(url, diagnostic) }
         }
         sendCommand("camera/stream", build = { it.put("entity_id", entityId) }, onResult = { msg ->
-            post(parseHlsStreamUrl(msg))
+            post(parseHlsStreamUrl(msg), diagnoseHlsStreamMessage(msg))
         })
     }
 
