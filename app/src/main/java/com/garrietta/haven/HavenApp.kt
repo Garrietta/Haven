@@ -487,7 +487,11 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     ModalBottomSheet(onDismissRequest = vm::closePopup) {
         Column(
             Modifier.fillMaxWidth()
-                .onGloballyPositioned { sheetBounds = it.boundsInWindow() }
+                .onGloballyPositioned {
+                    val pos = it.positionInWindow()
+                    val sz = it.size
+                    sheetBounds = androidx.compose.ui.geometry.Rect(pos.x, pos.y, pos.x + sz.width, pos.y + sz.height)
+                }
                 .padding(horizontal = 16.dp).padding(bottom = 24.dp),
         ) {
             // Koda-style handle: a centered expressive pill, not a bare line.

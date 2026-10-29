@@ -73,7 +73,15 @@ fun RisingPageContent(
     val radius = 28.dp * (1f - progress)
     Box(
         modifier
-            .onGloballyPositioned { pageBounds = it.boundsInWindow() }
+            .onGloballyPositioned {
+                // LayoutCoordinates has no boundsInWindow (only
+                // boundsInParent/boundsInRoot): build the window rect from
+                // the window position + size. Origin and page bounds are
+                // both computed this way, so the relative math holds.
+                val pos = it.positionInWindow()
+                val sz = it.size
+                pageBounds = Rect(pos.x, pos.y, pos.x + sz.width, pos.y + sz.height)
+            }
             .graphicsLayer {
                 this.scaleX = if (active) scaleX else 1f
                 this.scaleY = if (active) scaleY else 1f

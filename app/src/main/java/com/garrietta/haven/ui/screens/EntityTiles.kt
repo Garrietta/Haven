@@ -5,6 +5,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -168,8 +170,8 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     // The tile's on-screen bounds become the page origin: the full page
     // rises out of exactly this rect and settles back toward it on back.
     var tileBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val pressed by androidx.compose.foundation.interaction.collectIsPressedAsState(interactionSource)
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
     val reduceMotion = com.garrietta.haven.ui.components.LocalReduceMotion.current
     val pressScale by androidx.compose.animation.core.animateFloatAsState(
         if (pressed) 0.97f else 1f,
@@ -184,7 +186,11 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             MaterialTheme.colorScheme.surfaceContainerLow
         },
         modifier = Modifier.fillMaxWidth()
-            .onGloballyPositioned { tileBounds = it.boundsInWindow() }
+            .onGloballyPositioned {
+                val pos = it.positionInWindow()
+                val sz = it.size
+                tileBounds = androidx.compose.ui.geometry.Rect(pos.x, pos.y, pos.x + sz.width, pos.y + sz.height)
+            }
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .combinedClickable(
                 interactionSource = interactionSource,
