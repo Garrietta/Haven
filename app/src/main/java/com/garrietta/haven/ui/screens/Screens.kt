@@ -43,6 +43,7 @@ import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.DiscoverySource
+import com.garrietta.haven.data.isLightShownOnHome
 import com.garrietta.haven.isLive
 import com.garrietta.haven.ui.controls.EntityControlCard
 import java.util.Calendar
@@ -219,18 +220,33 @@ fun LoginScreen(vm: HavenViewModel) {
 fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val connection by vm.connection.collectAsState()
+    // Read so Home editor saves recompose this screen from the store.
+    @Suppress("UNUSED_VARIABLE")
+    val homePrefsVersion = vm.homePrefsVersion
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val greeting = when (hour) {
+    val autoGreeting = when (hour) {
         in 0..4 -> "Up late"
         in 5..11 -> "Good morning"
         in 12..17 -> "Good afternoon"
         else -> "Good evening"
     }
+    // A custom welcome message replaces the greeting verbatim; empty keeps
+    // the automatic time-based greeting exactly as before.
+    val customWelcome = vm.settingsStore.homeWelcomeMessage
+    val greeting = if (customWelcome.isBlank()) autoGreeting else customWelcome
+    val hiddenSections = vm.settingsStore.homeHiddenSections
+    val showSection: (String) -> Boolean = { it !in hiddenSections }
     val entities = states.values.sortedBy { it.friendlyName }
     val weather = entities.firstOrNull { it.domain == "weather" }
     val homePeople = entities.filter { (it.domain == "person" || it.domain == "device_tracker") && it.state == "home" }
     val nowPlaying = entities.filter { it.domain == "media_player" && it.state == "playing" }
-    val lightsOn = entities.filter { it.domain == "light" && it.state == "on" }
+    // Home shows only the lights the user (or the default rule) allows:
+    // indicator lights are excluded unless explicitly re-added, and "All
+    // off" below therefore touches displayed lights only.
+    val lightOverrides = vm.settingsStore.homeLightOverrides()
+    val lightsOn = entities.filter {
+        it.domain == "light" && it.state == "on" && isLightShownOnHome(it, lightOverrides)
+    }
     val alerts = entities.filter {
         it.domain == "binary_sensor" && it.state == "on" &&
             (it.attrString("device_class") in listOf("problem", "safety", "smoke", "co", "moisture", "tamper", "gas"))
@@ -239,8 +255,10 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     // them exactly: one column folded, two side-by-side columns unfolded.
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            Spacer(Modifier.height(16.dp))
-            Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            if (showSection("greeting")) {
+                Spacer(Modifier.height(16.dp))
+                Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            }
             if (!connection.isLive()) {
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -257,7 +275,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
-        if (weather != null) {
+        if (showSection("weather") && weather != null) {
             item {
                 Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
@@ -267,7 +285,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
     }
     val homeSection: LazyListScope.() -> Unit = {
-        if (homePeople.isNotEmpty()) {
+        if (showSection("home") && homePeople.isNotEmpty()) {
             item {
                 Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(4.dp))
@@ -277,7 +295,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
     }
     val playingSection: LazyListScope.() -> Unit = {
-        if (nowPlaying.isNotEmpty()) {
+        if (showSection("playing") && nowPlaying.isNotEmpty()) {
             item {
                 Text("Now playing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
@@ -290,7 +308,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
     }
     val lightsSection: LazyListScope.() -> Unit = {
-        if (lightsOn.isNotEmpty()) {
+        if (showSection("lights") && lightsOn.isNotEmpty()) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -314,7 +332,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
     }
     val alertsSection: LazyListScope.() -> Unit = {
-        if (alerts.isNotEmpty()) {
+        if (showSection("alerts") && alerts.isNotEmpty()) {
             item {
                 Text("Needs attention", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(8.dp))
@@ -408,6 +426,16 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(8.dp))
             Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+            Spacer(Modifier.height(24.dp))
+            Text("Home page", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { navigate(Screen.HomeEditor) }) { Text("Manage home page") }
             Spacer(Modifier.height(24.dp))
             Text("Browse", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))

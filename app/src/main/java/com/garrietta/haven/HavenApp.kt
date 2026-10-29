@@ -104,6 +104,7 @@ import com.garrietta.haven.ui.screens.LoginScreen
 import com.garrietta.haven.ui.screens.SceneBuilderScreen
 import com.garrietta.haven.ui.screens.ScriptBuilderScreen
 import com.garrietta.haven.ui.screens.SearchScreen
+import com.garrietta.haven.ui.screens.HomeEditorScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.TabManagerScreen
@@ -270,6 +271,7 @@ fun HavenApp(vm: HavenViewModel) {
                     )
                     is Screen.UserTab -> UserTabScreen(vm, screen.tabId, navigate)
                     Screen.TabManager -> TabManagerScreen(vm, goBack, navigate)
+                    Screen.HomeEditor -> HomeEditorScreen(vm, goBack)
                     is Screen.EntityDetail -> EntityDetailScreen(vm, screen.entityId, goBack)
                     is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
                     Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)

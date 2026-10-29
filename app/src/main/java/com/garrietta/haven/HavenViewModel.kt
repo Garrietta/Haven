@@ -46,6 +46,7 @@ sealed class Screen {
     /** A user-created tab; Home and Settings are the built-in tabs. */
     data class UserTab(val tabId: String) : Screen()
     data object TabManager : Screen()
+    data object HomeEditor : Screen()
     data class EntityDetail(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()
     data object DashboardEdit : Screen()
@@ -65,6 +66,16 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /** User-created tabs, in pill-bar order. Loaded synchronously so the app can open on the first tab. */
     var userTabs by mutableStateOf<List<UserTab>>(tabsStore.loadTabs())
         private set
+
+    /**
+     * Bumped whenever the Home editor saves, so the Today screen recomposes
+     * from the store even when it is still in the composition. Returning
+     * from the editor recomposes Today anyway; this covers every other path.
+     */
+    var homePrefsVersion by mutableStateOf(0)
+        private set
+
+    fun bumpHomePrefs() { homePrefsVersion++ }
 
     val connection = client.connection
     val states = client.states

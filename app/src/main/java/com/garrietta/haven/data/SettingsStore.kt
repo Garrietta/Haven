@@ -26,4 +26,41 @@ class SettingsStore(context: Context) {
     var hasSelectedDashboard: Boolean
         get() = prefs.getBoolean("has_selected_dashboard", false)
         set(value) = prefs.edit().putBoolean("has_selected_dashboard", value).apply()
+
+    // ---- Home page customization (Settings -> Manage home page) ----
+
+    /** Custom welcome message shown on Home in place of the greeting. Empty = the automatic time-based greeting. */
+    var homeWelcomeMessage: String
+        get() = prefs.getString("home_welcome_message", "") ?: ""
+        set(value) = prefs.edit().putString("home_welcome_message", value).apply()
+
+    /** Keys of the Home sections (see HOME_SECTIONS) the user hid. Empty = show everything. */
+    var homeHiddenSections: Set<String>
+        get() = prefs.getStringSet("home_hidden_sections", emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet("home_hidden_sections", value.toSet()).apply()
+
+    /** Explicit per-light Home visibility choices (entity id -> shown), as one JSON object string. */
+    fun homeLightOverrides(): Map<String, Boolean> {
+        val raw = prefs.getString("home_light_overrides_json", null) ?: return emptyMap()
+        return try {
+            val obj = org.json.JSONObject(raw)
+            val out = mutableMapOf<String, Boolean>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                out[key] = obj.optBoolean(key)
+            }
+            out
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    /** Records one explicit per-light choice; it persists and always beats the default exclusion rule. */
+    fun setHomeLightOverride(entityId: String, shown: Boolean) {
+        val obj = org.json.JSONObject()
+        for ((id, value) in homeLightOverrides()) obj.put(id, value)
+        obj.put(entityId, shown)
+        prefs.edit().putString("home_light_overrides_json", obj.toString()).apply()
+    }
 }
