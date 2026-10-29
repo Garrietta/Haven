@@ -51,7 +51,9 @@ class OptimisticStateGuardTest {
         val guard = OptimisticStateGuard()
         guard.expect("light.lamp", "off", nowMs = 1000L)
         guard.expect("light.lamp", "on", nowMs = 1200L)
-        assertFalse(guard.shouldDrop("light.lamp", "on", nowMs = 1500L))
+        // The newest expectation governs: "off" now contradicts it.
         assertTrue(guard.shouldDrop("light.lamp", "off", nowMs = 1500L))
+        // And "on" confirms it.
+        assertFalse(guard.shouldDrop("light.lamp", "on", nowMs = 1600L))
     }
 }
