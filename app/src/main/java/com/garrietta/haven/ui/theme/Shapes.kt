@@ -26,10 +26,10 @@ import kotlin.math.sin
  */
 enum class ExpressiveKind { SUNNY, FLOWER, BUN, BURST, WAVE, CLOUD }
 
-private fun polygonVertices(n: Int, radiusAt: (Int, Float) -> Float): FloatArray {
+private fun polygonVertices(n: Int, startDeg: Float = 0f, radiusAt: (Int, Float) -> Float): FloatArray {
     val out = FloatArray(n * 2)
     for (i in 0 until n) {
-        val angle = (2 * Math.PI * i / n).toFloat()
+        val angle = (2 * Math.PI * i / n).toFloat() + Math.toRadians(startDeg.toDouble()).toFloat()
         val r = radiusAt(i, angle)
         out[i * 2] = r * cos(angle)
         out[i * 2 + 1] = r * sin(angle)
@@ -84,7 +84,74 @@ fun polygonShape(kind: ExpressiveKind): Shape = object : Shape {
 }
 
 /**
- * Draws a live morph between two expressive polygons. [progress] 0 = [from], 1 = [to].
+ * State-driven polygons for the dynamic badging table: each domain has an
+ * idle shape and an active shape, and badges morph between them on state
+ * change (see StateShapeBadge). Idle shapes are calm and closed; active
+ * shapes bloom, spike, or wave.
+ */
+enum class StateShape { HEXAGON, SCALLOP12, SQUIRCLE, ARC_WAVE, SHIELD, NOTCHED_DIAMOND, STAR8, OCTAGON, SUNBURST, CLOUD_POLY }
+
+fun stateShapePolygon(shape: StateShape): RoundedPolygon = when (shape) {
+    // Smooth hexagon, corner radius 0.35 (lights off, etc.).
+    StateShape.HEXAGON -> RoundedPolygon(
+        polygonVertices(6) { _, _ -> 1f },
+        rounding = CornerRounding(0.35f, 0.6f),
+    )
+    // 12-lobed scallop (lights on, blooming).
+    StateShape.SCALLOP12 -> RoundedPolygon(
+        polygonVertices(48) { _, a -> 0.86f + 0.14f * cos(12 * a) },
+        rounding = CornerRounding(0.30f, 0.6f),
+    )
+    // Squircle: a rounded square, corners at 45 degrees, 32% rounding.
+    StateShape.SQUIRCLE -> RoundedPolygon(
+        polygonVertices(4, 45f) { _, _ -> 1f },
+        rounding = CornerRounding(0.32f, 0.6f),
+    )
+    // Circular arc wave (thermostat active): a wavy ring.
+    StateShape.ARC_WAVE -> RoundedPolygon(
+        polygonVertices(48) { _, a -> 0.90f + 0.10f * sin(8 * a) },
+        rounding = CornerRounding(0.30f, 0.6f),
+    )
+    // Inverted shield: flat top, point at the bottom (garage closed).
+    StateShape.SHIELD -> RoundedPolygon(
+        floatArrayOf(
+            -0.85f, -0.9f,
+            0.85f, -0.9f,
+            0.85f, 0.1f,
+            0f, 0.95f,
+            -0.85f, 0.1f,
+        ),
+        rounding = CornerRounding(0.25f, 0.6f),
+    )
+    // Notched diamond (garage open): a diamond with cut-in waists.
+    StateShape.NOTCHED_DIAMOND -> RoundedPolygon(
+        polygonVertices(8) { i, _ -> if (i % 2 == 0) 1f else 0.55f },
+        rounding = CornerRounding(0.25f, 0.6f),
+    )
+    // 8-point star (media playing): alternating long/short points.
+    StateShape.STAR8 -> RoundedPolygon(
+        polygonVertices(16) { i, _ -> if (i % 2 == 0) 1f else 0.72f },
+        rounding = CornerRounding(0.30f, 0.6f),
+    )
+    // Rounded octagon (weather/sensor idle).
+    StateShape.OCTAGON -> RoundedPolygon(
+        polygonVertices(8) { _, _ -> 1f },
+        rounding = CornerRounding(0.35f, 0.6f),
+    )
+    // 12-point sunburst (weather active, clear day) — mirrors SUNNY.
+    StateShape.SUNBURST -> RoundedPolygon(
+        polygonVertices(12) { i, _ -> if (i % 2 == 0) 1f else 0.70f },
+        rounding = CornerRounding(0.30f, 0.6f),
+    )
+    // Soft five-lobe cloud (weather active, cloudy) — mirrors CLOUD.
+    StateShape.CLOUD_POLY -> RoundedPolygon(
+        polygonVertices(24) { _, a -> 0.88f + 0.12f * cos(5 * a) },
+        rounding = CornerRounding(0.38f, 0.6f),
+    )
+}
+
+/**
+ * Draws a live morph between two state polygons. [progress] 0 = [from], 1 = [to].
  * Used for toggles that change shape with state (e.g. a light bulb blooming into a sun).
  */
 @Composable
@@ -95,8 +162,26 @@ fun MorphShape(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    MorphPolygon(
+        from = expressivePolygon(from),
+        to = expressivePolygon(to),
+        progress = progress,
+        color = color,
+        modifier = modifier,
+    )
+}
+
+/** The same live morph, for state polygons directly. */
+@Composable
+fun MorphPolygon(
+    from: RoundedPolygon,
+    to: RoundedPolygon,
+    progress: Float,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
     Canvas(modifier) {
-        val morph = Morph(expressivePolygon(from), expressivePolygon(to))
+        val morph = Morph(from, to)
         val scale = min(size.width, size.height) / 2f
         val cx = size.width / 2f
         val cy = size.height / 2f

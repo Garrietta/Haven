@@ -237,4 +237,53 @@ class ThermostatLogicTest {
         )
         assertEquals(50.0, findOutdoorTemperature(celsius, climate)!!, 0.0)
     }
+
+    // -- The spec's 240-degree dial (ThermostatDial). The 270-degree tests
+    // above are untouched; these cover only the new dial. --
+
+    @Test
+    fun dial240MapsEndpointsMidpointAndGap() {
+        val range = 50f..90f
+        assertEquals(50f, dial240ValueFromAngle(150f, range)!!, 0.001f)
+        assertEquals(70f, dial240ValueFromAngle(270f, range)!!, 0.001f)
+        assertEquals(90f, dial240ValueFromAngle(30f, range)!!, 0.001f)
+        assertEquals(90f, dial240ValueFromAngle(390f, range)!!, 0.001f)
+        // The 120-degree bottom gap (30 -> 150 through 90) maps to nothing.
+        assertNull(dial240ValueFromAngle(90f, range))
+        assertNull(dial240ValueFromAngle(100f, range))
+        assertNull(dial240ValueFromAngle(140f, range))
+    }
+
+    @Test
+    fun dial240AngleForValueRoundTrips() {
+        val range = 50f..90f
+        assertEquals(150f, dial240AngleForValue(50f, range), 0.001f)
+        assertEquals(270f, dial240AngleForValue(70f, range), 0.001f)
+        assertEquals(390f, dial240AngleForValue(90f, range), 0.001f)
+        assertEquals(70f, dial240ValueFromAngle(dial240AngleForValue(70f, range), range)!!, 0.001f)
+    }
+
+    @Test
+    fun rubberBandPassesInsideValuesAndDampsOvershoot() {
+        val range = 50f..90f
+        assertEquals(70f, rubberBandedValue(70f, range), 0.001f)
+        assertEquals(50f, rubberBandedValue(50f, range), 0.001f)
+        // 10 degrees past the top end damps to 3.5 past it.
+        assertEquals(93.5f, rubberBandedValue(100f, range), 0.001f)
+        // 10 degrees below the bottom end damps to 3.5 below it.
+        assertEquals(46.5f, rubberBandedValue(40f, range), 0.001f)
+    }
+
+    @Test
+    fun dial240SnapsToWholeDegreesUnderneath() {
+        // The dial drags continuously, but the applied value snaps (the 1-degree
+        // rule): a raw 67.4 from the angle snaps to 67, and the clamp pair
+        // still holds heat <= cool.
+        val range = 50f..90f
+        val raw = dial240ValueFromAngle(254.4f, range)!!
+        assertEquals(67.4f, raw, 0.01f)
+        assertEquals(67.0, snapToDegree(raw.toDouble()), 0.001)
+        assertEquals(67.0, clampHeatSetpoint(67.0, 50.0, 70.0), 0.001)
+        assertEquals(70.0, clampHeatSetpoint(72.0, 50.0, 70.0), 0.001)
+    }
 }

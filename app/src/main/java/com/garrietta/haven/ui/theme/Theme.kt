@@ -1,7 +1,10 @@
 package com.garrietta.haven.ui.theme
 
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -15,6 +18,30 @@ import androidx.compose.ui.platform.LocalContext
 
 /** The house spring: bouncy, shared by every animated control in Haven. */
 fun <T> havenSpring(): FiniteAnimationSpec<T> = spring(stiffness = 380f, dampingRatio = 0.62f)
+
+/**
+ * The spec's motion foundation (ARCHITECTURE AND SYSTEM FOUNDATIONS).
+ * havenSpring (380/0.62) is kept for existing call sites — it is the
+ * bouncy spring to within 20 stiffness — while new code uses these
+ * named specs so the language stays explicit and greppable.
+ */
+/** Emphasized decelerate: standard entrances, sheets, expands. */
+val EmphasizedDecelerate: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f)
+
+/** Emphasized accelerate: exits, dismissals. */
+val EmphasizedAccelerate: Easing = CubicBezierEasing(0.3f, 0.0f, 0.8f, 0.15f)
+
+/** Spring Bouncy: the house feel, named. */
+fun <T> springBouncy(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow)
+
+/** Spring Snappy: tighter, for quick controls. */
+fun <T> springSnappy(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMedium)
+
+/** Morph spring: shape and bounds morphs. */
+fun <T> springMorph(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.72f, stiffness = 320f)
 
 /**
  * The sheet-rise spring, matched to the recorded Koda mini-player

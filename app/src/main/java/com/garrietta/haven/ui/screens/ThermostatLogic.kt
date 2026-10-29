@@ -130,6 +130,53 @@ fun dialValueFromAngle(deg: Float, range: ClosedFloatingPointRange<Float>): Floa
         .coerceIn(range)
 }
 
+// ---------------------------------------------------------------------------
+// The spec's 240-degree dial (ThermostatDial). The shared Dial above stays
+// at 270 degrees — its tests are untouched — while this dial carries the
+// spec: a 240-degree sweep with a 120-degree gap centered on the bottom
+// (start 150 degrees, end 390 degrees = 30 degrees), dual pill thumbs,
+// rubber-banding past the ends, and 1-degree snapping underneath.
+// ---------------------------------------------------------------------------
+
+/** Start angle of the 240-degree sweep, in screen degrees (0 = east, clockwise). */
+const val DIAL240_START_DEG = 150f
+
+/** Sweep of the 240-degree dial; the remaining 120 degrees is the bottom gap. */
+const val DIAL240_SWEEP_DEG = 240f
+
+/**
+ * Maps a screen angle (degrees, 0 = east, clockwise, y down) to a dial value
+ * on the 240-degree sweep, or null when the angle falls in the bottom gap.
+ * Unlike the 270-degree dial, this does NOT clamp: a gap angle is a gap
+ * angle, and the caller keeps the previous value.
+ */
+fun dial240ValueFromAngle(deg: Float, range: ClosedFloatingPointRange<Float>): Float? {
+    val rel = (deg - DIAL240_START_DEG + 360f) % 360f
+    if (rel > DIAL240_SWEEP_DEG) return null
+    return range.start + (rel / DIAL240_SWEEP_DEG) * (range.endInclusive - range.start)
+}
+
+/** The screen angle for a dial value on the 240-degree sweep. */
+fun dial240AngleForValue(value: Float, range: ClosedFloatingPointRange<Float>): Float {
+    val fraction = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+    return DIAL240_START_DEG + fraction * DIAL240_SWEEP_DEG
+}
+
+/**
+ * Rubber-banding past the dial ends: values inside the range pass through
+ * unchanged; overshoot past either end is damped to 35% of the excess, so
+ * the thumb resists instead of pinning hard. The APPLIED value is still
+ * snapped to whole degrees and clamped (the 1-degree rule stands); only the
+ * drawn thumb uses the rubber-banded value, so the needle visibly strains
+ * against the ends while the finger goes past them.
+ */
+fun rubberBandedValue(raw: Float, range: ClosedFloatingPointRange<Float>): Float =
+    when {
+        raw < range.start -> range.start + (raw - range.start) * 0.35f
+        raw > range.endInclusive -> range.endInclusive + (raw - range.endInclusive) * 0.35f
+        else -> raw
+    }
+
 /** Where a dial tap landed, in pure pixel geometry (no Compose types). */
 enum class DialTapZone { INSIDE, RING, OUTSIDE }
 

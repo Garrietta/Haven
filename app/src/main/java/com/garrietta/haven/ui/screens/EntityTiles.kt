@@ -53,7 +53,9 @@ import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.lightContainerColor
 import com.garrietta.haven.ui.components.shapeForDomain
+import com.garrietta.haven.ui.components.sharedCardBounds
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
@@ -186,12 +188,14 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     Surface(
         shape = RoundedCornerShape(28.dp),
         color = if (entity.domain == "light" && entity.state == "on") {
-            accent.copy(alpha = 0.22f)
+            // Lit tiles tint across secondary -> tertiary by color temp.
+            lightContainerColor(MaterialTheme.colorScheme, entity.attrInt("color_temp_kelvin"), true)
         } else {
             MaterialTheme.colorScheme.surfaceContainerLow
         },
         modifier = Modifier.fillMaxWidth()
             .onGloballyPositioned { tileBounds = it.boundsInWindow() }
+            .sharedCardBounds("card-${entity.entityId}")
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .combinedClickable(
                 interactionSource = interactionSource,

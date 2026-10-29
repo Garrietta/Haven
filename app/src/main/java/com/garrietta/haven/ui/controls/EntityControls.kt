@@ -71,9 +71,12 @@ import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
+import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.lightColorTempTint
+import com.garrietta.haven.ui.components.sharedCardBounds
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenMotion
@@ -147,12 +150,18 @@ fun ServiceSlider(
  * so it is hidden instead of rendered as a bar that opens nothing.
  */
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, onDetail: (String) -> Unit) {
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, onDetail: (String) -> Unit, nested: Boolean = false) {
     val accent = accentFor(entity.entityId)
     Card(
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        modifier = Modifier.fillMaxWidth(),
+        // Hierarchy tokens: SurfaceContainer for root cards (Home, Boards,
+        // Areas, detail pages), SurfaceContainerLow for nested cards
+        // (inside the sheet, where the panel is already a container).
+        colors = CardDefaults.cardColors(
+            containerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
+            else MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        modifier = Modifier.fillMaxWidth().sharedCardBounds("card-${entity.entityId}"),
     ) {
         Column(Modifier.padding(16.dp)) {
             if (showHeader) {
@@ -160,12 +169,8 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     Modifier.fillMaxWidth().clickable { onDetail(entity.entityId) },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
-                        Modifier.size(48.dp).background(accent.copy(alpha = 0.22f), polygonShape(ExpressiveKind.BUN)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(domainIcon(entity), contentDescription = null, tint = accent)
-                    }
+                    // State-driven badge: morphs with the entity's state.
+                    DomainBadge(entity, domainIcon(entity), accent, Modifier.size(48.dp))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
@@ -193,7 +198,10 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
 @Composable
 fun LightControl(entity: HaEntity, vm: HavenViewModel) {
     val isOn = entity.state == "on"
-    val accent = Color(0xFFFFB300)
+    // Bulb color follows color temperature (secondary -> tertiary blend
+    // family, as a warm-amber to cool-white glyph tint); unknown kelvin
+    // reads neutral instead of defaulting to amber.
+    val accent = lightColorTempTint(entity.attrInt("color_temp_kelvin"))
     val brightness = entity.attrInt("brightness") ?: 255
     val pct = brightness * 100f / 255f
     val modes = entity.attrList("supported_color_modes")?.mapNotNull { it as? String } ?: emptyList()
@@ -247,7 +255,7 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
         Text("Warm to cool", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         ServiceSlider(
             (kelvin ?: 3500).toFloat(), 2000f..6500f,
-            { vm.setLightColorTemp(entity.entityId, it.toInt()) }, Color(0xFFFFCC80),
+            { vm.setLightColorTemp(entity.entityId, it.toInt()) }, lightColorTempTint(kelvin),
         )
     }
     if (modes.any { it == "hs" || it == "rgb" || it == "xy" }) {

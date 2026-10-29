@@ -52,6 +52,7 @@ import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.FanControl
 import com.garrietta.haven.ui.controls.LightControl
@@ -63,6 +64,7 @@ import com.garrietta.haven.ui.controls.WeatherControl
 import com.garrietta.haven.ui.controls.SensorTile
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.stateText
+import java.util.Locale
 import org.json.JSONObject
 
 /**
@@ -120,7 +122,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     val hero: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             DomainBadge(
-                entity.domain,
+                entity,
                 domainIcon(entity),
                 accent,
                 modifier = Modifier.size(52.dp),
@@ -139,7 +141,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             "switch", "input_boolean" -> SwitchControl(entity, vm)
             "cover" -> CoverPageControl(entity, vm)
             "lock" -> LockControl(entity, vm)
-            "sensor", "binary_sensor" -> SensorTile(entity)
+            "sensor", "binary_sensor" -> SensorTile(entity, vm)
             "media_player" -> MediaPageControl(entity, vm)
             "vacuum" -> VacuumControl(entity, vm)
             "fan" -> FanControl(entity, vm)
@@ -177,7 +179,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             Spacer(Modifier.height(24.dp))
             Text("Last 24 hours", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
-            DetailHistoryStrip(vm, entity.entityId)
+            DetailHistoryStrip(vm, entity)
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -332,20 +334,32 @@ private fun detailValueToString(value: Any?): String = when (value) {
 
 /** Real 24-hour history through the existing endpoint; numeric states only. */
 @Composable
-private fun DetailHistoryStrip(vm: HavenViewModel, entityId: String) {
+private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
     var points by remember { mutableStateOf<List<HistoryPoint>>(emptyList()) }
-    LaunchedEffect(entityId) {
-        points = vm.client.fetchHistory(entityId, 24)
+    LaunchedEffect(entity.entityId) {
+        points = vm.client.fetchHistory(entity.entityId, 24)
     }
     if (points.size >= 2) {
-        val min = points.minOf { it.value }
-        val max = points.maxOf { it.value }
+        val mm = sparklineMinCurrentMax(points)
+        val unit = entity.attrString("unit_of_measurement")
         Column {
-            Sparkline(points, accentFor(entityId), Modifier.fillMaxWidth().height(120.dp))
+            Sparkline(points, accentFor(entity.entityId), Modifier.fillMaxWidth().height(120.dp))
             Spacer(Modifier.height(4.dp))
-            Text("Low $min · High $max", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (mm != null) {
+                Text(
+                    "Min ${fmtDetailHistory(mm.first, unit)} · Current ${fmtDetailHistory(mm.second, unit)} · Max ${fmtDetailHistory(mm.third, unit)}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     } else {
         Text("No history yet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/** Whole numbers print whole; the rest get one decimal; unit suffix when present. */
+private fun fmtDetailHistory(v: Double, unit: String?): String {
+    val num = if (v == v.toInt().toDouble()) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
+    return if (unit != null) "$num $unit" else num
 }

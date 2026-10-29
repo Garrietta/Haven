@@ -54,9 +54,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.ui.components.Dial
+import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.PillToggle
+import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -68,7 +72,7 @@ import java.util.Locale
 @Composable
 fun MoreControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = true) {
     when (entity.domain) {
-        "sensor", "binary_sensor" -> SensorTile(entity)
+        "sensor", "binary_sensor" -> SensorTile(entity, vm)
         "weather" -> WeatherControl(entity, vm, showForecast = showForecast)
         "camera" -> CameraControl(entity, vm)
         "scene" -> FilledTonalButton(onClick = { vm.turnOn(entity.entityId) }) { Text("Activate scene") }
@@ -95,24 +99,66 @@ fun MoreControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = tr
     }
 }
 
+/**
+ * Sensor card, rebuilt human-readable (spec item 7): polygon state badge
+ * + current value + smoothed cubic-bezier sparkline with gradient alpha
+ * area fill + Min/Current/Max row. NEVER a raw entity id or a raw ISO UTC
+ * timestamp on the card face — those live only in detail/attribute views.
+ * History comes from the existing fetchHistory path; non-numeric sensors
+ * (and binary sensors) show badge + value only.
+ */
 @Composable
-fun SensorTile(entity: HaEntity) {
+fun SensorTile(entity: HaEntity, vm: HavenViewModel) {
+    val accent = accentFor(entity.entityId)
+    val numeric = entity.state.toDoubleOrNull()
     val unit = entity.attrString("unit_of_measurement")
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            entity.state,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
-            color = accentFor(entity.entityId),
-        )
-        if (unit != null) {
-            Spacer(Modifier.width(6.dp))
-            Text(unit, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    var history by remember { mutableStateOf<List<HistoryPoint>>(emptyList()) }
+    LaunchedEffect(entity.entityId) {
+        if (numeric != null) {
+            try {
+                history = vm.client.fetchHistory(entity.entityId, 24)
+            } catch (e: Exception) {
+                history = emptyList()
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        val deviceClass = entity.attrString("device_class")
-        if (deviceClass != null) Text(deviceClass.replace('_', ' '), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DomainBadge(entity, domainIcon(entity), accent, Modifier.size(40.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entity.stateText(),
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = accent,
+                )
+                val deviceClass = entity.attrString("device_class")
+                if (deviceClass != null) {
+                    Text(deviceClass.replace('_', ' '), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        if (numeric != null && history.size >= 2) {
+            Spacer(Modifier.height(12.dp))
+            Sparkline(history, accent, Modifier.fillMaxWidth().height(64.dp))
+            val mm = sparklineMinCurrentMax(history)
+            if (mm != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Min ${fmtSensor(mm.first, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Current ${fmtSensor(mm.second, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Max ${fmtSensor(mm.third, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/** Whole numbers print whole; the rest get one decimal; unit suffix when present. */
+private fun fmtSensor(v: Double, unit: String?): String {
+    val num = if (v == v.toInt().toDouble()) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
+    return if (unit != null) "$num $unit" else num
 }
 
 @Composable

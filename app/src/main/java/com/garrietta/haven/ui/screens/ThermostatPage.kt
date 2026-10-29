@@ -1,5 +1,13 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -38,15 +46,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
-import com.garrietta.haven.ui.components.Dial
-import com.garrietta.haven.ui.components.DialMarker
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
@@ -161,11 +169,6 @@ private fun ThermostatHero(
     // cooling, otherwise heating) and survives setpoint updates within a
     // mode; the user flips it with an inside tap.
     var selector by remember(entity.entityId, entity.state) { mutableStateOf(defaultSelector(entity.state)) }
-    val active: Float = if (heatCool) {
-        if (selector == SetpointSelector.HEATING) heat else cool
-    } else {
-        single
-    }
     val dialAccent: Color = if (heatCool) {
         if (selector == SetpointSelector.HEATING) HEAT_COLOR else COOL_COLOR
     } else {
@@ -173,13 +176,6 @@ private fun ThermostatHero(
             "heat" -> HEAT_COLOR
             "cool" -> COOL_COLOR
             else -> accent
-        }
-    }
-    val setActive: (Float) -> Unit = {
-        if (heatCool) {
-            if (selector == SetpointSelector.HEATING) heat = it else cool = it
-        } else {
-            single = it
         }
     }
     val stepActive: (Float) -> Unit = { delta ->
@@ -196,61 +192,47 @@ private fun ThermostatHero(
         applyClimateSetpoint(vm, entity, selector, next.toDouble())
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Dial(
-            value = active,
-            range = min..max,
-            onValueChange = setActive,
-            onFinished = { applyClimateSetpoint(vm, entity, selector, it.toDouble()) },
-            centerText = "",
-            centerSub = "",
-            accent = dialAccent,
-            diameter = 300.dp,
-            onInsideTap = if (heatCool) {
-                { selector = toggleSelector(selector) }
-            } else {
-                null
-            },
-            snapToWhole = true,
-            markers = if (heatCool) {
-                listOf(DialMarker(heat, HEAT_COLOR), DialMarker(cool, COOL_COLOR))
-            } else {
-                emptyList()
-            },
-            currentValue = current?.toFloat(),
-            currentLabel = current?.let { it.formatTemp() },
-        ) {
+        // The spec's dial: 240-degree sweep, dual pill thumbs, mode arcs.
+        // The center content overlays the dial face, as run #38 had it.
+        Box(contentAlignment = Alignment.Center) {
+            ThermostatDial(
+                heat = heat,
+                cool = cool,
+                single = single,
+                dual = heatCool,
+                current = current?.toFloat(),
+                currentLabel = current?.let { it.formatTemp() },
+                range = min..max,
+                mode = entity.state,
+                selector = selector,
+                onHeatChange = { heat = it },
+                onCoolChange = { cool = it },
+                onSingleChange = { single = it },
+                onFinished = { sel, v -> applyClimateSetpoint(vm, entity, sel, v.toDouble()) },
+                onInsideTap = if (heatCool) {
+                    { selector = toggleSelector(selector) }
+                } else {
+                    null
+                },
+                diameter = 300.dp,
+            )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (heatCool) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            heat.toDouble().formatTemp(),
-                            fontSize = 64.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selector == SetpointSelector.HEATING) {
-                                HEAT_COLOR
-                            } else {
-                                HEAT_COLOR.copy(alpha = 0.45f)
-                            },
+                        KineticTempText(
+                            heat,
+                            HEAT_COLOR,
+                            active = selector == SetpointSelector.HEATING,
                         )
                         Spacer(Modifier.width(16.dp))
-                        Text(
-                            cool.toDouble().formatTemp(),
-                            fontSize = 64.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selector == SetpointSelector.COOLING) {
-                                COOL_COLOR
-                            } else {
-                                COOL_COLOR.copy(alpha = 0.45f)
-                            },
+                        KineticTempText(
+                            cool,
+                            COOL_COLOR,
+                            active = selector == SetpointSelector.COOLING,
                         )
                     }
                 } else {
-                    Text(
-                        single.toDouble().formatTemp(),
-                        fontSize = 72.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = dialAccent,
-                    )
+                    KineticTempText(single, dialAccent, active = true, fontSize = 72.sp)
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -262,6 +244,39 @@ private fun ThermostatHero(
                 }
             }
         }
+    }
+}
+
+/**
+ * Kinetic counter typography: whole degrees — the standing 1-degree rule
+ * overrules the spec's %.1f format — sliding + fading + scaling by
+ * direction, with tabular figures so digits never jitter.
+ */
+@Composable
+private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 64.sp) {
+    val text = value.toDouble().formatTemp()
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            val up = (targetState.removeSuffix("°").toFloatOrNull() ?: 0f) >=
+                (initialState.removeSuffix("°").toFloatOrNull() ?: 0f)
+            if (up) {
+                (slideInVertically { -it / 2 } + fadeIn() + scaleIn(initialScale = 0.85f)) togetherWith
+                    (slideOutVertically { it / 2 } + fadeOut() + scaleOut(targetScale = 1.15f))
+            } else {
+                (slideInVertically { it / 2 } + fadeIn() + scaleIn(initialScale = 0.85f)) togetherWith
+                    (slideOutVertically { -it / 2 } + fadeOut() + scaleOut(targetScale = 1.15f))
+            }.using(SizeTransform(clip = false))
+        },
+        label = "kineticTemp",
+    ) { t ->
+        Text(
+            t,
+            fontSize = fontSize,
+            fontWeight = FontWeight.Bold,
+            color = if (active) color else color.copy(alpha = 0.45f),
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
     }
 }
 

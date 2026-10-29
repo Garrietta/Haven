@@ -50,6 +50,8 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Wifi
+import com.garrietta.haven.ui.components.KodaMenuDivider
+import com.garrietta.haven.ui.components.KodaMenuGroup
 import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.KodaMenuSection
 import com.garrietta.haven.ui.components.LocalWideLayout
@@ -419,125 +421,149 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            KodaMenuRow(
-                badgeKey = "appearance-motion",
-                badgeKind = ExpressiveKind.BUN,
-                icon = Icons.Filled.Autorenew,
-                title = "Reduce motion",
-                subtitle = "Keep animations instant and minimal",
-                onClick = null,
-                trailing = { Switch(checked = reduceMotion, onCheckedChange = onReduceMotion) },
-            )
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "appearance-motion",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.Autorenew,
+                    title = "Reduce motion",
+                    subtitle = "Keep animations instant and minimal",
+                    onClick = null,
+                    trailing = { Switch(checked = reduceMotion, onCheckedChange = onReduceMotion) },
+                    flat = true,
+                )
+            }
             Spacer(Modifier.height(16.dp))
             KodaMenuSection("Connection")
-            KodaMenuRow(
-                badgeKey = "connection-instance",
-                badgeKind = ExpressiveKind.CLOUD,
-                icon = Icons.Filled.Wifi,
-                title = "Instance",
-                subtitle = vm.tokenStore.instanceUrl ?: "—",
-                onClick = null,
-            )
-            Spacer(Modifier.height(8.dp))
-            KodaMenuRow(
-                badgeKey = "connection-status",
-                badgeKind = ExpressiveKind.CLOUD,
-                icon = Icons.Filled.Wifi,
-                title = "Status",
-                subtitle = when (connection) {
-                    is ConnectionState.Connected -> "Connected"
-                    is ConnectionState.Connecting -> "Connecting…"
-                    is ConnectionState.Authenticating -> "Signing in…"
-                    is ConnectionState.Error -> (connection as ConnectionState.Error).message
-                    else -> "Disconnected"
-                },
-                onClick = null,
-            )
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "connection-instance",
+                    badgeKind = ExpressiveKind.CLOUD,
+                    icon = Icons.Filled.Wifi,
+                    title = "Instance",
+                    subtitle = vm.tokenStore.instanceUrl ?: "—",
+                    onClick = null,
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "connection-status",
+                    badgeKind = ExpressiveKind.CLOUD,
+                    icon = Icons.Filled.Wifi,
+                    title = "Status",
+                    subtitle = when (connection) {
+                        is ConnectionState.Connected -> "Connected"
+                        is ConnectionState.Connecting -> "Connecting…"
+                        is ConnectionState.Authenticating -> "Signing in…"
+                        is ConnectionState.Error -> (connection as ConnectionState.Error).message
+                        else -> "Disconnected"
+                    },
+                    onClick = null,
+                    flat = true,
+                )
+            }
             Spacer(Modifier.height(16.dp))
             KodaMenuSection("Tabs")
-            KodaMenuRow(
-                badgeKey = "tabs-manage",
-                badgeKind = ExpressiveKind.BURST,
-                icon = Icons.Filled.List,
-                title = "Manage tabs",
-                subtitle = "The pill bar is your tabs: Home is always first, Settings is always last, and the rest are yours to create, rename, and reorder.",
-                onClick = { navigate(Screen.TabManager) },
-            )
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "tabs-manage",
+                    badgeKind = ExpressiveKind.BURST,
+                    icon = Icons.Filled.List,
+                    title = "Manage tabs",
+                    subtitle = "The pill bar is your tabs: Home is always first, Settings is always last, and the rest are yours to create, rename, and reorder.",
+                    onClick = { navigate(Screen.TabManager) },
+                    flat = true,
+                )
+            }
             Spacer(Modifier.height(16.dp))
             KodaMenuSection("Home page")
-            KodaMenuRow(
-                badgeKey = "home-manage",
-                badgeKind = ExpressiveKind.SUNNY,
-                icon = Icons.Filled.Home,
-                title = "Manage home page",
-                subtitle = "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
-                onClick = { navigate(Screen.HomeEditor) },
-            )
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "home-manage",
+                    badgeKind = ExpressiveKind.SUNNY,
+                    icon = Icons.Filled.Home,
+                    title = "Manage home page",
+                    subtitle = "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
+                    onClick = { navigate(Screen.HomeEditor) },
+                    flat = true,
+                )
+            }
             Spacer(Modifier.height(16.dp))
             KodaMenuSection("Browse")
-            KodaMenuRow(
-                badgeKey = "browse-boards",
-                badgeKind = ExpressiveKind.BUN,
-                icon = Icons.Filled.Dashboard,
-                title = "Boards",
-                subtitle = "Your Lovelace dashboards",
-                onClick = { navigate(Screen.Dashboards) },
-            )
-            Spacer(Modifier.height(8.dp))
-            KodaMenuRow(
-                badgeKey = "browse-areas",
-                badgeKind = ExpressiveKind.BUN,
-                icon = Icons.Filled.GridView,
-                title = "Areas",
-                subtitle = "Rooms and their entities",
-                onClick = { navigate(Screen.Areas) },
-            )
-            Spacer(Modifier.height(8.dp))
-            KodaMenuRow(
-                badgeKey = "browse-search",
-                badgeKind = ExpressiveKind.BUN,
-                icon = Icons.Filled.Search,
-                title = "Search",
-                subtitle = "Find any entity",
-                onClick = { navigate(Screen.Search) },
-            )
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "browse-boards",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.Dashboard,
+                    title = "Boards",
+                    subtitle = "Your Lovelace dashboards",
+                    onClick = { navigate(Screen.Dashboards) },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "browse-areas",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.GridView,
+                    title = "Areas",
+                    subtitle = "Rooms and their entities",
+                    onClick = { navigate(Screen.Areas) },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "browse-search",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.Search,
+                    title = "Search",
+                    subtitle = "Find any entity",
+                    onClick = { navigate(Screen.Search) },
+                    flat = true,
+                )
+            }
             Spacer(Modifier.height(16.dp))
             KodaMenuSection("Create")
-            KodaMenuRow(
-                badgeKey = "create-automation",
-                badgeKind = ExpressiveKind.WAVE,
-                icon = Icons.Filled.Autorenew,
-                title = "Automation",
-                subtitle = "Guided builder: pick a trigger, a condition, and an action — no YAML, no web UI.",
-                onClick = { navigate(Screen.AutomationBuilder) },
-            )
-            Spacer(Modifier.height(8.dp))
-            KodaMenuRow(
-                badgeKey = "create-scene",
-                badgeKind = ExpressiveKind.WAVE,
-                icon = Icons.Filled.Palette,
-                title = "Scene",
-                subtitle = "Capture the current state of your devices",
-                onClick = { navigate(Screen.SceneBuilder) },
-            )
-            Spacer(Modifier.height(8.dp))
-            KodaMenuRow(
-                badgeKey = "create-script",
-                badgeKind = ExpressiveKind.WAVE,
-                icon = Icons.Filled.Code,
-                title = "Script",
-                subtitle = "A reusable sequence of actions",
-                onClick = { navigate(Screen.ScriptBuilder) },
-            )
-            Spacer(Modifier.height(8.dp))
-            KodaMenuRow(
-                badgeKey = "create-helper",
-                badgeKind = ExpressiveKind.WAVE,
-                icon = Icons.Filled.Build,
-                title = "Helper",
-                subtitle = "Input booleans, numbers, timers, and more",
-                onClick = { navigate(Screen.HelperBuilder) },
-            )
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "create-automation",
+                    badgeKind = ExpressiveKind.WAVE,
+                    icon = Icons.Filled.Autorenew,
+                    title = "Automation",
+                    subtitle = "Guided builder: pick a trigger, a condition, and an action — no YAML, no web UI.",
+                    onClick = { navigate(Screen.AutomationBuilder) },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "create-scene",
+                    badgeKind = ExpressiveKind.WAVE,
+                    icon = Icons.Filled.Palette,
+                    title = "Scene",
+                    subtitle = "Capture the current state of your devices",
+                    onClick = { navigate(Screen.SceneBuilder) },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "create-script",
+                    badgeKind = ExpressiveKind.WAVE,
+                    icon = Icons.Filled.Code,
+                    title = "Script",
+                    subtitle = "A reusable sequence of actions",
+                    onClick = { navigate(Screen.ScriptBuilder) },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "create-helper",
+                    badgeKind = ExpressiveKind.WAVE,
+                    icon = Icons.Filled.Build,
+                    title = "Helper",
+                    subtitle = "Input booleans, numbers, timers, and more",
+                    onClick = { navigate(Screen.HelperBuilder) },
+                    flat = true,
+                )
+            }
             Spacer(Modifier.height(24.dp))
             OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
             Spacer(Modifier.height(16.dp))

@@ -3,20 +3,27 @@ package com.garrietta.haven
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -30,10 +37,13 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -56,12 +66,9 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -76,36 +83,54 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.components.LocalSharedTransitionScope
+import com.garrietta.haven.ui.components.LocalSharedVisibilityScope
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.SheetPageContent
+import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.pillLabelVisible
+import com.garrietta.haven.ui.components.sharedCardBounds
+import com.garrietta.haven.ui.theme.EmphasizedAccelerate
+import com.garrietta.haven.ui.theme.EmphasizedDecelerate
 import com.garrietta.haven.ui.theme.sheetSpring
+import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
 import com.garrietta.haven.ui.components.rememberPillScrubState
@@ -130,7 +155,6 @@ import com.garrietta.haven.ui.screens.ThermostatPageScreen
 import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
-import com.garrietta.haven.ui.theme.havenMotion
 
 private data class NavItem(
     val screen: Screen,
@@ -195,6 +219,8 @@ private fun isTopLevel(screen: Screen): Boolean = when (screen) {
     else -> false
 }
 
+@Composable
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun HavenApp(vm: HavenViewModel) {
     var themeMode by remember { mutableStateOf(vm.settingsStore.themeMode) }
@@ -333,6 +359,24 @@ fun HavenApp(vm: HavenViewModel) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wideLayout = maxWidth >= 600.dp
             CompositionLocalProvider(LocalWideLayout provides wideLayout) {
+            // Sheet presence drives the backdrop blur on the scaffold
+            // content (never on the overlay itself), up to 24dp, on the
+            // emphasized-decelerate entrance easing.
+            val sheetPresence by animateFloatAsState(
+                if (vm.popupEntityId != null) 1f else 0f,
+                animationSpec = tween(durationMillis = 300, easing = EmphasizedDecelerate),
+                label = "sheetPresence",
+            )
+            SharedTransitionLayout {
+            // Tiles read this always-visible scope for sharedBounds; the
+            // sheet panel declares the same key in its own scope below, so
+            // a card morphs into the sheet instead of the sheet popping in.
+            // PAGES keep the recorded bottom-sheet rise — only sheets morph.
+            AnimatedVisibility(visible = true) {
+            CompositionLocalProvider(
+                LocalSharedTransitionScope provides this@SharedTransitionLayout,
+                LocalSharedVisibilityScope provides this,
+            ) {
             Scaffold(
             // Screens consume the status-bar inset themselves
             // (statusBarsPadding on each root), so the Scaffold must not add
@@ -352,12 +396,28 @@ fun HavenApp(vm: HavenViewModel) {
                         items = barItems,
                         selectedIndex = selectedIndex,
                         onSelect = goTop,
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        // Floating island: 16dp side and bottom margins, no
+                        // top margin, so it floats over cards without
+                        // blocking touch targets below it.
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                     )
                 }
             },
         ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
+            // Backdrop blur while a sheet is open: up to 24dp, scaled by
+            // sheet presence, skipped entirely under reduce-motion, and
+            // applied to the scaffold content only — never the overlay.
+            val density = LocalDensity.current
+            val blurPx = if (reduceMotion) 0f else with(density) { (24.dp * sheetPresence).toPx() }
+            Box(
+                Modifier.fillMaxSize().padding(padding).graphicsLayer {
+                    if (blurPx > 0.5f) {
+                        renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                            blurPx, blurPx, android.graphics.Shader.TileMode.CLAMP,
+                        ).asComposeRenderEffect()
+                    }
+                },
+            ) {
                 val content: @Composable (Screen) -> Unit = { screen ->
                     ScreenContent(
                         screen = screen,
@@ -409,19 +469,42 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
-            // Overlays render after the Scaffold so they cover the pill bar
-            // too: the more-info sheet and the landscape camera viewer.
-            if (vm.popupEntityId != null) {
-                EntityPopupSheet(vm, navigate)
+            } // CompositionLocalProvider (tile shared-transition scope)
+            } // AnimatedVisibility (tile shared-transition scope)
+            // The sheet overlay renders inside the shared-transition layout
+            // so its panel can morph from the tapped card, and above the
+            // scaffold so it covers the pill bar too. It has its own
+            // visibility scope; the panel declares the card's key in it.
+            // lastPopupId keeps the content alive through the exit
+            // animation after closePopup has already cleared the id.
+            var lastPopupId by remember { mutableStateOf<String?>(null) }
+            if (vm.popupEntityId != null) lastPopupId = vm.popupEntityId
+            AnimatedVisibility(
+                visible = vm.popupEntityId != null,
+                enter = fadeIn(animationSpec = tween(durationMillis = 250, easing = EmphasizedDecelerate)) +
+                    slideInVertically(animationSpec = tween(durationMillis = 350, easing = EmphasizedDecelerate)) { it / 4 },
+                exit = fadeOut(animationSpec = tween(durationMillis = 200, easing = EmphasizedAccelerate)) +
+                    slideOutVertically(animationSpec = tween(durationMillis = 250, easing = EmphasizedAccelerate)) { it / 4 },
+            ) {
+                CompositionLocalProvider(
+                    LocalSharedTransitionScope provides this@SharedTransitionLayout,
+                    LocalSharedVisibilityScope provides this,
+                ) {
+                    val sheetId = lastPopupId
+                    if (sheetId != null) EntityPopupSheet(vm, navigate, sheetId)
+                }
             }
+            } // SharedTransitionLayout
+            // Camera overlays stay outside the shared layout: they rise as
+            // bottom-sheet pages from their tile origin, not as morphs.
             if (cameraId != null) {
                 if (cameraExiting) {
                     SheetPageContent(vm.pageOrigin, cameraExitProgress.value, background = Color.Black) {
-                        CameraFullscreen(vm, requestCameraClose)
+                        CameraFullscreen(vm, requestCameraClose, cameraExitProgress.value)
                     }
                 } else {
                     SheetPageContent(vm.pageOrigin, cameraEnterProgress.value, background = Color.Black) {
-                        CameraFullscreen(vm, requestCameraClose)
+                        CameraFullscreen(vm, requestCameraClose, cameraEnterProgress.value)
                     }
                 }
             }
@@ -475,47 +558,106 @@ private fun ScreenContent(
 }
 
 /**
- * More-info popup: tapping any entity now opens this bottom sheet with its
- * full control (dial, mode, fan, temps for the thermostat) instead of only
- * pushing a full detail screen. Details is still one tap away.
+ * More-info popup, now an inline overlay instead of a ModalBottomSheet:
+ * a Dialog window breaks shared-element coordinate spaces, so the sheet
+ * must render inline for the card->sheet morph to work. The panel has no
+ * half-expanded state (hidden or fully shown, so the abrupt half-expanded
+ * snapping is gone by construction); dragging down past the threshold
+ * dismisses it, otherwise it springs back. Back and scrim tap dismiss.
+ * The sheet's own bounds become the page origin when Details is tapped,
+ * so the full page rises as a bottom sheet out of the sheet on the
+ * sheet spring. PAGES keep the rise; only this sheet morphs.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
-    val popupId = vm.popupEntityId ?: return
+private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit, popupId: String) {
     val states by vm.states.collectAsState()
     val entity = states[popupId]
-    // The sheet's own bounds become the page origin when Details is tapped,
-    // so the full page rises as a bottom sheet out of the sheet on the
-    // sheet spring.
     var sheetBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val reduceMotion = LocalReduceMotion.current
-    ModalBottomSheet(onDismissRequest = vm::closePopup) {
-        Column(
-            Modifier.fillMaxWidth()
+    val scope = rememberCoroutineScope()
+    val dragOffset = remember { Animatable(0f) }
+    // Entering phase for the dynamic handle: wide/thin while the sheet
+    // rises, narrow/thick at rest.
+    var settled by remember { mutableStateOf(false) }
+    LaunchedEffect(popupId) {
+        kotlinx.coroutines.delay(350)
+        settled = true
+    }
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 120.dp.toPx() }
+    BackHandler { vm.closePopup() }
+    Box(Modifier.fillMaxSize()) {
+        // Scrim: tap dismisses.
+        Box(
+            Modifier.fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { vm.closePopup() },
+        )
+        Surface(
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .sharedCardBounds("card-$popupId")
                 .onGloballyPositioned { sheetBounds = it.boundsInWindow() }
-                .padding(horizontal = 16.dp).padding(bottom = 24.dp),
+                .offset { IntOffset(0, dragOffset.value.roundToInt()) }
+                .pointerInput(popupId) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            if (dragOffset.value > dismissThresholdPx) {
+                                vm.closePopup()
+                            } else {
+                                scope.launch { dragOffset.animateTo(0f, springMorph()) }
+                            }
+                        },
+                        onDragCancel = {
+                            scope.launch { dragOffset.animateTo(0f, springMorph()) }
+                        },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        scope.launch { dragOffset.snapTo((dragOffset.value + dragAmount).coerceAtLeast(0f)) }
+                    }
+                },
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
-            // Koda-style handle: a centered expressive pill, not a bare line.
-            Box(
-                Modifier.align(Alignment.CenterHorizontally)
-                    .size(width = 48.dp, height = 6.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
-            )
-            Spacer(Modifier.height(12.dp))
-            AnimatedVisibility(
-                visible = true,
-                enter = fadeIn(animationSpec = havenMotion(reduceMotion)) +
-                    slideInVertically(animationSpec = havenMotion(reduceMotion)) { it / 4 },
+            val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+            Column(
+                Modifier.fillMaxWidth()
+                    .heightIn(max = screenHeight * 0.92f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp).padding(bottom = 24.dp),
             ) {
-                Column {
+                Spacer(Modifier.height(12.dp))
+                // Fluid dynamic drag handle: 48x3.5 while entering or
+                // dragging, 32x4 at rest, on spring 0.6/Low.
+                val dragging = dragOffset.value > 1f
+                val handleSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
+                    else spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow)
+                val handleWidth by animateDpAsState(
+                    if (dragging || !settled) 48.dp else 32.dp,
+                    animationSpec = handleSpec,
+                    label = "sheetHandleW",
+                )
+                val handleHeight by animateDpAsState(
+                    if (dragging || !settled) 3.5.dp else 4.dp,
+                    animationSpec = handleSpec,
+                    label = "sheetHandleH",
+                )
+                Box(
+                    Modifier.align(Alignment.CenterHorizontally)
+                        .size(width = handleWidth, height = handleHeight)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
+                )
+                Spacer(Modifier.height(12.dp))
                     if (entity == null) {
                         Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         val accent = accentFor(entity.entityId)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             DomainBadge(
-                                entity.domain,
+                                entity,
                                 domainIcon(entity),
                                 accent,
                                 modifier = Modifier.size(48.dp),
@@ -530,7 +672,8 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                         // Plain control, not the card's header bar: the header
                         // is a dead control here (this IS the detail surface),
                         // so the card renders without it and the name still shows.
-                        EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
+                        // Nested: the sheet panel is already a container.
+                        EntityControlCard(entity, vm, onDetail = { }, showHeader = false, nested = true)
                         Spacer(Modifier.height(12.dp))
                         Row {
                             KodaMenuRow(
@@ -558,9 +701,8 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                             ) { Text("Close") }
                         }
                     }
-                }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -577,13 +719,16 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
  * camera: it never opened a stream. This viewer plays the MJPEG proxy
  * stream (`/api/camera_proxy_stream/`) for real, on all four curated
  * cameras. While the stream connects or reconnects it shows the last
- * live frame from memory, dimmed, with a loading indicator; on return to
- * a previously viewed camera that frame shows instantly while the stream
- * resumes. A failed stream shows an explicit error + Retry — never a
- * silent still pretending to be live.
+ * live frame from memory, dimmed, with a low-profile shimmer skeleton;
+ * on return to a previously viewed camera that frame shows instantly
+ * while the stream resumes. A failed stream shows an explicit error +
+ * Retry — never a silent still pretending to be live. The image region
+ * itself interpolates (scale 0.94 -> 1, alpha 0.7 -> 1) with the page
+ * progress, so the fullscreen image grows out of the grid slot instead
+ * of flashing in at full size — the page rise itself is unchanged.
  */
 @Composable
-private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
+private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgress: Float) {
     val cameraId = vm.fullscreenCameraId ?: return
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
@@ -627,7 +772,12 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
                     state.frame.asImageBitmap(),
                     contentDescription = entity?.friendlyName,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        val s = 0.94f + 0.06f * enterProgress
+                        scaleX = s
+                        scaleY = s
+                        alpha = 0.7f + 0.3f * enterProgress
+                    },
                 )
             }
             is CameraStreamState.Connecting -> {
@@ -638,14 +788,20 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit) {
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
                         alpha = 0.4f,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            val s = 0.94f + 0.06f * enterProgress
+                            scaleX = s
+                            scaleY = s
+                            alpha = 0.7f + 0.3f * enterProgress
+                        },
                     )
                 }
                 Column(
                     Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    CircularProgressIndicator(color = Color.White)
+                    // Low-profile shimmer skeleton, not a spinner on black.
+                    ShimmerBox(Modifier.size(120.dp, 8.dp).clip(RoundedCornerShape(50)))
                     Spacer(Modifier.height(12.dp))
                     Text(
                         if (last != null) "Reconnecting…"
@@ -744,12 +900,18 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
 }
 
 /**
- * The pill-bar bottom navigation, with Koda's item treatment: the selected
- * pill grows (padding 12 -> 20dp) on the house spring, its label fades and
- * expands in, and its icon fills — while the others shrink back to outlined
- * icons with no label. Dragging along the bar scrubs the highlight under the
- * finger (haptic tick per tab) and commits on release, exactly like Koda's
- * nav scrub. The bar container itself stays Haven's own floating pill.
+ * The pill-bar bottom navigation, rebuilt on measured positions: a single
+ * indicator morphs between tabs by animating its left/right bounds with
+ * spring(0.74, 380) from the tabs' measured window rects — it is never
+ * instantly reattached as a fixed-size pill. The indicator target follows
+ * the scrub hover when present, else the selected tab. Labels are
+ * single-line with ellipsis, and a title over 10 characters suppresses its
+ * static label in favor of an icon badge (selected: icon + label row with
+ * a fade+scale crossfade; unselected: icon only) — the old "Living Room
+ * lig" truncation is gone by construction. The shell is a floating island:
+ * 32dp corners, surfaceContainer, subtle shadow, 16dp bottom margin at the
+ * call site. Dragging along the bar still scrubs the highlight (haptic
+ * tick per tab) and commits on release, Koda-style.
  */
 @Composable
 private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
@@ -766,82 +928,108 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             }
         },
     )
+    // Measured tab positions, in window coordinates: the bar origin is
+    // subtracted, so the indicator stays correct while the row scrolls.
+    var barOrigin by remember { mutableStateOf(0f) }
+    var itemRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
+    val targetIndex = scrub.hoveredTab ?: currentIndex
+    val targetRect = itemRects[targetIndex]
+    val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
+        else spring(dampingRatio = 0.74f, stiffness = 380f)
+    val indicatorLeft by animateFloatAsState(
+        targetRect?.let { it.left - barOrigin } ?: 0f,
+        animationSpec = indicatorSpec,
+        label = "pillLeft",
+    )
+    val indicatorRight by animateFloatAsState(
+        targetRect?.let { it.right - barOrigin } ?: 0f,
+        animationSpec = indicatorSpec,
+        label = "pillRight",
+    )
+    val density = LocalDensity.current
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(50),
+        shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 3.dp,
         shadowElevation = 6.dp,
     ) {
-        // Scrolls horizontally once tabs overflow; short bars stay centered.
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 8.dp).pillScrub(scrub),
-            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            Modifier.fillMaxWidth()
+                .onGloballyPositioned { barOrigin = it.boundsInWindow().left },
         ) {
-            for ((index, item) in items.withIndex()) {
-                val selected = (scrub.hoveredTab ?: currentIndex) == index
-                val animatedPadding by animateDpAsState(
-                    if (selected) 20.dp else 12.dp,
-                    animationSpec = havenMotion(reduceMotion),
-                    label = "pillPad",
+            // The morphing indicator, behind the items.
+            if (targetRect != null) {
+                Box(
+                    Modifier.align(Alignment.CenterStart)
+                        .offset { IntOffset(indicatorLeft.roundToInt(), 0) }
+                        .width(with(density) { (indicatorRight - indicatorLeft).toDp() })
+                        .height(48.dp)
+                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
                 )
-                val animatedContainerColor by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                    animationSpec = tween(durationMillis = 200),
-                    label = "pillColor",
-                )
-                val animatedContentColor by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    animationSpec = tween(durationMillis = 200),
-                    label = "pillContent",
-                )
-                // Selected pill pops on the house spring, Koda-style.
-                val pillScale by animateFloatAsState(
-                    if (selected) 1.06f else 1f,
-                    animationSpec = havenMotion(reduceMotion),
-                    label = "pillScale",
-                )
-                Surface(
-                    selected = selected,
-                    onClick = {
-                        if (index != currentIndex) {
-                            haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                            onSelect(item.screen)
-                        }
-                    },
-                    shape = CircleShape,
-                    color = animatedContainerColor,
-                    contentColor = animatedContentColor,
-                    modifier = Modifier.height(48.dp)
-                        .graphicsLayer(scaleX = pillScale, scaleY = pillScale)
-                        .pillScrubItem(scrub, index),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = animatedPadding)
-                            .animateContentSize(animationSpec = havenMotion(reduceMotion)),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
+            }
+            // Scrolls horizontally once tabs overflow; short bars stay centered.
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 8.dp).pillScrub(scrub),
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                for ((index, item) in items.withIndex()) {
+                    val selected = (scrub.hoveredTab ?: currentIndex) == index
+                    val showLabel = pillLabelVisible(item.label, selected)
+                    val contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    Box(
+                        modifier = Modifier.height(48.dp)
+                            .onGloballyPositioned { itemRects = itemRects + (index to it.boundsInWindow()) }
+                            .pillScrubItem(scrub, index)
+                            .clickable {
+                                if (index != currentIndex) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                    onSelect(item.screen)
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            if (selected) item.icon else item.outlinedIcon,
-                            contentDescription = item.label,
-                            modifier = Modifier.size(24.dp),
-                        )
-                        AnimatedVisibility(
-                            visible = selected,
-                            enter = fadeIn() + expandHorizontally(animationSpec = havenMotion(reduceMotion)),
-                            exit = fadeOut() + shrinkHorizontally(animationSpec = havenMotion(reduceMotion)),
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    item.label,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                )
+                        AnimatedContent(
+                            targetState = showLabel,
+                            transitionSpec = {
+                                // Selected label rows fade+scale in (180ms,
+                                // 60ms delay); icon-only states fade+scale
+                                // out faster (120ms), per the spec.
+                                fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 60)) +
+                                    scaleIn(initialScale = 0.88f, animationSpec = tween(durationMillis = 180, delayMillis = 60)) togetherWith
+                                    fadeOut(animationSpec = tween(durationMillis = 120)) +
+                                    scaleOut(targetScale = 0.88f, animationSpec = tween(durationMillis = 120))
+                            },
+                            label = "pillLabel",
+                        ) { show ->
+                            if (show) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(item.icon, contentDescription = item.label, tint = contentColor, modifier = Modifier.size(24.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        item.label,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = contentColor,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            } else {
+                                Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                    Icon(
+                                        if (selected) item.icon else item.outlinedIcon,
+                                        contentDescription = item.label,
+                                        tint = contentColor,
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                }
                             }
                         }
                     }

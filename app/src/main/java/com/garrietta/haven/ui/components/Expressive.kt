@@ -1,6 +1,13 @@
 package com.garrietta.haven.ui.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -9,8 +16,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,8 +27,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
@@ -32,11 +43,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -46,15 +60,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.ui.screens.DialTapZone
 import com.garrietta.haven.ui.screens.dialTapZone
 import com.garrietta.haven.ui.screens.dialValueFromAngle
 import com.garrietta.haven.ui.screens.isHandleGrab
 import com.garrietta.haven.ui.theme.ExpressiveKind
+import com.garrietta.haven.ui.theme.MorphPolygon
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenSpring
 import com.garrietta.haven.ui.theme.polygonShape
+import com.garrietta.haven.ui.theme.springMorph
+import com.garrietta.haven.ui.theme.stateShapePolygon
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -103,17 +121,91 @@ fun shapeForDomain(domain: String): ExpressiveKind = when (domain) {
     else -> ExpressiveKind.BUN
 }
 
-/** Domain badge: the domain's shape in its accent, with its icon centered. */
+/**
+ * Domain badge, now state-driven: the polygon morphs between the domain's
+ * idle and active shapes on state change (Morph, spring 0.72/320), and
+ * alert badges (triggered binary sensors) rotate continuously and pulse.
+ * Media badges rotate slowly while playing; a traveling cover's badge
+ * lifts gently. The badge fill follows the color-token pipeline (climate
+ * containers, light color-temp blend, binary-sensor error, media
+ * tertiary); domains with no token mapping keep the accent wash.
+ */
 @Composable
-fun DomainBadge(domain: String, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color, modifier: Modifier = Modifier) {
+fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color, modifier: Modifier = Modifier) {
+    val reduceMotion = LocalReduceMotion.current
+    val scheme = MaterialTheme.colorScheme
+    val domain = entity.domain
+    val state = entity.state
+    val hvacAction = entity.attrString("hvac_action")
+    val progressTarget = badgeMorphProgress(domain, state, hvacAction)
+    val progress by animateFloatAsState(
+        progressTarget,
+        animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springMorph(),
+        label = "badgeMorph",
+    )
+    val alert = badgeAlert(domain, state)
+    val playing = domain == "media_player" && state == "playing"
+    val moving = domain == "cover" && coverIsMoving(state)
+    val infinite = rememberInfiniteTransition(label = "badgeMotion")
+    val rotation by infinite.animateFloat(
+        0f, 360f,
+        infiniteRepeatable(tween(if (alert) 12000 else 20000, easing = LinearEasing), RepeatMode.Restart),
+        label = "badgeRotation",
+    )
+    val pulse by infinite.animateFloat(
+        1f, 1.08f,
+        infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "badgePulse",
+    )
+    val lift by infinite.animateFloat(
+        0f, -4f,
+        infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "badgeLift",
+    )
+    val idle = stateShapePolygon(badgeIdleShape(domain))
+    val active = stateShapePolygon(badgeActiveShape(domain, if (domain == "weather") state else null))
+    val kelvin = entity.attrInt("color_temp_kelvin")
+    val (bg, iconTint) = when (domain) {
+        "light" -> {
+            val on = state == "on"
+            lightContainerColor(scheme, kelvin, on) to
+                if (on) lerp(scheme.onSecondaryContainer, scheme.onTertiaryContainer, lightTempBlendFraction(kelvin))
+                else scheme.onSurfaceVariant
+        }
+        "climate" -> when {
+            state == "off" -> climateIdleContainer(scheme) to scheme.onSurfaceVariant
+            hvacAction == "cooling" || state == "cool" ->
+                coolSetpointContainer(scheme) to coolSetpointOnContainer(scheme)
+            hvacAction == "heating" || state == "heat" || state == "heat_cool" -> {
+                val dual = state == "heat_cool"
+                heatSetpointContainer(scheme, dual) to heatSetpointOnContainer(scheme, dual)
+            }
+            else -> climateIdleContainer(scheme) to scheme.onSurfaceVariant
+        }
+        "binary_sensor" -> if (alert) scheme.errorContainer to scheme.onErrorContainer
+            else accent.copy(alpha = 0.22f) to accent
+        "media_player" -> if (playing) scheme.tertiaryContainer to scheme.onTertiaryContainer
+            else accent.copy(alpha = 0.22f) to accent
+        else -> accent.copy(alpha = 0.22f) to accent
+    }
     Box(
-        modifier.background(accent.copy(alpha = 0.22f), polygonShape(shapeForDomain(domain))),
+        modifier.graphicsLayer {
+            if (!reduceMotion) {
+                if (alert || playing) rotationZ = rotation
+                if (alert) {
+                    scaleX = pulse
+                    scaleY = pulse
+                }
+                if (moving) translationY = lift
+            }
+        },
         contentAlignment = Alignment.Center,
     ) {
+        MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
         Icon(
             icon,
             contentDescription = null,
-            tint = accent,
+            tint = iconTint,
             modifier = Modifier.size(26.dp),
         )
     }
@@ -150,11 +242,13 @@ fun KodaMenuRow(
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     trailing: (@Composable () -> Unit)? = null,
+    /** Flat rows render background-less, for use inside a [KodaMenuGroup]. */
+    flat: Boolean = false,
 ) {
     val accent = accentFor(badgeKey)
     val row = Modifier
         .fillMaxWidth()
-        .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(20.dp))
+        .then(if (flat) Modifier else Modifier.background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(20.dp)))
         .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
         .padding(horizontal = 12.dp, vertical = 12.dp)
     Row(row.then(modifier), verticalAlignment = Alignment.CenterVertically) {
@@ -181,6 +275,61 @@ fun KodaMenuRow(
             )
         }
     }
+}
+
+/**
+ * Inset grouped rounded section (spec item 9): a 24dp-corner
+ * surfaceContainer card holding flat [KodaMenuRow]s separated by
+ * [KodaMenuDivider]s. Used by Settings; the sheet Details row keeps its
+ * standalone 20dp row.
+ */
+@Composable
+fun KodaMenuGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(content = content)
+    }
+}
+
+/**
+ * A 0.5dp divider indented to the text-start boundary: row padding 12dp
+ * + badge 26dp + gap 12dp = 50dp from the card edge.
+ */
+@Composable
+fun KodaMenuDivider(indent: Dp = 50.dp, modifier: Modifier = Modifier) {
+    HorizontalDivider(
+        modifier = modifier.padding(start = indent),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant,
+    )
+}
+
+/**
+ * Low-profile shimmer skeleton layer (spec item 8): an alpha-pulsing
+ * horizontal gradient slab, for loading states that should not read as a
+ * spinner on black. The caller sizes and clips it.
+ */
+@Composable
+fun ShimmerBox(modifier: Modifier = Modifier) {
+    val infinite = rememberInfiniteTransition(label = "shimmer")
+    val alpha by infinite.animateFloat(
+        0.35f, 0.75f,
+        infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "shimmerAlpha",
+    )
+    val base = MaterialTheme.colorScheme.surfaceContainerHighest
+    Box(
+        modifier
+            .graphicsLayer { this.alpha = alpha }
+            .background(
+                Brush.horizontalGradient(
+                    listOf(base.copy(alpha = 0.6f), base, base.copy(alpha = 0.6f)),
+                ),
+            ),
+    )
 }
 
 /**
@@ -380,22 +529,33 @@ fun Dial(
 
 /** A small history sparkline for sensor detail screens. */
 @Composable
+/**
+ * Smoothed cubic-bezier sparkline with a gradient alpha area fill under
+ * the curve (spec item 7). The smoothing math lives in SparklineMath so
+ * it is unit-testable; this composable only draws what it returns.
+ */
+@Composable
 fun Sparkline(points: List<HistoryPoint>, color: Color, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        if (points.size < 2) return@Canvas
-        val min = points.minOf { it.value }
-        val max = points.maxOf { it.value }
-        val span = (max - min).takeIf { it > 0.0 } ?: 1.0
-        val t0 = points.first().timeMs
-        val t1 = points.last().timeMs
-        val tspan = (t1 - t0).takeIf { it > 0L } ?: 1L
-        val path = Path()
-        points.forEachIndexed { i, p ->
-            val x = (p.timeMs - t0).toFloat() / tspan * size.width
-            val y = size.height - ((p.value - min) / span * size.height).toFloat()
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        val segments = sparklineSegments(points, size.width, size.height)
+        if (segments.isEmpty()) return@Canvas
+        val line = Path().apply {
+            moveTo(segments.first().x0, segments.first().y0)
+            segments.forEach { cubicTo(it.c1x, it.c1y, it.c2x, it.c2y, it.x1, it.y1) }
         }
-        drawPath(path, color, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        val fill = Path().apply {
+            addPath(line)
+            lineTo(segments.last().x1, size.height)
+            lineTo(segments.first().x0, size.height)
+            close()
+        }
+        drawPath(
+            fill,
+            Brush.verticalGradient(
+                listOf(color.copy(alpha = 0.35f), color.copy(alpha = 0f)),
+            ),
+        )
+        drawPath(line, color, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
