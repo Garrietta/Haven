@@ -55,7 +55,8 @@ import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.lightContainerColor
 import com.garrietta.haven.ui.components.shapeForDomain
-import com.garrietta.haven.ui.components.sharedCardBounds
+import com.garrietta.haven.ui.components.hideWhenMorphSource
+import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.domainIcon
@@ -176,9 +177,9 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     val accent = accentFor(entity.entityId)
     val active = ((entity.domain == "light" || entity.domain == "switch" || entity.domain == "input_boolean") &&
         entity.state == "on") || (entity.domain == "cover" && entity.state == "open")
-    // The tile's on-screen bounds feed the camera rise origin (and are
-    // kept for it). Detail pages no longer rise from this rect: they
-    // morph from the tile element itself via the shared card key.
+    // The tile's window bounds feed the camera rise origin (and are
+    // kept for it). Detail/sheet morphs use the root bounds reported
+    // to the shared map (see MorphOverlay), never this rect.
     var tileBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -198,8 +199,9 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         },
         modifier = Modifier.fillMaxWidth()
             .onGloballyPositioned { tileBounds = it.boundsInWindow() }
-            .sharedCardBounds("card-${entity.entityId}")
+            .reportCardBounds(entity.entityId)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
+            .hideWhenMorphSource(entity.entityId)
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,

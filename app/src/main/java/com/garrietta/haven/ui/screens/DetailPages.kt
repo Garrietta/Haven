@@ -148,9 +148,10 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             "vacuum" -> VacuumControl(entity, vm)
             "fan" -> FanControl(entity, vm)
             "weather" -> WeatherControl(entity, vm, showForecast = true)
-            // The page overlay root owns "card-<id>"; this inner card
-            // must not declare it too (one owner per key).
-            else -> EntityControlCard(entity, vm, onDetail = { }, showHeader = false, shareBounds = false)
+            // This inner card is page content, never a morph source: it
+            // must not report bounds or hide (the page overlay itself
+            // is the morph surface).
+            else -> EntityControlCard(entity, vm, onDetail = { }, showHeader = false, morphSource = false)
         }
         Spacer(Modifier.height(16.dp))
         // Generic on/off actions, only where they make sense: an entity

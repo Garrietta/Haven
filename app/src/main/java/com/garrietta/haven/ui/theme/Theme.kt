@@ -70,6 +70,17 @@ fun <T> springBounds(): FiniteAnimationSpec<T> =
 fun <T> pressBounce(): FiniteAnimationSpec<T> =
     spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium)
 
+/**
+ * Overhaul-spec HavenMotion mapping (2026-10-29 architectural round):
+ * the overhaul spec's three values map onto the single token set above
+ * — they are NOT duplicated as new tokens:
+ * SpatialSpring (0.82/MediumLow) -> springBounds (0.8/MediumLow) for the
+ * modal rect interpolation (0.02 damping apart, imperceptible);
+ * PillSpring (0.78/MediumLow) -> springSpatial (exact) for the pill exit;
+ * InteractiveBounce (0.52/Medium) -> pressBounce (0.55/Medium), the one
+ * press token. No new tokens were added for this round.
+ */
+
 /** ExitFast: the spec's 180ms exit tween on the accelerate easing. */
 fun <T> exitFast(): FiniteAnimationSpec<T> =
     tween(durationMillis = 180, easing = EmphasizedAccelerate)

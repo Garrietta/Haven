@@ -3,24 +3,12 @@ package com.garrietta.haven
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -93,7 +81,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -128,8 +115,6 @@ import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
-import com.garrietta.haven.ui.components.LocalSharedTransitionScope
-import com.garrietta.haven.ui.components.LocalSharedVisibilityScope
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.SheetPageContent
 import com.garrietta.haven.ui.components.ShimmerBox
@@ -137,14 +122,25 @@ import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.pillLabelVisible
-import com.garrietta.haven.ui.components.sharedCardBounds
-import com.garrietta.haven.ui.theme.EmphasizedAccelerate
-import com.garrietta.haven.ui.theme.EmphasizedDecelerate
 import com.garrietta.haven.ui.theme.sheetSpring
 import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
 import com.garrietta.haven.ui.components.rememberPillScrubState
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.unit.IntSize
+import com.garrietta.haven.ui.components.LocalCardBounds
+import com.garrietta.haven.ui.components.LocalHiddenCardId
+import com.garrietta.haven.ui.components.MorphSurface
+import com.garrietta.haven.ui.components.detailTargetRect
+import com.garrietta.haven.ui.components.lerpRect
+import com.garrietta.haven.ui.components.sheetTargetRect
+import com.garrietta.haven.ui.theme.springBounds
+import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.stateText
@@ -237,8 +233,20 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
     else -> ""
 }
 
+/**
+ * Open sheet morph: the entity id plus the source card rect captured
+ * at open (null = the card never reported bounds, e.g. a board card;
+ * the sheet then appears at its target rect with no morph).
+ * [targetSize] is filled by the one-frame measurement pass.
+ */
+private class SheetAnim(val id: String, val source: Rect?) {
+    var targetSize by mutableStateOf<IntSize?>(null)
+}
+
+/** Open detail morph: the backstack screen plus its source card rect. */
+private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?)
+
 @Composable
-@OptIn(ExperimentalSharedTransitionApi::class)
 fun HavenApp(vm: HavenViewModel) {
     var themeMode by remember { mutableStateOf(vm.settingsStore.themeMode) }
     var reduceMotion by remember { mutableStateOf(vm.settingsStore.reduceMotion) }
@@ -261,39 +269,129 @@ fun HavenApp(vm: HavenViewModel) {
             mutableStateListOf<Screen>(Screen.Today)
         }
         val current = backstack.last()
-        // Detail destinations morph out of their card (spec item 2),
-        // they do not slide or rise: the overlay below renders the page
-        // above the scaffold, and its root claims the card's sharedBounds
-        // key, so the card grows into the page on the bounds spring with
-        // 150ms fades. Back is a plain pop; the exit morph plays
-        // automatically from the AnimatedVisibility below. This replaces
-        // the old bottom-sheet-rise path (entering/exitingScreen) for
-        // detail pages; the camera fullscreen keeps its own rise, and
+        // Morph state machine (2026-10-29 architectural overhaul):
+        // the sheet and detail overlays below are explicit single-surface
+        // morphs, not framework sharedBounds. Each morph captures its
+        // source card's root rect at open and interpolates ONE rect to
+        // its target (and exactly back on dismiss); the source card
+        // renders alpha 0 while its morph is active (see
+        // LocalHiddenCardId), so source and destination are never both
+        // visible. The camera fullscreen keeps its own rise, and
         // vm.pageOrigin is still set by tile taps and sheet Details
         // because the camera path needs it.
         val detailScreen = current as? Screen.Thermostat ?: current as? Screen.EntityDetail
-        // lastDetail keeps the page alive through the exit morph after
-        // back has already popped the backstack (same pattern as the
-        // sheet's lastPopupId).
-        var lastDetail by remember { mutableStateOf<Screen?>(null) }
-        if (detailScreen != null) lastDetail = detailScreen
+        val cardBounds = remember { mutableStateMapOf<String, Rect>() }
+        var sheetAnim by remember { mutableStateOf<SheetAnim?>(null) }
+        var detailAnim by remember { mutableStateOf<DetailAnim?>(null) }
+        val sheetProgress = remember { Animatable(0f) }
+        val detailProgress = remember { Animatable(0f) }
+        val sheetDrag = remember { Animatable(0f) }
+        var sheetExiting by remember { mutableStateOf(false) }
+        var detailExiting by remember { mutableStateOf(false) }
+        var sheetSurfaceBounds by remember { mutableStateOf<Rect?>(null) }
         val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
         val goTop: (Screen) -> Unit = {
             vm.pageOrigin = null
+            vm.closePopup()
+            sheetAnim = null
+            detailAnim = null
             backstack.clear()
             backstack.add(it)
         }
+        val scope = rememberCoroutineScope()
+        fun dismissDetail() {
+            if (detailAnim == null || detailExiting) return
+            detailExiting = true
+            scope.launch {
+                val anim = detailAnim
+                if (anim?.source != null && !reduceMotion) detailProgress.animateTo(0f, springBounds())
+                else detailProgress.snapTo(0f)
+                // Pop only AFTER the exit morph: the page content must
+                // stay present while its rect shrinks back to the card.
+                if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
+                detailAnim = null
+                detailExiting = false
+            }
+        }
+        fun dismissSheet(animated: Boolean) {
+            val anim = sheetAnim ?: return
+            if (sheetExiting) return
+            if (!animated) {
+                vm.closePopup()
+                sheetAnim = null
+                return
+            }
+            sheetExiting = true
+            scope.launch {
+                val progressJob = launch {
+                    if (anim.source != null && !reduceMotion) sheetProgress.animateTo(0f, springBounds())
+                    else sheetProgress.snapTo(0f)
+                }
+                val dragJob = launch { sheetDrag.animateTo(0f, springMorph()) }
+                progressJob.join()
+                dragJob.join()
+                vm.closePopup()
+                sheetAnim = null
+                sheetExiting = false
+            }
+        }
         val goBack: () -> Unit = {
-            if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
+            if (detailAnim != null) dismissDetail()
+            else if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
         }
         val signOut: () -> Unit = {
             vm.pageOrigin = null
+            vm.closePopup()
+            sheetAnim = null
+            detailAnim = null
             vm.signOut()
             backstack.clear()
             backstack.add(Screen.Today)
         }
         BackHandler(enabled = backstack.size > 1) { goBack() }
-        // Camera overlay transitions share the same language: the live
+        // Morph open effects: the morph objects are captured
+        // synchronously above (falling back to a fade-only appearance
+        // when the card never reported bounds, e.g. a board card);
+        // these effects animate progress 0 -> 1 on the bounds spring
+        // (snapped under reduce-motion). External clears (goTop,
+        // signOut) drop the anim state instantly; the exit morphs above
+        // own their own lifecycle and are guarded by the exiting flags.
+        // Synchronous capture (mirrors #49's lastDetail/lastPopupId):
+        // the morph object exists in the same frame its trigger
+        // appears, so the overlay renders (at progress 0, i.e. exactly
+        // over the hidden card) with no one-frame gap. The effects
+        // below own only the progress animation.
+        if (vm.popupEntityId != null && sheetAnim?.id != vm.popupEntityId && !sheetExiting) {
+            sheetAnim = SheetAnim(vm.popupEntityId!!, cardBounds[vm.popupEntityId!!])
+        }
+        if (detailScreen != null && detailAnim?.screen != detailScreen && !detailExiting) {
+            detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)])
+        }
+        LaunchedEffect(vm.popupEntityId) {
+            val id = vm.popupEntityId
+            val anim = sheetAnim
+            if (id != null && anim?.id == id) {
+                sheetDrag.snapTo(0f)
+                if (anim.source != null && !reduceMotion) {
+                    sheetProgress.snapTo(0f)
+                    sheetProgress.animateTo(1f, springBounds())
+                } else sheetProgress.snapTo(1f)
+            } else if (id == null && anim != null && !sheetExiting) {
+                sheetAnim = null
+            }
+        }
+        LaunchedEffect(detailScreen?.let { detailEntityId(it) }) {
+            val anim = detailAnim
+            if (detailScreen != null && anim != null && detailEntityId(anim.screen) == detailEntityId(detailScreen)) {
+                if (anim.source != null && !reduceMotion) {
+                    detailProgress.snapTo(0f)
+                    detailProgress.animateTo(1f, springBounds())
+                } else detailProgress.snapTo(1f)
+            } else if (detailScreen == null && anim != null && !detailExiting) {
+                detailAnim = null
+            }
+        }
+        // Camera overlay transitions share the same language:
         // view rises as a bottom sheet out of the tapped camera tile and
         // sinks back on close.
         var cameraExiting by remember { mutableStateOf(false) }
@@ -339,20 +437,6 @@ fun HavenApp(vm: HavenViewModel) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wideLayout = maxWidth >= 600.dp
             CompositionLocalProvider(LocalWideLayout provides wideLayout) {
-            // Sheet presence drives the backdrop blur on the whole
-            // scaffold — content AND pill bar, never the overlay itself
-            // — up to 24dp, on the emphasized-decelerate entrance easing.
-            // The old code blurred only the content box, so mid-enter the
-            // pill read as a separate bright layer over the dimmed
-            // background (2026-10-29 evidence video: the pill "above the
-            // scrim" was really the pill unblurred while everything else
-            // dimmed; the full-screen scrim above the scaffold was
-            // already covering it).
-            val sheetPresence by animateFloatAsState(
-                if (vm.popupEntityId != null) 1f else 0f,
-                animationSpec = tween(durationMillis = 300, easing = EmphasizedDecelerate),
-                label = "sheetPresence",
-            )
             // One content lambda shared by the scaffold and the detail
             // overlay below, so both render the same screens.
             val content: @Composable (Screen) -> Unit = { screen ->
@@ -374,30 +458,30 @@ fun HavenApp(vm: HavenViewModel) {
                     onSignOut = signOut,
                 )
             }
-            SharedTransitionLayout {
-            // Tiles read this always-visible scope for sharedBounds; the
-            // sheet panel declares the same key in its own scope below, so
-            // a card morphs into the sheet instead of the sheet popping in.
-            // PAGES keep the recorded bottom-sheet rise — only sheets morph.
-            AnimatedVisibility(visible = true) {
+            // Morph locals: cards report bounds here, and the active
+            // morph source hides here. The scaffold blur from #49 is
+            // GONE: the pill now exits the viewport during modals (see
+            // the pill-exit below), which replaces the blur as the answer
+            // to the scrim problem, and the scrim alone dims the page.
+            val modalActive = sheetAnim != null || detailAnim != null
+            val pillExit by animateFloatAsState(
+                if (modalActive) 1f else 0f,
+                animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springSpatial(),
+                label = "pillExit",
+            )
             CompositionLocalProvider(
-                LocalSharedTransitionScope provides this@SharedTransitionLayout,
-                LocalSharedVisibilityScope provides this,
+                LocalCardBounds provides cardBounds,
+                LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId),
             ) {
-            // Backdrop blur while a sheet is open: up to 24dp, scaled by
-            // sheet presence, skipped entirely under reduce-motion, and
-            // applied to the whole scaffold — content and pill bar — so
-            // the pill dims and blurs with everything else instead of
-            // reading as a bright layer over the dim. Never the overlay.
-            val density = LocalDensity.current
-            val blurPx = if (reduceMotion) 0f else with(density) { (24.dp * sheetPresence).toPx() }
+            // Overlay root: its root-coordinate origin and size anchor
+            // every morph rect (see MorphSurface). All morph overlays
+            // below render inside this Box, above the scaffold.
+            var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
+            var overlaySize by remember { mutableStateOf(IntSize.Zero) }
             Box(
-                Modifier.fillMaxSize().graphicsLayer {
-                    if (blurPx > 0.5f) {
-                        renderEffect = android.graphics.RenderEffect.createBlurEffect(
-                            blurPx, blurPx, android.graphics.Shader.TileMode.CLAMP,
-                        ).asComposeRenderEffect()
-                    }
+                Modifier.fillMaxSize().onGloballyPositioned {
+                    overlayOrigin = it.boundsInRoot().topLeft
+                    overlaySize = it.size
                 },
             ) {
             Scaffold(
@@ -427,7 +511,19 @@ fun HavenApp(vm: HavenViewModel) {
                         // taking the spec's 12dp bottom).
                         modifier = Modifier.fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                            // Pill exit (overhaul spec item 3): during any
+                            // modal the pill fades out and slides 32dp
+                            // down out of the viewport on the pill
+                            // spring, replacing #49's blur-the-pill
+                            // answer; it returns when the modal closes.
+                            // The scrim (fillMaxSize, above the scaffold)
+                            // already intercepts touches, so the exiting
+                            // pill is never tappable mid-modal.
+                            .graphicsLayer {
+                                alpha = 1f - pillExit
+                                translationY = 32.dp.toPx() * pillExit
+                            },
                     )
                 }
             },
@@ -455,64 +551,120 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
-            } // blur Box
-            } // CompositionLocalProvider (tile shared-transition scope)
-            } // AnimatedVisibility (tile shared-transition scope)
-            // The sheet overlay renders inside the shared-transition layout
-            // so its panel can morph from the tapped card, and above the
-            // scaffold so it covers the pill bar too. It has its own
-            // visibility scope; the panel declares the card's key in it.
-            // lastPopupId keeps the content alive through the exit
-            // animation after closePopup has already cleared the id.
-            var lastPopupId by remember { mutableStateOf<String?>(null) }
-            if (vm.popupEntityId != null) lastPopupId = vm.popupEntityId
-            // The panel positions itself by the shared-bounds morph
-            // alone. The old enter/exit also slid the panel vertically,
-            // so two transforms positioned it at once — one source of
-            // the jumpy, off-center first frames in the evidence video.
-            AnimatedVisibility(
-                visible = vm.popupEntityId != null,
-                enter = fadeIn(animationSpec = tween(durationMillis = 250, easing = EmphasizedDecelerate)),
-                exit = fadeOut(animationSpec = tween(durationMillis = 200, easing = EmphasizedAccelerate)),
-            ) {
-                CompositionLocalProvider(
-                    LocalSharedTransitionScope provides this@SharedTransitionLayout,
-                    LocalSharedVisibilityScope provides this,
-                ) {
-                    val sheetId = lastPopupId
-                    if (sheetId != null) EntityPopupSheet(vm, navigate, sheetId)
-                }
-            }
-            // Detail-page overlay (spec item 2): renders above the
-            // scaffold — above the status bar and the pill bar, never
-            // under them — with the card's sharedBounds key on its root,
-            // so the card morphs into the page on the bounds spring with
-            // 150ms fades. Placed after the sheet overlay so the Details
-            // handoff (sheet -> page) draws the page above the closing
-            // sheet. lastDetail keeps the page alive through the exit
-            // morph after back has popped the backstack.
-            AnimatedVisibility(
-                visible = detailScreen != null,
-                enter = fadeIn(animationSpec = tween(durationMillis = 150, easing = EmphasizedDecelerate)),
-                exit = fadeOut(animationSpec = tween(durationMillis = 150, easing = EmphasizedAccelerate)),
-            ) {
-                CompositionLocalProvider(
-                    LocalSharedTransitionScope provides this@SharedTransitionLayout,
-                    LocalSharedVisibilityScope provides this,
-                ) {
-                    val detail = lastDetail
-                    if (detail != null) {
+            // Sheet morph overlay: one scrim plus one morphing surface.
+            // The scrim fades with progress and blocks touches from the
+            // first frame (even during the measurement frame below,
+            // when progress is still 0). The surface interpolates a
+            // single rect from the card captured at open to the measured
+            // panel rect; the source card underneath renders alpha 0
+            // for the whole morph, so nothing ever doubles. Dismissing
+            // animates the same rect back to the card (never a diagonal
+            // fly-out); the sheet -> detail handoff clears the sheet
+            // instantly (no exit morph) and the detail morph starts
+            // from the same card, so the card never flashes back in
+            // between.
+            if (sheetAnim != null) {
+                val anim = sheetAnim!!
+                BackHandler { dismissSheet(true) }
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f * sheetProgress.value))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { dismissSheet(true) },
+                )
+                val targetSize = anim.targetSize
+                if (targetSize == null) {
+                    // Measurement frame: the panel content, invisible,
+                    // laid out once at its final width so its height can
+                    // be captured. Below the scrim, so it can neither
+                    // flash nor take touches; replaced by the morph
+                    // surface on the next frame.
+                    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Box(
-                            Modifier.fillMaxSize()
-                                .background(MaterialTheme.colorScheme.background)
-                                .sharedCardBounds("card-${detailEntityId(detail)}"),
+                            Modifier.fillMaxWidth()
+                                .heightIn(max = screenHeight * 0.92f)
+                                .alpha(0f)
+                                .onGloballyPositioned { anim.targetSize = it.size },
                         ) {
-                            content(detail)
+                            EntityPopupSheetContent(
+                                vm, navigate, anim.id, dragging = false,
+                                sheetBounds = sheetSurfaceBounds,
+                                onClose = { dismissSheet(true) },
+                                onDetails = { dismissSheet(false) },
+                            )
                         }
+                    }
+                } else {
+                    val target = sheetTargetRect(overlayOrigin, overlaySize, targetSize)
+                    val rect = if (anim.source != null) lerpRect(anim.source, target, sheetProgress.value) else target
+                    val density = LocalDensity.current
+                    val dismissThresholdPx = with(density) { 120.dp.toPx() }
+                    MorphSurface(
+                        rect = rect,
+                        overlayOrigin = overlayOrigin,
+                        targetSize = targetSize,
+                        cornerTop = 28.dp,
+                        background = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.pointerInput(anim.id) {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    if (!sheetExiting) {
+                                        if (sheetDrag.value > dismissThresholdPx) {
+                                            dismissSheet(true)
+                                        } else {
+                                            scope.launch { sheetDrag.animateTo(0f, springMorph()) }
+                                        }
+                                    }
+                                },
+                                onDragCancel = {
+                                    if (!sheetExiting) scope.launch { sheetDrag.animateTo(0f, springMorph()) }
+                                },
+                            ) { change, dragAmount ->
+                                if (!sheetExiting) {
+                                    change.consume()
+                                    scope.launch { sheetDrag.snapTo((sheetDrag.value + dragAmount).coerceAtLeast(0f)) }
+                                }
+                            }
+                        },
+                        dragOffsetY = sheetDrag.value,
+                        onPlaced = { sheetSurfaceBounds = it },
+                    ) {
+                        EntityPopupSheetContent(
+                            vm, navigate, anim.id, dragging = sheetDrag.value > 1f,
+                            sheetBounds = sheetSurfaceBounds,
+                            onClose = { dismissSheet(true) },
+                            onDetails = { dismissSheet(false) },
+                        )
                     }
                 }
             }
-            } // SharedTransitionLayout
+            // Detail morph overlay: the page grows out of its card on
+            // the bounds spring and draws above all chrome (the old
+            // bottom-sheet rise for detail pages is gone — the
+            // visual-bugs round replaced it with the container morph,
+            // and this round replaces the morph mechanism itself).
+            // Back runs the same rect back to the card before the
+            // backstack pops (see dismissDetail), so the exit lands on
+            // the card instead of fading out in place.
+            if (detailAnim != null) {
+                val anim = detailAnim!!
+                val target = detailTargetRect(overlayOrigin, overlaySize)
+                val rect = if (anim.source != null) lerpRect(anim.source, target, detailProgress.value) else target
+                MorphSurface(
+                    rect = rect,
+                    overlayOrigin = overlayOrigin,
+                    targetSize = overlaySize,
+                    cornerTop = 28.dp * (1f - detailProgress.value),
+                    background = MaterialTheme.colorScheme.background,
+                ) {
+                    content(anim.screen)
+                }
+            }
+            } // overlay root Box
+            } // CompositionLocalProvider (morph locals)
             // Camera overlays stay outside the shared layout: they rise as
             // bottom-sheet pages from their tile origin, not as morphs.
             if (cameraId != null) {
@@ -576,24 +728,30 @@ private fun ScreenContent(
 }
 
 /**
- * More-info popup, now an inline overlay instead of a ModalBottomSheet:
- * a Dialog window breaks shared-element coordinate spaces, so the sheet
- * must render inline for the card->sheet morph to work. The panel has no
- * half-expanded state (hidden or fully shown, so the abrupt half-expanded
- * snapping is gone by construction); dragging down past the threshold
- * dismisses it, otherwise it springs back. Back and scrim tap dismiss.
- * The sheet's own bounds become the page origin when Details is tapped,
- * so the full page rises as a bottom sheet out of the sheet on the
- * sheet spring. PAGES keep the rise; only this sheet morphs.
+ * The sheet panel's CONTENT (not the panel itself): the morph surface
+ * in HavenApp owns positioning, scrim, and drag; this is the column
+ * laid out inside it at the panel's measured size. Kept separate so
+ * the same content serves the one-frame measurement pass and the morph
+ * surface. [dragging] drives the dynamic handle (wide/thin while
+ * entering or dragging, narrow/thick at rest). [sheetBounds] is the
+ * surface's window rect for the camera rise origin on Details.
+ * [onClose] dismisses with the exit morph; [onDetails] dismisses
+ * instantly for the sheet -> detail handoff (the detail morph starts
+ * from the same card, so the card never flashes back in between).
  */
 @Composable
-private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit, popupId: String) {
+private fun EntityPopupSheetContent(
+    vm: HavenViewModel,
+    navigate: (Screen) -> Unit,
+    popupId: String,
+    dragging: Boolean,
+    sheetBounds: androidx.compose.ui.geometry.Rect?,
+    onClose: () -> Unit,
+    onDetails: () -> Unit,
+) {
     val states by vm.states.collectAsState()
     val entity = states[popupId]
-    var sheetBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val reduceMotion = LocalReduceMotion.current
-    val scope = rememberCoroutineScope()
-    val dragOffset = remember { Animatable(0f) }
     // Entering phase for the dynamic handle: wide/thin while the sheet
     // rises, narrow/thick at rest.
     var settled by remember { mutableStateOf(false) }
@@ -601,127 +759,85 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit, pop
         kotlinx.coroutines.delay(350)
         settled = true
     }
-    val density = LocalDensity.current
-    val dismissThresholdPx = with(density) { 120.dp.toPx() }
-    BackHandler { vm.closePopup() }
-    Box(Modifier.fillMaxSize()) {
-        // Scrim: tap dismisses.
-        Box(
-            Modifier.fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.4f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { vm.closePopup() },
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    Column(
+        Modifier.fillMaxWidth()
+            .heightIn(max = screenHeight * 0.92f)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp).padding(bottom = 24.dp),
+    ) {
+        Spacer(Modifier.height(12.dp))
+        // Fluid dynamic drag handle: 48x3.5 while entering or
+        // dragging, 32x4 at rest, on spring 0.6/Low.
+        val handleSpec: FiniteAnimationSpec<Dp> = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f)
+            else spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow)
+        val handleWidth by animateDpAsState(
+            if (dragging || !settled) 48.dp else 32.dp,
+            animationSpec = handleSpec,
+            label = "sheetHandleW",
         )
-        Surface(
-            modifier = Modifier.align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .sharedCardBounds("card-$popupId")
-                .onGloballyPositioned { sheetBounds = it.boundsInWindow() }
-                .offset { IntOffset(0, dragOffset.value.roundToInt()) }
-                .pointerInput(popupId) {
-                    detectVerticalDragGestures(
-                        onDragEnd = {
-                            if (dragOffset.value > dismissThresholdPx) {
-                                vm.closePopup()
-                            } else {
-                                scope.launch { dragOffset.animateTo(0f, springMorph()) }
+        val handleHeight by animateDpAsState(
+            if (dragging || !settled) 3.5.dp else 4.dp,
+            animationSpec = handleSpec,
+            label = "sheetHandleH",
+        )
+        Box(
+            Modifier.align(Alignment.CenterHorizontally)
+                .size(width = handleWidth, height = handleHeight)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
+        )
+        Spacer(Modifier.height(12.dp))
+            if (entity == null) {
+                Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                val accent = accentFor(entity.entityId)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DomainBadge(
+                        entity,
+                        domainIcon(entity),
+                        accent,
+                        modifier = Modifier.size(48.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                // Plain control, not the card's header bar: the header
+                // is a dead control here (this IS the detail surface),
+                // so the card renders without it and the name still shows.
+                // Nested: the sheet panel is already a container.
+                EntityControlCard(entity, vm, onDetail = { }, showHeader = false, nested = true)
+                Spacer(Modifier.height(12.dp))
+                Row {
+                    KodaMenuRow(
+                        badgeKey = entity.entityId,
+                        badgeKind = shapeForDomain(entity.domain),
+                        icon = domainIcon(entity),
+                        title = "Details",
+                        subtitle = "Open the full page",
+                        onClick = {
+                            sheetBounds?.let { vm.pageOrigin = it }
+                            onDetails()
+                            when (entity.domain) {
+                                "climate" -> navigate(Screen.Thermostat(popupId))
+                                // Cameras open their live viewer, not a static page.
+                                "camera" -> vm.openCameraFullscreen(popupId)
+                                else -> navigate(Screen.EntityDetail(popupId))
                             }
                         },
-                        onDragCancel = {
-                            scope.launch { dragOffset.animateTo(0f, springMorph()) }
-                        },
-                    ) { change, dragAmount ->
-                        change.consume()
-                        scope.launch { dragOffset.snapTo((dragOffset.value + dragAmount).coerceAtLeast(0f)) }
-                    }
-                },
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-            Column(
-                Modifier.fillMaxWidth()
-                    .heightIn(max = screenHeight * 0.92f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp).padding(bottom = 24.dp),
-            ) {
-                Spacer(Modifier.height(12.dp))
-                // Fluid dynamic drag handle: 48x3.5 while entering or
-                // dragging, 32x4 at rest, on spring 0.6/Low.
-                val dragging = dragOffset.value > 1f
-                val handleSpec: FiniteAnimationSpec<Dp> = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f)
-                    else spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow)
-                val handleWidth by animateDpAsState(
-                    if (dragging || !settled) 48.dp else 32.dp,
-                    animationSpec = handleSpec,
-                    label = "sheetHandleW",
-                )
-                val handleHeight by animateDpAsState(
-                    if (dragging || !settled) 3.5.dp else 4.dp,
-                    animationSpec = handleSpec,
-                    label = "sheetHandleH",
-                )
-                Box(
-                    Modifier.align(Alignment.CenterHorizontally)
-                        .size(width = handleWidth, height = handleHeight)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
-                )
-                Spacer(Modifier.height(12.dp))
-                    if (entity == null) {
-                        Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        val accent = accentFor(entity.entityId)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DomainBadge(
-                                entity,
-                                domainIcon(entity),
-                                accent,
-                                modifier = Modifier.size(48.dp),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                                Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        // Plain control, not the card's header bar: the header
-                        // is a dead control here (this IS the detail surface),
-                        // so the card renders without it and the name still shows.
-                        // Nested: the sheet panel is already a container.
-                        EntityControlCard(entity, vm, onDetail = { }, showHeader = false, nested = true)
-                        Spacer(Modifier.height(12.dp))
-                        Row {
-                            KodaMenuRow(
-                                badgeKey = entity.entityId,
-                                badgeKind = shapeForDomain(entity.domain),
-                                icon = domainIcon(entity),
-                                title = "Details",
-                                subtitle = "Open the full page",
-                                onClick = {
-                                    sheetBounds?.let { vm.pageOrigin = it }
-                                    vm.closePopup()
-                                    when (entity.domain) {
-                                        "climate" -> navigate(Screen.Thermostat(popupId))
-                                        // Cameras open their live viewer, not a static page.
-                                        "camera" -> vm.openCameraFullscreen(popupId)
-                                        else -> navigate(Screen.EntityDetail(popupId))
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(
-                                onClick = vm::closePopup,
-                                shape = RoundedCornerShape(50),
-                            ) { Text("Close") }
-                        }
-                    }
-                Spacer(Modifier.height(8.dp))
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = onClose,
+                        shape = RoundedCornerShape(50),
+                    ) { Text("Close") }
+                }
             }
-        }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -1017,11 +1133,13 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
  * instantly reattached as a fixed-size pill. The indicator target follows
  * the scrub hover when present, else the selected tab. Labels are
  * single-line with ellipsis, and a title over 10 characters suppresses its
- * static label in favor of an icon badge (selected: icon + label row with
- * a fade+scale crossfade; unselected: icon only) — the old "Living Room
- * lig" truncation is gone by construction. The shell is a floating island:
- * 32dp corners, surfaceContainer, subtle shadow, 16dp bottom margin at the
- * call site. Dragging along the bar still scrubs the highlight (haptic
+ * static label in favor of an icon badge (selected: icon + label row,
+ * appearing with no animation — labels switch in the same recomposition
+ * as the selection, so two labels can never overlap; unselected: icon
+ * only) — the old "Living Room lig" truncation is gone by construction.
+ * The shell is a floating island: 32dp corners, surfaceContainer, subtle
+ * shadow, 16dp horizontal and 12dp bottom padding at the call site.
+ * Dragging along the bar still scrubs the highlight (haptic
  * tick per tab) and commits on release, Koda-style.
  */
 @Composable
@@ -1086,9 +1204,22 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 for ((index, item) in items.withIndex()) {
-                    val selected = (scrub.hoveredTab ?: currentIndex) == index
-                    val showLabel = pillLabelVisible(item.label, selected)
-                    val contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                    // Highlight follows the scrub hover (the indicator
+                    // glides under the finger); the LABEL follows only
+                    // the committed selection, with no animation at all.
+                    // The #49 vertical slide+fade still collided: while
+                    // the label's size animated, its text clipped to
+                    // "Thermo..." beside the fading outgoing label, and
+                    // scrubbing flashed labels across tabs. A label now
+                    // appears or vanishes in the same recomposition as
+                    // the selection change, so two labels can never
+                    // coexist in one frame; the indicator's glide is the
+                    // only motion. Trade accepted: item width snaps
+                    // instantly at selection while the indicator glides
+                    // (masked by the indicator's arrival).
+                    val highlighted = (scrub.hoveredTab ?: currentIndex) == index
+                    val showLabel = pillLabelVisible(item.label, index == currentIndex)
+                    val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     Box(
                         modifier = Modifier.height(48.dp)
@@ -1102,53 +1233,31 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        AnimatedContent(
-                            targetState = showLabel,
-                            transitionSpec = {
-                                // Vertical slide + fade, clipped: the old
-                                // fade+scale crossfade drew outgoing and
-                                // incoming labels in the same row space at
-                                // once, so during tab switches the pill
-                                // showed colliding text ("HomeThermostat"
-                                // in the 2026-10-29 evidence video). A
-                                // vertical slide can never overlap
-                                // horizontally, and togetherWith already
-                                // clips to the animated size by default.
-                                slideInVertically(
-                                    animationSpec = tween(durationMillis = 180, easing = EmphasizedDecelerate),
-                                ) { it } + fadeIn(animationSpec = tween(durationMillis = 180, easing = EmphasizedDecelerate)) togetherWith
-                                    slideOutVertically(
-                                        animationSpec = tween(durationMillis = 120, easing = EmphasizedAccelerate),
-                                    ) { -it } + fadeOut(animationSpec = tween(durationMillis = 120, easing = EmphasizedAccelerate))
-                            },
-                            label = "pillLabel",
-                        ) { show ->
-                            if (show) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(item.icon, contentDescription = item.label, tint = contentColor, modifier = Modifier.size(24.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        item.label,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = contentColor,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            } else {
-                                Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                                    Icon(
-                                        if (selected) item.icon else item.outlinedIcon,
-                                        contentDescription = item.label,
-                                        tint = contentColor,
-                                        modifier = Modifier.size(24.dp),
-                                    )
-                                }
+                        if (showLabel) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(item.icon, contentDescription = item.label, tint = contentColor, modifier = Modifier.size(24.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    item.label,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = contentColor,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        } else {
+                            Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                Icon(
+                                    if (highlighted) item.icon else item.outlinedIcon,
+                                    contentDescription = item.label,
+                                    tint = contentColor,
+                                    modifier = Modifier.size(24.dp),
+                                )
                             }
                         }
                     }

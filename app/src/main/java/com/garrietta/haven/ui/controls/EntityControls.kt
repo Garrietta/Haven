@@ -85,7 +85,8 @@ import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.lightColorTempTint
-import com.garrietta.haven.ui.components.sharedCardBounds
+import com.garrietta.haven.ui.components.hideWhenMorphSource
+import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenMotion
@@ -222,15 +223,16 @@ fun ExpressiveStepper(symbol: String, onClick: () -> Unit, height: Dp = 48.dp, m
  * dead control there (it would open the very sheet/screen already shown),
  * so it is hidden instead of rendered as a bar that opens nothing.
  *
- * [shareBounds] owns the shared-bounds key exactly when this card is the
- * transition source. Nested cards (inside the sheet, where the panel
- * owns the key) and cards on detail pages (where the page overlay root
- * owns it) must NOT declare it: two elements with one key in one scope
- * rendered as overlapping ghosts mid-morph in the 2026-10-29 evidence
- * video. Defaults to true exactly when the card is not nested.
+ * [morphSource] reports this card's root bounds to the morph map and
+ * hides the card while its morph is active (see MorphOverlay). Nested
+ * cards (inside the sheet, where the panel is the surface) and cards
+ * on detail pages (where the page overlay is the surface) must NOT be
+ * morph sources: a card that both reports and renders during its own
+ * morph reads as a doubled ghost, as in the 2026-10-29 evidence video.
+ * Defaults to true exactly when the card is not nested.
  */
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, shareBounds: Boolean = !nested, onDetail: (String) -> Unit) {
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -241,7 +243,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
             containerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
             else MaterialTheme.colorScheme.surfaceContainer,
         ),
-        modifier = Modifier.fillMaxWidth().then(if (shareBounds) Modifier.sharedCardBounds("card-${entity.entityId}") else Modifier),
+        modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).hideWhenMorphSource(entity.entityId) else Modifier),
     ) {
         Column(Modifier.padding(16.dp)) {
             if (showHeader) {
