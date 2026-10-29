@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,10 +66,10 @@ import java.util.Locale
 
 /** Second half of the domain dispatch (called from EntityControlCard). */
 @Composable
-fun MoreControl(entity: HaEntity, vm: HavenViewModel) {
+fun MoreControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = true) {
     when (entity.domain) {
         "sensor", "binary_sensor" -> SensorTile(entity)
-        "weather" -> WeatherControl(entity, vm)
+        "weather" -> WeatherControl(entity, vm, showForecast = showForecast)
         "camera" -> CameraControl(entity, vm)
         "scene" -> FilledTonalButton(onClick = { vm.turnOn(entity.entityId) }) { Text("Activate scene") }
         "script" -> FilledTonalButton(onClick = { vm.turnOn(entity.entityId) }) { Text("Run script") }
@@ -117,12 +116,13 @@ fun SensorTile(entity: HaEntity) {
 }
 
 @Composable
-fun WeatherControl(entity: HaEntity, vm: HavenViewModel) {
+fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = true) {
     val accent = accentFor(entity.entityId)
     val temp = entity.attrDouble("temperature") ?: 0.0
     val humidity = entity.attrDouble("humidity")
     var forecast by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
-    LaunchedEffect(entity.entityId) {
+    LaunchedEffect(entity.entityId, showForecast) {
+        if (!showForecast) return@LaunchedEffect
         val attr = entity.attrList("forecast")?.mapNotNull { it as? Map<String, Any?> }
         if (!attr.isNullOrEmpty()) {
             forecast = attr
@@ -168,8 +168,12 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel) {
         if (humidity != null) {
             Text("Humidity ${humidity.toInt()}%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(Modifier.height(8.dp))
-        for (item in forecast.take(6)) {
+        // Home hides the forecast rows (showForecast = false): the dial,
+        // condition, and humidity above are the whole Weather section there.
+        // Sheets, Boards, and detail surfaces keep the rows.
+        if (showForecast) {
+            Spacer(Modifier.height(8.dp))
+            for (item in forecast.take(6)) {
             val whenRaw = (item["datetime"] as? String) ?: ""
             val whenLabel = friendlyHourLabel(whenRaw)
             val fTemp = (item["temperature"] as? Number)?.toDouble()
@@ -196,6 +200,7 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel) {
                 }
             }
             Spacer(Modifier.height(4.dp))
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,6 +40,7 @@ import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenSpring
+import com.garrietta.haven.ui.theme.polygonShape
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -66,6 +68,40 @@ fun accentFor(entityId: String): Color {
     val hash = entityId.hashCode()
     val idx = ((hash % ACCENTS.size) + ACCENTS.size) % ACCENTS.size
     return ACCENTS[idx]
+}
+
+/**
+ * One expressive shape family per domain, shared by tiles, detail pages,
+ * sheets, and badges so the whole app reads as one set: lights bloom
+ * (SUNNY), climate squishes (BUN), cameras flower (FLOWER), covers burst
+ * (BURST), media and fans ripple (WAVE), weather and sensors cloud
+ * (CLOUD). Everything else falls back to BUN.
+ */
+fun shapeForDomain(domain: String): ExpressiveKind = when (domain) {
+    "light" -> ExpressiveKind.SUNNY
+    "climate" -> ExpressiveKind.BUN
+    "camera" -> ExpressiveKind.FLOWER
+    "cover" -> ExpressiveKind.BURST
+    "switch", "lock", "input_boolean" -> ExpressiveKind.BURST
+    "media_player", "fan" -> ExpressiveKind.WAVE
+    "weather", "sensor", "binary_sensor" -> ExpressiveKind.CLOUD
+    else -> ExpressiveKind.BUN
+}
+
+/** Domain badge: the domain's shape in its accent, with its icon centered. */
+@Composable
+fun DomainBadge(domain: String, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier.background(accent.copy(alpha = 0.22f), polygonShape(shapeForDomain(domain))),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(26.dp),
+        )
+    }
 }
 
 /**

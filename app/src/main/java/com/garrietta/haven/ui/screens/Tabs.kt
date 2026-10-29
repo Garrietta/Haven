@@ -93,8 +93,8 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            // Tab pages render Apple Home-style tiles (tap = primary
-            // action, long-press = detail sheet); cards that can't tile
+            // Tab pages render Apple Home-style tiles (tap = full page,
+            // long-press = detail sheet); cards that can't tile
             // keep their card rendering below.
             TabTileGrid(vm, tab.cards, states, navigate) { yaml ->
                 TabCardView(vm, yaml, states, navigate)

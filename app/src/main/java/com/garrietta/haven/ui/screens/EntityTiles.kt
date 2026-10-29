@@ -36,7 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +47,7 @@ import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
@@ -56,10 +59,10 @@ import org.json.JSONObject
  * Apple Home-style tiles, for TAB PAGES ONLY. Boards, Today, and Areas
  * keep their full cards; a tab page shows one tile per entity instead:
  * icon + name + natural status, in an adaptive grid (2 columns folded,
- * more unfolded). Tap is the primary action — light toggles, garage
- * opens/closes, thermostat opens its full page, camera opens landscape
- * fullscreen, everything else opens its control sheet. Long-press always
- * opens the more-info/detail sheet.
+ * more unfolded). Tap opens the entity's full page — thermostat page for
+ * climate, live fullscreen for cameras, per-domain page for everything
+ * else — rising out of the tapped tile on the house spring. Long-press
+ * always opens the more-info/detail sheet.
  *
  * Cards that can't tile keep their card rendering through [fallbackCard]:
  * gauge and button cards (their visuals/actions don't survive as a tile),
@@ -103,6 +106,7 @@ fun TabTileGrid(
                             EntityTile(
                                 vm,
                                 entity,
+                                navigate = navigate,
                                 onThermostat = navigate?.let { nav ->
                                     { entityId: String -> nav(Screen.Thermostat(entityId)) }
                                 },
@@ -130,15 +134,6 @@ private fun cardEntityIds(card: JSONObject): List<String> {
     return out
 }
 
-/** One tile per expressive shape family, so a tab reads as a set, not a grid of identical blobs. */
-private fun shapeForDomain(domain: String): ExpressiveKind = when (domain) {
-    "light" -> ExpressiveKind.SUNNY
-    "climate" -> ExpressiveKind.BUN
-    "camera" -> ExpressiveKind.FLOWER
-    "cover" -> ExpressiveKind.BURST
-    else -> ExpressiveKind.BUN
-}
-
 /** Natural status line: light on/off rides the icon state, the rest read out in words. */
 private fun tileStatus(entity: HaEntity): String = when (entity.domain) {
     "light", "switch", "input_boolean" -> if (entity.state == "on") "On" else "Off"
@@ -155,28 +150,32 @@ private fun tileStatus(entity: HaEntity): String = when (entity.domain) {
     else -> entity.stateText()
 }
 
-private fun primaryAction(vm: HavenViewModel, entity: HaEntity, onThermostat: ((String) -> Unit)? = null) {
+/** Tap routing: full page for every domain (thermostat page, live camera, per-domain page). */
+private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)?, onThermostat: ((String) -> Unit)? = null) {
     when (entity.domain) {
-        "light", "switch", "input_boolean" -> vm.toggle(entity.entityId)
-        "cover" -> {
-            if (entity.state == "open" || entity.state == "opening") {
-                vm.callService("cover", "close_cover", entity.entityId)
-            } else {
-                vm.callService("cover", "open_cover", entity.entityId)
-            }
-        }
         "climate" -> if (onThermostat != null) onThermostat(entity.entityId) else vm.openPopup(entity.entityId)
         "camera" -> vm.openCameraFullscreen(entity.entityId)
-        else -> vm.openPopup(entity.entityId)
+        else -> if (navigate != null) navigate(Screen.EntityDetail(entity.entityId)) else vm.openPopup(entity.entityId)
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EntityTile(vm: HavenViewModel, entity: HaEntity, onThermostat: ((String) -> Unit)? = null) {
+fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)? = null, onThermostat: ((String) -> Unit)? = null) {
     val accent = accentFor(entity.entityId)
     val active = ((entity.domain == "light" || entity.domain == "switch" || entity.domain == "input_boolean") &&
         entity.state == "on") || (entity.domain == "cover" && entity.state == "open")
+    // The tile's on-screen bounds become the page origin: the full page
+    // rises out of exactly this rect and settles back toward it on back.
+    var tileBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by androidx.compose.foundation.interaction.collectIsPressedAsState(interactionSource)
+    val reduceMotion = com.garrietta.haven.ui.components.LocalReduceMotion.current
+    val pressScale by androidx.compose.animation.core.animateFloatAsState(
+        if (pressed) 0.97f else 1f,
+        animationSpec = com.garrietta.haven.ui.theme.havenMotion(reduceMotion),
+        label = "tilePress",
+    )
     Surface(
         shape = RoundedCornerShape(28.dp),
         color = if (entity.domain == "light" && entity.state == "on") {
@@ -184,10 +183,18 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, onThermostat: ((String) -> 
         } else {
             MaterialTheme.colorScheme.surfaceContainerLow
         },
-        modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = { primaryAction(vm, entity, onThermostat) },
-            onLongClick = { vm.openPopup(entity.entityId) },
-        ),
+        modifier = Modifier.fillMaxWidth()
+            .onGloballyPositioned { tileBounds = it.boundsInWindow() }
+            .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    tileBounds?.let { vm.setPageOrigin(it) }
+                    openPage(vm, entity, navigate, onThermostat)
+                },
+                onLongClick = { vm.openPopup(entity.entityId) },
+            ),
     ) {
         Column(Modifier.padding(16.dp)) {
             if (entity.domain == "camera") {

@@ -113,6 +113,34 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun openCameraFullscreen(entityId: String) { fullscreenCameraId = entityId }
     fun closeCameraFullscreen() { fullscreenCameraId = null }
 
+    /**
+     * Last live frame per camera, in memory only (never disk). The
+     * fullscreen viewer shows the cached frame dimmed + "Connecting…" while
+     * its stream starts or restarts, and instantly on returning to a camera
+     * it has shown before. It never stands in for a dead stream: a failed
+     * stream replaces it with an explicit error + Retry.
+     */
+    private val cameraFrameCache = com.garrietta.haven.data.CameraFrameCache()
+
+    fun cacheCameraFrame(entityId: String, frame: android.graphics.Bitmap) {
+        cameraFrameCache.put(entityId, frame)
+    }
+
+    fun lastCameraFrame(entityId: String): android.graphics.Bitmap? =
+        cameraFrameCache.get(entityId)
+
+    /**
+     * On-screen bounds (window coordinates) of the tile, card, or sheet the
+     * user just tapped to reach a full page. The page transition grows out
+     * of this rect on the house spring and settles back toward it on back.
+     * Set by the tapped item before navigating; cleared when the page is
+     * left or the user jumps to another top-level tab.
+     */
+    var pageOrigin by mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
+        private set
+
+    fun setPageOrigin(rect: androidx.compose.ui.geometry.Rect?) { pageOrigin = rect }
+
     var isAuthenticated by mutableStateOf(false)
         private set
 

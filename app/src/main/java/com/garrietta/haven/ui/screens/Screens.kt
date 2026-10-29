@@ -279,7 +279,10 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             item {
                 Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
-                EntityControlCard(weather, vm) { vm.openPopup(it) }
+                // Home shows current conditions only — dial, condition,
+                // humidity. The forecast rows live on the weather sheet and
+                // detail surfaces, not here.
+                EntityControlCard(weather, vm, showForecast = false) { vm.openPopup(it) }
                 Spacer(Modifier.height(16.dp))
             }
         }

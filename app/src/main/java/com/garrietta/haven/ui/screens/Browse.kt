@@ -9,30 +9,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,12 +29,7 @@ import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.SectionHeader
-import com.garrietta.haven.data.HaEntity
-import com.garrietta.haven.ui.components.LocalWideLayout
-import com.garrietta.haven.ui.components.Sparkline
-import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.EntityControlCard
-import com.garrietta.haven.ui.controls.stateText
 
 const val UNASSIGNED_AREA = "__unassigned__"
 
@@ -172,154 +156,3 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     }
 }
 
-@Composable
-fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
-    val states by vm.states.collectAsState()
-    val entity = states[entityId]
-    // Wide (unfolded): controls on the left, attributes + history on the
-    // right, instead of one stretched phone column.
-    if (LocalWideLayout.current) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            DetailTopBar(entity?.friendlyName ?: entityId, onBack)
-            if (entity == null) {
-                Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Row(Modifier.fillMaxSize()) {
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp)) {
-                        Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
-                        Spacer(Modifier.height(4.dp))
-                        Text(entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(16.dp))
-                        EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
-                        Spacer(Modifier.height(16.dp))
-                        Row {
-                            OutlinedButton(onClick = { vm.turnOn(entityId) }) { Text("Turn on") }
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = { vm.turnOff(entityId) }) { Text("Turn off") }
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = { vm.toggle(entityId) }) { Text("Toggle") }
-                        }
-                        Spacer(Modifier.height(16.dp))
-                    }
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 8.dp)) {
-                        Text("Attributes", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(8.dp))
-                        val attrs = entity.attributes.filterKeys { it != "friendly_name" }.toList().sortedBy { it.first }
-                        for ((key, value) in attrs) {
-                            AttributeRow(key, valueToString(value))
-                        }
-                        if (entity.state.toDoubleOrNull() != null) {
-                            Spacer(Modifier.height(24.dp))
-                            Text("Last 24 hours", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.height(8.dp))
-                            HistorySparkline(vm, entityId)
-                            Spacer(Modifier.height(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-        return
-    }
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-        item { DetailTopBar(entity?.friendlyName ?: entityId, onBack) }
-        if (entity == null) {
-            item { Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        } else {
-            item {
-                Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
-                Spacer(Modifier.height(4.dp))
-                Text(entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(16.dp))
-                // Full control, header hidden here (already on the detail screen).
-                EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
-                Spacer(Modifier.height(16.dp))
-                Row {
-                    OutlinedButton(onClick = { vm.turnOn(entityId) }) { Text("Turn on") }
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { vm.turnOff(entityId) }) { Text("Turn off") }
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { vm.toggle(entityId) }) { Text("Toggle") }
-                }
-                Spacer(Modifier.height(24.dp))
-                Text("Attributes", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-            }
-            val attrs = entity.attributes.filterKeys { it != "friendly_name" }.toList().sortedBy { it.first }
-            for ((key, value) in attrs) {
-                item {
-                    AttributeRow(key, valueToString(value))
-                }
-            }
-            if (entity.state.toDoubleOrNull() != null) {
-                item {
-                    Spacer(Modifier.height(24.dp))
-                    Text("Last 24 hours", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.height(8.dp))
-                    HistorySparkline(vm, entityId)
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-        }
-        item { Spacer(Modifier.height(16.dp)) }
-    }
-}
-
-/**
- * One attribute as a stacked label + full-width value. The old side-by-side
- * Row let a long unbroken value (a weather attribution sentence, a camera
- * token URL) measure to a single character wide and stack vertically, one
- * letter per line. A full-width value can never do that: it wraps normally,
- * and values over 200 chars truncate with a tap-to-copy affordance instead
- * of dumping a token URL into the layout.
- */
-@Composable
-private fun AttributeRow(key: String, value: String) {
-    val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(key, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (value.length > 200) {
-            Text(value.take(200) + "\u2026", fontSize = 13.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = {
-                    clipboard.setText(AnnotatedString(value))
-                    copied = true
-                }) {
-                    Text(if (copied) "Copied" else "Copy full value")
-                }
-                if (copied) {
-                    Text("Copied to clipboard", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        } else {
-            Text(value, fontSize = 13.sp)
-        }
-    }
-}
-
-private fun valueToString(value: Any?): String = when (value) {
-    null -> "—"
-    is List<*> -> value.joinToString(", ")
-    is Map<*, *> -> value.entries.joinToString(", ") { "${it.key}: ${it.value}" }
-    else -> value.toString()
-}
-
-@Composable
-private fun HistorySparkline(vm: HavenViewModel, entityId: String) {
-    var points by remember { mutableStateOf<List<com.garrietta.haven.data.HistoryPoint>>(emptyList()) }
-    LaunchedEffect(entityId) {
-        points = vm.client.fetchHistory(entityId, 24)
-    }
-    if (points.size >= 2) {
-        val min = points.minOf { it.value }
-        val max = points.maxOf { it.value }
-        Column {
-            Sparkline(points, accentFor(entityId), Modifier.fillMaxWidth().height(120.dp))
-            Spacer(Modifier.height(4.dp))
-            Text("Low $min · High $max", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    } else {
-        Text("No history yet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}

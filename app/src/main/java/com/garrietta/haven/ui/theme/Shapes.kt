@@ -24,7 +24,7 @@ import kotlin.math.sin
  * These are the same family of shapes used across Relay/Koda/Pixel Music: big,
  * friendly, animated blobs — never raw rectangles.
  */
-enum class ExpressiveKind { SUNNY, FLOWER, BUN, BURST }
+enum class ExpressiveKind { SUNNY, FLOWER, BUN, BURST, WAVE, CLOUD }
 
 private fun polygonVertices(n: Int, radiusAt: (Int, Float) -> Float): FloatArray {
     val out = FloatArray(n * 2)
@@ -57,6 +57,16 @@ fun expressivePolygon(kind: ExpressiveKind): RoundedPolygon = when (kind) {
     ExpressiveKind.BURST -> RoundedPolygon(
         polygonVertices(24) { _, a -> 0.86f + 0.14f * cos(8 * a) },
         rounding = CornerRounding(0.28f, 0.6f),
+    )
+    // Sound ripple: two broad lobes, for media and fans.
+    ExpressiveKind.WAVE -> RoundedPolygon(
+        polygonVertices(24) { _, a -> 0.84f + 0.16f * sin(2 * a) },
+        rounding = CornerRounding(0.32f, 0.6f),
+    )
+    // Soft five-lobe cloud, for weather and sensors.
+    ExpressiveKind.CLOUD -> RoundedPolygon(
+        polygonVertices(24) { _, a -> 0.88f + 0.12f * cos(5 * a) },
+        rounding = CornerRounding(0.38f, 0.6f),
     )
 }
 

@@ -631,6 +631,111 @@ class HaClient(
         }
     }
 
+    /**
+     * Live MJPEG playback for a camera, via `/api/camera_proxy_stream/`.
+     * Emits [CameraStreamState.Connecting] immediately, then [Playing] per
+     * decoded frame. A first frame must arrive within [FIRST_FRAME_TIMEOUT_MS]
+     * and frames must keep arriving within [STALL_TIMEOUT_MS]; otherwise an
+     * explicit [Error] fires so the viewer shows error + Retry instead of a
+     * frozen frame that looks live. Slow snapshot cameras (Ring) get generous
+     * timeouts: their proxy stream only produces a frame per snapshot fetch.
+     * Callbacks post to the main thread; cancel the returned Job to stop.
+     */
+    fun streamCamera(
+        entityId: String,
+        onState: (CameraStreamState) -> Unit,
+    ): Job {
+        val post = { state: CameraStreamState ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onState(state) }
+        }
+        return scope.launch(Dispatchers.IO) {
+            post(CameraStreamState.Connecting)
+            try {
+                val req = Request.Builder()
+                    .url("$instanceUrl/api/camera_proxy_stream/$entityId")
+                    .header("Authorization", "Bearer $token")
+                    .build()
+                val resp = http.newCall(req).execute()
+                if (!resp.isSuccessful) {
+                    post(CameraStreamState.Error("Camera stream unavailable (HTTP ${resp.code})"))
+                    return@launch
+                }
+                val contentType = resp.header("Content-Type") ?: ""
+                val boundary = Regex("boundary=([^;\\s]+)").find(contentType)?.groupValues?.get(1)
+                    ?.trim('"', '\'')
+                if (boundary.isNullOrEmpty()) {
+                    post(CameraStreamState.Error("Camera stream format not recognized"))
+                    return@launch
+                }
+                val parser = MjpegParser(boundary)
+                val body = resp.body?.byteStream()
+                if (body == null) {
+                    post(CameraStreamState.Error("Camera stream is empty"))
+                    return@launch
+                }
+                var lastFrameAt = System.currentTimeMillis()
+                val startedAt = lastFrameAt
+                var sawFrame = false
+                val failed = java.util.concurrent.atomic.AtomicBoolean(false)
+                val buf = ByteArray(8192)
+                // Watchdog: a CHILD of the stream job, so cancelling the
+                // stream (viewer closed, Retry pressed) kills it too, and
+                // its timeouts fire even while the read blocks.
+                val watchdog = launch(Dispatchers.Default) {
+                    while (true) {
+                        delay(1000)
+                        val now = System.currentTimeMillis()
+                        if (!sawFrame && now - startedAt > FIRST_FRAME_TIMEOUT_MS) {
+                            failed.set(true)
+                            post(CameraStreamState.Error("Camera did not start streaming"))
+                            break
+                        }
+                        if (sawFrame && now - lastFrameAt > STALL_TIMEOUT_MS) {
+                            failed.set(true)
+                            post(CameraStreamState.Error("Camera stream stalled"))
+                            break
+                        }
+                    }
+                }
+                try {
+                    while (!failed.get()) {
+                        val read = body.read(buf)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        val frames = parser.feed(buf.copyOf(read))
+                        for (jpeg in frames) {
+                            val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+                            if (bitmap != null) {
+                                lastFrameAt = System.currentTimeMillis()
+                                sawFrame = true
+                                post(CameraStreamState.Playing(bitmap))
+                            }
+                        }
+                    }
+                    // Stream ended cleanly without ever producing a frame.
+                    if (!sawFrame && !failed.get()) post(CameraStreamState.Error("Camera stream ended"))
+                } finally {
+                    watchdog.cancel()
+                    try {
+                        body.close()
+                    } catch (ignored: Exception) {
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                post(CameraStreamState.Error("Could not reach the camera stream"))
+            }
+        }
+    }
+
+    companion object {
+        /** Slow snapshot cameras need this long to produce a first frame. */
+        const val FIRST_FRAME_TIMEOUT_MS = 20_000L
+
+        /** No frame for this long after playback started means a dead stream. */
+        const val STALL_TIMEOUT_MS = 30_000L
+    }
+
     private fun parseIsoToMs(iso: String): Long? {
         if (iso.isEmpty()) return null
         val formats = listOf(
