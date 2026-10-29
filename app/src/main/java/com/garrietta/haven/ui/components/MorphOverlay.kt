@@ -166,6 +166,35 @@ fun morphCornerTop(progress: Float): Dp =
     (28.dp * (1f - progress.coerceIn(0f, 1f))).coerceAtLeast(0.dp)
 
 /**
+ * Content alpha for a morphing surface at [progress] (0 = card,
+ * 1 = target). The content stays INVISIBLE while the panel is still
+ * growing and fades in over the last 30% of the morph (smoothstep over
+ * [0.7, 1.0]); on exit the same curve dissolves it before the panel
+ * shrinks back to the card.
+ *
+ * Why a steep fade, and why for EVERY morph (superseding the #53
+ * weather-only linear fade): the Koda reveal rule — content laid out
+ * once at target size, clipped to the growing rect — reads as
+ * clipping/doubling whenever the destination content duplicates its
+ * source card (the weather arc, the thermostat numbers, the lamp
+ * tile), because a full-size arc or value appears inside a
+ * still-small rect. The 2026-10-29 verdict video shows it on sheets
+ * AND detail pages, so scoping the fade to one sheet cannot fix it.
+ * With this curve no frame ever shows content meaningfully clipped
+ * by the rect edge: while the rect is mid-size the panel is blank
+ * (its own background color, growing from the card), and the content
+ * materializes only once the panel is nearly full size. The panel
+ * motion itself stays fully visible — only the content is delayed.
+ * Progress is clamped to [0, 1] first, so spring overshoot can never
+ * push the alpha out of range (see the spring-clamp skill: one shared
+ * pure clamping function, never ad-hoc clamps per call site).
+ */
+fun morphContentAlpha(progress: Float): Float {
+    val t = ((progress.coerceIn(0f, 1f) - 0.7f) / 0.3f).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+/**
  * The single morphing surface. [rect] is the interpolated rect in root
  * pixels; [overlayOrigin] is the overlay root's own root-coordinate
  * origin, subtracted so the surface lands correctly regardless of where
@@ -176,9 +205,10 @@ fun morphCornerTop(progress: Float): Dp =
  * detail pages: 28dp → 0dp over the morph). It is coerced to >= 0.dp
  * at the clip site: no caller can ever hand this surface a negative
  * corner again (see [morphCornerTop]). [contentAlpha] fades the
- * surface's content (1 = fully visible); weather sheets pass the
- * morph progress so their arc materializes instead of popping to full
- * size inside a still-small rect. [dragOffsetY] shifts the
+ * surface's content (1 = fully visible); every morph passes
+ * [morphContentAlpha] of its progress, so content materializes only
+ * once the panel is nearly full size instead of popping to full size
+ * inside a still-small rect (see [morphContentAlpha]). [dragOffsetY] shifts the
  * surface down for the sheet drag gesture without touching the rect
  * math. [onPlaced] reports the surface's window bounds (the sheet's
  * Details action uses them as the camera rise origin, as before).

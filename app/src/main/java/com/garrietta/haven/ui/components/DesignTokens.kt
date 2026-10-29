@@ -151,3 +151,67 @@ fun weatherActiveShape(condition: String?): StateShape = when (condition?.lowerc
 
 /** Whether a cover is mid-travel (the warning chevron lifts while moving). */
 fun coverIsMoving(state: String): Boolean = state == "opening" || state == "closing"
+
+// ---------------------------------------------------------------------------
+// Prominent dynamic colors (2026-10-29 verdict: the #41 tokens exist
+// but are not VISIBLE enough). These are the per-domain dynamic colors
+// the UI scales with state: thermostat mode, light kelvin + brightness,
+// weather condition. All pure, all unit-tested.
+// ---------------------------------------------------------------------------
+
+/**
+ * Prominent dynamic color for a climate entity: warm orange while
+ * heating, cool blue while cooling. hvac_action wins when present
+ * (the live truth); otherwise the mode state decides, with heat_cool
+ * / auto defaulting to the heating color (the heating selector is the
+ * default selector). Off, idle, dry, and fan_only have no
+ * heating/cooling direction and get a neutral blue-gray — never a
+ * heating or cooling color for a state that is neither.
+ */
+fun climateModeColor(state: String, hvacAction: String?): Color = when {
+    hvacAction == "heating" || hvacAction == "preheating" -> Color(0xFFD84315)
+    hvacAction == "cooling" -> Color(0xFF1565C0)
+    state == "heat" -> Color(0xFFD84315)
+    state == "cool" -> Color(0xFF1565C0)
+    state == "heat_cool" || state == "auto" -> Color(0xFFD84315)
+    else -> Color(0xFF78909C)
+}
+
+/**
+ * Light container scaled by brightness: the kelvin-tinted container
+ * at full brightness, fading toward the neutral idle container as the
+ * light dims (floored at 0.25 so a dim light still reads tinted, never
+ * gray). Off lights are the neutral idle container, same as before.
+ * brightnessPct is HA's brightness_pct (0-100); null means unknown and
+ * is treated as full brightness.
+ */
+fun lightBrightnessContainer(
+    scheme: ColorScheme,
+    kelvin: Int?,
+    brightnessPct: Int?,
+    isOn: Boolean,
+): Color {
+    if (!isOn) return scheme.surfaceContainerHighest
+    val full = lightContainerColor(scheme, kelvin, true)
+    val f = ((brightnessPct ?: 100).coerceIn(0, 100) / 100f).coerceIn(0.25f, 1f)
+    return lerp(scheme.surfaceContainerHighest, full, f)
+}
+
+/**
+ * Weather's prominent color by condition — the same hue family the
+ * weather page hero, the front weather card tint, and the forecast
+ * chips all draw from, so condition changes are unmissable.
+ */
+fun weatherConditionColor(condition: String?): Color = when (condition?.lowercase()) {
+    "sunny", "clear" -> Color(0xFFFFB300)
+    "clear-night" -> Color(0xFF5C6BC0)
+    "partlycloudy", "partly-cloudy" -> Color(0xFF90A4AE)
+    "cloudy" -> Color(0xFF78909C)
+    "rainy", "pouring" -> Color(0xFF1E88E5)
+    "snowy", "snowy-rainy" -> Color(0xFF81D4FA)
+    "lightning", "lightning-rainy" -> Color(0xFF7E57C2)
+    "fog" -> Color(0xFF9E9E9E)
+    "hail" -> Color(0xFF4FC3F7)
+    "windy", "windy-variant" -> Color(0xFF80CBC4)
+    else -> Color(0xFF90A4AE)
+}

@@ -232,7 +232,7 @@ fun ExpressiveStepper(symbol: String, onClick: () -> Unit, height: Dp = 48.dp, m
  * Defaults to true exactly when the card is not nested.
  */
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, onDetail: (String) -> Unit) {
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -247,8 +247,13 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
     ) {
         Column(Modifier.padding(16.dp)) {
             if (showHeader) {
+                // headerClickable=false lets an outer gesture own the
+                // card (the Home weather card's combinedClickable):
+                // an inner clickable would consume the tap and swallow
+                // the long-press, breaking tap → page / long-press →
+                // sheet. The chevron stays: the card is still tappable.
                 Row(
-                    Modifier.fillMaxWidth().clickable { onDetail(entity.entityId) },
+                    Modifier.fillMaxWidth().then(if (headerClickable) Modifier.clickable { onDetail(entity.entityId) } else Modifier),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // State-driven badge: morphs with the entity's state.

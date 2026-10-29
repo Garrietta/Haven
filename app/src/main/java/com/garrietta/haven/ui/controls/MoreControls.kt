@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -61,6 +63,9 @@ import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
+import com.garrietta.haven.ui.components.weatherConditionColor
+import com.garrietta.haven.ui.theme.ExpressiveKind
+import com.garrietta.haven.ui.theme.polygonShape
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -162,8 +167,7 @@ private fun fmtSensor(v: Double, unit: String?): String {
 }
 
 @Composable
-fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = true) {
-    val accent = accentFor(entity.entityId)
+fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = true, showDial: Boolean = true, forecastLimit: Int = 6) {
     val temp = entity.attrDouble("temperature") ?: 0.0
     val humidity = entity.attrDouble("humidity")
     var forecast by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
@@ -203,23 +207,34 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
         }
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Dial(
-            value = temp.toFloat(),
-            range = -10f..40f,
-            onValueChange = {},
-            centerText = temp.formatTemp(),
-            centerSub = entity.state.replace('_', ' ').replaceFirstChar { it.uppercase() },
-            accent = accent,
-        )
-        if (humidity != null) {
-            Text("Humidity ${humidity.toInt()}%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (showDial) {
+            // The dial sits on a condition-tinted panel: the condition
+            // color is the hero, not an accent line — the panel behind the
+            // dial reads instantly as "sunny amber" or "rainy blue".
+            val conditionColor = weatherConditionColor(entity.state)
+            Box(
+                Modifier.background(conditionColor.copy(alpha = 0.14f), RoundedCornerShape(28.dp)).padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Dial(
+                    value = temp.toFloat(),
+                    range = -10f..40f,
+                    onValueChange = {},
+                    centerText = temp.formatTemp(),
+                    centerSub = entity.state.replace('_', ' ').replaceFirstChar { it.uppercase() },
+                    accent = conditionColor,
+                )
+            }
+            if (humidity != null) {
+                Text("Humidity ${humidity.toInt()}%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         // Home hides the forecast rows (showForecast = false): the dial,
         // condition, and humidity above are the whole Weather section there.
         // Sheets, Boards, and detail surfaces keep the rows.
         if (showForecast) {
             Spacer(Modifier.height(8.dp))
-            for (item in forecast.take(6)) {
+            for (item in forecast.take(forecastLimit)) {
             val whenRaw = (item["datetime"] as? String) ?: ""
             val whenLabel = friendlyHourLabel(whenRaw)
             val fTemp = (item["temperature"] as? Number)?.toDouble()
@@ -230,12 +245,22 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Icon(
-                        conditionIcon(condition),
-                        contentDescription = condition,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    // Expressive chip: the hour's condition as a small
+                    // condition-colored polygon badge (sun / wave /
+                    // cloud by condition family) with a white glyph —
+                    // not a bare monochrome icon. Tight 8dp spacing.
+                    val chipColor = weatherConditionColor(condition)
+                    Box(
+                        Modifier.size(28.dp).background(chipColor, polygonShape(forecastChipKind(condition))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            conditionIcon(condition),
+                            contentDescription = condition,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(whenLabel, fontSize = 13.sp)
                 }
@@ -249,6 +274,13 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
             }
         }
     }
+}
+
+/** Forecast chip polygon by condition family: sun for clear, wave for wet, cloud otherwise. */
+private fun forecastChipKind(condition: String): ExpressiveKind = when (condition.lowercase()) {
+    "sunny", "clear", "clear-night" -> ExpressiveKind.SUNNY
+    "rainy", "pouring", "lightning", "lightning-rainy", "hail", "snowy", "snowy-rainy" -> ExpressiveKind.WAVE
+    else -> ExpressiveKind.CLOUD
 }
 
 /** "2026-10-28T23:00:00" -> "11 PM", "Tomorrow 11 PM", or "Thu 11 PM". Falls back to the raw string. */

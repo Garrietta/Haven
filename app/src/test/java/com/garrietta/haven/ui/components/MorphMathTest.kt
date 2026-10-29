@@ -102,4 +102,34 @@ class MorphMathTest {
         }
         assertEquals(0.dp, morphCornerTop(1.00493f))
     }
+
+    @Test
+    fun morphContentAlpha_hiddenWhilePanelGrows() {
+        // The steep fade: content is fully invisible while the panel
+        // is still growing, so no frame ever shows content clipped by
+        // the rect edge (the 2026-10-29 "clipping" verdict: sheets AND
+        // detail pages, where destination content duplicates the card).
+        assertEquals(0f, morphContentAlpha(0f), 0.001f)
+        assertEquals(0f, morphContentAlpha(0.5f), 0.001f)
+        assertEquals(0f, morphContentAlpha(0.7f), 0.001f)
+    }
+
+    @Test
+    fun morphContentAlpha_fadesInOverLastThird() {
+        assertEquals(0.5f, morphContentAlpha(0.85f), 0.001f)
+        assertEquals(1f, morphContentAlpha(1f), 0.001f)
+    }
+
+    @Test
+    fun morphContentAlpha_clampsAndIsMonotonic() {
+        assertEquals(0f, morphContentAlpha(-1f), 0.001f)
+        assertEquals(1f, morphContentAlpha(1.5f), 0.001f)
+        assertEquals(1f, morphContentAlpha(1.00493f), 0.001f)
+        var prev = 0f
+        for (p in listOf(0f, 0.5f, 0.7f, 0.8f, 0.9f, 1f)) {
+            val a = morphContentAlpha(p)
+            assertEquals(true, a >= prev)
+            prev = a
+        }
+    }
 }

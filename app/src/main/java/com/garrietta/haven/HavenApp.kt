@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -96,6 +97,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -138,6 +140,7 @@ import androidx.compose.ui.unit.IntSize
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.MorphSurface
+import com.garrietta.haven.ui.components.morphContentAlpha
 import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.detailTargetRect
@@ -305,6 +308,16 @@ fun HavenApp(vm: HavenViewModel) {
         // navigation could pop the NEW destination (or, after a
         // sign-out, empty the backstack and crash on backstack.last()).
         var morphGeneration by remember { mutableIntStateOf(0) }
+        // Scroll-away state lives here, above goTop, so a tab switch
+        // can reset it: it used to persist across tabs (remembered on
+        // density only), so a pill hidden by scrolling on one tab
+        // stayed hidden on the next until the user scrolled up there —
+        // the pill that vanished on the Thermostat tab with no scroll
+        // happening. A fresh tab always starts with the pill visible.
+        val scrollDensity = LocalDensity.current
+        val scrollVisibility = remember(scrollDensity) {
+            ScrollVisibilityState(with(scrollDensity) { 8.dp.toPx() })
+        }
         val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
         val goTop: (Screen) -> Unit = {
             morphGeneration++
@@ -312,6 +325,7 @@ fun HavenApp(vm: HavenViewModel) {
             vm.closePopup()
             sheetAnim = null
             detailAnim = null
+            scrollVisibility.reset()
             backstack.clear()
             backstack.add(it)
         }
@@ -521,11 +535,8 @@ fun HavenApp(vm: HavenViewModel) {
             // to the scaffold content only, so sheet/detail inner
             // scrolls never move the bar. PillSlideSpring
             // (0.85/MediumLow) maps onto springSpatial, the single
-            // pill-motion token — no new token.
-            val scrollDensity = LocalDensity.current
-            val scrollVisibility = remember(scrollDensity) {
-                ScrollVisibilityState(with(scrollDensity) { 8.dp.toPx() })
-            }
+            // pill-motion token — no new token. (The state itself is
+            // hoisted above goTop so tab switches can reset it.)
             val pillHidden = modalActive || !scrollVisibility.isVisible
             val pillExit by animateFloatAsState(
                 if (pillHidden) 1f else 0f,
@@ -548,10 +559,23 @@ fun HavenApp(vm: HavenViewModel) {
                 },
             ) {
             Scaffold(
+            // Transparent container: the default background painted a
+            // full-width opaque band in the reserved bottom-bar zone —
+            // near-white in light mode, the "white box" that sliced
+            // scrolling content at its top edge. With a transparent
+            // scaffold AND content extending full-height (bottom
+            // padding zeroed below), lists scroll visibly beneath the
+            // floating pill, which carries its own shadow; no box edge
+            // ever cuts an element mid-scroll. Lists carry their own
+            // bottom clearance (pillClearanceBottom) so the last item
+            // still scrolls fully above the pill.
+            containerColor = Color.Transparent,
             // Screens consume the status-bar inset themselves
             // (statusBarsPadding on each root), so the Scaffold must not add
             // it again — otherwise headers sit a full inset too low. The
-            // bottom bar's height is still reserved by the Scaffold.
+            // bottom-bar height is NOT reserved in content anymore (see
+            // the zeroed bottom padding below); lists carry their own
+            // clearance instead.
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 if (isTopLevel(current)) {
@@ -591,10 +615,23 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             },
         ) { padding ->
+            // The scaffold's padding is only the bottom-bar height
+            // (contentWindowInsets are zeroed above); it is deliberately
+            // NOT applied at the bottom, so tab/Home lists extend
+            // full-height and scroll beneath the floating pill (see the
+            // transparent container above). Start/top/end are kept
+            // from the scaffold for correctness.
+            val layoutDirection = LocalLayoutDirection.current
+            val contentPadding = PaddingValues(
+                start = padding.calculateStartPadding(layoutDirection),
+                top = padding.calculateTopPadding(),
+                end = padding.calculateEndPadding(layoutDirection),
+                bottom = 0.dp,
+            )
             // Scroll-away lives here: nested scrolls from the tab/Home
             // lists reach this Box (sheet/detail overlays are siblings
             // outside it, so their inner scrolls never move the bar).
-            Box(Modifier.fillMaxSize().padding(padding).nestedScroll(scrollVisibility.nestedScrollConnection)) {
+            Box(Modifier.fillMaxSize().padding(contentPadding).nestedScroll(scrollVisibility.nestedScrollConnection)) {
                 // Detail pages do NOT render here: the scaffold shows
                 // the screen underneath, and the page itself lives in
                 // the overlay below (above all chrome). Every other
@@ -687,13 +724,16 @@ fun HavenApp(vm: HavenViewModel) {
                         overlayOrigin = overlayOrigin,
                         targetSize = targetSize,
                         cornerTop = 28.dp,
-                        // Weather sheets fade their content with the
-                        // morph: the sheet's arc duplicates its source
-                        // card's arc, and revealing it at full size
-                        // inside a still-small rect read as doubling
-                        // (2026-10-29 verdict video). Other sheets keep
-                        // the Koda reveal-as-it-grows language.
-                        contentAlpha = if (anim.id.substringBefore('.') == "weather") sheetP else 1f,
+                        // Every morph fades its content with the steep
+                        // curve (see morphContentAlpha): the #53
+                        // weather-only linear fade did not satisfy the
+                        // verdict — the clipping/doubling read appears
+                        // on sheets AND detail pages wherever the
+                        // destination duplicates its card — so the
+                        // fade is now general, and the Koda
+                        // reveal-as-it-grows rule is superseded for
+                        // morph content.
+                        contentAlpha = morphContentAlpha(sheetP),
                         background = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.pointerInput(anim.id) {
                             detectVerticalDragGestures(
@@ -756,6 +796,7 @@ fun HavenApp(vm: HavenViewModel) {
                     targetSize = overlaySize,
                     cornerTop = morphCornerTop(detailP),
                     background = MaterialTheme.colorScheme.background,
+                    contentAlpha = morphContentAlpha(detailP),
                 ) {
                     content(anim.screen)
                 }

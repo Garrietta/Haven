@@ -56,6 +56,7 @@ import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.lightContainerColor
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.hideWhenMorphSource
+import com.garrietta.haven.ui.components.pillClearanceBottom
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
@@ -93,7 +94,7 @@ fun TabTileGrid(
         columns = GridCells.Adaptive(minSize = 160.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(bottom = 16.dp),
+        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
         modifier = Modifier.fillMaxSize(),
     ) {
         for (yaml in cards) {

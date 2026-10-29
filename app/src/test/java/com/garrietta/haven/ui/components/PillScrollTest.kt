@@ -1,5 +1,7 @@
 package com.garrietta.haven.ui.components
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -43,5 +45,22 @@ class PillScrollTest {
         // steady threshold-exact scroll would strobe the bar.
         assertEquals(true, scrollVisibilityAfter(true, -24f, threshold))
         assertEquals(false, scrollVisibilityAfter(false, 24f, threshold))
+    }
+
+    @Test
+    fun reset_restoresVisible() {
+        // Tab switches reset the latched state: a pill hidden by
+        // scrolling on one tab must not stay hidden on the next tab
+        // until the user scrolls up there (2026-10-29 verdict: the
+        // Thermostat tab opened with no pill and no scroll happening).
+        val state = ScrollVisibilityState(threshold)
+        assertEquals(true, state.isVisible)
+        state.nestedScrollConnection.onPreScroll(
+            Offset(0f, -100f),
+            NestedScrollSource.UserInput,
+        )
+        assertEquals(false, state.isVisible)
+        state.reset()
+        assertEquals(true, state.isVisible)
     }
 }

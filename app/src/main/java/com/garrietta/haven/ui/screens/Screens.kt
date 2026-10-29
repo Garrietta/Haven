@@ -3,8 +3,11 @@ package com.garrietta.haven.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +59,7 @@ import com.garrietta.haven.ui.components.KodaMenuGroup
 import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.KodaMenuSection
 import com.garrietta.haven.ui.components.LocalWideLayout
+import com.garrietta.haven.ui.components.pillClearanceBottom
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ConnectionState
@@ -305,9 +309,19 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
                 // Home shows current conditions only — dial, condition,
-                // humidity. The forecast rows live on the weather sheet and
-                // detail surfaces, not here.
-                EntityControlCard(weather, vm, showForecast = false) { vm.openPopup(it) }
+                // humidity. The card owns its gestures like every other
+                // entity: tap opens the full weather page, long-press
+                // keeps the sheet. The card's own header click is off
+                // so it cannot swallow the outer gestures, and the
+                // card still reports its bounds as the morph source.
+                Box(
+                    Modifier.combinedClickable(
+                        onClick = { navigate(Screen.EntityDetail(weather.entityId)) },
+                        onLongClick = { vm.openPopup(weather.entityId) },
+                    ),
+                ) {
+                    EntityControlCard(weather, vm, showForecast = false, headerClickable = false) { vm.openPopup(it) }
+                }
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -373,21 +387,30 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     }
     if (LocalWideLayout.current) {
         Row(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            LazyColumn(Modifier.weight(1f).padding(end = 8.dp)) {
+            LazyColumn(
+                Modifier.weight(1f).padding(end = 8.dp),
+                contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+            ) {
                 greetingSection()
                 weatherSection()
                 homeSection()
                 playingSection()
                 item { Spacer(Modifier.height(16.dp)) }
             }
-            LazyColumn(Modifier.weight(1f).padding(start = 8.dp)) {
+            LazyColumn(
+                Modifier.weight(1f).padding(start = 8.dp),
+                contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+            ) {
                 lightsSection()
                 alertsSection()
                 item { Spacer(Modifier.height(16.dp)) }
             }
         }
     } else {
-        LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+        LazyColumn(
+            Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        ) {
             greetingSection()
             weatherSection()
             homeSection()
@@ -415,7 +438,10 @@ fun SettingsScreen(
     // rows with chevrons — on Haven's dynamic colors, not Koda's palette.
     // The explanatory texts the old screen showed under each heading now
     // live as the rows' subtitles, so nothing is lost in the restyle.
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding().padding(16.dp),
+        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+    ) {
         item {
             Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))

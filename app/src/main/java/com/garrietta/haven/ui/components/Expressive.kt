@@ -20,8 +20,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -411,20 +414,29 @@ fun Dial(
     Box(
         modifier
             .size(diameter)
-            .pointerInput(range, snapToWhole) {
-                val handleRadiusPx = 13.dp.toPx()
-                val ringTolerancePx = 23.dp.toPx()
-                val grabRadiusPx = handleRadiusPx + 15.dp.toPx()
-                detectTapGestures { offset ->
-                    val zone = dialTapZone(
-                        offset.x, offset.y,
-                        size.width / 2f, size.height / 2f,
-                        minOf(size.width, size.height) / 2f - handleRadiusPx,
-                        ringTolerancePx,
-                    )
-                    if (zone == DialTapZone.INSIDE) onInsideTap?.invoke()
-                }
-            }
+            // The tap detector is attached ONLY when an inside-tap
+            // action exists: detectTapGestures consumes taps in its
+            // area even when the callback is null, which would swallow
+            // taps meant for an outer card gesture (the Home weather
+            // card's tap → full page, whose dial has no inside action).
+            // Thermostat dials pass onInsideTap, so they are unaffected.
+            .then(
+                if (onInsideTap != null) {
+                    Modifier.pointerInput(range, snapToWhole) {
+                        val handleRadiusPx = 13.dp.toPx()
+                        val ringTolerancePx = 23.dp.toPx()
+                        detectTapGestures { offset ->
+                            val zone = dialTapZone(
+                                offset.x, offset.y,
+                                size.width / 2f, size.height / 2f,
+                                minOf(size.width, size.height) / 2f - handleRadiusPx,
+                                ringTolerancePx,
+                            )
+                            if (zone == DialTapZone.INSIDE) onInsideTap.invoke()
+                        }
+                    }
+                } else Modifier
+            )
             .pointerInput(range, snapToWhole) {
                 val handleRadiusPx = 13.dp.toPx()
                 val grabRadiusPx = handleRadiusPx + 15.dp.toPx()
@@ -613,4 +625,18 @@ fun PillToggle(
                 .background(Color.White, RoundedCornerShape(50)),
         )
     }
+}
+
+/**
+ * Bottom clearance for scrollable tab/Home screens: the pill bar is
+ * 64dp tall, floats 20dp above the navigation-bars inset, and content
+ * now scrolls full-height beneath it (the scaffold no longer reserves
+ * the bottom-bar height — see HavenApp). Every scrollable top-level
+ * screen pads its last item by this amount so nothing ends up
+ * permanently hidden behind the pill.
+ */
+@Composable
+fun pillClearanceBottom(): Dp {
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    return 64.dp + 20.dp + navBottom
 }

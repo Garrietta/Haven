@@ -117,6 +117,11 @@ class ScrollVisibilityState(private val thresholdPx: Float) {
     var isVisible by mutableStateOf(true)
         private set
 
+    /** A fresh screen always starts with the pill visible (tab switches reset). */
+    fun reset() {
+        isVisible = true
+    }
+
     val nestedScrollConnection = object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             isVisible = scrollVisibilityAfter(isVisible, available.y, thresholdPx)

@@ -122,4 +122,64 @@ class DesignTokensTest {
         assertFalse(coverIsMoving("open"))
         assertFalse(coverIsMoving("closed"))
     }
+
+    @Test
+    fun climateModeColorFollowsHeatingCooling() {
+        assertEquals(Color(0xFFD84315), climateModeColor("heat", null))
+        assertEquals(Color(0xFF1565C0), climateModeColor("cool", null))
+        // heat_cool / auto default to the heating color (heating
+        // selector is the default selector).
+        assertEquals(Color(0xFFD84315), climateModeColor("heat_cool", null))
+        assertEquals(Color(0xFFD84315), climateModeColor("auto", null))
+        // hvac_action is the live truth and wins over the mode.
+        assertEquals(Color(0xFF1565C0), climateModeColor("heat_cool", "cooling"))
+        assertEquals(Color(0xFFD84315), climateModeColor("heat_cool", "heating"))
+        // Off / idle / dry / fan_only are neither: neutral, never a
+        // heating or cooling color.
+        assertEquals(Color(0xFF78909C), climateModeColor("off", null))
+        assertEquals(Color(0xFF78909C), climateModeColor("heat", "idle"))
+        assertEquals(Color(0xFF78909C), climateModeColor("dry", null))
+        assertEquals(Color(0xFF78909C), climateModeColor("fan_only", null))
+    }
+
+    @Test
+    fun lightBrightnessContainerScalesWithBrightness() {
+        // Off is always the neutral idle container.
+        assertEquals(scheme.surfaceContainerHighest, lightBrightnessContainer(scheme, 3000, 100, false))
+        // Full brightness equals the kelvin-tinted container.
+        val full = lightContainerColor(scheme, 3000, true)
+        val atFull = lightBrightnessContainer(scheme, 3000, 100, true)
+        assertEquals(full.red, atFull.red, 0.002f)
+        assertEquals(full.green, atFull.green, 0.002f)
+        assertEquals(full.blue, atFull.blue, 0.002f)
+        // Dimmer is closer to neutral than full; the 0.25 floor keeps
+        // a dim light tinted, never gray.
+        val dim = lightBrightnessContainer(scheme, 3000, 0, true)
+        assertTrue(dim.red != scheme.surfaceContainerHighest.red ||
+            dim.green != scheme.surfaceContainerHighest.green ||
+            dim.blue != scheme.surfaceContainerHighest.blue)
+        // Monotonic: brightness 25 < 50 < 100 in distance from neutral
+        // toward the tinted container (checked on one channel).
+        val c25 = lightBrightnessContainer(scheme, 3000, 25, true)
+        val c50 = lightBrightnessContainer(scheme, 3000, 50, true)
+        val d25 = kotlin.math.abs(c25.red - scheme.surfaceContainerHighest.red)
+        val d50 = kotlin.math.abs(c50.red - scheme.surfaceContainerHighest.red)
+        val d100 = kotlin.math.abs(atFull.red - scheme.surfaceContainerHighest.red)
+        assertTrue(d25 <= d50)
+        assertTrue(d50 <= d100)
+        // Unknown brightness means full.
+        assertEquals(atFull.red, lightBrightnessContainer(scheme, 3000, null, true).red, 0.002f)
+    }
+
+    @Test
+    fun weatherConditionColorCoversConditions() {
+        assertEquals(Color(0xFFFFB300), weatherConditionColor("sunny"))
+        assertEquals(Color(0xFF5C6BC0), weatherConditionColor("clear-night"))
+        assertEquals(Color(0xFF1E88E5), weatherConditionColor("rainy"))
+        assertEquals(Color(0xFF81D4FA), weatherConditionColor("snowy"))
+        assertEquals(Color(0xFF7E57C2), weatherConditionColor("lightning"))
+        assertEquals(Color(0xFF90A4AE), weatherConditionColor("partlycloudy"))
+        assertEquals(Color(0xFF90A4AE), weatherConditionColor(null))
+        assertEquals(Color(0xFF90A4AE), weatherConditionColor("exceptional"))
+    }
 }

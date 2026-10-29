@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
@@ -54,6 +56,7 @@ import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
+import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.FanControl
@@ -98,6 +101,12 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         ThermostatPageScreen(vm, entityId, onBack)
         return
     }
+    // Weather's full page is an expressive page (condition hero +
+    // expanded forecast), not the generic attribute-dump detail.
+    if (entity.domain == "weather") {
+        WeatherPageScreen(entity, vm, onBack)
+        return
+    }
     if (entity.domain == "camera") {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
             DetailTopBar(entity.friendlyName, onBack)
@@ -116,6 +125,36 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         return
     }
     DetailPageContent(vm, entity, onBack)
+}
+
+/**
+ * The weather full page: tap on the Home weather card lands here
+ * (long-press still opens the sheet). A condition-colored expressive
+ * hero — the dial + humidity on a large condition-tinted panel — then
+ * an expanded hourly forecast (24 hours of condition-colored shape
+ * chips, not the sheet's 6). No raw entity id, no attribute dump:
+ * this page is a designed surface, not the generic detail.
+ */
+@Composable
+private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -> Unit) {
+    val conditionColor = weatherConditionColor(entity.state)
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+    ) {
+        DetailTopBar(entity.friendlyName, onBack)
+        Spacer(Modifier.height(16.dp))
+        Box(
+            Modifier.fillMaxWidth().background(conditionColor.copy(alpha = 0.16f), RoundedCornerShape(32.dp)).padding(vertical = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            WeatherControl(entity, vm, showForecast = false)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Hourly forecast", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(8.dp))
+        WeatherControl(entity, vm, showDial = false, forecastLimit = 24)
+        Spacer(Modifier.height(16.dp))
+    }
 }
 
 @Composable

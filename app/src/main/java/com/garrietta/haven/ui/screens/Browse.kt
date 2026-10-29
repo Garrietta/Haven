@@ -2,6 +2,7 @@ package com.garrietta.haven.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,7 @@ import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.SectionHeader
+import com.garrietta.haven.ui.components.pillClearanceBottom
 import com.garrietta.haven.ui.controls.EntityControlCard
 
 const val UNASSIGNED_AREA = "__unassigned__"
@@ -41,7 +43,10 @@ fun AreasScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val entityAreas by vm.entityAreas.collectAsState()
     val unassignedCount = states.values.count { entityAreas[it.entityId] == null }
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+    ) {
         item {
             Spacer(Modifier.height(16.dp))
             Text("Areas", fontSize = 30.sp, fontWeight = FontWeight.Bold)
@@ -147,7 +152,10 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         } else if (results.isEmpty()) {
             Text("Nothing matches \"$query\".", color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+            ) {
                 items(results) { entity ->
                     EntityControlCard(entity, vm) { vm.openPopup(it) }
                     Spacer(Modifier.height(12.dp))

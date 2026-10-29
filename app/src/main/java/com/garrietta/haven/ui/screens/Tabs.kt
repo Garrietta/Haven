@@ -63,6 +63,7 @@ import com.garrietta.haven.data.cardType
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.pillClearanceBottom
 import org.json.JSONObject
 
 /**
@@ -116,13 +117,16 @@ fun <T> AdaptiveCardList(items: List<T>, render: @Composable (T) -> Unit) {
             columns = GridCells.Fixed(2),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 16.dp),
+            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
             modifier = Modifier.fillMaxSize(),
         ) {
             items(items.size) { i -> render(items[i]) }
         }
     } else {
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        ) {
             for (item in items) {
                 item {
                     render(item)
