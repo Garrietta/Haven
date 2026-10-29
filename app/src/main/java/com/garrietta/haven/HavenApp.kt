@@ -12,6 +12,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -96,16 +98,24 @@ private data class NavItem(
     val outlinedIcon: ImageVector,
 )
 
-private val TOP_NAV = listOf(
-    NavItem(Screen.Today, "Today", Icons.Filled.Home, Icons.Outlined.Home),
-    NavItem(Screen.Dashboards, "Boards", Icons.Filled.GridView, Icons.Outlined.GridView),
-    NavItem(Screen.Areas, "Areas", Icons.Filled.LocationOn, Icons.Outlined.LocationOn),
-    NavItem(Screen.Search, "Search", Icons.Filled.Search, Icons.Outlined.Search),
-    NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
-)
+/**
+ * The pill bar IS the tab bar: user tabs first, Settings always last and
+ * always present. Today/Boards/Areas/Search are no longer bar entries —
+ * they stay fully functional, reachable from Settings -> Browse (see the
+ * report for why this demotion is a consequence of the brief, not a
+ * removal). A legacy screen shows the bar with nothing selected.
+ */
+private fun pillBarItems(tabs: List<com.garrietta.haven.data.UserTab>): List<NavItem> {
+    val items = tabs.map { tab ->
+        NavItem(Screen.UserTab(tab.id), tab.title, Icons.Filled.GridView, Icons.Outlined.GridView)
+    }.toMutableList()
+    items.add(NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings))
+    return items
+}
 
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
     Screen.Today, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.Settings -> true
+    is Screen.UserTab -> true
     else -> false
 }
 
@@ -128,7 +138,11 @@ fun HavenApp(vm: HavenViewModel) {
             LoginScreen(vm)
             return@HavenTheme
         }
-        val backstack = remember { mutableStateListOf<Screen>(Screen.Today) }
+        val backstack = remember {
+            mutableStateListOf(
+                if (vm.userTabs.isNotEmpty()) Screen.UserTab(vm.userTabs.first().id) else Screen.Today
+            )
+        }
         val current = backstack.last()
         val navigate: (Screen) -> Unit = { backstack.add(it) }
         val goTop: (Screen) -> Unit = {
@@ -148,8 +162,15 @@ fun HavenApp(vm: HavenViewModel) {
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 if (isTopLevel(current)) {
+                    val barItems = pillBarItems(vm.userTabs)
+                    val selectedIndex = when (current) {
+                        is Screen.UserTab -> vm.userTabs.indexOfFirst { it.id == current.tabId }.takeIf { it >= 0 }
+                        Screen.Settings -> barItems.lastIndex
+                        else -> null
+                    }
                     PillNav(
-                        current = current,
+                        items = barItems,
+                        selectedIndex = selectedIndex,
                         onSelect = goTop,
                         modifier = Modifier.fillMaxWidth().padding(12.dp),
                     )
@@ -177,10 +198,14 @@ fun HavenApp(vm: HavenViewModel) {
                         onSignOut = {
                             vm.signOut()
                             backstack.clear()
-                            backstack.add(Screen.Today)
+                            backstack.add(
+                                if (vm.userTabs.isNotEmpty()) Screen.UserTab(vm.userTabs.first().id) else Screen.Today
+                            )
                         },
                         navigate = navigate,
                     )
+                    is Screen.UserTab -> UserTabScreen(vm, screen.tabId, navigate)
+                    Screen.TabManager -> TabManagerScreen(vm, goBack, navigate)
                     is Screen.EntityDetail -> EntityDetailScreen(vm, screen.entityId, goBack)
                     is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
                     Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)
@@ -239,17 +264,17 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
  * nav scrub. The bar container itself stays Haven's own floating pill.
  */
 @Composable
-fun PillNav(current: Screen, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
+fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
     val reduceMotion = LocalReduceMotion.current
     val haptics = LocalHapticFeedback.current
-    val currentIndex = TOP_NAV.indexOfFirst { it.screen == current }.coerceAtLeast(0)
+    val currentIndex = selectedIndex ?: -1
     val scrub = rememberPillScrubState(
-        tabIds = TOP_NAV.indices.toList(),
+        tabIds = items.indices.toList(),
         onHoverChange = { haptics.performHapticFeedback(HapticFeedbackType.SegmentTick) },
         onCommit = { target ->
             if (target != currentIndex) {
                 haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                onSelect(TOP_NAV[target].screen)
+                onSelect(items[target].screen)
             }
         },
     )
@@ -260,12 +285,13 @@ fun PillNav(current: Screen, onSelect: (Screen) -> Unit, modifier: Modifier = Mo
         tonalElevation = 3.dp,
         shadowElevation = 6.dp,
     ) {
+        // Scrolls horizontally once tabs overflow; short bars stay centered.
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp).pillScrub(scrub),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 8.dp).pillScrub(scrub),
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            for ((index, item) in TOP_NAV.withIndex()) {
+            for ((index, item) in items.withIndex()) {
                 val selected = (scrub.hoveredTab ?: currentIndex) == index
                 val animatedPadding by animateDpAsState(
                     if (selected) 20.dp else 12.dp,

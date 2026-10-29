@@ -49,6 +49,7 @@ dependencies {
     implementation(libs.graphics.shapes)
     implementation(libs.core.ktx)
     implementation(libs.okhttp)
+    implementation(libs.snakeyaml)
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
 }

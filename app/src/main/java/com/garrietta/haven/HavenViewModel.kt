@@ -15,12 +15,18 @@ import com.garrietta.haven.data.LovelaceConfig
 import com.garrietta.haven.data.ProbeResult
 import com.garrietta.haven.data.ScanOutcome
 import com.garrietta.haven.data.SettingsStore
+import com.garrietta.haven.data.TabsStore
+import com.garrietta.haven.data.UserTab
+import com.garrietta.haven.data.cardToYaml
+import com.garrietta.haven.data.changeCardType
+import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.data.TokenStore
 import com.garrietta.haven.data.isNetworkAvailable
 import com.garrietta.haven.data.normalizeInstanceUrl
 import com.garrietta.haven.data.probeFailureMessage
 import com.garrietta.haven.data.probeInstance
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -37,6 +43,9 @@ sealed class Screen {
     data object Areas : Screen()
     data object Search : Screen()
     data object Settings : Screen()
+    /** A user-created tab; Settings is the only built-in tab. */
+    data class UserTab(val tabId: String) : Screen()
+    data object TabManager : Screen()
     data class EntityDetail(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()
     data object DashboardEdit : Screen()
@@ -50,7 +59,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     val tokenStore = TokenStore(application)
     val settingsStore = SettingsStore(application)
+    val tabsStore = TabsStore(application)
     val client = HaClient(viewModelScope)
+
+    /** User-created tabs, in pill-bar order. Loaded synchronously so the app can open on the first tab. */
+    var userTabs by mutableStateOf<List<UserTab>>(tabsStore.loadTabs())
+        private set
 
     val connection = client.connection
     val states = client.states
@@ -121,7 +135,136 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             settingsStore.selectedDashboardPath = path
             settingsStore.hasSelectedDashboard = has
         }
+        // Starter tabs seed once, from the first full states snapshot. The
+        // guard is the persisted flag, not the tab list: a user who deletes
+        // every tab must not get them back on the next launch.
+        viewModelScope.launch {
+            val first = client.states.first { it.isNotEmpty() }
+            maybeSeedTabs(first)
+        }
         autoConnect()
+    }
+
+    // ---- User tabs ----
+
+    private fun mutateTab(tabId: String, f: (UserTab) -> UserTab) {
+        userTabs = userTabs.map { if (it.id == tabId) f(it) else it }
+        tabsStore.saveTabs(userTabs)
+    }
+
+    /** Creates a tab and returns its id, so the caller can navigate to it. */
+    fun addTab(title: String): String {
+        val id = "tab_${System.currentTimeMillis()}"
+        userTabs = userTabs + UserTab(id, title.trim().ifEmpty { "Tab" }, emptyList())
+        tabsStore.saveTabs(userTabs)
+        return id
+    }
+
+    fun renameTab(tabId: String, title: String) {
+        mutateTab(tabId) { it.copy(title = title.trim().ifEmpty { it.title }) }
+    }
+
+    fun deleteTab(tabId: String) {
+        userTabs = userTabs.filter { it.id != tabId }
+        tabsStore.saveTabs(userTabs)
+    }
+
+    fun moveTab(tabId: String, delta: Int) {
+        val list = userTabs.toMutableList()
+        val i = list.indexOfFirst { it.id == tabId }
+        val j = (i + delta).coerceIn(list.indices)
+        if (i < 0 || i == j) return
+        val tab = list.removeAt(i)
+        list.add(j, tab)
+        userTabs = list
+        tabsStore.saveTabs(userTabs)
+    }
+
+    fun addCardToTab(tabId: String, yaml: String) {
+        mutateTab(tabId) { it.copy(cards = it.cards + yaml) }
+    }
+
+    fun updateCardYaml(tabId: String, index: Int, yaml: String) {
+        mutateTab(tabId) { tab ->
+            if (index !in tab.cards.indices) tab
+            else tab.copy(cards = tab.cards.toMutableList().also { it[index] = yaml })
+        }
+    }
+
+    fun removeCardFromTab(tabId: String, index: Int) {
+        mutateTab(tabId) { tab ->
+            if (index !in tab.cards.indices) tab
+            else tab.copy(cards = tab.cards.filterIndexed { i, _ -> i != index })
+        }
+    }
+
+    fun moveCardInTab(tabId: String, from: Int, to: Int) {
+        mutateTab(tabId) { tab ->
+            if (from !in tab.cards.indices || to !in tab.cards.indices || from == to) tab
+            else {
+                val cards = tab.cards.toMutableList()
+                val card = cards.removeAt(from)
+                cards.add(to, card)
+                tab.copy(cards = cards)
+            }
+        }
+    }
+
+    /** Re-serializes a card with a new type; false when the YAML won't parse (nothing saved). */
+    fun changeTabCardType(tabId: String, index: Int, newType: String): Boolean {
+        val tab = userTabs.firstOrNull { it.id == tabId } ?: return false
+        val yaml = tab.cards.getOrNull(index) ?: return false
+        return try {
+            updateCardYaml(tabId, index, cardToYaml(changeCardType(parseCardYaml(yaml), newType)))
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Garrett's starter tabs, seeded once from his instance's entities — this
+     * is his personal initial configuration, not defaults for fresh users
+     * (a fresh user with none of these entities gets no tabs, just Settings).
+     * Cameras take ALL camera-domain entities, so the Ring front door is
+     * included automatically; no entity id is guessed, only matched.
+     */
+    private fun maybeSeedTabs(states: Map<String, com.garrietta.haven.data.HaEntity>) {
+        if (tabsStore.seeded) return
+        tabsStore.seeded = true
+        if (userTabs.isNotEmpty()) return
+        fun card(type: String, entityId: String) = "type: $type\nentity: $entityId\n"
+        val tabs = mutableListOf<UserTab>()
+        val climate = states["climate.thermostat"] ?: states.values.firstOrNull { it.domain == "climate" }
+        if (climate != null) {
+            val cards = mutableListOf(card("thermostat", climate.entityId))
+            for (sensorId in listOf("sensor.thermostat_current_temperature", "sensor.thermostat_current_humidity")) {
+                if (states.containsKey(sensorId)) cards.add(card("sensor", sensorId))
+            }
+            tabs.add(UserTab("seed_thermostat", "Thermostat", cards))
+        }
+        val garage = states.values.firstOrNull { it.domain == "cover" && it.friendlyName.contains("garage", ignoreCase = true) }
+            ?: states.values.firstOrNull { it.domain == "cover" }
+        if (garage != null) {
+            tabs.add(UserTab("seed_garage", "Garage Door", listOf(card("tile", garage.entityId))))
+        }
+        val livingLights = listOf("light.lamp_socket_1", "light.standing_lamp_socket_1")
+            .filter { states.containsKey(it) }
+            .ifEmpty {
+                states.values.filter { it.domain == "light" && it.friendlyName.contains("living", ignoreCase = true) }
+                    .map { it.entityId }
+            }
+        if (livingLights.isNotEmpty()) {
+            tabs.add(UserTab("seed_living_lights", "Living Room lights", livingLights.map { card("light", it) }))
+        }
+        val cameras = states.values.filter { it.domain == "camera" }.map { it.entityId }
+        if (cameras.isNotEmpty()) {
+            tabs.add(UserTab("seed_cameras", "Cameras", cameras.map { card("camera", it) }))
+        }
+        if (tabs.isNotEmpty()) {
+            userTabs = tabs
+            tabsStore.saveTabs(tabs)
+        }
     }
 
     // ---- Auth ----

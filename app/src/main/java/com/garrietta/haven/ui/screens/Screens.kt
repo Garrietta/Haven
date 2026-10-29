@@ -360,6 +360,34 @@ fun SettingsScreen(
                 fontSize = 14.sp,
             )
             Spacer(Modifier.height(24.dp))
+            Text("Tabs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "The pill bar is your tabs: Settings is always on, and the rest are yours to create, rename, and reorder.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+            Spacer(Modifier.height(24.dp))
+            Text("Browse", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Today, Boards, Areas, and Search live here now that the pill bar holds your tabs.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { navigate(Screen.Today) }) { Text("Today") }
+                Button(onClick = { navigate(Screen.Dashboards) }) { Text("Boards") }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { navigate(Screen.Areas) }) { Text("Areas") }
+                Button(onClick = { navigate(Screen.Search) }) { Text("Search") }
+            }
+            Spacer(Modifier.height(24.dp))
             Text("Create", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

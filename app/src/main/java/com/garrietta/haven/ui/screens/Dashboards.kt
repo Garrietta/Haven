@@ -183,9 +183,14 @@ fun LovelaceCardView(
                 }
             }
         }
-        "tile", "light", "thermostat", "sensor", "weather-forecast", "media-control" -> {
+        "tile", "light", "thermostat", "sensor", "weather", "weather-forecast", "media", "media-control", "camera", "picture-entity" -> {
             val entity = cardEntity(card)?.let { states[it] }
             if (entity != null) EntityControlCard(entity, vm) { navigate(Screen.EntityDetail(it)) }
+            else MissingEntityRow(cardEntity(card) ?: "?")
+        }
+        "gauge" -> {
+            val entity = cardEntity(card)?.let { states[it] }
+            if (entity != null) GaugeCard(card, entity)
             else MissingEntityRow(cardEntity(card) ?: "?")
         }
         "entity" -> {
