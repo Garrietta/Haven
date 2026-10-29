@@ -76,6 +76,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
@@ -305,14 +306,20 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // State-driven badge: morphs with the entity's state.
-                    DomainBadge(entity, domainIcon(entity), accent, Modifier.size(48.dp).then(badgeClick))
-                    Spacer(Modifier.width(12.dp))
+                    // 56dp badge (up from 48dp) + 16dp gap to the name:
+                    // the expressive shape background is larger than
+                    // the text block beside it, so the morph pulse and
+                    // rotation never touch the name (2026-10-29
+                    // verdict: "the text overlaps [the] — this
+                    // expressive shape background should be larger").
+                    DomainBadge(entity, domainIcon(entity), accent, Modifier.size(56.dp).then(badgeClick))
+                    Spacer(Modifier.width(16.dp))
                     Row(
                         Modifier.weight(1f).then(detailClick),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)

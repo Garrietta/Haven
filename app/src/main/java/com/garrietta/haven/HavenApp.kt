@@ -87,6 +87,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -313,18 +314,15 @@ fun HavenApp(vm: HavenViewModel) {
         val sheetProgress = remember { Animatable(0f) }
         val detailProgress = remember { Animatable(0f) }
         val sheetDrag = remember { Animatable(0f) }
-        var sheetExiting by remember { mutableStateOf(false) }
-        var detailExiting by remember { mutableStateOf(false) }
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
         val popoutProgress = remember { Animatable(0f) }
-        var popoutExiting by remember { mutableStateOf(false) }
         var sheetSurfaceBounds by remember { mutableStateOf<Rect?>(null) }
-        // Navigation generation: bumped by goTop/signOut. In-flight
-        // dismiss coroutines check it before touching the backstack —
-        // without it, a dismiss that started before a top-level
-        // navigation could pop the NEW destination (or, after a
-        // sign-out, empty the backstack and crash on backstack.last()).
-        var morphGeneration by remember { mutableIntStateOf(0) }
+        // No exiting flags and no morph generation anymore: dismiss
+        // is synchronous (see dismissDetail/dismissSheet/dismissPopout
+        // below), so there is no in-flight exit animation for a
+        // top-level navigation to race with. The #52 async stale-
+        // dismiss race is impossible in a synchronous dismiss, and
+        // the flags that guarded it are gone with the animation.
         // Scroll-away state lives here, above goTop, so a tab switch
         // can reset it: it used to persist across tabs (remembered on
         // density only), so a pill hidden by scrolling on one tab
@@ -337,7 +335,6 @@ fun HavenApp(vm: HavenViewModel) {
         }
         val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
         val goTop: (Screen) -> Unit = {
-            morphGeneration++
             vm.pageOrigin = null
             vm.closePopup()
             sheetAnim = null
@@ -349,101 +346,55 @@ fun HavenApp(vm: HavenViewModel) {
             backstack.add(it)
         }
         val scope = rememberCoroutineScope()
+        // INSTANT RETURN (2026-10-29 verdict videos on run #60).
+        // Dismiss used to animate progress 1 -> 0 on the bounds spring
+        // and only then unhide the source card: during the whole exit
+        // the card stayed hidden while a shrinking, content-dissolved
+        // panel sat over it, and the card then popped back in stages
+        // (badge first, text later, after async content reloaded).
+        // That is exactly the reported hesitation, white flash,
+        // disappearing polygon, and clipped polygon bottom on return.
+        // The fix is his first offered option: the morph surface is
+        // removed and the source card restored in the SAME
+        // recomposition — no exit shrink, no exit fade. The card was
+        // composed throughout (only alpha-hidden), so unhide is
+        // atomic: all elements present in the same frame, never
+        // staged, never blank, never clipped mid-animation. Enter
+        // morphs are unchanged (grow + steep content fade +
+        // background blend); the sheet drag spring-back on
+        // release-below-threshold is a gesture cancel, not a return
+        // morph, and is kept. The camera rise/sink keeps its own exit
+        // animation (separate path, not complained about on return).
+        // The dismisses are synchronous, so the #52 async stale-
+        // dismiss race cannot occur; identity checks stay (never pop
+        // or clear a destination that is not this morph's own).
+        // This SUPERSEDES #60's exit morph for sheets, pop-out, and
+        // detail pages (the exit animation is gone, not retuned).
         fun dismissDetail() {
             val anim = detailAnim ?: return
-            if (detailExiting) return
-            // Capture the identity this exit belongs to: if a top-level
-            // navigation (or a new detail open) intervenes before the
-            // animation finishes, the guarded cleanup below must NOT
-            // pop or clear the new destination. try/finally so a
-            // cancelled animation (a new morph snapping the shared
-            // Animatable) still resets the exiting flag.
-            val screenAtStart = anim.screen
-            val genAtStart = morphGeneration
-            detailExiting = true
-            scope.launch {
-                try {
-                    if (!reduceMotion) detailProgress.animateTo(0f, springBounds())
-                    else detailProgress.snapTo(0f)
-                } finally {
-                    // Pop only AFTER the exit morph, and only if this
-                    // is still the same detail on top: the page content
-                    // must stay present while its rect shrinks back to
-                    // the card.
-                    if (morphGeneration == genAtStart && backstack.lastOrNull() == screenAtStart && backstack.size > 1) {
-                        backstack.removeAt(backstack.lastIndex)
-                    }
-                    if (morphGeneration == genAtStart && detailAnim?.screen == screenAtStart) {
-                        detailAnim = null
-                    }
-                    detailExiting = false
-                }
+            if (backstack.lastOrNull() == anim.screen && backstack.size > 1) {
+                backstack.removeAt(backstack.lastIndex)
+            }
+            if (detailAnim?.screen == anim.screen) {
+                detailAnim = null
             }
         }
-        fun dismissSheet(animated: Boolean) {
+        fun dismissSheet() {
             val anim = sheetAnim ?: return
-            if (sheetExiting) return
-            if (!animated) {
-                // Instant clear (the sheet -> detail handoff): only
-                // clear state that still belongs to this sheet, so a
-                // popup opened in the meantime is never closed by a
-                // stale tap.
-                if (vm.popupEntityId == anim.id) vm.closePopup()
-                if (sheetAnim?.id == anim.id) sheetAnim = null
-                return
-            }
-            val idAtStart = anim.id
-            val genAtStart = morphGeneration
-            sheetExiting = true
-            scope.launch {
-                try {
-                    val progressJob = launch {
-                        if (!reduceMotion) sheetProgress.animateTo(0f, springBounds())
-                        else sheetProgress.snapTo(0f)
-                    }
-                    val dragJob = launch { sheetDrag.animateTo(0f, springMorph()) }
-                    progressJob.join()
-                    dragJob.join()
-                } finally {
-                    if (morphGeneration == genAtStart && vm.popupEntityId == idAtStart) vm.closePopup()
-                    if (morphGeneration == genAtStart && sheetAnim?.id == idAtStart) sheetAnim = null
-                    sheetExiting = false
-                }
-            }
+            if (vm.popupEntityId == anim.id) vm.closePopup()
+            if (sheetAnim?.id == anim.id) sheetAnim = null
         }
-        fun dismissPopout(animated: Boolean) {
+        fun dismissPopout() {
             val anim = popoutAnim ?: return
-            if (popoutExiting) return
-            if (!animated) {
-                // Instant clear (the pop-out -> full-page Details
-                // handoff): only clear state that still belongs to
-                // this pop-out, so a pop-out opened in the meantime
-                // is never closed by a stale tap.
-                if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
-                if (popoutAnim?.id == anim.id) popoutAnim = null
-                return
-            }
-            val idAtStart = anim.id
-            val genAtStart = morphGeneration
-            popoutExiting = true
-            scope.launch {
-                try {
-                    if (!reduceMotion) popoutProgress.animateTo(0f, springBounds())
-                    else popoutProgress.snapTo(0f)
-                } finally {
-                    if (morphGeneration == genAtStart && vm.climatePopoutId == idAtStart) vm.closeClimatePopout()
-                    if (morphGeneration == genAtStart && popoutAnim?.id == idAtStart) popoutAnim = null
-                    popoutExiting = false
-                }
-            }
+            if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
+            if (popoutAnim?.id == anim.id) popoutAnim = null
         }
         val goBack: () -> Unit = {
             if (detailAnim != null) dismissDetail()
-            else if (popoutAnim != null) dismissPopout(true)
+            else if (popoutAnim != null) dismissPopout()
             else if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
         }
         val signOut: () -> Unit = {
-            morphGeneration++
             vm.pageOrigin = null
             vm.closePopup()
             sheetAnim = null
@@ -459,18 +410,19 @@ fun HavenApp(vm: HavenViewModel) {
         // synchronously above (falling back to a fade-only appearance
         // when the card never reported bounds, e.g. a board card);
         // these effects animate progress 0 -> 1 on the bounds spring
-        // (snapped under reduce-motion). External clears (goTop,
-        // signOut) drop the anim state instantly; the exit morphs above
-        // own their own lifecycle and are guarded by the exiting flags.
+        // (snapped under reduce-motion). There is no exit animation:
+        // dismiss drops the anim state instantly (instant return —
+        // see dismissDetail/dismissSheet/dismissPopout), and external
+        // clears (goTop, signOut) do the same.
         // Synchronous capture (mirrors #49's lastDetail/lastPopupId):
         // the morph object exists in the same frame its trigger
         // appears, so the overlay renders (at progress 0, i.e. exactly
         // over the hidden card) with no one-frame gap. The effects
         // below own only the progress animation.
-        if (vm.popupEntityId != null && sheetAnim?.id != vm.popupEntityId && !sheetExiting) {
+        if (vm.popupEntityId != null && sheetAnim?.id != vm.popupEntityId) {
             sheetAnim = SheetAnim(vm.popupEntityId!!, cardBounds[vm.popupEntityId!!])
         }
-        if (detailScreen != null && detailAnim?.screen != detailScreen && !detailExiting) {
+        if (detailScreen != null && detailAnim?.screen != detailScreen) {
             detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)])
         }
         LaunchedEffect(vm.popupEntityId) {
@@ -486,7 +438,7 @@ fun HavenApp(vm: HavenViewModel) {
                     sheetProgress.snapTo(0f)
                     sheetProgress.animateTo(1f, springBounds())
                 } else sheetProgress.snapTo(1f)
-            } else if (id == null && anim != null && !sheetExiting) {
+            } else if (id == null && anim != null) {
                 sheetAnim = null
             }
         }
@@ -497,14 +449,14 @@ fun HavenApp(vm: HavenViewModel) {
                     detailProgress.snapTo(0f)
                     detailProgress.animateTo(1f, springBounds())
                 } else detailProgress.snapTo(1f)
-            } else if (detailScreen == null && anim != null && !detailExiting) {
+            } else if (detailScreen == null && anim != null) {
                 detailAnim = null
             }
         }
         // Thermostat pop-out open effect (mirrors the sheet effect):
         // capture synchronously, animate progress 0 -> 1 on the bounds
         // spring (snapped under reduce-motion).
-        if (vm.climatePopoutId != null && popoutAnim?.id != vm.climatePopoutId && !popoutExiting) {
+        if (vm.climatePopoutId != null && popoutAnim?.id != vm.climatePopoutId) {
             popoutAnim = PopoutAnim(vm.climatePopoutId!!, cardBounds[vm.climatePopoutId!!])
         }
         LaunchedEffect(vm.climatePopoutId) {
@@ -515,7 +467,7 @@ fun HavenApp(vm: HavenViewModel) {
                     popoutProgress.snapTo(0f)
                     popoutProgress.animateTo(1f, springBounds())
                 } else popoutProgress.snapTo(1f)
-            } else if (id == null && anim != null && !popoutExiting) {
+            } else if (id == null && anim != null) {
                 popoutAnim = null
             }
         }
@@ -727,21 +679,21 @@ fun HavenApp(vm: HavenViewModel) {
             // single rect from the card captured at open to the measured
             // panel rect; the source card underneath renders alpha 0
             // for the whole morph, so nothing ever doubles. Dismissing
-            // animates the same rect back to the card (never a diagonal
-            // fly-out); the sheet -> detail handoff clears the sheet
-            // instantly (no exit morph) and the detail morph starts
-            // from the same card, so the card never flashes back in
-            // between.
+            // is instant (no exit morph — see dismissSheet): the
+            // surface vanishes and the card reappears in the same
+            // frame; the sheet -> detail handoff clears the sheet
+            // instantly and the detail morph starts from the same
+            // card, so the card never flashes back in between.
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
-                BackHandler { dismissSheet(true) }
+                BackHandler { dismissSheet() }
                 Box(
                     Modifier.fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.4f * sheetProgress.value))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                        ) { dismissSheet(true) },
+                        ) { dismissSheet() },
                 )
                 val targetSize = anim.targetSize
                 if (targetSize == null) {
@@ -761,8 +713,8 @@ fun HavenApp(vm: HavenViewModel) {
                             EntityPopupSheetContent(
                                 vm, navigate, anim.id, dragging = false,
                                 sheetBounds = sheetSurfaceBounds,
-                                onClose = { dismissSheet(true) },
-                                onDetails = { dismissSheet(false) },
+                                onClose = { dismissSheet() },
+                                onDetails = { dismissSheet() },
                             )
                         }
                     }
@@ -801,25 +753,28 @@ fun HavenApp(vm: HavenViewModel) {
                         // morph content.
                         contentAlpha = morphContentAlpha(sheetP),
                         background = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
+                        backgroundBlend = morphBackgroundBlend(sheetP),
                         modifier = Modifier.pointerInput(anim.id) {
                             detectVerticalDragGestures(
                                 onDragEnd = {
-                                    if (!sheetExiting) {
-                                        if (sheetDrag.value > dismissThresholdPx) {
-                                            dismissSheet(true)
-                                        } else {
-                                            scope.launch { sheetDrag.animateTo(0f, springMorph()) }
-                                        }
+                                    if (sheetDrag.value > dismissThresholdPx) {
+                                        dismissSheet()
+                                    } else {
+                                        // Gesture cancel: spring back to
+                                        // rest. This is NOT a return
+                                        // morph — the instant-return
+                                        // rule applies to dismiss, not
+                                        // to cancelling a drag.
+                                        scope.launch { sheetDrag.animateTo(0f, springMorph()) }
                                     }
                                 },
                                 onDragCancel = {
-                                    if (!sheetExiting) scope.launch { sheetDrag.animateTo(0f, springMorph()) }
+                                    scope.launch { sheetDrag.animateTo(0f, springMorph()) }
                                 },
                             ) { change, dragAmount ->
-                                if (!sheetExiting) {
-                                    change.consume()
-                                    scope.launch { sheetDrag.snapTo((sheetDrag.value + dragAmount).coerceAtLeast(0f)) }
-                                }
+                                change.consume()
+                                scope.launch { sheetDrag.snapTo((sheetDrag.value + dragAmount).coerceAtLeast(0f)) }
                             }
                         },
                         dragOffsetY = sheetDrag.value,
@@ -828,8 +783,8 @@ fun HavenApp(vm: HavenViewModel) {
                         EntityPopupSheetContent(
                             vm, navigate, anim.id, dragging = sheetDrag.value > 1f,
                             sheetBounds = sheetSurfaceBounds,
-                            onClose = { dismissSheet(true) },
-                            onDetails = { dismissSheet(false) },
+                            onClose = { dismissSheet() },
+                            onDetails = { dismissSheet() },
                         )
                     }
                 }
@@ -839,9 +794,9 @@ fun HavenApp(vm: HavenViewModel) {
             // bottom-sheet rise for detail pages is gone — the
             // visual-bugs round replaced it with the container morph,
             // and this round replaces the morph mechanism itself).
-            // Back runs the same rect back to the card before the
-            // backstack pops (see dismissDetail), so the exit lands on
-            // the card instead of fading out in place.
+            // Back is instant (see dismissDetail): the surface
+            // vanishes and the card reappears in the same frame —
+            // no exit shrink, no staged reappearance.
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 val target = detailTargetRect(overlayOrigin, overlaySize)
@@ -863,6 +818,8 @@ fun HavenApp(vm: HavenViewModel) {
                     cornerTop = morphCornerTop(detailP),
                     background = MaterialTheme.colorScheme.background,
                     contentAlpha = morphContentAlpha(detailP),
+                    fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
+                    backgroundBlend = morphBackgroundBlend(detailP),
                 ) {
                     content(anim.screen)
                 }
@@ -870,22 +827,23 @@ fun HavenApp(vm: HavenViewModel) {
             // Thermostat pop-out: a centered expressive morph (not a
             // bottom sheet, not a full page). The panel is measured
             // once at 16dp side margins, then centered in the overlay;
-            // the morph runs card -> centered panel and back, with the
-            // same steep content fade and current-bounds-first rule as
-            // sheets and details. The morph surface itself is
-            // transparent: the panel draws its own shapes (the scallop
-            // disc is the pop-out's own background, inside a 32dp
-            // rounded panel).
+            // the morph runs card -> centered panel on enter and
+            // returns instantly on dismiss (no exit morph — see
+            // dismissPopout), with the same steep content fade and
+            // current-bounds-first rule as sheets and details. The
+            // morph surface itself is transparent: the panel draws its
+            // own shapes (the scallop disc is the pop-out's own
+            // background, inside a 32dp rounded panel).
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
-                BackHandler { dismissPopout(true) }
+                BackHandler { dismissPopout() }
                 Box(
                     Modifier.fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.4f * popoutProgress.value))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                        ) { dismissPopout(true) },
+                        ) { dismissPopout() },
                 )
                 val targetSize = anim.targetSize
                 if (targetSize == null) {
@@ -905,10 +863,10 @@ fun HavenApp(vm: HavenViewModel) {
                             ThermostatPopoutContent(
                                 vm, anim.id,
                                 onDetails = {
-                                    dismissPopout(false)
+                                    dismissPopout()
                                     navigate(Screen.Thermostat(anim.id))
                                 },
-                                onClose = { dismissPopout(true) },
+                                onClose = { dismissPopout() },
                             )
                         }
                     }
@@ -927,19 +885,29 @@ fun HavenApp(vm: HavenViewModel) {
                         contentAlpha = morphContentAlpha(popoutP),
                         background = Color.Transparent,
                     ) {
+                        // The pop-out panel's own background blends
+                        // from the card color over the first 30% of
+                        // enter (same morphBackgroundBlend rule as
+                        // sheets/details) so the pop-out grows out of
+                        // the card instead of flashing in white.
+                        val popoutPanelBg = lerp(
+                            MaterialTheme.colorScheme.surfaceContainerLow,
+                            MaterialTheme.colorScheme.surfaceContainerHigh,
+                            morphBackgroundBlend(popoutP),
+                        )
                         Box(
                             Modifier.fillMaxSize().background(
-                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                                popoutPanelBg,
                                 RoundedCornerShape(32.dp),
                             ),
                         ) {
                             ThermostatPopoutContent(
                                 vm, anim.id,
                                 onDetails = {
-                                    dismissPopout(false)
+                                    dismissPopout()
                                     navigate(Screen.Thermostat(anim.id))
                                 },
-                                onClose = { dismissPopout(true) },
+                                onClose = { dismissPopout() },
                             )
                         }
                     }
@@ -1041,9 +1009,10 @@ private fun ThermostatPopoutContent(
  * surface. [dragging] drives the dynamic handle (wide/thin while
  * entering or dragging, narrow/thick at rest). [sheetBounds] is the
  * surface's window rect for the camera rise origin on Details.
- * [onClose] dismisses with the exit morph; [onDetails] dismisses
- * instantly for the sheet -> detail handoff (the detail morph starts
- * from the same card, so the card never flashes back in between).
+ * [onClose] dismisses instantly (instant return — no exit morph);
+ * [onDetails] dismisses instantly for the sheet -> detail handoff
+ * (the detail morph starts from the same card, so the card never
+ * flashes back in between).
  */
 @Composable
 private fun EntityPopupSheetContent(
@@ -1106,7 +1075,7 @@ private fun EntityPopupSheetContent(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -1211,11 +1180,18 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     // Start the session once both the session and the renderer exist.
     LaunchedEffect(webrtcSession, renderer) {
         val view = renderer ?: return@LaunchedEffect
-        webrtcSession.start(
-            view,
-            onFirstFrame = { webrtcPlaying = true },
-            onFailed = { stage -> if (webrtcFailed == null) webrtcFailed = stage },
-        )
+        try {
+            webrtcSession.start(
+                view,
+                onFirstFrame = { webrtcPlaying = true },
+                onFailed = { stage -> if (webrtcFailed == null) webrtcFailed = stage },
+            )
+        } catch (e: Exception) {
+            // Defense in depth beside the session's own init guard:
+            // any throw here becomes the named error UI + HLS-live
+            // fallback, never a crash dialog.
+            if (webrtcFailed == null) webrtcFailed = "init: ${e.message ?: e.javaClass.simpleName}"
+        }
     }
     // WebRTC negotiation guard: 20s for offer + answer + first track.
     // Without it a stalled negotiation would sit on "Loading" forever.
@@ -1283,7 +1259,10 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
             },
             )
         }
-        // HLS-live player, only while it is the live path.
+        // HLS-live player, only while it is the live path. The update
+        // block re-binds the player on recomposition: without it the
+        // factory-captured player goes stale when the HLS attempt
+        // changes, and the view can show a released player.
         if (hlsPlayer != null) {
             AndroidView(
                 factory = { ctx ->
@@ -1292,6 +1271,7 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
                         useController = false
                     }
                 },
+                update = { it.player = hlsPlayer },
                 modifier = Modifier.fillMaxSize().graphicsLayer {
                     val s = 0.94f + 0.06f * enterProgress
                     scaleX = s
@@ -1576,12 +1556,21 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                     Modifier.wrapContentWidth()
                         .onGloballyPositioned { barOrigin = it.boundsInWindow().left },
                 ) {
-            // The morphing indicator, behind the items.
+            // The morphing indicator, behind the items. It is padded
+            // 8dp beyond the measured item rect on each side: item
+            // width snaps instantly at selection while the indicator
+            // glides (the #51 trade), so during the glide a label can
+            // briefly extend past an exactly-sized indicator and read
+            // as text overflowing its shape background. The padding
+            // absorbs that transient overflow (2026-10-29 verdict:
+            // "the text overlaps [the] — this expressive shape
+            // background should be larger").
             if (targetRect != null) {
+                val indicatorPad = with(density) { 8.dp.toPx() }
                 Box(
                     Modifier.align(Alignment.CenterStart)
-                        .offset { IntOffset(indicatorLeft.roundToInt(), 0) }
-                        .width(with(density) { (indicatorRight - indicatorLeft).toDp() })
+                        .offset { IntOffset((indicatorLeft - indicatorPad).roundToInt(), 0) }
+                        .width(with(density) { (indicatorRight - indicatorLeft + indicatorPad * 2).toDp() })
                         .height(48.dp)
                         .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
                 )

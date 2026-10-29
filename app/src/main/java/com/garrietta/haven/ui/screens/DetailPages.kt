@@ -1,5 +1,7 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -53,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.DetailTopBar
@@ -62,7 +66,6 @@ import com.garrietta.haven.data.HaClient
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.findRecordingSibling
 import com.garrietta.haven.data.formatHaTimestamp
-import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.data.isRingCamera
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -77,6 +80,7 @@ import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.controls.EntityControlCard
+import com.garrietta.haven.ui.controls.ForecastTimeline
 import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.FanControl
 import com.garrietta.haven.ui.controls.LightControl
@@ -173,7 +177,11 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         Spacer(Modifier.height(16.dp))
         Text("Hourly forecast", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
-        WeatherControl(entity, vm, showDial = false, forecastLimit = 24)
+        // Timeline, not a list (2026-10-29 verdict: the 24-row plain
+        // list "just doesn't look very good — a forecast could be a
+        // timeline"). The hero above and the condition coloring are
+        // unchanged; only the hourly presentation changes.
+        ForecastTimeline(entity, vm)
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -195,7 +203,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accent)
+                    Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(entity.entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -294,17 +302,35 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     }
 }
 
+/**
+ * Fraction of the garage-door frame the door fills, 1 = fully closed
+ * (door down, frame full), 0 = fully open (door up, frame empty).
+ * Position is ground truth when reported; without it, open/closed
+ * states map to the ends and any in-between state (opening, closing,
+ * unknown) maps to mid-travel — a neutral placeholder, never an
+ * invented position. Pure, unit-tested.
+ */
+fun garageDoorFillFraction(position: Int?, state: String): Float {
+    if (position != null) return (100 - position.coerceIn(0, 100)) / 100f
+    return when (state) {
+        "open" -> 0f
+        "closed" -> 1f
+        else -> 0.5f
+    }
+}
+
 /** Cover page: open/close/stop always, position slider only when the cover reports one. */
 @Composable
 private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
     val position = entity.attrInt("current_position")
     val accent = accentFor(entity.entityId)
     val isGarage = entity.attrString("device_class") == "garage"
+    if (isGarage) {
+        GarageDoorMenu(entity, vm, position, accent)
+        return
+    }
     Column {
-        Text(
-            if (isGarage) "Garage door · ${entity.stateText()}" else entity.stateText(),
-            fontWeight = FontWeight.SemiBold,
-        )
+        Text(entity.stateText(), fontWeight = FontWeight.SemiBold)
         if (position != null) {
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -313,6 +339,96 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
             FilledTonalButton(onClick = { vm.callService("cover", "open_cover", entity.entityId) }) { Text("Open") }
             FilledTonalButton(onClick = { vm.callService("cover", "close_cover", entity.entityId) }) { Text("Close") }
             OutlinedButton(onClick = { vm.callService("cover", "stop_cover", entity.entityId) }) { Text("Stop") }
+        }
+        if (position != null) {
+            Spacer(Modifier.height(8.dp))
+            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent)
+        }
+    }
+}
+
+/**
+ * Garage door expressive menu (2026-10-29 verdict: "some kind of
+ * expressive UI menu — I don't know how you can incorporate
+ * expressive shapes to kind of represent a garage door, but that
+ * would be nice"). The expressive element IS a garage door: a
+ * segmented door-panel shape in a frame, filled from the top by
+ * exactly the closed fraction — closed fills the frame, open empties
+ * it from the bottom (the door slides up), partial positions fill
+ * partway, and the fill animates as the door moves. Segment divider
+ * lines sit at the quarter heights of the frame wherever the fill
+ * covers them, so the door reads as panels, not a flat block. Open /
+ * Close / Stop are pill controls in the #49 pill language, and the
+ * position slider stays where a position is reported. Attributes stay
+ * reachable below this control (the page's attributes section is
+ * untouched) — the menu replaces only the plain control row.
+ */
+@Composable
+private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?, accent: Color) {
+    val fill = garageDoorFillFraction(position, entity.state)
+    val animatedFill by animateFloatAsState(fill, tween(600), label = "garageDoorFill")
+    val frameHeight = 200.dp
+    val panelBg = MaterialTheme.colorScheme.surfaceContainer
+    Column {
+        Text("Garage door · ${entity.stateText()}", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (position != null) {
+            Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            Modifier.fillMaxWidth().height(frameHeight)
+                .background(panelBg, RoundedCornerShape(20.dp)),
+        ) {
+            // The door itself: top-aligned fill, height = closed
+            // fraction of the frame. Rounded top corners only — the
+            // bottom edge is the door's own straight edge.
+            Box(
+                Modifier.fillMaxWidth()
+                    .height(frameHeight * animatedFill)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        accent,
+                        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                    ),
+            )
+            // Segment dividers at the quarter heights, only where
+            // the fill reaches them.
+            for (quarter in 1..3) {
+                val dividerY = frameHeight * (quarter / 4f)
+                if (animatedFill * frameHeight.value > dividerY.value) {
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .height(2.dp)
+                            .align(Alignment.TopCenter)
+                            .offset(y = dividerY - 1.dp)
+                            .background(panelBg),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PressablePillButton(
+                onClick = { vm.callService("cover", "open_cover", entity.entityId) },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            ) {
+                Text("Open", fontWeight = FontWeight.SemiBold)
+            }
+            PressablePillButton(
+                onClick = { vm.callService("cover", "close_cover", entity.entityId) },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            ) {
+                Text("Close", fontWeight = FontWeight.SemiBold)
+            }
+            PressablePillButton(
+                onClick = { vm.callService("cover", "stop_cover", entity.entityId) },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
+                Text("Stop", fontWeight = FontWeight.SemiBold)
+            }
         }
         if (position != null) {
             Spacer(Modifier.height(8.dp))
@@ -438,19 +554,24 @@ private fun detailValueToString(value: Any?): String = when (value) {
  * after a completed load returns too few points. The old code showed
  * "No history yet" during every load, so history visibly arrived late
  * behind a false empty state (2026-10-29 evidence video).
+ *
+ * CACHED (2026-10-29 verdict: "the plot should be cached"): the
+ * strip reads the ViewModel history cache first and refreshes
+ * silently in the background. On re-entry the cached plot shows
+ * immediately — no shimmer, no reload — and the refresh never blanks
+ * it: the cache keeps the last plottable series across a failed
+ * refresh, and only updates when new data lands.
  */
 @Composable
 private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
-    var points by remember { mutableStateOf<List<HistoryPoint>>(emptyList()) }
-    var loaded by remember { mutableStateOf(false) }
+    val cached = vm.historyFor(entity.entityId)
     LaunchedEffect(entity.entityId) {
-        loaded = false
-        points = vm.client.fetchHistory(entity.entityId, 24)
-        loaded = true
+        vm.refreshHistory(entity.entityId)
     }
-    if (!loaded) {
+    if (cached == null) {
         ShimmerBox(Modifier.fillMaxWidth().height(120.dp))
-    } else if (points.size >= 2) {
+    } else if (cached.size >= 2) {
+        val points = cached
         val mm = sparklineMinCurrentMax(points)
         val unit = entity.attrString("unit_of_measurement")
         Column {
@@ -628,9 +749,11 @@ private fun TimelineSectionHeader(text: String) {
 
 @Composable
 private fun RecordingRow(vm: HavenViewModel, sibling: HaEntity, onTap: () -> Unit) {
-    var bitmap by remember(sibling.entityId) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // Cached snapshot: re-entering the timeline shows the last
+    // recording thumbnail immediately, refreshed in the background.
+    val bitmap = vm.snapshotFor(sibling.entityId)
     LaunchedEffect(sibling.entityId) {
-        bitmap = vm.client.fetchCameraBitmap(sibling.entityId)
+        vm.refreshSnapshot(sibling.entityId)
     }
     Row(
         Modifier.fillMaxWidth().clickable { onTap() }.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -667,10 +790,12 @@ private fun RecordingRow(vm: HavenViewModel, sibling: HaEntity, onTap: () -> Uni
 
 @Composable
 private fun ClipRow(vm: HavenViewModel, clip: HaClient.MediaChild, onTap: () -> Unit) {
-    var bitmap by remember(clip.mediaContentId) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // Cached thumbnail: re-entering the timeline shows the last
+    // thumbnail immediately, refreshed in the background.
     val thumb = clip.thumbnail
+    val bitmap = thumb?.let { vm.imageFor(it) }
     LaunchedEffect(clip.mediaContentId) {
-        if (thumb != null) bitmap = vm.client.fetchImageBitmap(thumb)
+        if (thumb != null) vm.refreshImage(thumb)
     }
     Row(
         Modifier.fillMaxWidth().clickable { onTap() }.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -756,6 +881,12 @@ private fun ClipPlayerScreen(
                             useController = true
                         }
                     },
+                    // Re-bind on recomposition: without this the
+                    // factory-captured player goes stale when the
+                    // resolved clip changes, and the view can show a
+                    // released player (same staleness class as the
+                    // HLS fullscreen fix in this round).
+                    update = { it.player = player },
                     modifier = Modifier.fillMaxSize(),
                 )
             }

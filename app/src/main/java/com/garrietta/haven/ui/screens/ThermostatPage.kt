@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -166,7 +167,7 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
+            Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")
             }
@@ -175,7 +176,10 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
         // Scalloped disc + radial dial: the disc is the pop-out's
         // expressive shape, mode-colored; the dial sits centered on it.
         Box(
-            Modifier.size(300.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.SCALLOP12)),
+            // 320dp disc (up from 300dp): the 260dp dial's 28dp thumb
+            // bloom reaches 158dp from center, past the old 150dp disc
+            // radius — the disc now clears the bloom with room to spare.
+            Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.SCALLOP12)),
             contentAlignment = Alignment.Center,
         ) {
             ThermostatHero(entity, vm, min, max, diameter = 260.dp)
@@ -221,7 +225,9 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
 private fun ThermostatHeroDisc(entity: HaEntity, vm: HavenViewModel, min: Float, max: Float) {
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     Box(
-        Modifier.size(340.dp).background(modeColor.copy(alpha = 0.18f), stateShape(StateShape.SCALLOP12)),
+        // 360dp disc (up from 340dp): the 300dp hero's 28dp thumb bloom
+        // reaches 178dp from center, past the old 170dp disc radius.
+        Modifier.size(360.dp).background(modeColor.copy(alpha = 0.18f), stateShape(StateShape.SCALLOP12)),
         contentAlignment = Alignment.Center,
     ) {
         ThermostatHero(entity, vm, min, max)

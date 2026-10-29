@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AcUnit
@@ -52,11 +55,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
-import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.PillToggle
@@ -117,19 +120,17 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel) {
     val accent = accentFor(entity.entityId)
     val numeric = entity.state.toDoubleOrNull()
     val unit = entity.attrString("unit_of_measurement")
-    var history by remember { mutableStateOf<List<HistoryPoint>>(emptyList()) }
+    // Cached plot (same cache as the detail strip): re-entry shows
+    // the last plot immediately, refreshed silently in the background.
+    val history = vm.historyFor(entity.entityId) ?: emptyList()
     LaunchedEffect(entity.entityId) {
-        if (numeric != null) {
-            try {
-                history = vm.client.fetchHistory(entity.entityId, 24)
-            } catch (e: Exception) {
-                history = emptyList()
-            }
-        }
+        if (numeric != null) vm.refreshHistory(entity.entityId)
     }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            DomainBadge(entity, domainIcon(entity), accent, Modifier.size(40.dp))
+            // 48dp badge (up from 40dp): the shape background clears
+            // the value text beside it even while pulsing/rotating.
+            DomainBadge(entity, domainIcon(entity), accent, Modifier.size(48.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -137,6 +138,8 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel) {
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     color = accent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 val deviceClass = entity.attrString("device_class")
                 if (deviceClass != null) {
@@ -166,13 +169,18 @@ private fun fmtSensor(v: Double, unit: String?): String {
     return if (unit != null) "$num $unit" else num
 }
 
+/**
+ * Shared hourly-forecast fetch: the `forecast` attribute when present,
+ * else WS `weather/get_forecasts` (hourly, return_response). Used by
+ * both WeatherControl (rows) and ForecastTimeline (timeline) so the
+ * two presentations never fetch twice or diverge. When [enabled] is
+ * false nothing is fetched (Home hides the forecast).
+ */
 @Composable
-fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = true, showDial: Boolean = true, forecastLimit: Int = 6) {
-    val temp = entity.attrDouble("temperature") ?: 0.0
-    val humidity = entity.attrDouble("humidity")
+private fun rememberForecast(entity: HaEntity, vm: HavenViewModel, enabled: Boolean): List<Map<String, Any?>> {
     var forecast by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
-    LaunchedEffect(entity.entityId, showForecast) {
-        if (!showForecast) return@LaunchedEffect
+    LaunchedEffect(entity.entityId, enabled) {
+        if (!enabled) return@LaunchedEffect
         val attr = entity.attrList("forecast")?.mapNotNull { it as? Map<String, Any?> }
         if (!attr.isNullOrEmpty()) {
             forecast = attr
@@ -206,6 +214,14 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
             )
         }
     }
+    return forecast
+}
+
+@Composable
+fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = true, showDial: Boolean = true, forecastLimit: Int = 6) {
+    val temp = entity.attrDouble("temperature") ?: 0.0
+    val humidity = entity.attrDouble("humidity")
+    val forecast = rememberForecast(entity, vm, showForecast)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         if (showDial) {
             // The dial sits on a condition-tinted panel: the condition
@@ -271,6 +287,66 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                 }
             }
             Spacer(Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Hourly forecast as a scrollable TIMELINE (2026-10-29 verdict: the
+ * 24-row plain list "just doesn't look very good — a forecast could
+ * be a timeline"). One node per hour: hour label, condition-colored
+ * polygon badge on a continuous track, temperature, condition word.
+ * The track is drawn per node (each node's 2dp segment spans its full
+ * 72dp width, nodes abut with zero spacing) so the line runs unbroken
+ * across hours and changes color with the condition. Same forecast
+ * source and condition coloring as WeatherControl's rows; only the
+ * full weather page uses the timeline — sheets, Boards, and detail
+ * surfaces keep their rows.
+ */
+@Composable
+fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
+    val forecast = rememberForecast(entity, vm, true).take(24)
+    if (forecast.isEmpty()) return
+    LazyRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp),
+    ) {
+        items(forecast) { item ->
+            val whenRaw = (item["datetime"] as? String) ?: ""
+            val whenLabel = friendlyHourLabel(whenRaw)
+            val fTemp = (item["temperature"] as? Number)?.toDouble()
+            val condition = (item["condition"] as? String) ?: ""
+            val chipColor = weatherConditionColor(condition)
+            Column(
+                Modifier.width(72.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(whenLabel, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.fillMaxWidth().height(2.dp).background(chipColor.copy(alpha = 0.35f)))
+                    Box(
+                        Modifier.size(40.dp).background(chipColor, polygonShape(forecastChipKind(condition))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            conditionIcon(condition),
+                            contentDescription = condition,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                if (fTemp != null) {
+                    Text(fTemp.formatTemp(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(condition.replace('_', ' '), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

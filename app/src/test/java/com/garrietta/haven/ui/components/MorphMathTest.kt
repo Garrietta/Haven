@@ -153,4 +153,34 @@ class MorphMathTest {
             centerTargetRect(Offset(10f, 20f), IntSize(1080, 2400), IntSize(2000, 3000)),
         )
     }
+
+    @Test
+    fun morphBackgroundBlend_endpoints() {
+        // Card color at morph start, destination color once the first
+        // 30% is done — the blend exists to remove the hard color step
+        // at morph start that read as a white flash in light mode
+        // (2026-10-29 verdict videos on run #60).
+        assertEquals(0f, morphBackgroundBlend(0f), 0.001f)
+        assertEquals(1f, morphBackgroundBlend(0.3f), 0.001f)
+        assertEquals(1f, morphBackgroundBlend(1f), 0.001f)
+    }
+
+    @Test
+    fun morphBackgroundBlend_midpoint() {
+        // Smoothstep midpoint of [0, 0.3] is 0.15 -> 0.5.
+        assertEquals(0.5f, morphBackgroundBlend(0.15f), 0.001f)
+    }
+
+    @Test
+    fun morphBackgroundBlend_clampsAndOvershoot() {
+        assertEquals(0f, morphBackgroundBlend(-1f), 0.001f)
+        assertEquals(1f, morphBackgroundBlend(1.5f), 0.001f)
+        assertEquals(1f, morphBackgroundBlend(1.00493f), 0.001f)
+        var prev = 0f
+        for (p in listOf(0f, 0.1f, 0.15f, 0.2f, 0.3f, 0.5f, 1f)) {
+            val b = morphBackgroundBlend(p)
+            assertEquals(true, b >= prev)
+            prev = b
+        }
+    }
 }

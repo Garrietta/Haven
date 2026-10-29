@@ -1,6 +1,8 @@
 package com.garrietta.haven.data
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import org.json.JSONObject
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
@@ -73,9 +75,8 @@ fun parseWebRtcAnswer(msg: JSONObject): WebRtcAnswer {
  * close() only tears down locally (peer connection, factory, EGL);
  * the HA-side session expires on its own.
  *
- * Callbacks fire on the thread the WebRTC stack calls them on; the
- * caller posts to main where UI state is touched (same pattern as
- * requestHlsUrl). onFailed fires at most once.
+ * Callbacks are posted to the main thread inside the session, so the
+ * caller can touch Compose state directly. onFailed fires at most once.
  */
 class RingWebRtcSession(
     private val appContext: Context,
@@ -88,11 +89,21 @@ class RingWebRtcSession(
     private var sessionId: String? = null
     private var failed = false
     private var closed = false
+    private var started = false
+    private var videoTrack: VideoTrack? = null
+    private var sink: VideoSink? = null
+
+    // WebRTC invokes callbacks on its own signaling/decoder threads;
+    // Compose snapshot state must only be written on the main thread.
+    // Every callback into the caller is posted to main here (and in
+    // the sink below), so a cross-thread write can never corrupt the
+    // snapshot or crash the tap path.
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private fun fail(stage: String, onFailed: (String) -> Unit) {
         if (failed || closed) return
         failed = true
-        onFailed(stage)
+        mainHandler.post { onFailed(stage) }
     }
 
     /**
@@ -100,8 +111,32 @@ class RingWebRtcSession(
      * calls [onFirstFrame] on the first decoded frame (the "Live"
      * badge gates on this, never on negotiation alone). [onFailed]
      * carries the stage that failed, for the error UI.
+     *
+     * Hardening (2026-10-29 camera-tap crash, cause unproven by audit
+     * — no bug report was attached, so the tap path was audited, not
+     * reproduced): start is idempotent (a double start from an
+     * effect re-run or a Retry racing the old session can never
+     * double-init the native stack), and any synchronous throw during
+     * native init (EGL context, factory, renderer) becomes a named
+     * "init:" failure for the error UI + HLS-live fallback, never a
+     * crash dialog. If the crash persists on device after this build,
+     * a bug report would pinpoint it — the audit could not.
      */
     fun start(
+        renderer: SurfaceViewRenderer,
+        onFirstFrame: () -> Unit,
+        onFailed: (String) -> Unit,
+    ) {
+        if (started) return
+        started = true
+        try {
+            startInternal(renderer, onFirstFrame, onFailed)
+        } catch (e: Exception) {
+            fail("init: ${e.message ?: e.javaClass.simpleName}", onFailed)
+        }
+    }
+
+    private fun startInternal(
         renderer: SurfaceViewRenderer,
         onFirstFrame: () -> Unit,
         onFailed: (String) -> Unit,
@@ -128,10 +163,11 @@ class RingWebRtcSession(
         val sink = VideoSink { frame: VideoFrame ->
             if (!firstFrameFired) {
                 firstFrameFired = true
-                onFirstFrame()
+                mainHandler.post { onFirstFrame() }
             }
             renderer.onFrame(frame)
         }
+        this.sink = sink
         val observer = object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) {
                 // Only after the answer (sessionId known); best-effort.
@@ -162,6 +198,7 @@ class RingWebRtcSession(
 
             override fun onAddTrack(receiver: RtpReceiver, streams: Array<MediaStream>) {
                 val track = receiver.track() as? VideoTrack ?: return
+                videoTrack = track
                 track.addSink(sink)
             }
 
@@ -223,6 +260,17 @@ class RingWebRtcSession(
     fun close(renderer: SurfaceViewRenderer) {
         if (closed) return
         closed = true
+        // Detach the sink FIRST: a decoded frame landing on a released
+        // renderer after close is a use-after-release crash vector.
+        val detachedSink = sink
+        if (detachedSink != null) {
+            try {
+                videoTrack?.removeSink(detachedSink)
+            } catch (_: Exception) {
+            }
+        }
+        videoTrack = null
+        sink = null
         try {
             pc?.close()
         } catch (_: Exception) {

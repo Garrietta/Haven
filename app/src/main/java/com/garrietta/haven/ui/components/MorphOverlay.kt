@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
@@ -207,6 +208,32 @@ fun morphContentAlpha(progress: Float): Float {
 }
 
 /**
+ * Background blend for a morphing surface at [progress] (0 = card,
+ * 1 = target): the panel's background color interpolates from the
+ * source card's color to the destination color over the FIRST 30% of
+ * the morph (smoothstep over [0, 0.3]), then stays at the destination
+ * color. Progress is clamped to [0, 1] first, so spring overshoot
+ * (the observed 1.00493) lands exactly on 1.
+ *
+ * Why this exists (2026-10-29 verdict videos on run #60): the steep
+ * content fade fixed doubling, but the panel itself switched from
+ * the card's color to the destination color in a single frame at
+ * morph start — in light mode that step reads as a white flash, and
+ * on exit the same step plus the dissolve left the card to pop back
+ * in stages. Blending the background over the first 30% removes the
+ * hard color step at morph start: the growing panel reads as the
+ * card itself growing, not as a new white surface appearing. The
+ * content still fades in late ([morphContentAlpha]), so doubling
+ * protection is untouched — only the background transition is
+ * softened. Callers pass the card color as [MorphSurface]
+ * fromBackground and this curve as its backgroundBlend.
+ */
+fun morphBackgroundBlend(progress: Float): Float {
+    val t = (progress.coerceIn(0f, 1f) / 0.3f).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+/**
  * The single morphing surface. [rect] is the interpolated rect in root
  * pixels; [overlayOrigin] is the overlay root's own root-coordinate
  * origin, subtracted so the surface lands correctly regardless of where
@@ -220,7 +247,14 @@ fun morphContentAlpha(progress: Float): Float {
  * surface's content (1 = fully visible); every morph passes
  * [morphContentAlpha] of its progress, so content materializes only
  * once the panel is nearly full size instead of popping to full size
- * inside a still-small rect (see [morphContentAlpha]). [dragOffsetY] shifts the
+ * inside a still-small rect (see [morphContentAlpha]).
+ * [fromBackground] + [backgroundBlend] blend the surface's background
+ * from the source card's color to [background] over the first 30% of
+ * the morph (callers pass [morphBackgroundBlend] of their progress),
+ * so the growing panel reads as the card growing rather than a new
+ * surface flashing in — the enter white flash from the 2026-10-29
+ * verdict videos. When [fromBackground] is null the surface uses
+ * [background] directly (backward-compatible default). [dragOffsetY] shifts the
  * surface down for the sheet drag gesture without touching the rect
  * math. [onPlaced] reports the surface's window bounds (the sheet's
  * Details action uses them as the camera rise origin, as before).
@@ -235,6 +269,8 @@ fun MorphSurface(
     modifier: Modifier = Modifier,
     dragOffsetY: Float = 0f,
     contentAlpha: Float = 1f,
+    fromBackground: Color? = null,
+    backgroundBlend: Float = 1f,
     onPlaced: ((Rect) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -243,6 +279,11 @@ fun MorphSurface(
     val heightDp = with(density) { rect.height.toDp() }
     val targetWidthDp = with(density) { targetSize.width.toDp() }
     val targetHeightDp = with(density) { targetSize.height.toDp() }
+    val effectiveBackground = if (fromBackground != null) {
+        lerp(fromBackground, background, backgroundBlend.coerceIn(0f, 1f))
+    } else {
+        background
+    }
     Box(
         modifier
             .offset {
@@ -253,7 +294,7 @@ fun MorphSurface(
             }
             .size(widthDp, heightDp)
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = cornerTop.coerceAtLeast(0.dp), topEnd = cornerTop.coerceAtLeast(0.dp)))
-            .background(background)
+            .background(effectiveBackground)
             .then(
                 if (onPlaced != null) Modifier.onGloballyPositioned { onPlaced(it.boundsInWindow()) }
                 else Modifier,

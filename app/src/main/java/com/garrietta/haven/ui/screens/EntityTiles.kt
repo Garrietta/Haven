@@ -1,6 +1,5 @@
 package com.garrietta.haven.ui.screens
 
-import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -47,6 +46,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
@@ -264,8 +264,14 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
                     label = "badgePress",
                 )
+                // 64dp badge (up from 52dp) + 16dp gap to the name:
+                // the expressive shape background is larger than the
+                // text block it sits over, so the 1.08x pulse and the
+                // rotation never touch the name (2026-10-29 verdict:
+                // "the text overlaps [the] — this expressive shape
+                // background should be larger").
                 Box(
-                    Modifier.size(52.dp).background(
+                    Modifier.size(64.dp).background(
                         if (badgeActive) badgeColor else badgeColor.copy(alpha = 0.18f),
                         polygonShape(shapeForDomain(entity.domain)),
                     )
@@ -286,8 +292,8 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     )
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(entity.friendlyName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2)
+            Spacer(Modifier.height(16.dp))
+            Text(entity.friendlyName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (entity.domain == "climate") {
                 ClimateTileBody(vm, entity)
             } else {
@@ -413,11 +419,14 @@ private fun tileStepNext(entity: HaEntity, selector: SetpointSelector, delta: Do
 /** Camera tiles show the snapshot when one loads; otherwise the camera badge. */
 @Composable
 private fun CameraTileVisual(vm: HavenViewModel, entity: HaEntity, accent: Color) {
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    // Cached snapshot: switching tabs back to a camera shows the last
+    // snapshot immediately, refreshed silently in the background —
+    // no blank tile + reload on every tab return (2026-10-29
+    // verdict: elements "don't stay cached in the background").
+    val snap = vm.snapshotFor(entity.entityId)
     LaunchedEffect(entity.entityId) {
-        bitmap = vm.client.fetchCameraBitmap(entity.entityId)
+        vm.refreshSnapshot(entity.entityId)
     }
-    val snap = bitmap
     if (snap != null) {
         Image(
             snap.asImageBitmap(),
