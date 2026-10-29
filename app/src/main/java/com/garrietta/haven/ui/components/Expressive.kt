@@ -16,7 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -170,7 +171,7 @@ fun KodaMenuRow(
             trailing()
         } else if (onClick != null) {
             Icon(
-                androidx.compose.material.icons.Icons.Filled.ChevronRight,
+                Icons.Filled.ChevronRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -240,7 +241,7 @@ fun Dial(
                     val zone = dialTapZone(
                         offset.x, offset.y,
                         size.width / 2f, size.height / 2f,
-                        size.minDimension / 2f - handleRadiusPx,
+                        minOf(size.width, size.height) / 2f - handleRadiusPx,
                         ringTolerancePx,
                     )
                     if (zone == DialTapZone.INSIDE) onInsideTap?.invoke()
@@ -251,7 +252,7 @@ fun Dial(
                 val grabRadiusPx = handleRadiusPx + 15.dp.toPx()
                 detectDragGestures(
                     onDragStart = { down ->
-                        val trackRadius = size.minDimension / 2f - handleRadiusPx
+                        val trackRadius = minOf(size.width, size.height) / 2f - handleRadiusPx
                         val angle = Math.toRadians(135.0 + 270.0 * fractionState.value)
                         val hx = size.width / 2f + trackRadius * cos(angle).toFloat()
                         val hy = size.height / 2f + trackRadius * sin(angle).toFloat()

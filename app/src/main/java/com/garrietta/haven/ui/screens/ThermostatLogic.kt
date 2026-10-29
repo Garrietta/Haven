@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.screens
 
 import com.garrietta.haven.data.HaEntity
+import kotlin.math.roundToInt
 
 /**
  * Pure helpers for the thermostat full page. Kept Compose-free so they are
@@ -95,7 +96,7 @@ fun defaultSelector(hvacMode: String?): SetpointSelector =
     if (hvacMode == "cool") SetpointSelector.COOLING else SetpointSelector.HEATING
 
 /** All thermostat changes happen in whole degrees: round to the nearest. */
-fun snapToDegree(value: Double): Double = kotlin.math.roundToInt(value).toDouble()
+fun snapToDegree(value: Double): Double = value.roundToInt().toDouble()
 
 /**
  * Clamp a heating setpoint to whole degrees inside [min]..[high]: it can
