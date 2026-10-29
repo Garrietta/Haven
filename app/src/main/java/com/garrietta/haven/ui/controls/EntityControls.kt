@@ -73,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -84,7 +85,9 @@ import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.lightColorTempTint
+import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.theme.ExpressiveKind
@@ -231,6 +234,22 @@ fun ExpressiveStepper(symbol: String, onClick: () -> Unit, height: Dp = 48.dp, m
  * morph reads as a doubled ghost, as in the 2026-10-29 evidence video.
  * Defaults to true exactly when the card is not nested.
  */
+/**
+ * Shape-tap actuation for binary entities: light/switch/input_boolean/
+ * fan toggle, cover toggles open/closed, lock toggles locked/unlocked.
+ * Null for every other domain (sensor, weather, camera, media,
+ * climate, vacuum): those shapes have no inner target and taps fall
+ * through to the card's background action (open page/pop-out).
+ * Shared by tiles and card headers so the model is identical
+ * everywhere: shape = actuate, background = open.
+ */
+fun shapeTapAction(vm: HavenViewModel, entity: HaEntity): (() -> Unit)? = when (entity.domain) {
+    "light", "switch", "input_boolean", "fan" -> ({ vm.toggle(entity.entityId) })
+    "cover" -> ({ vm.toggleCover(entity.entityId) })
+    "lock" -> ({ vm.toggleLock(entity.entityId) })
+    else -> null
+}
+
 @Composable
 fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
@@ -239,8 +258,21 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
         // Hierarchy tokens: SurfaceContainer for root cards (Home, Boards,
         // Areas, detail pages), SurfaceContainerLow for nested cards
         // (inside the sheet, where the panel is already a container).
+        // Weather and climate root cards carry their dynamic color at
+        // low alpha — condition on the weather front card, mode on
+        // climate cards — so state reads on the card face itself.
         colors = CardDefaults.cardColors(
             containerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
+            else if (entity.domain == "weather") lerp(
+                MaterialTheme.colorScheme.surfaceContainer,
+                weatherConditionColor(entity.state),
+                0.20f,
+            )
+            else if (entity.domain == "climate") lerp(
+                MaterialTheme.colorScheme.surfaceContainer,
+                climateModeColor(entity.state, entity.attrString("hvac_action")),
+                0.15f,
+            )
             else MaterialTheme.colorScheme.surfaceContainer,
         ),
         modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).hideWhenMorphSource(entity.entityId) else Modifier),
@@ -252,18 +284,39 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 // an inner clickable would consume the tap and swallow
                 // the long-press, breaking tap → page / long-press →
                 // sheet. The chevron stays: the card is still tappable.
+                // Shape-tap = actuate: for binary entities the badge
+                // is its own target (tap the shape, the entity flips)
+                // while the name/state/chevron open the detail; without
+                // a shape action the whole header is one detail target,
+                // exactly as before.
+                val shapeAction = if (headerClickable) shapeTapAction(vm, entity) else null
+                val badgeClick = when {
+                    shapeAction != null -> Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = shapeAction,
+                    )
+                    headerClickable -> Modifier.clickable { onDetail(entity.entityId) }
+                    else -> Modifier
+                }
+                val detailClick = if (headerClickable) Modifier.clickable { onDetail(entity.entityId) } else Modifier
                 Row(
-                    Modifier.fillMaxWidth().then(if (headerClickable) Modifier.clickable { onDetail(entity.entityId) } else Modifier),
+                    Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // State-driven badge: morphs with the entity's state.
-                    DomainBadge(entity, domainIcon(entity), accent, Modifier.size(48.dp))
+                    DomainBadge(entity, domainIcon(entity), accent, Modifier.size(48.dp).then(badgeClick))
                     Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        Modifier.weight(1f).then(detailClick),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(12.dp))
             }

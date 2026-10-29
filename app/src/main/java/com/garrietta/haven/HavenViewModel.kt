@@ -114,6 +114,19 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun closeCameraFullscreen() { fullscreenCameraId = null }
 
     /**
+     * The centered expressive thermostat pop-out (scalloped container,
+     * radial dial, fan/mode underneath). Mirrors popupEntityId: one
+     * climate entity at a time, closed by scrim tap, X, back, or the
+     * Details route (which closes the pop-out and navigates to the
+     * full thermostat page).
+     */
+    var climatePopoutId by mutableStateOf<String?>(null)
+        private set
+
+    fun openClimatePopout(entityId: String) { climatePopoutId = entityId }
+    fun closeClimatePopout() { climatePopoutId = null }
+
+    /**
      * Last live frame per camera, in memory only (never disk). The
      * fullscreen viewer shows the cached frame dimmed + "Connecting…" while
      * its stream starts or restarts, and instantly on returning to a camera
@@ -591,6 +604,32 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun toggle(id: String) {
         val next = if (client.states.value[id]?.state == "on") "off" else "on"
         actuate(id, next) { done -> client.toggle(id, done) }
+    }
+
+    /**
+     * Shape-tap actuation for covers: the optimistic state is the FINAL
+     * state ("open"/"closed"), never the intermediate ("opening"/
+     * "closing") — the OptimisticStateGuard drops any incoming state
+     * that is not exactly the expected one while the window lives, so
+     * an intermediate optimistic state would be dropped by the guard
+     * itself and the confirming final state would arrive late. The
+     * transient travel states are simply not shown during the window;
+     * the final state confirms (or the window expires and later events
+     * apply normally).
+     */
+    fun toggleCover(id: String) {
+        val cur = client.states.value[id]?.state
+        val next = if (cur == "open" || cur == "opening") "closed" else "open"
+        val service = if (next == "open") "open_cover" else "close_cover"
+        actuate(id, next) { done -> client.callService("cover", service, id, null, done) }
+    }
+
+    /** Shape-tap actuation for locks; same final-state rule as covers. */
+    fun toggleLock(id: String) {
+        val cur = client.states.value[id]?.state
+        val next = if (cur == "locked" || cur == "locking") "unlocked" else "locked"
+        val service = if (next == "locked") "lock" else "unlock"
+        actuate(id, next) { done -> client.callService("lock", service, id, null, done) }
     }
 
     fun turnOn(id: String) = actuate(id, "on") { done ->

@@ -55,6 +55,7 @@ import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.controls.EntityControlCard
@@ -161,18 +162,40 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
 private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -> Unit) {
     val accent = accentFor(entity.entityId)
     val hero: @Composable () -> Unit = {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            DomainBadge(
-                entity,
-                domainIcon(entity),
-                accent,
-                modifier = Modifier.size(52.dp),
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accent)
-                Text(entity.entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Lights get a brightness-tinted hero panel (kelvin + brightness
+        // scaled, same token as the tiles): the page's color is
+        // unmissable, not just the badge glyph.
+        val heroRow: @Composable () -> Unit = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DomainBadge(
+                    entity,
+                    domainIcon(entity),
+                    accent,
+                    modifier = Modifier.size(52.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accent)
+                    Text(entity.entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
+        }
+        if (entity.domain == "light") {
+            Box(
+                Modifier.fillMaxWidth().background(
+                    lightBrightnessContainer(
+                        MaterialTheme.colorScheme,
+                        entity.attrInt("color_temp_kelvin"),
+                        entity.attrInt("brightness")?.let { it * 100 / 255 },
+                        entity.state == "on",
+                    ),
+                    RoundedCornerShape(28.dp),
+                ).padding(16.dp),
+            ) {
+                heroRow()
+            }
+        } else {
+            heroRow()
         }
         Spacer(Modifier.height(16.dp))
     }

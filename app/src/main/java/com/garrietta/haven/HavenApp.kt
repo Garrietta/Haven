@@ -142,6 +142,7 @@ import androidx.compose.ui.unit.IntSize
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.MorphSurface
+import com.garrietta.haven.ui.components.centerTargetRect
 import com.garrietta.haven.ui.components.morphContentAlpha
 import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.ScrollVisibilityState
@@ -169,6 +170,7 @@ import com.garrietta.haven.ui.screens.SearchScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.TabManagerScreen
 import com.garrietta.haven.ui.screens.ThermostatPageScreen
+import com.garrietta.haven.ui.screens.ThermostatPopout
 import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
@@ -261,6 +263,11 @@ private class SheetAnim(val id: String, val source: Rect?) {
 /** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
 private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?)
 
+/** Open thermostat pop-out morph: the climate entity plus its source card rect (same fallback rule as sheets). */
+private class PopoutAnim(val id: String, val source: Rect?) {
+    var targetSize by mutableStateOf<IntSize?>(null)
+}
+
 @Composable
 fun HavenApp(vm: HavenViewModel) {
     var themeMode by remember { mutableStateOf(vm.settingsStore.themeMode) }
@@ -303,6 +310,9 @@ fun HavenApp(vm: HavenViewModel) {
         val sheetDrag = remember { Animatable(0f) }
         var sheetExiting by remember { mutableStateOf(false) }
         var detailExiting by remember { mutableStateOf(false) }
+        var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
+        val popoutProgress = remember { Animatable(0f) }
+        var popoutExiting by remember { mutableStateOf(false) }
         var sheetSurfaceBounds by remember { mutableStateOf<Rect?>(null) }
         // Navigation generation: bumped by goTop/signOut. In-flight
         // dismiss coroutines check it before touching the backstack —
@@ -327,6 +337,8 @@ fun HavenApp(vm: HavenViewModel) {
             vm.closePopup()
             sheetAnim = null
             detailAnim = null
+            popoutAnim = null
+            vm.closeClimatePopout()
             scrollVisibility.reset()
             backstack.clear()
             backstack.add(it)
@@ -394,8 +406,35 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
+        fun dismissPopout(animated: Boolean) {
+            val anim = popoutAnim ?: return
+            if (popoutExiting) return
+            if (!animated) {
+                // Instant clear (the pop-out -> full-page Details
+                // handoff): only clear state that still belongs to
+                // this pop-out, so a pop-out opened in the meantime
+                // is never closed by a stale tap.
+                if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
+                if (popoutAnim?.id == anim.id) popoutAnim = null
+                return
+            }
+            val idAtStart = anim.id
+            val genAtStart = morphGeneration
+            popoutExiting = true
+            scope.launch {
+                try {
+                    if (!reduceMotion) popoutProgress.animateTo(0f, springBounds())
+                    else popoutProgress.snapTo(0f)
+                } finally {
+                    if (morphGeneration == genAtStart && vm.climatePopoutId == idAtStart) vm.closeClimatePopout()
+                    if (morphGeneration == genAtStart && popoutAnim?.id == idAtStart) popoutAnim = null
+                    popoutExiting = false
+                }
+            }
+        }
         val goBack: () -> Unit = {
             if (detailAnim != null) dismissDetail()
+            else if (popoutAnim != null) dismissPopout(true)
             else if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
         }
         val signOut: () -> Unit = {
@@ -404,6 +443,8 @@ fun HavenApp(vm: HavenViewModel) {
             vm.closePopup()
             sheetAnim = null
             detailAnim = null
+            popoutAnim = null
+            vm.closeClimatePopout()
             vm.signOut()
             backstack.clear()
             backstack.add(Screen.Today)
@@ -453,6 +494,24 @@ fun HavenApp(vm: HavenViewModel) {
                 } else detailProgress.snapTo(1f)
             } else if (detailScreen == null && anim != null && !detailExiting) {
                 detailAnim = null
+            }
+        }
+        // Thermostat pop-out open effect (mirrors the sheet effect):
+        // capture synchronously, animate progress 0 -> 1 on the bounds
+        // spring (snapped under reduce-motion).
+        if (vm.climatePopoutId != null && popoutAnim?.id != vm.climatePopoutId && !popoutExiting) {
+            popoutAnim = PopoutAnim(vm.climatePopoutId!!, cardBounds[vm.climatePopoutId!!])
+        }
+        LaunchedEffect(vm.climatePopoutId) {
+            val id = vm.climatePopoutId
+            val anim = popoutAnim
+            if (id != null && anim?.id == id) {
+                if (!reduceMotion) {
+                    popoutProgress.snapTo(0f)
+                    popoutProgress.animateTo(1f, springBounds())
+                } else popoutProgress.snapTo(1f)
+            } else if (id == null && anim != null && !popoutExiting) {
+                popoutAnim = null
             }
         }
         // Camera overlay transitions share the same language:
@@ -527,7 +586,7 @@ fun HavenApp(vm: HavenViewModel) {
             // GONE: the pill now exits the viewport during modals (see
             // the pill-exit below), which replaces the blur as the answer
             // to the scrim problem, and the scrim alone dims the page.
-            val modalActive = sheetAnim != null || detailAnim != null
+            val modalActive = sheetAnim != null || detailAnim != null || popoutAnim != null
             // Scroll-away (production-upgrade round): the pill slides
             // out of view on a downward scroll past 8dp and returns on
             // an upward scroll past 8dp (the spec sample's thresholds,
@@ -547,7 +606,7 @@ fun HavenApp(vm: HavenViewModel) {
             )
             CompositionLocalProvider(
                 LocalCardBounds provides cardBounds,
-                LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId),
+                LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
             ) {
             // Overlay root: its root-coordinate origin and size anchor
             // every morph rect (see MorphSurface). All morph overlays
@@ -803,6 +862,84 @@ fun HavenApp(vm: HavenViewModel) {
                     content(anim.screen)
                 }
             }
+            // Thermostat pop-out: a centered expressive morph (not a
+            // bottom sheet, not a full page). The panel is measured
+            // once at 16dp side margins, then centered in the overlay;
+            // the morph runs card -> centered panel and back, with the
+            // same steep content fade and current-bounds-first rule as
+            // sheets and details. The morph surface itself is
+            // transparent: the panel draws its own shapes (the scallop
+            // disc is the pop-out's own background, inside a 32dp
+            // rounded panel).
+            if (popoutAnim != null) {
+                val anim = popoutAnim!!
+                BackHandler { dismissPopout(true) }
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f * popoutProgress.value))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { dismissPopout(true) },
+                )
+                val targetSize = anim.targetSize
+                if (targetSize == null) {
+                    // Measurement frame: invisible, at the panel's final
+                    // width (overlay minus 16dp margins), height capped
+                    // at 92% of the overlay. Below the scrim, so it can
+                    // neither flash nor take touches.
+                    val density = LocalDensity.current
+                    val maxHeight = with(density) { overlaySize.height.toDp() * 0.92f }
+                    Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.fillMaxWidth()
+                                .heightIn(max = maxHeight)
+                                .alpha(0f)
+                                .onGloballyPositioned { anim.targetSize = it.size },
+                        ) {
+                            ThermostatPopoutContent(
+                                vm, anim.id,
+                                onDetails = {
+                                    dismissPopout(false)
+                                    navigate(Screen.Thermostat(anim.id))
+                                },
+                                onClose = { dismissPopout(true) },
+                            )
+                        }
+                    }
+                } else {
+                    val target = centerTargetRect(overlayOrigin, overlaySize, targetSize)
+                    val density = LocalDensity.current
+                    val source = cardBounds[anim.id] ?: anim.source
+                    val popoutP = popoutProgress.value.coerceIn(0f, 1f)
+                    val rect = if (source != null) lerpRect(source, target, popoutP)
+                        else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, popoutP)
+                    MorphSurface(
+                        rect = rect,
+                        overlayOrigin = overlayOrigin,
+                        targetSize = targetSize,
+                        cornerTop = 0.dp,
+                        contentAlpha = morphContentAlpha(popoutP),
+                        background = Color.Transparent,
+                    ) {
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                                RoundedCornerShape(32.dp),
+                            ),
+                        ) {
+                            ThermostatPopoutContent(
+                                vm, anim.id,
+                                onDetails = {
+                                    dismissPopout(false)
+                                    navigate(Screen.Thermostat(anim.id))
+                                },
+                                onClose = { dismissPopout(true) },
+                            )
+                        }
+                    }
+                }
+            }
             } // overlay root Box
             } // CompositionLocalProvider (morph locals)
             // Camera overlays stay outside the shared layout: they rise as
@@ -864,6 +1001,29 @@ private fun ScreenContent(
         Screen.SceneBuilder -> SceneBuilderScreen(vm, goBack)
         Screen.ScriptBuilder -> ScriptBuilderScreen(vm, goBack)
         Screen.HelperBuilder -> HelperBuilderScreen(vm, goBack)
+    }
+}
+
+/** Thermostat pop-out content: looks the entity up (so setpoint/mode
+ * changes recompose the open pop-out) and renders the pop-out, or a
+ * fallback if the entity vanished while open. */
+@Composable
+private fun ThermostatPopoutContent(
+    vm: HavenViewModel,
+    entityId: String,
+    onDetails: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val states by vm.states.collectAsState()
+    val entity = states[entityId]
+    if (entity == null) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onClose) { Text("Close") }
+        }
+    } else {
+        ThermostatPopout(entity, vm, onDetails, onClose)
     }
 }
 

@@ -83,6 +83,22 @@ fun polygonShape(kind: ExpressiveKind): Shape = object : Shape {
     }
 }
 
+/** Same min-dimension scaling as [polygonShape], for state-table shapes
+ * (the thermostat pop-out's scallop disc is SCALLOP12, not an
+ * ExpressiveKind). Square boxes fit exactly; non-square boxes inset
+ * the same way polygonShape does, so disc boxes are kept square. */
+fun stateShape(kind: StateShape): Shape = object : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val path = stateShapePolygon(kind).toPath()
+        val scale = min(size.width, size.height) / 2f
+        val matrix = android.graphics.Matrix()
+        matrix.setScale(scale, scale)
+        matrix.postTranslate(size.width / 2f, size.height / 2f)
+        path.transform(matrix)
+        return Outline.Generic(path.asComposePath())
+    }
+}
+
 /**
  * State-driven polygons for the dynamic badging table: each domain has an
  * idle shape and an active shape, and badges morph between them on state

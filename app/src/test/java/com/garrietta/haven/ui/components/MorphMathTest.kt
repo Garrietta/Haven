@@ -132,4 +132,25 @@ class MorphMathTest {
             prev = a
         }
     }
+
+    @Test
+    fun centerTargetRect_centersPanel() {
+        // Panel smaller than the overlay: centered on both axes, with
+        // the overlay origin respected (left = 10 + (1080-800)/2, top =
+        // 20 + (2400-1560)/2).
+        assertEquals(
+            Rect(150f, 440f, 950f, 2000f),
+            centerTargetRect(Offset(10f, 20f), IntSize(1080, 2400), IntSize(800, 1560)),
+        )
+    }
+
+    @Test
+    fun centerTargetRect_clampsOversizedPanel() {
+        // Panel larger than the overlay: clamped inside the overlay,
+        // never extending past the screen.
+        assertEquals(
+            Rect(10f, 20f, 1090f, 2420f),
+            centerTargetRect(Offset(10f, 20f), IntSize(1080, 2400), IntSize(2000, 3000)),
+        )
+    }
 }

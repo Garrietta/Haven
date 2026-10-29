@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -53,8 +54,10 @@ import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.components.lightContainerColor
+import com.garrietta.haven.ui.components.climateModeColor
+import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.shapeForDomain
+import com.garrietta.haven.ui.controls.shapeTapAction
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.pillClearanceBottom
 import com.garrietta.haven.ui.components.reportCardBounds
@@ -120,9 +123,6 @@ fun TabTileGrid(
                                 vm,
                                 entity,
                                 navigate = navigate,
-                                onThermostat = navigate?.let { nav ->
-                                    { entityId: String -> nav(Screen.Thermostat(entityId)) }
-                                },
                             )
                         }
                     } else {
@@ -163,10 +163,12 @@ private fun tileStatus(entity: HaEntity): String = when (entity.domain) {
     else -> entity.stateText()
 }
 
-/** Tap routing: full page for every domain (thermostat page, live camera, per-domain page). */
-private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)?, onThermostat: ((String) -> Unit)? = null) {
+/** Tap routing: climate opens the centered expressive pop-out, cameras
+ * open fullscreen live, everything else opens its full page (or the
+ * sheet when there is no navigator, e.g. Boards cards). */
+private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)?) {
     when (entity.domain) {
-        "climate" -> if (onThermostat != null) onThermostat(entity.entityId) else vm.openPopup(entity.entityId)
+        "climate" -> vm.openClimatePopout(entity.entityId)
         "camera" -> vm.openCameraFullscreen(entity.entityId)
         else -> if (navigate != null) navigate(Screen.EntityDetail(entity.entityId)) else vm.openPopup(entity.entityId)
     }
@@ -174,7 +176,7 @@ private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)? = null, onThermostat: ((String) -> Unit)? = null) {
+fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)? = null) {
     val accent = accentFor(entity.entityId)
     val active = ((entity.domain == "light" || entity.domain == "switch" || entity.domain == "input_boolean") &&
         entity.state == "on") || (entity.domain == "cover" && entity.state == "open")
@@ -192,11 +194,25 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     )
     Surface(
         shape = RoundedCornerShape(28.dp),
-        color = if (entity.domain == "light" && entity.state == "on") {
-            // Lit tiles tint across secondary -> tertiary by color temp.
-            lightContainerColor(MaterialTheme.colorScheme, entity.attrInt("color_temp_kelvin"), true)
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
+        color = when {
+            // Lit tiles tint by kelvin AND brightness: a dim light reads
+            // dimmer than a bright one, never full-tint at 10%.
+            entity.domain == "light" && entity.state == "on" ->
+                lightBrightnessContainer(
+                    MaterialTheme.colorScheme,
+                    entity.attrInt("color_temp_kelvin"),
+                    entity.attrInt("brightness")?.let { it * 100 / 255 },
+                    true,
+                )
+            // Climate tiles carry their mode color at low alpha — the
+            // mode is visible on the tab grid, not just on the page.
+            entity.domain == "climate" ->
+                lerp(
+                    MaterialTheme.colorScheme.surfaceContainerLow,
+                    climateModeColor(entity.state, entity.attrString("hvac_action")),
+                    0.15f,
+                )
+            else -> MaterialTheme.colorScheme.surfaceContainerLow
         },
         modifier = Modifier.fillMaxWidth()
             .onGloballyPositioned { tileBounds = it.boundsInWindow() }
@@ -208,7 +224,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 indication = null,
                 onClick = {
                     tileBounds?.let { vm.pageOrigin = it }
-                    openPage(vm, entity, navigate, onThermostat)
+                    openPage(vm, entity, navigate)
                 },
                 onLongClick = { vm.openPopup(entity.entityId) },
             ),
@@ -217,17 +233,48 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             if (entity.domain == "camera") {
                 CameraTileVisual(vm, entity, accent)
             } else {
+                // Shape-tap = actuate: the expressive shape IS the
+                // control for binary entities (tap the bulb, the light
+                // flips; tap the garage shape, the door moves), while
+                // the background tap still opens the page. The badge's
+                // own combinedClickable keeps long-press -> sheet, so
+                // no gesture is lost to the inner target. Non-actuable
+                // domains get no inner target: taps fall through to
+                // the tile's background action. Climate badges carry
+                // the mode color (full when the system is on, muted
+                // when off/idle); the light shape morph on toggle is
+                // untouched (DomainBadge still morphs hexagon->scallop).
+                val badgeColor = if (entity.domain == "climate") {
+                    climateModeColor(entity.state, entity.attrString("hvac_action"))
+                } else accent
+                val badgeActive = active || (entity.domain == "climate" &&
+                    entity.state != "off" && entity.attrString("hvac_action") != "idle")
+                val shapeAction = shapeTapAction(vm, entity)
+                val badgeInteraction = remember { MutableInteractionSource() }
+                val badgePressed by badgeInteraction.collectIsPressedAsState()
+                val badgeScale by androidx.compose.animation.core.animateFloatAsState(
+                    if (badgePressed) 0.92f else 1f,
+                    animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
+                    label = "badgePress",
+                )
                 Box(
                     Modifier.size(52.dp).background(
-                        if (active) accent else accent.copy(alpha = 0.18f),
+                        if (badgeActive) badgeColor else badgeColor.copy(alpha = 0.18f),
                         polygonShape(shapeForDomain(entity.domain)),
-                    ),
+                    )
+                        .graphicsLayer(scaleX = badgeScale, scaleY = badgeScale)
+                        .then(if (shapeAction != null) Modifier.combinedClickable(
+                            interactionSource = badgeInteraction,
+                            indication = null,
+                            onClick = shapeAction,
+                            onLongClick = { vm.openPopup(entity.entityId) },
+                        ) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         domainIcon(entity),
                         contentDescription = null,
-                        tint = if (active) Color.White else accent,
+                        tint = if (badgeActive) Color.White else badgeColor,
                         modifier = Modifier.size(26.dp),
                     )
                 }

@@ -25,6 +25,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import kotlin.math.roundToInt
 
+/** Centered target rect for the thermostat pop-out: the measured panel
+ * size, centered in the overlay on both axes, clamped inside the
+ * overlay bounds so an oversized panel never extends past the screen.
+ * Pure, unit-tested. */
+fun centerTargetRect(overlayOrigin: Offset, overlaySize: IntSize, panelSize: IntSize): Rect {
+    val left = overlayOrigin.x + ((overlaySize.width - panelSize.width) / 2f).coerceAtLeast(0f)
+    val top = overlayOrigin.y + ((overlaySize.height - panelSize.height) / 2f).coerceAtLeast(0f)
+    val right = minOf(left + panelSize.width, overlayOrigin.x + overlaySize.width)
+    val bottom = minOf(top + panelSize.height, overlayOrigin.y + overlaySize.height)
+    return Rect(left, top, right, bottom)
+}
+
 /**
  * Explicit single-surface morph machinery (2026-10-29 architectural
  * overhaul). REPLACES the framework sharedBounds morph from #41/#49.

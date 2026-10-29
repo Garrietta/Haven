@@ -29,9 +29,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -59,7 +61,10 @@ import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.climateModeColor
+import com.garrietta.haven.ui.theme.StateShape
 import com.garrietta.haven.ui.theme.springMorph
+import com.garrietta.haven.ui.theme.stateShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.formatTemp
@@ -109,7 +114,7 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    ThermostatHero(entity, vm, min, max)
+                    ThermostatHeroDisc(entity, vm, min, max)
                     Spacer(Modifier.height(16.dp))
                     HeatCoolRangeBar(entity, min, max)
                 }
@@ -122,7 +127,7 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                ThermostatHero(entity, vm, min, max)
+                ThermostatHeroDisc(entity, vm, min, max)
                 Spacer(Modifier.height(16.dp))
                 HeatCoolRangeBar(entity, min, max)
                 Spacer(Modifier.height(16.dp))
@@ -130,6 +135,96 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
                 Spacer(Modifier.height(16.dp))
             }
         }
+    }
+}
+
+/**
+ * The centered expressive thermostat pop-out: tap a thermostat card's
+ * background and it expands to the middle of the screen as a large
+ * scalloped shape — the radial dial on a mode-colored scallop disc up
+ * top, Mode/Fan pills underneath, tight 8–12dp spacing, Details routing
+ * to the full page (Hold/Sensors/Indoor/history) and Close. The
+ * thermostat's shape IS its control surface (the dial changes temp,
+ * the pills change mode/fan); there is no single binary actuation for
+ * it, so the shape-tap = actuate rule applies to its inner controls,
+ * not to the card shape as a whole. The dial keeps every standing
+ * rule (1° snap, handle-grab-only 32dp nearest-wins, inside-tap
+ * toggle, clamps, gap-proofing, widen-on-grab, pulsing bloom, dual
+ * numbers) — the redesign is shapes/spacing/layout, not interaction.
+ * The disc is a square box, so the min-dimension polygon scale fits
+ * exactly: content fills the mask, never inset, no white crescents.
+ */
+@Composable
+fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit, onClose: () -> Unit) {
+    val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
+    val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
+    val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
+    var modeExpanded by remember { mutableStateOf(false) }
+    var fanExpanded by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = "Close")
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        // Scalloped disc + radial dial: the disc is the pop-out's
+        // expressive shape, mode-colored; the dial sits centered on it.
+        Box(
+            Modifier.size(300.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.SCALLOP12)),
+            contentAlignment = Alignment.Center,
+        ) {
+            ThermostatHero(entity, vm, min, max, diameter = 260.dp)
+        }
+        Spacer(Modifier.height(12.dp))
+        val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
+        if (modes.isNotEmpty()) {
+            GooglePill("Mode", formatHvacMode(entity.state), modeExpanded) { modeExpanded = !modeExpanded }
+            if (modeExpanded) {
+                Spacer(Modifier.height(8.dp))
+                ChipRow(modes, entity.state) { vm.setClimateHvacMode(entity.entityId, it) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        val fanModes = entity.attrList("fan_modes")?.mapNotNull { it as? String } ?: emptyList()
+        if (fanModes.isNotEmpty()) {
+            val fanMode = entity.attrString("fan_mode")
+            GooglePill(
+                "Fan",
+                fanMode?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Choose",
+                fanExpanded,
+            ) { fanExpanded = !fanExpanded }
+            if (fanExpanded) {
+                Spacer(Modifier.height(8.dp))
+                ChipRow(fanModes, fanMode) { vm.setClimateFanMode(entity.entityId, it) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onDetails, modifier = Modifier.weight(1f)) { Text("Details") }
+            OutlinedButton(onClick = onClose, modifier = Modifier.weight(1f)) { Text("Close") }
+        }
+    }
+}
+
+/**
+ * The thermostat page hero on its mode-colored scallop disc — the
+ * same disc language as the pop-out, larger (340dp disc, 300dp dial).
+ * The mode color is unmissable on the page, not just in the dial
+ * accents: heat orange, cool blue, neutral when off/idle.
+ */
+@Composable
+private fun ThermostatHeroDisc(entity: HaEntity, vm: HavenViewModel, min: Float, max: Float) {
+    val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
+    Box(
+        Modifier.size(340.dp).background(modeColor.copy(alpha = 0.18f), stateShape(StateShape.SCALLOP12)),
+        contentAlignment = Alignment.Center,
+    ) {
+        ThermostatHero(entity, vm, min, max)
     }
 }
 
@@ -152,11 +247,12 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
  * degrees and is clamped so heating can never pass cooling.
  */
 @Composable
-private fun ThermostatHero(
+fun ThermostatHero(
     entity: HaEntity,
     vm: HavenViewModel,
     min: Float,
     max: Float,
+    diameter: Dp = 300.dp,
 ) {
     val current = entity.attrDouble("current_temperature")
     val accent = accentFor(entity.entityId)
@@ -231,7 +327,7 @@ private fun ThermostatHero(
                     null
                 },
                 pulseSelector = pulseSelector,
-                diameter = 300.dp,
+                diameter = diameter,
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (heatCool) {
