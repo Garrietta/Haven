@@ -161,16 +161,21 @@ fun coverIsMoving(state: String): Boolean = state == "opening" || state == "clos
 
 /**
  * Prominent dynamic color for a climate entity: warm orange while
- * heating, cool blue while cooling. hvac_action wins when present
- * (the live truth); otherwise the mode state decides, with heat_cool
- * / auto defaulting to the heating color (the heating selector is the
- * default selector). Off, idle, dry, and fan_only have no
- * heating/cooling direction and get a neutral blue-gray — never a
- * heating or cooling color for a state that is neither.
+ * heating, cool blue while cooling. hvac_action, when present,
+ * decides completely (it is the live truth): heating/preheating →
+ * heat, cooling → cool, anything else (idle, off, fan, drying) →
+ * neutral — an idle thermostat in heat mode is not heating, so it
+ * must not read heat-colored. Only when hvac_action is absent does
+ * the mode state decide, with heat_cool / auto defaulting to the
+ * heating color (the heating selector is the default selector).
+ * Off, dry, and fan_only have no heating/cooling direction and get
+ * the neutral blue-gray — never a heating or cooling color for a
+ * state that is neither.
  */
 fun climateModeColor(state: String, hvacAction: String?): Color = when {
     hvacAction == "heating" || hvacAction == "preheating" -> Color(0xFFD84315)
     hvacAction == "cooling" -> Color(0xFF1565C0)
+    hvacAction != null -> Color(0xFF78909C)
     state == "heat" -> Color(0xFFD84315)
     state == "cool" -> Color(0xFF1565C0)
     state == "heat_cool" || state == "auto" -> Color(0xFFD84315)
