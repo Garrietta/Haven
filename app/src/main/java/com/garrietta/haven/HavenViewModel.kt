@@ -43,7 +43,7 @@ sealed class Screen {
     data object Areas : Screen()
     data object Search : Screen()
     data object Settings : Screen()
-    /** A user-created tab; Settings is the only built-in tab. */
+    /** A user-created tab; Home and Settings are the built-in tabs. */
     data class UserTab(val tabId: String) : Screen()
     data object TabManager : Screen()
     data class EntityDetail(val entityId: String) : Screen()

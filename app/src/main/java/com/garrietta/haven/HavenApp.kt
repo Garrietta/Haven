@@ -41,14 +41,20 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Thermostat
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Thermostat
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -86,6 +92,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
+import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
 import com.garrietta.haven.ui.screens.AutomationBuilderScreen
@@ -118,18 +125,53 @@ private data class NavItem(
 )
 
 /**
- * The pill bar IS the tab bar: user tabs first, Settings always last and
- * always present. Today/Boards/Areas/Search are no longer bar entries —
- * they stay fully functional, reachable from Settings -> Browse (see the
- * report for why this demotion is a consequence of the brief, not a
- * removal). A legacy screen shows the bar with nothing selected.
+ * The pill bar IS the tab bar: Home always first, user tabs next, Settings
+ * always last and always present. Boards/Areas/Search stay reachable from
+ * Settings -> Browse; Home returned to the bar because a home with no tab
+ * is a home you can't get back to. A legacy screen shows the bar with
+ * nothing selected.
  */
 private fun pillBarItems(tabs: List<com.garrietta.haven.data.UserTab>): List<NavItem> {
-    val items = tabs.map { tab ->
-        NavItem(Screen.UserTab(tab.id), tab.title, Icons.Filled.GridView, Icons.Outlined.GridView)
-    }.toMutableList()
+    val items = mutableListOf(
+        NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home)
+    )
+    for (tab in tabs) {
+        val (icon, outlinedIcon) = tabIcons(tab)
+        items.add(NavItem(Screen.UserTab(tab.id), tab.title, icon, outlinedIcon))
+    }
     items.add(NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings))
     return items
+}
+
+/**
+ * Per-tab pill icons: the first card's entity domain wins (camera, climate,
+ * light, cover); title keywords cover entity-less tabs; GridView is the
+ * fallback. Only domains with a matching outlined variant get a pair, so
+ * the selected pill can still fill its icon like Home and Settings do.
+ */
+private fun tabIcons(tab: com.garrietta.haven.data.UserTab): Pair<ImageVector, ImageVector> {
+    val domain = tab.cards.firstNotNullOfOrNull { yaml ->
+        try {
+            parseCardYaml(yaml).optString("entity").ifEmpty { null }?.substringBefore(".")
+        } catch (e: Exception) {
+            null
+        }
+    } ?: when {
+        tab.title.contains("camera", ignoreCase = true) -> "camera"
+        tab.title.contains("thermostat", ignoreCase = true) ||
+            tab.title.contains("climate", ignoreCase = true) -> "climate"
+        tab.title.contains("garage", ignoreCase = true) -> "cover"
+        tab.title.contains("light", ignoreCase = true) ||
+            tab.title.contains("lamp", ignoreCase = true) -> "light"
+        else -> null
+    }
+    return when (domain) {
+        "camera" -> Icons.Filled.Videocam to Icons.Outlined.Videocam
+        "climate" -> Icons.Filled.Thermostat to Icons.Outlined.Thermostat
+        "light" -> Icons.Filled.Lightbulb to Icons.Outlined.Lightbulb
+        "cover" -> Icons.Filled.Home to Icons.Outlined.Home
+        else -> Icons.Filled.GridView to Icons.Outlined.GridView
+    }
 }
 
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
@@ -158,9 +200,7 @@ fun HavenApp(vm: HavenViewModel) {
             return@HavenTheme
         }
         val backstack = remember {
-            mutableStateListOf(
-                if (vm.userTabs.isNotEmpty()) Screen.UserTab(vm.userTabs.first().id) else Screen.Today
-            )
+            mutableStateListOf(Screen.Today)
         }
         val current = backstack.last()
         val navigate: (Screen) -> Unit = { backstack.add(it) }
@@ -188,7 +228,8 @@ fun HavenApp(vm: HavenViewModel) {
                 if (isTopLevel(current)) {
                     val barItems = pillBarItems(vm.userTabs)
                     val selectedIndex = when (current) {
-                        is Screen.UserTab -> vm.userTabs.indexOfFirst { it.id == current.tabId }.takeIf { it >= 0 }
+                        Screen.Today -> 0
+                        is Screen.UserTab -> vm.userTabs.indexOfFirst { it.id == current.tabId }.takeIf { it >= 0 }?.plus(1)
                         Screen.Settings -> barItems.lastIndex
                         else -> null
                     }
@@ -222,9 +263,7 @@ fun HavenApp(vm: HavenViewModel) {
                         onSignOut = {
                             vm.signOut()
                             backstack.clear()
-                            backstack.add(
-                                if (vm.userTabs.isNotEmpty()) Screen.UserTab(vm.userTabs.first().id) else Screen.Today
-                            )
+                            backstack.add(Screen.Today)
                         },
                         navigate = navigate,
                     )

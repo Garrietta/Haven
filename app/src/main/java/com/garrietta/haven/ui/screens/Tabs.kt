@@ -181,7 +181,7 @@ fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         item {
             DetailTopBar("Manage tabs", onBack)
             Text(
-                "There are no default tabs — Settings is always present, and everything else here is yours. " +
+                "Home is always first and Settings is always last — everything else here is yours. " +
                     "Reorder tabs to move them along the pill bar.",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
