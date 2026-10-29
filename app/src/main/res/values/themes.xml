@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Haven" parent="android:Theme.Material.Light.NoActionBar">
+    <!-- DayNight parent, not Light: the window background must follow the
+         system theme. The old Light parent left a white window behind every
+         screen that paints no background of its own — in dark mode the
+         login screen showed light scheme text on that white window
+         (unreadable) and dark-mode status icons against white, then
+         "bounced" to dark once the Scaffold painted after sign-in. -->
+    <style name="Theme.Haven" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <!-- NOTE: no windowLightStatusBar here on purpose. The icon color is

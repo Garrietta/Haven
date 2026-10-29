@@ -10,6 +10,12 @@ data class HaEntity(
     val attributes: Map<String, Any?>,
     val lastChanged: String? = null,
     val lastUpdated: String? = null,
+    /**
+     * Device-registry manufacturer, when known (patched in by HaClient from
+     * config/device_registry/list — state payloads never carry it). Null
+     * means unknown, never "not Ring": callers must treat null as absent.
+     */
+    val manufacturer: String? = null,
 ) {
     val domain: String get() = entityId.substringBefore(".")
     val friendlyName: String get() = (attributes["friendly_name"] as? String) ?: entityId

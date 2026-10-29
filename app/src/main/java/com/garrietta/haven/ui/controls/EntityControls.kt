@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.controls
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -80,6 +81,7 @@ import com.garrietta.haven.ui.components.sharedCardBounds
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenMotion
+import com.garrietta.haven.ui.theme.springSnappy
 import com.garrietta.haven.ui.theme.polygonShape
 import org.json.JSONObject
 import com.garrietta.haven.ui.screens.SetpointSelector
@@ -208,14 +210,20 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
     val kelvin = entity.attrInt("color_temp_kelvin")
     // The bulb used to snap between shapes; now it blooms on the house spring.
     val reduceMotion = LocalReduceMotion.current
+    // Snappy, not bouncy, for the on/off morph: the bouncy house spring
+    // settles over ~1s with overshoot, so the bulb shape lagged a full
+    // second behind the header text that flips discretely with the state
+    // — the "header and bulb disagree" window. The tight spring lands
+    // with the text; the bouncy spring stays everywhere else.
+    val bulbSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springSnappy()
     val bulbProgress by animateFloatAsState(
         if (isOn) 1f else 0f,
-        animationSpec = havenMotion(reduceMotion),
+        animationSpec = bulbSpec,
         label = "bulb",
     )
     val bulbScale by animateFloatAsState(
         if (isOn) 1f else 0.9f,
-        animationSpec = havenMotion(reduceMotion),
+        animationSpec = bulbSpec,
         label = "bulbScale",
     )
     Row(verticalAlignment = Alignment.CenterVertically) {

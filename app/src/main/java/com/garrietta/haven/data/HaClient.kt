@@ -114,6 +114,40 @@ class HaClient(
         _states.value = current
     }
 
+    /**
+     * Sticky optimistic flips (see OptimisticStateGuard): a tap's expected
+     * state survives stale or intermediate server events that still say
+     * the old value, so off feels exactly as instant as on. The ViewModel
+     * records the expectation beside every optimistic flip and clears it
+     * when the service call fails.
+     */
+    private val optimisticGuard = OptimisticStateGuard()
+
+    fun expectOptimistic(entityId: String, state: String) = optimisticGuard.expect(entityId, state)
+
+    fun clearOptimistic(entityId: String) = optimisticGuard.clear(entityId)
+
+    /**
+     * Device-registry manufacturer per entity, resolved in afterAuth.
+     * State payloads never carry it, so every entity built from a payload
+     * (get_states, state_changed) gets it re-attached here — otherwise the
+     * first event after connect would wipe the manufacturer signal that
+     * Ring detection relies on (see isRingCamera).
+     */
+    private var manufacturerByEntity: Map<String, String> = emptyMap()
+
+    private fun attachManufacturer(entity: HaEntity): HaEntity {
+        val maker = manufacturerByEntity[entity.entityId] ?: return entity
+        return entity.copy(manufacturer = maker)
+    }
+
+    /** Re-attaches manufacturers to every currently held entity (runs when the device registry lands). */
+    private fun reattachManufacturers() {
+        if (manufacturerByEntity.isEmpty()) return
+        val patched = _states.value.mapValues { (_, entity) -> attachManufacturer(entity) }
+        _states.value = patched
+    }
+
     private var socket: WebSocket? = null
     private var instanceUrl: String = ""
     private var token: String = ""
@@ -244,8 +278,18 @@ class HaClient(
                     val current = _states.value.toMutableMap()
                     if (newState == null || newState == JSONObject.NULL) {
                         current.remove(entityId)
+                        optimisticGuard.clear(entityId)
                     } else {
-                        current[entityId] = HaEntity.fromJson(newState)
+                        val incoming = newState.optString("state")
+                        // A contradicting event while a tap's expectation
+                        // is live is stale or intermediate: drop it so the
+                        // optimistic flip the user already saw is not
+                        // reverted for a second before the confirming
+                        // event arrives. A matching event confirms the
+                        // flip (the guard clears itself) and applies.
+                        if (!optimisticGuard.shouldDrop(entityId, incoming)) {
+                            current[entityId] = attachManufacturer(HaEntity.fromJson(newState))
+                        }
                     }
                     _states.value = current
                 }
@@ -263,7 +307,7 @@ class HaClient(
             val map = mutableMapOf<String, HaEntity>()
             for (i in 0 until result.length()) {
                 val e = HaEntity.fromJson(result.optJSONObject(i) ?: continue)
-                map[e.entityId] = e
+                map[e.entityId] = attachManufacturer(e)
             }
             _states.value = map
         })
@@ -294,16 +338,28 @@ class HaClient(
                 val dresult = dmsg.optJSONArray("result")
                 if (dresult != null) {
                     val deviceToArea = mutableMapOf<String, String>()
+                    val deviceToMaker = mutableMapOf<String, String>()
                     for (j in 0 until dresult.length()) {
                         val d = dresult.optJSONObject(j) ?: continue
                         val areaId = d.optString("area_id")
                         if (areaId.isNotEmpty()) deviceToArea[d.optString("id")] = areaId
+                        // Manufacturer per device: the second Ring signal.
+                        // Camera state attributes on this instance do not
+                        // carry `brand`, which is why run #38's label never
+                        // fired — the device registry is the ground truth
+                        // for who made the device.
+                        val maker = d.optString("manufacturer")
+                        if (maker.isNotEmpty()) deviceToMaker[d.optString("id")] = maker
                     }
                     for ((entityId, deviceId) in entityToDevice) {
                         if (!entityToArea.containsKey(entityId)) {
                             deviceToArea[deviceId]?.let { entityToArea[entityId] = it }
                         }
                     }
+                    manufacturerByEntity = entityToDevice.mapNotNull { (entityId, deviceId) ->
+                        deviceToMaker[deviceId]?.let { entityId to it }
+                    }.toMap()
+                    reattachManufacturers()
                 }
                 _entityAreas.value = entityToArea
             })
@@ -725,6 +781,46 @@ class HaClient(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 post(CameraStreamState.Error("Could not reach the camera stream"))
             }
+        }
+    }
+
+    /**
+     * HA's stream path for a camera: WS `camera/stream` returns an HLS
+     * playlist URL (relative, e.g. `/api/hls/<token>/playlist.m3u8`) when
+     * the instance can stream the camera, or null when it cannot (unknown
+     * entity, no stream source, stream integration unavailable). The
+     * callback posts to the main thread; it may never fire if the socket
+     * is down, so callers must time out and fall back (see
+     * CameraFullscreen). This is the Ring true-live attempt: HA's own
+     * frontend plays the same entity live through this path, while the
+     * MJPEG proxy serves its last motion recording.
+     */
+    fun requestHlsUrl(entityId: String, onResult: (String?) -> Unit) {
+        val post = { url: String? ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(url) }
+        }
+        sendCommand("camera/stream", build = { it.put("entity_id", entityId) }, onResult = { msg ->
+            post(parseHlsStreamUrl(msg))
+        })
+    }
+
+    /**
+     * An ExoPlayer configured for HA's HLS streams: the playlist URL is
+     * resolved against the instance, and every playlist/segment request
+     * carries the Bearer token (HLS URLs are authenticated). The caller
+     * owns the player and must release it. HLS support lives in the
+     * exoplayer artifact itself — no extra HLS module is needed.
+     */
+    fun createHlsPlayer(context: android.content.Context, playlistUrl: String): androidx.media3.exoplayer.ExoPlayer {
+        val absolute = if (playlistUrl.startsWith("http")) playlistUrl else "$instanceUrl$playlistUrl"
+        val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(mapOf("Authorization" to "Bearer $token"))
+        val source = androidx.media3.exoplayer.hls.HlsMediaSource.Factory(dataSourceFactory)
+            .createMediaSource(androidx.media3.common.MediaItem.fromUri(absolute))
+        return androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaSource(source)
+            prepare()
+            playWhenReady = true
         }
     }
 

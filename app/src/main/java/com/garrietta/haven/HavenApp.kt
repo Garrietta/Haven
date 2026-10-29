@@ -112,7 +112,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
@@ -734,10 +740,11 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     val cameraId = vm.fullscreenCameraId ?: return
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
-    // Ring's proxy stream is its last motion recording, not live video
-    // (see isRingCamera): the viewer says so everywhere it would
-    // otherwise imply live, but the stream, cache, and error paths below
-    // are unchanged for every camera.
+    // Ring's MJPEG proxy stream is its last motion recording, not live
+    // video (see isRingCamera) — so Ring tries HA's HLS stream path
+    // first (the path HA's own frontend plays live) and only falls back
+    // to the MJPEG recording, labeled as such, when HA cannot stream it.
+    // Non-Ring cameras stay on the MJPEG path, untouched.
     val isRing = entity?.let { isRingCamera(it) } == true
     val activity = LocalContext.current as? Activity
     DisposableEffect(cameraId) {
@@ -752,9 +759,40 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     BackHandler { onClose() }
     var streamState by remember(cameraId) { mutableStateOf<CameraStreamState>(CameraStreamState.Connecting) }
     var attempt by remember(cameraId) { mutableStateOf(0) }
-    // The stream job lives in the ViewModel scope, so the effect cancels it
-    // explicitly on dispose or Retry; joining keeps exactly one stream per view.
-    LaunchedEffect(cameraId, attempt) {
+    // Ring HLS negotiation: hlsUrl set when HA returns a playlist, hlsFailed
+    // when it cannot stream (or answers nothing within the timeout — the
+    // WS callback may never fire if the socket is down). hlsReady flips
+    // only when ExoPlayer actually reaches READY: the "Live" badge is gated
+    // on it, never on the URL existing. Retry (attempt++) resets all three
+    // and re-runs the negotiation from scratch.
+    var hlsUrl by remember(cameraId, attempt, isRing) { mutableStateOf<String?>(null) }
+    var hlsFailed by remember(cameraId, attempt, isRing) { mutableStateOf(false) }
+    var hlsReady by remember(cameraId, attempt, isRing) { mutableStateOf(false) }
+    LaunchedEffect(cameraId, attempt, isRing) {
+        if (!isRing) return@LaunchedEffect
+        var answered = false
+        val timeout = launch {
+            delay(10_000)
+            if (!answered) hlsFailed = true
+        }
+        vm.client.requestHlsUrl(cameraId) { url ->
+            if (answered) return@requestHlsUrl
+            answered = true
+            timeout.cancel()
+            // Timed out already: the MJPEG fallback owns the view now,
+            // so a late playlist must not start a second player beside it.
+            if (hlsFailed) return@requestHlsUrl
+            if (url != null) hlsUrl = url else hlsFailed = true
+        }
+    }
+    // MJPEG runs for every non-Ring camera, and for Ring only once HLS has
+    // failed — never alongside a live HLS player, and never instead of
+    // trying HLS. The stream job lives in the ViewModel scope, so the
+    // effect cancels it explicitly on dispose or Retry; joining keeps
+    // exactly one stream per view.
+    val useMjpeg = !isRing || hlsFailed
+    LaunchedEffect(cameraId, attempt, useMjpeg) {
+        if (!useMjpeg) return@LaunchedEffect
         val job = vm.client.streamCamera(cameraId) { state ->
             if (state is CameraStreamState.Playing) {
                 vm.cacheCameraFrame(cameraId, state.frame)
@@ -767,8 +805,54 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
             job.cancel()
         }
     }
+    // The HLS player, owned by this view: created when the URL lands,
+    // released when the URL clears (player error) or the view leaves.
+    // A player error falls back to the MJPEG recording rather than an
+    // error screen — the recording label, not silence, is the fallback.
+    val context = LocalContext.current
+    var hlsPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    DisposableEffect(hlsUrl) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) hlsReady = true
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                hlsUrl = null
+                hlsFailed = true
+            }
+        }
+        val player = hlsUrl?.let { vm.client.createHlsPlayer(context, it) }
+        player?.addListener(listener)
+        hlsPlayer = player
+        onDispose {
+            player?.removeListener(listener)
+            player?.release()
+            hlsPlayer = null
+        }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        when (val state = streamState) {
+        // HLS live video, only once ExoPlayer is actually READY: before
+        // that the MJPEG connecting UI below covers negotiation, so a
+        // black unready player never flashes in.
+        val player = hlsPlayer
+        if (player != null && hlsReady) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        this.player = player
+                        useController = false
+                    }
+                },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    val s = 0.94f + 0.06f * enterProgress
+                    scaleX = s
+                    scaleY = s
+                    alpha = 0.7f + 0.3f * enterProgress
+                },
+            )
+        } else when (val state = streamState) {
             is CameraStreamState.Playing -> {
                 Image(
                     state.frame.asImageBitmap(),
@@ -806,8 +890,13 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
                     ShimmerBox(Modifier.size(120.dp, 8.dp).clip(RoundedCornerShape(50)))
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (last != null) "Reconnecting…"
+                        // Ring negotiating HLS must not say "recording"
+                        // yet (live is still possible), and Ring on the
+                        // MJPEG fallback must not say "camera" (it is a
+                        // recording). Non-Ring text is unchanged.
+                        if (isRing && !hlsFailed) "Loading live view…"
                         else if (isRing) "Loading last recording…"
+                        else if (last != null) "Reconnecting…"
                         else "Loading camera…",
                         color = Color.White,
                     )
@@ -851,14 +940,24 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold,
             )
-            if (isRing) {
+            // The badge is the honesty mechanism: "Live" only when the
+            // HLS player is actually READY; "Last recording" only once
+            // HLS has failed and the MJPEG fallback is in play; nothing
+            // while negotiation is still open, so the viewer never claims
+            // either before it knows.
+            val badgeText = when {
+                isRing && hlsReady -> "Live"
+                isRing && hlsFailed -> "Last recording · Not live"
+                else -> null
+            }
+            if (badgeText != null) {
                 Spacer(Modifier.height(6.dp))
                 Surface(
                     shape = RoundedCornerShape(50),
                     color = Color.White.copy(alpha = 0.15f),
                 ) {
                     Text(
-                        "Last recording · Not live",
+                        badgeText,
                         color = Color.White.copy(alpha = 0.9f),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,

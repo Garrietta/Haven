@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -85,7 +86,15 @@ fun LoginScreen(vm: HavenViewModel) {
         onDispose { vm.discovery.stopMdns() }
     }
     Column(
-        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp),
+        // The login screen paints the scheme background itself: without
+        // this, the window background showed through — white under the
+        // Light activity theme — so dark-mode text was light-on-white and
+        // unreadable, and the screen "bounced" to dark after sign-in when
+        // the Scaffold painted. The DayNight activity theme covers the
+        // window; this covers the content, in both modes, with no
+        // hardcoded color.
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Text("Haven", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)

@@ -47,6 +47,8 @@ dependencies {
     implementation(libs.compose.activity)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.graphics.shapes)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
     implementation(libs.core.ktx)
     implementation(libs.okhttp)
     implementation(libs.snakeyaml)

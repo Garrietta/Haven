@@ -571,12 +571,20 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Runs [call] with an optimistic local state flip, reverted if the call
      * fails. The next state_changed event reconciles the flip on success.
+     * The flip is also recorded as a sticky expectation (see
+     * OptimisticStateGuard): a stale or intermediate server event that
+     * still says the old value must not visibly revert the tap — that is
+     * what made off feel delayed while on felt instant.
      */
     private fun actuate(id: String, optimisticState: String, call: ((Boolean) -> Unit) -> Unit) {
         val prev = client.states.value[id]?.state
         client.setLocalState(id, optimisticState)
+        client.expectOptimistic(id, optimisticState)
         call { ok ->
-            if (!ok && prev != null) client.setLocalState(id, prev)
+            if (!ok && prev != null) {
+                client.setLocalState(id, prev)
+                client.clearOptimistic(id)
+            }
         }
     }
 

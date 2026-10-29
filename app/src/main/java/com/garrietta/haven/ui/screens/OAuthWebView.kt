@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,7 +33,10 @@ import com.garrietta.haven.HavenViewModel
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun OAuthWebViewScreen(vm: HavenViewModel, authorizeUrl: String, onClose: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
+    // Same treatment as LoginScreen: the container paints the scheme
+    // background so the top bar and status area follow the system theme
+    // (the WebView itself paints HA's own authorize page, untouched).
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         DetailTopBar("Sign in", onClose)
         if (vm.oauthExchanging) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
