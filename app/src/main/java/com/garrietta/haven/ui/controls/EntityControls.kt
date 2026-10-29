@@ -310,10 +310,19 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
 fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
     val accent = accentFor(entity.entityId)
     val current = entity.attrDouble("current_temperature")
-    val targetInit = entity.attrDouble("temperature") ?: 21.0
-    var target by remember(targetInit) { mutableStateOf(targetInit.toFloat()) }
+    // Heat/cool thermostats (like the Ecobee) report target_temp_high/low
+    // instead of a single temperature — the old code fell back to a
+    // hardcoded 21.0 there, which reads as Celsius next to the Fahrenheit
+    // readouts. Use the midpoint of the two setpoints instead, so the dial
+    // always shows a value in the same unit as the readouts (every one of
+    // these attributes arrives from HA in its own unit system).
+    val high = entity.attrDouble("target_temp_high")
+    val low = entity.attrDouble("target_temp_low")
+    val targetInit = entity.attrDouble("temperature")
+        ?: if (high != null && low != null) (high + low) / 2.0 else 21.0
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
+    var target by remember(targetInit) { mutableStateOf(targetInit.toFloat().coerceIn(min, max)) }
     val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
     val presets = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -321,12 +330,12 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
             value = target,
             range = min..max,
             onValueChange = { target = it },
-            onFinished = { vm.setClimateTemperature(entity.entityId, target.toDouble()) },
+            onFinished = { applyClimateTarget(vm, entity, target.toDouble()) },
             centerText = target.toDouble().formatTemp(),
             centerSub = if (current != null) "Now ${current.formatTemp()}" else entity.stateText(),
             accent = accent,
         )
-        ServiceSlider(target, min..max, { vm.setClimateTemperature(entity.entityId, it.toDouble()) }, accent)
+        ServiceSlider(target, min..max, { applyClimateTarget(vm, entity, it.toDouble()) }, accent)
         if (modes.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -358,6 +367,34 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Applies a dial/slider temperature. Heat/cool thermostats take a high/low
+ * pair, so the dial value moves both setpoints while preserving their gap;
+ * single-setpoint thermostats take the value directly.
+ */
+private fun applyClimateTarget(vm: HavenViewModel, entity: HaEntity, value: Double) {
+    val high = entity.attrDouble("target_temp_high")
+    val low = entity.attrDouble("target_temp_low")
+    if (high != null && low != null) {
+        val gap = (high - low).coerceAtLeast(0.0)
+        val min = entity.attrDouble("min_temp")
+        val max = entity.attrDouble("max_temp")
+        var newLow = value - gap / 2.0
+        var newHigh = value + gap / 2.0
+        if (min != null && max != null) {
+            // Keep the pair inside the real setpoint range, shifting the
+            // pair rather than crushing one side when it hits an edge.
+            if (newLow < min) { newHigh += min - newLow; newLow = min }
+            if (newHigh > max) { newLow -= newHigh - max; newHigh = max }
+            newLow = newLow.coerceIn(min, max)
+            newHigh = newHigh.coerceIn(min, max)
+        }
+        vm.setClimateTemperatureRange(entity.entityId, newLow, newHigh)
+    } else {
+        vm.setClimateTemperature(entity.entityId, value)
     }
 }
 

@@ -523,6 +523,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         client.callService("climate", "set_temperature", id, data)
     }
 
+    /** Heat/cool pair version of [setClimateTemperature]. */
+    fun setClimateTemperatureRange(id: String, low: Double, high: Double) {
+        val data = JSONObject().put("target_temp_low", low).put("target_temp_high", high)
+        client.callService("climate", "set_temperature", id, data)
+    }
+
     fun setClimateHvacMode(id: String, mode: String) =
         client.callService("climate", "set_hvac_mode", id, JSONObject().put("hvac_mode", mode))
 

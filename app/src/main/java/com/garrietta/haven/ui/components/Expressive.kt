@@ -66,6 +66,14 @@ fun accentFor(entityId: String): Color {
 /**
  * A big round dial: drag around the ring (or tap it) to set a value.
  * The ring sweeps 270 degrees, leaving the gap at the bottom.
+ *
+ * Two drag fixes: a touch in the bottom gap is ignored (it used to snap
+ * the value to min or max as the finger crossed it, which reads as the
+ * dial jumping), and every computed value is clamped to [range] so a
+ * stray pointer position can never push the dial outside the thermostat's
+ * real setpoint range. The handle sits exactly on the track's centerline:
+ * the canvas is inset by the handle radius, so neither the track's round
+ * caps nor the handle are clipped at the edges.
  */
 @Composable
 fun Dial(
@@ -79,14 +87,18 @@ fun Dial(
     modifier: Modifier = Modifier,
 ) {
     val fraction = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
-    val valueFor: (Offset, IntSize) -> Float = { pos, sz ->
+    // Null in the bottom gap: the caller ignores the touch there.
+    val valueFor: (Offset, IntSize) -> Float? = { pos, sz ->
         val cx = sz.width / 2f
         val cy = sz.height / 2f
         var deg = Math.toDegrees(atan2((pos.y - cy).toDouble(), (pos.x - cx).toDouble())).toFloat()
         if (deg < 0) deg += 360f
         val rel = (deg - 135f + 360f) % 360f
-        val f = if (rel <= 270f) rel / 270f else if (rel < 315f) 0f else 1f
-        range.start + f * (range.endInclusive - range.start)
+        if (rel > 270f) {
+            null
+        } else {
+            (range.start + (rel / 270f) * (range.endInclusive - range.start)).coerceIn(range)
+        }
     }
     val track = MaterialTheme.colorScheme.surfaceVariant
     Box(
@@ -94,24 +106,30 @@ fun Dial(
             .size(220.dp)
             .pointerInput(range) {
                 detectTapGestures { offset ->
-                    onValueChange(valueFor(offset, size))
-                    onFinished()
+                    valueFor(offset, size)?.let {
+                        onValueChange(it)
+                        onFinished()
+                    }
                 }
             }
             .pointerInput(range) {
                 detectDragGestures(
                     onDragEnd = { onFinished() },
                 ) { change, _ ->
-                    onValueChange(valueFor(change.position, size))
+                    valueFor(change.position, size)?.let { onValueChange(it) }
                 }
             },
     ) {
-        Canvas(Modifier.size(220.dp)) {
+        // Inset by the handle radius: the arc's centerline then sits at
+        // size.minDimension / 2 of the inset canvas, and the handle drawn
+        // at that same radius lands exactly on the track instead of 10dp
+        // inside it (the old (minDimension - stroke) / 2 math).
+        Canvas(Modifier.size(220.dp).padding(13.dp)) {
             val stroke = 20.dp.toPx()
             drawArc(track, 135f, 270f, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
             drawArc(accent, 135f, 270f * fraction, false, style = Stroke(width = stroke, cap = StrokeCap.Round))
             val angle = Math.toRadians((135.0 + 270.0 * fraction))
-            val radius = (size.minDimension - stroke) / 2f
+            val radius = size.minDimension / 2f
             drawCircle(
                 accent,
                 radius = 13.dp.toPx(),
