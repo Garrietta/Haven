@@ -87,6 +87,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -487,11 +488,7 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     ModalBottomSheet(onDismissRequest = vm::closePopup) {
         Column(
             Modifier.fillMaxWidth()
-                .onGloballyPositioned {
-                    val pos = it.positionInWindow()
-                    val sz = it.size
-                    sheetBounds = androidx.compose.ui.geometry.Rect(pos.x, pos.y, pos.x + sz.width, pos.y + sz.height)
-                }
+                .onGloballyPositioned { sheetBounds = it.boundsInWindow() }
                 .padding(horizontal = 16.dp).padding(bottom = 24.dp),
         ) {
             // Koda-style handle: a centered expressive pill, not a bare line.

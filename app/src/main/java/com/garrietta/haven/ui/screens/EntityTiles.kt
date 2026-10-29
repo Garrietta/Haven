@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -186,11 +187,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             MaterialTheme.colorScheme.surfaceContainerLow
         },
         modifier = Modifier.fillMaxWidth()
-            .onGloballyPositioned {
-                val pos = it.positionInWindow()
-                val sz = it.size
-                tileBounds = androidx.compose.ui.geometry.Rect(pos.x, pos.y, pos.x + sz.width, pos.y + sz.height)
-            }
+            .onGloballyPositioned { tileBounds = it.boundsInWindow() }
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .combinedClickable(
                 interactionSource = interactionSource,

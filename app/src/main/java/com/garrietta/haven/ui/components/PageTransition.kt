@@ -15,6 +15,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 
@@ -73,15 +74,7 @@ fun RisingPageContent(
     val radius = 28.dp * (1f - progress)
     Box(
         modifier
-            .onGloballyPositioned {
-                // LayoutCoordinates has no boundsInWindow (only
-                // boundsInParent/boundsInRoot): build the window rect from
-                // the window position + size. Origin and page bounds are
-                // both computed this way, so the relative math holds.
-                val pos = it.positionInWindow()
-                val sz = it.size
-                pageBounds = Rect(pos.x, pos.y, pos.x + sz.width, pos.y + sz.height)
-            }
+            .onGloballyPositioned { pageBounds = it.boundsInWindow() }
             .graphicsLayer {
                 this.scaleX = if (active) scaleX else 1f
                 this.scaleY = if (active) scaleY else 1f
