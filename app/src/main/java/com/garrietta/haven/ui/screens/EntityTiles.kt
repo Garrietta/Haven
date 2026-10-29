@@ -193,7 +193,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = {
-                    tileBounds?.let { vm.setPageOrigin(it) }
+                    tileBounds?.let { vm.pageOrigin = it }
                     openPage(vm, entity, navigate, onThermostat)
                 },
                 onLongClick = { vm.openPopup(entity.entityId) },

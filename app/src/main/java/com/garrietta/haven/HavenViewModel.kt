@@ -137,9 +137,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
      * left or the user jumps to another top-level tab.
      */
     var pageOrigin by mutableStateOf<androidx.compose.ui.geometry.Rect?>(null)
-        private set
-
-    fun setPageOrigin(rect: androidx.compose.ui.geometry.Rect?) { pageOrigin = rect }
 
     var isAuthenticated by mutableStateOf(false)
         private set

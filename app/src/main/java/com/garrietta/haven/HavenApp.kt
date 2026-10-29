@@ -232,7 +232,7 @@ fun HavenApp(vm: HavenViewModel) {
         val goTop: (Screen) -> Unit = {
             entering = false
             exitingScreen = null
-            vm.setPageOrigin(null)
+            vm.pageOrigin = null
             backstack.clear()
             backstack.add(it)
         }
@@ -253,7 +253,7 @@ fun HavenApp(vm: HavenViewModel) {
         val signOut: () -> Unit = {
             entering = false
             exitingScreen = null
-            vm.setPageOrigin(null)
+            vm.pageOrigin = null
             vm.signOut()
             backstack.clear()
             backstack.add(Screen.Today)
@@ -281,7 +281,7 @@ fun HavenApp(vm: HavenViewModel) {
                 }
                 if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
                 exitingScreen = null
-                vm.setPageOrigin(null)
+                vm.pageOrigin = null
             }
         }
         // Camera overlay transitions share the same language: the live
@@ -309,7 +309,7 @@ fun HavenApp(vm: HavenViewModel) {
                     cameraExitProgress.animateTo(0f, havenSpring())
                 }
                 vm.closeCameraFullscreen()
-                vm.setPageOrigin(null)
+                vm.pageOrigin = null
                 cameraExiting = false
             }
         }
@@ -319,7 +319,7 @@ fun HavenApp(vm: HavenViewModel) {
                 vm.pageOrigin != null -> cameraExiting = true
                 else -> {
                     vm.closeCameraFullscreen()
-                    vm.setPageOrigin(null)
+                    vm.pageOrigin = null
                 }
             }
         }
@@ -530,7 +530,7 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                         Row {
                             Button(
                                 onClick = {
-                                    sheetBounds?.let { vm.setPageOrigin(it) }
+                                    sheetBounds?.let { vm.pageOrigin = it }
                                     vm.closePopup()
                                     when (entity.domain) {
                                         "climate" -> navigate(Screen.Thermostat(popupId))
