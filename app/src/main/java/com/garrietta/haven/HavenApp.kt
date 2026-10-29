@@ -84,6 +84,8 @@ import com.garrietta.haven.ui.screens.ScriptBuilderScreen
 import com.garrietta.haven.ui.screens.SearchScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.TodayScreen
+import com.garrietta.haven.ui.screens.TabManagerScreen
+import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
@@ -264,7 +266,7 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
  * nav scrub. The bar container itself stays Haven's own floating pill.
  */
 @Composable
-fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
+private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
     val reduceMotion = LocalReduceMotion.current
     val haptics = LocalHapticFeedback.current
     val currentIndex = selectedIndex ?: -1
