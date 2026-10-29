@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -39,6 +41,7 @@ import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.SectionHeader
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.EntityControlCard
@@ -173,6 +176,51 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
 fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
+    // Wide (unfolded): controls on the left, attributes + history on the
+    // right, instead of one stretched phone column.
+    if (LocalWideLayout.current) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+            DetailTopBar(entity?.friendlyName ?: entityId, onBack)
+            if (entity == null) {
+                Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp)) {
+                        Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
+                        Spacer(Modifier.height(4.dp))
+                        Text(entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(16.dp))
+                        EntityControlCard(entity, vm) { }
+                        Spacer(Modifier.height(16.dp))
+                        Row {
+                            OutlinedButton(onClick = { vm.turnOn(entityId) }) { Text("Turn on") }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(onClick = { vm.turnOff(entityId) }) { Text("Turn off") }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(onClick = { vm.toggle(entityId) }) { Text("Toggle") }
+                        }
+                        Spacer(Modifier.height(16.dp))
+                    }
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 8.dp)) {
+                        Text("Attributes", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(8.dp))
+                        val attrs = entity.attributes.filterKeys { it != "friendly_name" }.toList().sortedBy { it.first }
+                        for ((key, value) in attrs) {
+                            AttributeRow(key, valueToString(value))
+                        }
+                        if (entity.state.toDoubleOrNull() != null) {
+                            Spacer(Modifier.height(24.dp))
+                            Text("Last 24 hours", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.height(8.dp))
+                            HistorySparkline(vm, entityId)
+                            Spacer(Modifier.height(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         item { DetailTopBar(entity?.friendlyName ?: entityId, onBack) }
         if (entity == null) {

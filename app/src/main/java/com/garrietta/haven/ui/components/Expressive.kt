@@ -41,6 +41,15 @@ import kotlin.math.sin
 /** Provided by HavenApp from the user's settings. */
 val LocalReduceMotion = compositionLocalOf { false }
 
+/**
+ * True when the window is wide enough for two-pane layouts (unfolded
+ * Fold8). The threshold is 600dp, not Material's 840dp "expanded" bucket:
+ * the Fold8 unfolded is ~690dp portrait / ~830dp landscape, so 840dp
+ * would miss unfolded landscape entirely. Folded (~360-400dp) stays
+ * single-column.
+ */
+val LocalWideLayout = compositionLocalOf { false }
+
 /** Stable per-entity accent color, hashed from the entity id (same idea as Relay's palettes). */
 private val ACCENTS = listOf(
     Color(0xFFF59E0B), Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFF8B5CF6),

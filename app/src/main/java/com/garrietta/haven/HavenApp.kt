@@ -20,6 +20,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -101,6 +102,7 @@ import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.TabManagerScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
@@ -171,7 +173,12 @@ fun HavenApp(vm: HavenViewModel) {
         }
         BackHandler(enabled = backstack.size > 1) { goBack() }
         CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
-        Scaffold(
+        // Wide-layout detection lives here, above the Scaffold, so every
+        // screen (and the overlays) reads the same value.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val wideLayout = maxWidth >= 600.dp
+            CompositionLocalProvider(LocalWideLayout provides wideLayout) {
+            Scaffold(
             // Screens consume the status-bar inset themselves
             // (statusBarsPadding on each root), so the Scaffold must not add
             // it again — otherwise headers sit a full inset too low. The
@@ -251,6 +258,8 @@ fun HavenApp(vm: HavenViewModel) {
             if (vm.fullscreenCameraId != null) {
                 CameraFullscreen(vm, vm::closeCameraFullscreen)
             }
+            }
+        }
         }
     }
 }

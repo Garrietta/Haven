@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.DiscoverySource
@@ -233,7 +235,9 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         it.domain == "binary_sensor" && it.state == "on" &&
             (it.attrString("device_class") in listOf("problem", "safety", "smoke", "co", "moisture", "tamper", "gas"))
     }
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    // Sections as LazyListScope blocks so the narrow and wide layouts share
+    // them exactly: one column folded, two side-by-side columns unfolded.
+    val greetingSection: LazyListScope.() -> Unit = {
         item {
             Spacer(Modifier.height(16.dp))
             Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold)
@@ -251,6 +255,8 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             }
             Spacer(Modifier.height(16.dp))
         }
+    }
+    val weatherSection: LazyListScope.() -> Unit = {
         if (weather != null) {
             item {
                 Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -259,6 +265,8 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(16.dp))
             }
         }
+    }
+    val homeSection: LazyListScope.() -> Unit = {
         if (homePeople.isNotEmpty()) {
             item {
                 Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -267,6 +275,8 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(16.dp))
             }
         }
+    }
+    val playingSection: LazyListScope.() -> Unit = {
         if (nowPlaying.isNotEmpty()) {
             item {
                 Text("Now playing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -278,6 +288,8 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             }
             item { Spacer(Modifier.height(4.dp)) }
         }
+    }
+    val lightsSection: LazyListScope.() -> Unit = {
         if (lightsOn.isNotEmpty()) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -300,6 +312,8 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             }
             item { Spacer(Modifier.height(4.dp)) }
         }
+    }
+    val alertsSection: LazyListScope.() -> Unit = {
         if (alerts.isNotEmpty()) {
             item {
                 Text("Needs attention", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
@@ -310,7 +324,32 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(12.dp))
             }
         }
-        item { Spacer(Modifier.height(16.dp)) }
+    }
+    if (LocalWideLayout.current) {
+        Row(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+            LazyColumn(Modifier.weight(1f).padding(end = 8.dp)) {
+                greetingSection()
+                weatherSection()
+                homeSection()
+                playingSection()
+                item { Spacer(Modifier.height(16.dp)) }
+            }
+            LazyColumn(Modifier.weight(1f).padding(start = 8.dp)) {
+                lightsSection()
+                alertsSection()
+                item { Spacer(Modifier.height(16.dp)) }
+            }
+        }
+    } else {
+        LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+            greetingSection()
+            weatherSection()
+            homeSection()
+            playingSection()
+            lightsSection()
+            alertsSection()
+            item { Spacer(Modifier.height(16.dp)) }
+        }
     }
 }
 

@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -57,6 +60,7 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.UserTab
 import com.garrietta.haven.data.cardType
 import com.garrietta.haven.data.parseCardYaml
+import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import org.json.JSONObject
 
@@ -70,46 +74,65 @@ import org.json.JSONObject
 fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit) {
     val tab = vm.userTabs.firstOrNull { it.id == tabId }
     val states by vm.states.collectAsState()
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         if (tab == null) {
-            item {
-                Spacer(Modifier.height(16.dp))
-                Text("This tab was deleted.", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
-            }
-            return@LazyColumn
+            Spacer(Modifier.height(16.dp))
+            Text("This tab was deleted.", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+            return@Column
         }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { navigate(Screen.TabManager) }) { Text("Edit") }
-            }
-            Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = { navigate(Screen.TabManager) }) { Text("Edit") }
         }
+        Spacer(Modifier.height(12.dp))
         if (tab.cards.isEmpty()) {
-            item {
-                Text(
-                    "No cards yet. Tap Edit, then add an entity as a card.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Text(
+                "No cards yet. Tap Edit, then add an entity as a card.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            AdaptiveCardList(tab.cards) { yaml ->
+                TabCardView(vm, yaml, states, navigate)
             }
         }
-        for ((index, yaml) in tab.cards.withIndex()) {
-            item {
-                TabCardView(vm, tab, index, yaml, states, navigate)
-                Spacer(Modifier.height(12.dp))
-            }
+    }
+}
+
+/**
+ * One list of cards that becomes a 2-column grid on wide (unfolded)
+ * layouts. Boards and tab screens share it so wide mode is consistent;
+ * the per-card renderer (including broken-YAML handling) is the caller's.
+ */
+@Composable
+fun <T> AdaptiveCardList(items: List<T>, render: @Composable (T) -> Unit) {
+    if (LocalWideLayout.current) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 16.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(items.size) { i -> render(items[i]) }
         }
-        item { Spacer(Modifier.height(16.dp)) }
+    } else {
+        LazyColumn(Modifier.fillMaxSize()) {
+            for (item in items) {
+                item {
+                    render(item)
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+            item { Spacer(Modifier.height(16.dp)) }
+        }
     }
 }
 
 @Composable
 private fun TabCardView(
     vm: HavenViewModel,
-    tab: UserTab,
-    index: Int,
     yaml: String,
     states: Map<String, HaEntity>,
     navigate: (Screen) -> Unit,
