@@ -65,10 +65,10 @@ import com.garrietta.haven.ui.components.accentFor
 import org.json.JSONObject
 
 /**
- * User tabs (Item C): the pill bar's dynamic entries. A tab is a title plus
- * cards, each card stored as YAML text and rendered through the same native
- * LovelaceCardView as Boards cards — so a tab card and a dashboard card can
- * never drift apart in behavior.
+ * User tabs: a title plus cards, each card stored as YAML text. Tab pages
+ * render Apple Home-style tiles (see TabTileGrid); cards that can't tile
+ * fall back to the same native LovelaceCardView as Boards cards, so
+ * nothing a user built is ever lost by the tile layout.
  */
 @Composable
 fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit) {
@@ -93,7 +93,10 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            AdaptiveCardList(tab.cards) { yaml ->
+            // Tab pages render Apple Home-style tiles (tap = primary
+            // action, long-press = detail sheet); cards that can't tile
+            // keep their card rendering below.
+            TabTileGrid(vm, tab.cards, states) { yaml ->
                 TabCardView(vm, yaml, states, navigate)
             }
         }

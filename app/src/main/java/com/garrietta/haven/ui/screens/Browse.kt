@@ -190,7 +190,7 @@ fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit)
                         Spacer(Modifier.height(4.dp))
                         Text(entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(16.dp))
-                        EntityControlCard(entity, vm) { }
+                        EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
                         Spacer(Modifier.height(16.dp))
                         Row {
                             OutlinedButton(onClick = { vm.turnOn(entityId) }) { Text("Turn on") }
@@ -231,8 +231,8 @@ fun EntityDetailScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit)
                 Spacer(Modifier.height(4.dp))
                 Text(entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(16.dp))
-                // Full control, header taps disabled here (already on the detail screen).
-                EntityControlCard(entity, vm) { }
+                // Full control, header hidden here (already on the detail screen).
+                EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
                 Spacer(Modifier.height(16.dp))
                 Row {
                     OutlinedButton(onClick = { vm.turnOn(entityId) }) { Text("Turn on") }

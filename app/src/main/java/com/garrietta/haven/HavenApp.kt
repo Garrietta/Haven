@@ -111,6 +111,7 @@ import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.controls.EntityControlCard
+import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
 import com.garrietta.haven.ui.components.rememberPillScrubState
@@ -319,8 +320,13 @@ private fun EntityPopupSheet(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             if (entity == null) {
                 Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                // Header taps disabled here — this IS the detail surface.
-                EntityControlCard(entity, vm) { }
+                // Plain title, not the card's header bar: the header is a
+                // dead control here (this IS the detail surface), so the
+                // card renders without it and the name still shows.
+                Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
                 Spacer(Modifier.height(12.dp))
                 Row {
                     Button(onClick = {

@@ -134,9 +134,14 @@ fun ServiceSlider(
     )
 }
 
-/** The card shell: blob badge + name + state header, then the domain's own control. */
+/**
+ * The card shell: blob badge + name + state header, then the domain's own
+ * control. Detail surfaces pass showHeader = false: the header row is a
+ * dead control there (it would open the very sheet/screen already shown),
+ * so it is hidden instead of rendered as a bar that opens nothing.
+ */
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, onDetail: (String) -> Unit) {
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, onDetail: (String) -> Unit, showHeader: Boolean = true) {
     val accent = accentFor(entity.entityId)
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -144,24 +149,26 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, onDetail: (String) -
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Row(
-                Modifier.fillMaxWidth().clickable { onDetail(entity.entityId) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(48.dp).background(accent.copy(alpha = 0.22f), polygonShape(ExpressiveKind.BUN)),
-                    contentAlignment = Alignment.Center,
+            if (showHeader) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onDetail(entity.entityId) },
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(domainIcon(entity), contentDescription = null, tint = accent)
+                    Box(
+                        Modifier.size(48.dp).background(accent.copy(alpha = 0.22f), polygonShape(ExpressiveKind.BUN)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(domainIcon(entity), contentDescription = null, tint = accent)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(12.dp))
             when (entity.domain) {
                 "light" -> LightControl(entity, vm)
                 "switch" -> SwitchControl(entity, vm)
