@@ -15,6 +15,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.background
@@ -145,6 +146,26 @@ fun fallbackFromRect(target: Rect, offsetPx: Float): Rect =
     Rect(target.left, target.top + offsetPx, target.right, target.bottom + offsetPx)
 
 /**
+ * Top corner radius for a morphing surface at [progress] (0 = card,
+ * 1 = full page): 28dp at the card, 0dp at the page. Progress is
+ * clamped to [0, 1] BEFORE the radius is computed, and the result is
+ * floored at 0.dp.
+ *
+ * Why both clamps: the bounds spring (0.8 damping) and the sheet
+ * spring (0.85) both overshoot past 1, and the old formula
+ * `28.dp * (1f - progress)` went a hair negative at the overshoot
+ * peak. A negative corner throws IllegalArgumentException inside
+ * CornerBasedShape.createOutline during the layer update — not
+ * during draw — so one bad frame kills the app. Six such crashes on
+ * 2026-10-29 (topStart = topEnd about -0.36..-0.67px, bottom corners
+ * 0), all on detail opens, which is exactly this formula's
+ * signature. MorphSurface ALSO coerces at its clip site, so even a
+ * future caller passing a raw negative value cannot throw.
+ */
+fun morphCornerTop(progress: Float): Dp =
+    (28.dp * (1f - progress.coerceIn(0f, 1f))).coerceAtLeast(0.dp)
+
+/**
  * The single morphing surface. [rect] is the interpolated rect in root
  * pixels; [overlayOrigin] is the overlay root's own root-coordinate
  * origin, subtracted so the surface lands correctly regardless of where
@@ -152,7 +173,12 @@ fun fallbackFromRect(target: Rect, offsetPx: Float): Rect =
  * pixels; the content is placed top-left inside the surface at exactly
  * that size and clipped to the surface (never scaled, never reflowed).
  * [cornerTop] is the surface's top corner radius (sheets: constant 28dp;
- * detail pages: 28dp → 0dp over the morph). [dragOffsetY] shifts the
+ * detail pages: 28dp → 0dp over the morph). It is coerced to >= 0.dp
+ * at the clip site: no caller can ever hand this surface a negative
+ * corner again (see [morphCornerTop]). [contentAlpha] fades the
+ * surface's content (1 = fully visible); weather sheets pass the
+ * morph progress so their arc materializes instead of popping to full
+ * size inside a still-small rect. [dragOffsetY] shifts the
  * surface down for the sheet drag gesture without touching the rect
  * math. [onPlaced] reports the surface's window bounds (the sheet's
  * Details action uses them as the camera rise origin, as before).
@@ -166,6 +192,7 @@ fun MorphSurface(
     background: Color,
     modifier: Modifier = Modifier,
     dragOffsetY: Float = 0f,
+    contentAlpha: Float = 1f,
     onPlaced: ((Rect) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -183,7 +210,7 @@ fun MorphSurface(
                 )
             }
             .size(widthDp, heightDp)
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = cornerTop, topEnd = cornerTop))
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = cornerTop.coerceAtLeast(0.dp), topEnd = cornerTop.coerceAtLeast(0.dp)))
             .background(background)
             .then(
                 if (onPlaced != null) Modifier.onGloballyPositioned { onPlaced(it.boundsInWindow()) }
@@ -191,7 +218,8 @@ fun MorphSurface(
             ),
     ) {
         Box(
-            Modifier.size(targetWidthDp, targetHeightDp),
+            Modifier.size(targetWidthDp, targetHeightDp)
+                .graphicsLayer { alpha = contentAlpha },
             contentAlignment = Alignment.TopStart,
         ) {
             content()

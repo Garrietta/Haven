@@ -1,7 +1,5 @@
 package com.garrietta.haven
 
-import android.app.Activity
-import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -140,6 +138,7 @@ import androidx.compose.ui.unit.IntSize
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.MorphSurface
+import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.detailTargetRect
 import com.garrietta.haven.ui.components.fallbackFromRect
@@ -675,14 +674,26 @@ fun HavenApp(vm: HavenViewModel) {
                     // from the graceful fallback (target + 80dp down),
                     // never an instant appearance.
                     val source = cardBounds[anim.id] ?: anim.source
-                    val rect = if (source != null) lerpRect(source, target, sheetProgress.value)
-                        else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, sheetProgress.value)
+                    // Geometry progress is clamped: the bounds spring
+                    // overshoots past 1 (0.8 damping). lerpRect clamps
+                    // internally; this makes it explicit and shared
+                    // with the weather content fade below.
+                    val sheetP = sheetProgress.value.coerceIn(0f, 1f)
+                    val rect = if (source != null) lerpRect(source, target, sheetP)
+                        else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, sheetP)
                     val dismissThresholdPx = with(density) { 120.dp.toPx() }
                     MorphSurface(
                         rect = rect,
                         overlayOrigin = overlayOrigin,
                         targetSize = targetSize,
                         cornerTop = 28.dp,
+                        // Weather sheets fade their content with the
+                        // morph: the sheet's arc duplicates its source
+                        // card's arc, and revealing it at full size
+                        // inside a still-small rect read as doubling
+                        // (2026-10-29 verdict video). Other sheets keep
+                        // the Koda reveal-as-it-grows language.
+                        contentAlpha = if (anim.id.substringBefore('.') == "weather") sheetP else 1f,
                         background = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.pointerInput(anim.id) {
                             detectVerticalDragGestures(
@@ -733,13 +744,17 @@ fun HavenApp(vm: HavenViewModel) {
                 // rotation mid-morph and moved cards track correctly,
                 // sourceless cards rise from the graceful fallback.
                 val source = cardBounds[anim.entityId] ?: anim.source
-                val rect = if (source != null) lerpRect(source, target, detailProgress.value)
-                    else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, detailProgress.value)
+                // Clamped geometry progress (see the sheet block):
+                // the bounds spring overshoots past 1, and the raw
+                // value fed the corner formula below went negative.
+                val detailP = detailProgress.value.coerceIn(0f, 1f)
+                val rect = if (source != null) lerpRect(source, target, detailP)
+                    else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, detailP)
                 MorphSurface(
                     rect = rect,
                     overlayOrigin = overlayOrigin,
                     targetSize = overlaySize,
-                    cornerTop = 28.dp * (1f - detailProgress.value),
+                    cornerTop = morphCornerTop(detailP),
                     background = MaterialTheme.colorScheme.background,
                 ) {
                     content(anim.screen)
@@ -924,11 +939,17 @@ private fun EntityPopupSheetContent(
 }
 
 /**
- * Camera fullscreen, LIVE: the viewer locks the Activity to landscape
- * while open and restores the previous orientation on exit, so the feed
- * fills the screen rotated 90 degrees instead of letterboxing in
- * portrait. Exit via the X button or the system back gesture — both are
- * always visible.
+ * Camera fullscreen, LIVE. The viewer used to lock the Activity to
+ * landscape while open and restore the previous orientation on exit,
+ * so the feed filled the screen rotated 90 degrees instead of
+ * letterboxing in portrait — but that forced rotation animated the
+ * whole window through diagonal intermediates on open AND dismiss
+ * (2026-10-29 verdict video, camera open/dismiss frames visibly
+ * rotated), while the rise itself never rotates. The lock is removed
+ * (2026-10-29 crash round): the fullscreen stays in the device's
+ * current orientation (portrait when held portrait) and the user
+ * rotates the device for landscape. Exit via the X button or the
+ * system back gesture — both are always visible.
  *
  * The old viewer fetched one snapshot from `/api/camera_proxy/` and showed
  * it until Refresh was tapped — that was the still-image bug, on every
@@ -954,16 +975,6 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     // to the MJPEG recording, labeled as such, when HA cannot stream it.
     // Non-Ring cameras stay on the MJPEG path, untouched.
     val isRing = entity?.let { isRingCamera(it) } == true
-    val activity = LocalContext.current as? Activity
-    DisposableEffect(cameraId) {
-        val prev = activity?.requestedOrientation
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        onDispose {
-            if (activity != null && prev != null) {
-                activity.requestedOrientation = prev
-            }
-        }
-    }
     BackHandler { onClose() }
     var streamState by remember(cameraId) { mutableStateOf<CameraStreamState>(CameraStreamState.Connecting) }
     var attempt by remember(cameraId) { mutableStateOf(0) }

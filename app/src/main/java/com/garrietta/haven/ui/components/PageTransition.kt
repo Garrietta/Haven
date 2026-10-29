@@ -80,7 +80,12 @@ fun SheetPageContent(
     }
     val active = bounds != null && progress < 1f
     val shift = startShift * (1f - progress)
-    val radius = 28.dp * (1f - progress)
+    // Shared clamped corner math: the sheet spring (0.85 damping)
+    // overshoots past 1, and an unclamped 28.dp * (1f - progress)
+    // would go negative and throw in createOutline (2026-10-29 crash
+    // round). While active, progress < 1, so this matches the old
+    // value exactly; it only guards the overshoot frames.
+    val radius = morphCornerTop(progress)
     val contentAlpha = 0.55f + 0.45f * progress
     Box(
         modifier

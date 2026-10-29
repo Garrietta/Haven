@@ -3,6 +3,7 @@ package com.garrietta.haven.ui.components
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -75,5 +76,30 @@ class MorphMathTest {
         // target at every edge, so no snap on arrival.
         val target = Rect(10f, 20f, 1090f, 2420f)
         assertEquals(target, lerpRect(fallbackFromRect(target, 80f), target, 1f))
+    }
+
+    @Test
+    fun morphCornerTop_endpoints() {
+        assertEquals(28.dp, morphCornerTop(0f))
+        assertEquals(0.dp, morphCornerTop(1f))
+    }
+
+    @Test
+    fun morphCornerTop_midpoint() {
+        assertEquals(14.dp, morphCornerTop(0.5f))
+    }
+
+    @Test
+    fun morphCornerTop_neverNegative() {
+        // 2026-10-29 crash round: the bounds spring (0.8 damping)
+        // overshoots past 1, and the old formula 28.dp * (1f - progress)
+        // went negative at the peak (six crashes, topStart = topEnd
+        // about -0.36..-0.67px), throwing in createOutline during the
+        // layer update. No progress value may ever yield a negative
+        // corner again — including the exact observed overshoot.
+        for (p in listOf(-1f, -0.5f, 1.00493f, 1.5f, 2f)) {
+            assertEquals(true, morphCornerTop(p) >= 0.dp)
+        }
+        assertEquals(0.dp, morphCornerTop(1.00493f))
     }
 }
