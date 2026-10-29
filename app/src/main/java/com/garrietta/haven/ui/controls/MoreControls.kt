@@ -325,8 +325,13 @@ fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
                 )
             }
         } else {
+            // Same 180dp as the loaded image: the sheet panel's target
+            // bounds must not change when the snapshot arrives, or the
+            // panel jumps mid-morph (the old 120dp placeholder grew to
+            // 180dp on load — one of the jumpy recalculations in the
+            // 2026-10-29 evidence video).
             Box(
-                Modifier.fillMaxWidth().height(120.dp)
+                Modifier.fillMaxWidth().height(180.dp)
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp)),
                 contentAlignment = Alignment.Center,
             ) {

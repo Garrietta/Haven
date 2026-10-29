@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -58,6 +59,8 @@ import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.theme.springMorph
+import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
@@ -170,6 +173,14 @@ private fun ThermostatHero(
     // cooling, otherwise heating) and survives setpoint updates within a
     // mode; the user flips it with an inside tap.
     var selector by remember(entity.entityId, entity.state) { mutableStateOf(defaultSelector(entity.state)) }
+    // Pulsing thumb: the dial's fluid indicator while the system is
+    // actively heating or cooling (hvac_action, not mode — a thermostat
+    // in heat mode that is idle does not pulse).
+    val pulseSelector = when (entity.attrString("hvac_action")) {
+        "heating" -> SetpointSelector.HEATING
+        "cooling" -> if (heatCool) SetpointSelector.COOLING else SetpointSelector.HEATING
+        else -> null
+    }
     val dialAccent: Color = if (heatCool) {
         if (selector == SetpointSelector.HEATING) HEAT_COLOR else COOL_COLOR
     } else {
@@ -219,6 +230,7 @@ private fun ThermostatHero(
                 } else {
                     null
                 },
+                pulseSelector = pulseSelector,
                 diameter = 300.dp,
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -244,8 +256,8 @@ private fun ThermostatHero(
                     horizontalArrangement = Arrangement.spacedBy(24.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(onClick = { stepActive(-1f) }) { Text("−") }
-                    OutlinedButton(onClick = { stepActive(1f) }) { Text("+") }
+                    ExpressiveStepper("−", onClick = { stepActive(-1f) })
+                    ExpressiveStepper("+", onClick = { stepActive(1f) })
                 }
             }
         }
@@ -389,6 +401,13 @@ private fun GooglePill(
     modifier: Modifier = Modifier,
     onToggle: () -> Unit,
 ) {
+    // The chevron animates instead of snapping: it was an instant flip,
+    // one of the rigid transitions in the audit.
+    val chevronRotation by animateFloatAsState(
+        if (expanded) 180f else 0f,
+        animationSpec = springMorph(),
+        label = "chevron",
+    )
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -408,7 +427,7 @@ private fun GooglePill(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp).graphicsLayer {
-                    rotationZ = if (expanded) 180f else 0f
+                    rotationZ = chevronRotation
                 },
             )
         }

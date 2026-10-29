@@ -7,6 +7,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
@@ -40,11 +41,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -228,6 +231,13 @@ private fun isTopLevel(screen: Screen): Boolean = when (screen) {
     else -> false
 }
 
+/** Entity id a detail screen belongs to (the shared card key it morphs from). */
+private fun detailEntityId(screen: Screen): String = when (screen) {
+    is Screen.Thermostat -> screen.entityId
+    is Screen.EntityDetail -> screen.entityId
+    else -> ""
+}
+
 @Composable
 @OptIn(ExperimentalSharedTransitionApi::class)
 fun HavenApp(vm: HavenViewModel) {
@@ -252,75 +262,38 @@ fun HavenApp(vm: HavenViewModel) {
             mutableStateListOf<Screen>(Screen.Today)
         }
         val current = backstack.last()
-        // Page-transition state: a page rises as a bottom sheet out of
-        // the tapped item's saved bounds (vm.pageOrigin) on the sheet
-        // spring, and sinks back toward them on back. Top-level jumps
-        // clear it.
-        var entering by remember { mutableStateOf(false) }
-        var exitingScreen by remember { mutableStateOf<Screen?>(null) }
-        val enterProgress = remember { Animatable(0f) }
-        val exitProgress = remember { Animatable(1f) }
-        val navigate: (Screen) -> Unit = { screen ->
-            if ((screen is Screen.Thermostat || screen is Screen.EntityDetail) && vm.pageOrigin != null) {
-                entering = true
-            }
-            backstack.add(screen)
-        }
+        // Detail destinations morph out of their card (spec item 2),
+        // they do not slide or rise: the overlay below renders the page
+        // above the scaffold, and its root claims the card's sharedBounds
+        // key, so the card grows into the page on the bounds spring with
+        // 150ms fades. Back is a plain pop; the exit morph plays
+        // automatically from the AnimatedVisibility below. This replaces
+        // the old bottom-sheet-rise path (entering/exitingScreen) for
+        // detail pages; the camera fullscreen keeps its own rise, and
+        // vm.pageOrigin is still set by tile taps and sheet Details
+        // because the camera path needs it.
+        val detailScreen = current as? Screen.Thermostat ?: current as? Screen.EntityDetail
+        // lastDetail keeps the page alive through the exit morph after
+        // back has already popped the backstack (same pattern as the
+        // sheet's lastPopupId).
+        var lastDetail by remember { mutableStateOf<Screen?>(null) }
+        if (detailScreen != null) lastDetail = detailScreen
+        val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
         val goTop: (Screen) -> Unit = {
-            entering = false
-            exitingScreen = null
             vm.pageOrigin = null
             backstack.clear()
             backstack.add(it)
         }
         val goBack: () -> Unit = {
-            when {
-                exitingScreen != null -> Unit // already animating out; ignore
-                entering -> {
-                    // Back mid-enter: abandon the animation, pop at once.
-                    entering = false
-                    if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
-                }
-                (current is Screen.Thermostat || current is Screen.EntityDetail) && vm.pageOrigin != null -> {
-                    exitingScreen = current
-                }
-                backstack.size > 1 -> backstack.removeAt(backstack.lastIndex)
-            }
+            if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
         }
         val signOut: () -> Unit = {
-            entering = false
-            exitingScreen = null
             vm.pageOrigin = null
             vm.signOut()
             backstack.clear()
             backstack.add(Screen.Today)
         }
         BackHandler(enabled = backstack.size > 1) { goBack() }
-        LaunchedEffect(entering) {
-            if (entering) {
-                enterProgress.snapTo(0f)
-                if (reduceMotion) {
-                    enterProgress.snapTo(1f)
-                } else {
-                    enterProgress.animateTo(1f, sheetSpring())
-                }
-                entering = false
-            }
-        }
-        LaunchedEffect(exitingScreen) {
-            val leaving = exitingScreen
-            if (leaving != null) {
-                exitProgress.snapTo(1f)
-                if (reduceMotion) {
-                    exitProgress.snapTo(0f)
-                } else {
-                    exitProgress.animateTo(0f, sheetSpring())
-                }
-                if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
-                exitingScreen = null
-                vm.pageOrigin = null
-            }
-        }
         // Camera overlay transitions share the same language: the live
         // view rises as a bottom sheet out of the tapped camera tile and
         // sinks back on close.
@@ -367,14 +340,41 @@ fun HavenApp(vm: HavenViewModel) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wideLayout = maxWidth >= 600.dp
             CompositionLocalProvider(LocalWideLayout provides wideLayout) {
-            // Sheet presence drives the backdrop blur on the scaffold
-            // content (never on the overlay itself), up to 24dp, on the
-            // emphasized-decelerate entrance easing.
+            // Sheet presence drives the backdrop blur on the whole
+            // scaffold — content AND pill bar, never the overlay itself
+            // — up to 24dp, on the emphasized-decelerate entrance easing.
+            // The old code blurred only the content box, so mid-enter the
+            // pill read as a separate bright layer over the dimmed
+            // background (2026-10-29 evidence video: the pill "above the
+            // scrim" was really the pill unblurred while everything else
+            // dimmed; the full-screen scrim above the scaffold was
+            // already covering it).
             val sheetPresence by animateFloatAsState(
                 if (vm.popupEntityId != null) 1f else 0f,
                 animationSpec = tween(durationMillis = 300, easing = EmphasizedDecelerate),
                 label = "sheetPresence",
             )
+            // One content lambda shared by the scaffold and the detail
+            // overlay below, so both render the same screens.
+            val content: @Composable (Screen) -> Unit = { screen ->
+                ScreenContent(
+                    screen = screen,
+                    vm = vm,
+                    navigate = navigate,
+                    goBack = goBack,
+                    themeMode = themeMode,
+                    reduceMotion = reduceMotion,
+                    onThemeMode = {
+                        themeMode = it
+                        vm.settingsStore.themeMode = it
+                    },
+                    onReduceMotion = {
+                        reduceMotion = it
+                        vm.settingsStore.reduceMotion = it
+                    },
+                    onSignOut = signOut,
+                )
+            }
             SharedTransitionLayout {
             // Tiles read this always-visible scope for sharedBounds; the
             // sheet panel declares the same key in its own scope below, so
@@ -384,6 +384,22 @@ fun HavenApp(vm: HavenViewModel) {
             CompositionLocalProvider(
                 LocalSharedTransitionScope provides this@SharedTransitionLayout,
                 LocalSharedVisibilityScope provides this,
+            ) {
+            // Backdrop blur while a sheet is open: up to 24dp, scaled by
+            // sheet presence, skipped entirely under reduce-motion, and
+            // applied to the whole scaffold — content and pill bar — so
+            // the pill dims and blurs with everything else instead of
+            // reading as a bright layer over the dim. Never the overlay.
+            val density = LocalDensity.current
+            val blurPx = if (reduceMotion) 0f else with(density) { (24.dp * sheetPresence).toPx() }
+            Box(
+                Modifier.fillMaxSize().graphicsLayer {
+                    if (blurPx > 0.5f) {
+                        renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                            blurPx, blurPx, android.graphics.Shader.TileMode.CLAMP,
+                        ).asComposeRenderEffect()
+                    }
+                },
             ) {
             Scaffold(
             // Screens consume the status-bar inset themselves
@@ -404,67 +420,30 @@ fun HavenApp(vm: HavenViewModel) {
                         items = barItems,
                         selectedIndex = selectedIndex,
                         onSelect = goTop,
-                        // Floating island: 16dp side and bottom margins, no
-                        // top margin, so it floats over cards without
-                        // blocking touch targets below it.
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                        // Floating island, never pinned edge-to-edge: the
+                        // navigationBars window inset, then 16dp
+                        // horizontal and 12dp bottom padding (the spec's
+                        // literal numbers; reconciles #41's 16dp
+                        // side+bottom margins by keeping 16dp sides and
+                        // taking the spec's 12dp bottom).
+                        modifier = Modifier.fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                     )
                 }
             },
         ) { padding ->
-            // Backdrop blur while a sheet is open: up to 24dp, scaled by
-            // sheet presence, skipped entirely under reduce-motion, and
-            // applied to the scaffold content only — never the overlay.
-            val density = LocalDensity.current
-            val blurPx = if (reduceMotion) 0f else with(density) { (24.dp * sheetPresence).toPx() }
-            Box(
-                Modifier.fillMaxSize().padding(padding).graphicsLayer {
-                    if (blurPx > 0.5f) {
-                        renderEffect = android.graphics.RenderEffect.createBlurEffect(
-                            blurPx, blurPx, android.graphics.Shader.TileMode.CLAMP,
-                        ).asComposeRenderEffect()
-                    }
-                },
-            ) {
-                val content: @Composable (Screen) -> Unit = { screen ->
-                    ScreenContent(
-                        screen = screen,
-                        vm = vm,
-                        navigate = navigate,
-                        goBack = goBack,
-                        themeMode = themeMode,
-                        reduceMotion = reduceMotion,
-                        onThemeMode = {
-                            themeMode = it
-                            vm.settingsStore.themeMode = it
-                        },
-                        onReduceMotion = {
-                            reduceMotion = it
-                            vm.settingsStore.reduceMotion = it
-                        },
-                        onSignOut = signOut,
-                    )
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                // Detail pages do NOT render here: the scaffold shows
+                // the screen underneath, and the page itself lives in
+                // the overlay below (above all chrome). Every other
+                // destination renders normally.
+                val base = when (current) {
+                    is Screen.Thermostat, is Screen.EntityDetail ->
+                        backstack.getOrNull(backstack.lastIndex - 1) ?: Screen.Today
+                    else -> current
                 }
-                val leaving = exitingScreen
-                when {
-                    leaving != null && backstack.size > 1 -> {
-                        // Reverse: the page sinks back toward its origin
-                        // over the screen it came from.
-                        content(backstack[backstack.lastIndex - 1])
-                        SheetPageContent(vm.pageOrigin, exitProgress.value) {
-                            content(leaving)
-                        }
-                    }
-                    entering && backstack.size > 1 -> {
-                        // Enter: the page rises as a bottom sheet out of
-                        // the tapped item, over the screen it came from.
-                        content(backstack[backstack.lastIndex - 1])
-                        SheetPageContent(vm.pageOrigin, enterProgress.value) {
-                            content(current)
-                        }
-                    }
-                    else -> content(current)
-                }
+                content(base)
                 // A failed tap used to vanish silently; now it banners here on
                 // every screen until dismissed.
                 val serviceError by vm.serviceError.collectAsState()
@@ -477,6 +456,7 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
+            } // blur Box
             } // CompositionLocalProvider (tile shared-transition scope)
             } // AnimatedVisibility (tile shared-transition scope)
             // The sheet overlay renders inside the shared-transition layout
@@ -487,12 +467,14 @@ fun HavenApp(vm: HavenViewModel) {
             // animation after closePopup has already cleared the id.
             var lastPopupId by remember { mutableStateOf<String?>(null) }
             if (vm.popupEntityId != null) lastPopupId = vm.popupEntityId
+            // The panel positions itself by the shared-bounds morph
+            // alone. The old enter/exit also slid the panel vertically,
+            // so two transforms positioned it at once — one source of
+            // the jumpy, off-center first frames in the evidence video.
             AnimatedVisibility(
                 visible = vm.popupEntityId != null,
-                enter = fadeIn(animationSpec = tween(durationMillis = 250, easing = EmphasizedDecelerate)) +
-                    slideInVertically(animationSpec = tween(durationMillis = 350, easing = EmphasizedDecelerate)) { it / 4 },
-                exit = fadeOut(animationSpec = tween(durationMillis = 200, easing = EmphasizedAccelerate)) +
-                    slideOutVertically(animationSpec = tween(durationMillis = 250, easing = EmphasizedAccelerate)) { it / 4 },
+                enter = fadeIn(animationSpec = tween(durationMillis = 250, easing = EmphasizedDecelerate)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 200, easing = EmphasizedAccelerate)),
             ) {
                 CompositionLocalProvider(
                     LocalSharedTransitionScope provides this@SharedTransitionLayout,
@@ -500,6 +482,35 @@ fun HavenApp(vm: HavenViewModel) {
                 ) {
                     val sheetId = lastPopupId
                     if (sheetId != null) EntityPopupSheet(vm, navigate, sheetId)
+                }
+            }
+            // Detail-page overlay (spec item 2): renders above the
+            // scaffold — above the status bar and the pill bar, never
+            // under them — with the card's sharedBounds key on its root,
+            // so the card morphs into the page on the bounds spring with
+            // 150ms fades. Placed after the sheet overlay so the Details
+            // handoff (sheet -> page) draws the page above the closing
+            // sheet. lastDetail keeps the page alive through the exit
+            // morph after back has popped the backstack.
+            AnimatedVisibility(
+                visible = detailScreen != null,
+                enter = fadeIn(animationSpec = tween(durationMillis = 150, easing = EmphasizedDecelerate)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 150, easing = EmphasizedAccelerate)),
+            ) {
+                CompositionLocalProvider(
+                    LocalSharedTransitionScope provides this@SharedTransitionLayout,
+                    LocalSharedVisibilityScope provides this,
+                ) {
+                    val detail = lastDetail
+                    if (detail != null) {
+                        Box(
+                            Modifier.fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background)
+                                .sharedCardBounds("card-${detailEntityId(detail)}"),
+                        ) {
+                            content(detail)
+                        }
+                    }
                 }
             }
             } // SharedTransitionLayout
@@ -1095,14 +1106,21 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                         AnimatedContent(
                             targetState = showLabel,
                             transitionSpec = {
-                                // Selected label rows fade+scale in (180ms,
-                                // 60ms delay); icon-only states fade+scale
-                                // out faster (120ms), per the spec.
-                                fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 60)) +
-                                    scaleIn(initialScale = 0.88f, animationSpec = tween(durationMillis = 180, delayMillis = 60)) togetherWith
-                                    fadeOut(animationSpec = tween(durationMillis = 120)) +
-                                    scaleOut(targetScale = 0.88f, animationSpec = tween(durationMillis = 120))
-                            },
+                                // Vertical slide + fade, clipped: the old
+                                // fade+scale crossfade drew outgoing and
+                                // incoming labels in the same row space at
+                                // once, so during tab switches the pill
+                                // showed colliding text ("HomeThermostat"
+                                // in the 2026-10-29 evidence video). A
+                                // vertical slide with SizeTransform(clip)
+                                // can never overlap horizontally.
+                                slideInVertically(
+                                    animationSpec = tween(durationMillis = 180, easing = EmphasizedDecelerate),
+                                ) { it } + fadeIn(animationSpec = tween(durationMillis = 180, easing = EmphasizedDecelerate)) togetherWith
+                                    slideOutVertically(
+                                        animationSpec = tween(durationMillis = 120, easing = EmphasizedAccelerate),
+                                    ) { -it } + fadeOut(animationSpec = tween(durationMillis = 120, easing = EmphasizedAccelerate))
+                            }.using(SizeTransform(clip = true)),
                             label = "pillLabel",
                         ) { show ->
                             if (show) {

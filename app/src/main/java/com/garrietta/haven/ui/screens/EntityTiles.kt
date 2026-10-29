@@ -56,12 +56,14 @@ import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.lightContainerColor
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.sharedCardBounds
+import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.polygonShape
+import com.garrietta.haven.ui.theme.pressBounce
 import org.json.JSONObject
 
 /**
@@ -174,15 +176,16 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     val accent = accentFor(entity.entityId)
     val active = ((entity.domain == "light" || entity.domain == "switch" || entity.domain == "input_boolean") &&
         entity.state == "on") || (entity.domain == "cover" && entity.state == "open")
-    // The tile's on-screen bounds become the page origin: the full page
-    // rises out of exactly this rect and settles back toward it on back.
+    // The tile's on-screen bounds feed the camera rise origin (and are
+    // kept for it). Detail pages no longer rise from this rect: they
+    // morph from the tile element itself via the shared card key.
     var tileBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val reduceMotion = com.garrietta.haven.ui.components.LocalReduceMotion.current
     val pressScale by androidx.compose.animation.core.animateFloatAsState(
         if (pressed) 0.97f else 1f,
-        animationSpec = com.garrietta.haven.ui.theme.havenMotion(reduceMotion),
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
         label = "tilePress",
     )
     Surface(
@@ -308,24 +311,24 @@ private fun ClimateTileBody(vm: HavenViewModel, entity: HaEntity) {
     if (heatCool || single != null) {
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
+            ExpressiveStepper(
+                "−",
                 onClick = {
                     tileStepNext(entity, selector, -1.0)?.let {
                         applyClimateSetpoint(vm, entity, selector, it)
                     }
                 },
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.height(32.dp),
-            ) { Text("−") }
-            OutlinedButton(
+                height = 32.dp,
+            )
+            ExpressiveStepper(
+                "+",
                 onClick = {
                     tileStepNext(entity, selector, 1.0)?.let {
                         applyClimateSetpoint(vm, entity, selector, it)
                     }
                 },
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.height(32.dp),
-            ) { Text("+") }
+                height = 32.dp,
+            )
         }
     }
 }

@@ -54,3 +54,41 @@ fun sparklineMinCurrentMax(points: List<HistoryPoint>): Triple<Double, Double, D
     if (points.isEmpty()) return null
     return Triple(points.minOf { it.value }, points.last().value, points.maxOf { it.value })
 }
+
+/**
+ * Buckets a history series into at most [maxBuckets] equal time spans,
+ * averaging values per bucket, so dense 24-hour telemetry draws as a
+ * smooth readable curve instead of tracking every jitter sample. HA
+ * history is state-change driven, not regularly sampled: long flat runs
+ * plus bursts of noisy changes draw as jagged steps under the plain
+ * midpoint curve (the 2026-10-29 sensor-detail evidence). Bucket time is
+ * the span center, so x-spacing stays honest, and empty spans are
+ * skipped rather than invented. Series shorter than 2 points pass
+ * through unchanged. Min/Current/Max labels are still computed from the
+ * RAW series by callers, so resampling never invents or hides an
+ * extreme — it only de-noises the drawn line.
+ */
+fun resampleHistory(points: List<HistoryPoint>, maxBuckets: Int = 72): List<HistoryPoint> {
+    if (points.size < 2 || maxBuckets < 1) return points
+    val sorted = points.sortedBy { it.timeMs }
+    val t0 = sorted.first().timeMs.toDouble()
+    val t1 = sorted.last().timeMs.toDouble()
+    val span = t1 - t0
+    if (span <= 0) return sorted
+    val buckets = minOf(maxBuckets, sorted.size)
+    val width = span / buckets
+    val sums = DoubleArray(buckets)
+    val counts = IntArray(buckets)
+    for (p in sorted) {
+        val idx = ((p.timeMs - t0) / width).toInt().coerceIn(0, buckets - 1)
+        sums[idx] += p.value
+        counts[idx]++
+    }
+    val out = ArrayList<HistoryPoint>(buckets)
+    for (i in 0 until buckets) {
+        if (counts[i] == 0) continue
+        val centerMs = (t0 + width * (i + 0.5)).toLong()
+        out.add(HistoryPoint(centerMs, sums[i] / counts[i]))
+    }
+    return if (out.size >= 2) out else sorted
+}

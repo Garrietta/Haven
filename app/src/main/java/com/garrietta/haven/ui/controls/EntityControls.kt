@@ -6,10 +6,13 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Autorenew
@@ -30,6 +35,7 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Refresh
@@ -82,6 +88,7 @@ import com.garrietta.haven.ui.components.sharedCardBounds
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenMotion
+import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.ui.theme.springSnappy
 import com.garrietta.haven.ui.theme.polygonShape
 import org.json.JSONObject
@@ -147,13 +154,82 @@ fun ServiceSlider(
 }
 
 /**
+ * Koda-informed pressable pill control (spec item 5 + the Koda
+ * now-playing references: big pill-capsule transports with clear pressed
+ * states, on warm tonal containers). A filled tonal pill with a reactive
+ * press bounce — scale to 0.92 on the single pressBounce spring — and a
+ * bounded ripple clipped to the pill. Stepper buttons and media
+ * transports share it, so every control press feels like one set. Not a
+ * Material Button: the pill shape and press scale are the expressive
+ * language here. The caller sizes it via [modifier] (width) and [height].
+ */
+@Composable
+fun PressablePillButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    height: Dp = 48.dp,
+    containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
+    contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val reduceMotion = LocalReduceMotion.current
+    val scale by animateFloatAsState(
+        if (pressed) 0.92f else 1f,
+        animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
+        label = "pressPill",
+    )
+    Box(
+        modifier
+            .height(height)
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .clip(RoundedCornerShape(50))
+            .background(containerColor)
+            .clickable(interactionSource = interactionSource, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, content = content)
+    }
+}
+
+/**
+ * The expressive stepper (spec item 5): a pill-capsule button, not a
+ * basic rounded rectangle, with the press bounce above. Used wherever
+ * steppers appear — the thermostat dial, the thermostat tile — and sized
+ * by [height] (48dp on the page, 32dp on the tile).
+ */
+@Composable
+fun ExpressiveStepper(symbol: String, onClick: () -> Unit, height: Dp = 48.dp, modifier: Modifier = Modifier) {
+    PressablePillButton(
+        onClick = onClick,
+        modifier = modifier.width(height * 1.5f),
+        height = height,
+    ) {
+        Text(
+            symbol,
+            fontSize = if (height >= 48.dp) 22.sp else 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
+}
+
+/**
  * The card shell: blob badge + name + state header, then the domain's own
  * control. Detail surfaces pass showHeader = false: the header row is a
  * dead control there (it would open the very sheet/screen already shown),
  * so it is hidden instead of rendered as a bar that opens nothing.
+ *
+ * [shareBounds] owns the shared-bounds key exactly when this card is the
+ * transition source. Nested cards (inside the sheet, where the panel
+ * owns the key) and cards on detail pages (where the page overlay root
+ * owns it) must NOT declare it: two elements with one key in one scope
+ * rendered as overlapping ghosts mid-morph in the 2026-10-29 evidence
+ * video. Defaults to true exactly when the card is not nested.
  */
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, onDetail: (String) -> Unit) {
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, shareBounds: Boolean = !nested, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -164,7 +240,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
             containerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
             else MaterialTheme.colorScheme.surfaceContainer,
         ),
-        modifier = Modifier.fillMaxWidth().sharedCardBounds("card-${entity.entityId}"),
+        modifier = Modifier.fillMaxWidth().then(if (shareBounds) Modifier.sharedCardBounds("card-${entity.entityId}") else Modifier),
     ) {
         Column(Modifier.padding(16.dp)) {
             if (showHeader) {
@@ -515,13 +591,30 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
         if (artist != null) Text(artist, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { vm.callService("media_player", "media_previous_track", entity.entityId) }) {
+            PressablePillButton(
+                onClick = { vm.callService("media_player", "media_previous_track", entity.entityId) },
+                modifier = Modifier.width(56.dp),
+            ) {
                 Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous")
             }
-            Button(onClick = { vm.callService("media_player", "media_play_pause", entity.entityId) }) {
-                Text(if (playing) "Pause" else "Play")
+            PressablePillButton(
+                onClick = { vm.callService("media_player", "media_play_pause", entity.entityId) },
+                modifier = Modifier.width(88.dp),
+                height = 56.dp,
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Icon(
+                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (playing) "Pause" else "Play", fontWeight = FontWeight.SemiBold)
             }
-            FilledTonalButton(onClick = { vm.callService("media_player", "media_next_track", entity.entityId) }) {
+            PressablePillButton(
+                onClick = { vm.callService("media_player", "media_next_track", entity.entityId) },
+                modifier = Modifier.width(56.dp),
+            ) {
                 Icon(Icons.Filled.SkipNext, contentDescription = "Next")
             }
         }

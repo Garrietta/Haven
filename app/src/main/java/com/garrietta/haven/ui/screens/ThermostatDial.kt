@@ -1,9 +1,14 @@
 package com.garrietta.haven.ui.screens
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -35,6 +40,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.theme.EmphasizedDecelerate
+import com.garrietta.haven.ui.theme.springBounds
+import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.components.coolSetpointContainer
 import com.garrietta.haven.ui.components.coolSetpointOnContainer
 import com.garrietta.haven.ui.components.heatSetpointContainer
@@ -69,6 +77,15 @@ import kotlin.math.sqrt
  *   of jumping; the applied value never moves in the gap.
  * - Gap-proofing holds for drawn thumbs too: a drawn heat thumb never
  *   crosses the cool thumb, and vice versa.
+ * - Variable-width track (visual-bugs round, spec item 5): the track
+ *   widens while a thumb is grabbed (12dp -> 18dp on the morph spring),
+ *   so a drag reads as an active grip, not a static ring.
+ * - Pulsing fluid indicator (spec item 5, in the Koda wavy/dashed
+ *   language): while the system is actively heating or cooling, the
+ *   matching thumb's bloom undulates gently (radius + alpha, 1600ms
+ *   reverse on the emphasized decelerate). Idle and off modes keep the
+ *   static bloom; off keeps its dashed track. The pulse reads only in
+ *   the draw phase, so it never recomposes the page.
  *
  * Containers use the token pipeline (heat thumb: errorContainer in
  * single-heat mode, transitioning smoothly to tertiaryContainer in
@@ -98,6 +115,10 @@ fun ThermostatDial(
     onSingleChange: (Float) -> Unit,
     onFinished: (SetpointSelector, Float) -> Unit,
     onInsideTap: (() -> Unit)?,
+    // Which thumb (if any) pulses as actively heating/cooling. Null
+    // means idle: static blooms. Single mode passes HEATING for either
+    // active action; dual mode passes the matching selector.
+    pulseSelector: SetpointSelector? = null,
     modifier: Modifier = Modifier,
     diameter: Dp = 300.dp,
 ) {
@@ -109,7 +130,7 @@ fun ThermostatDial(
     // transitioning smoothly to tertiaryContainer in dual-band mode.
     val heatContainer by animateColorAsState(
         heatSetpointContainer(scheme, dual),
-        animationSpec = spring(stiffness = 400f, dampingRatio = 0.8f),
+        animationSpec = springBounds(),
         label = "heatThumbContainer",
     )
     val heatOnContainer = heatSetpointOnContainer(scheme, dual)
@@ -133,6 +154,20 @@ fun ThermostatDial(
     var grabbed by remember { mutableStateOf<SetpointSelector?>(null) }
     var strain by remember { mutableStateOf<Float?>(null) }
     var lastApplied by remember { mutableStateOf(0f) }
+    // Track widening while grabbed; pulse phase for the active bloom.
+    // The phase is read only inside the Canvas draw block below, so the
+    // infinite transition redraws the dial without recomposing the page.
+    val trackStroke by animateDpAsState(
+        if (grabbed != null) 18.dp else 12.dp,
+        animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springMorph(),
+        label = "trackStroke",
+    )
+    val pulseTransition = rememberInfiniteTransition(label = "dialPulse")
+    val pulsePhase by pulseTransition.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(1600, easing = EmphasizedDecelerate), RepeatMode.Reverse),
+        label = "bloomPhase",
+    )
 
     // Drawn values: the strained value while the finger pushes into the
     // bottom gap, else the applied value — gap-proofed so a drawn heat
@@ -153,11 +188,16 @@ fun ThermostatDial(
         return Offset(cx + radius * cos(a), cy + radius * sin(a))
     }
 
-    fun DrawScope.drawThumb(center: Offset, fill: Color, dot: Color, active: Boolean) {
+    fun DrawScope.drawThumb(center: Offset, fill: Color, dot: Color, active: Boolean, pulsing: Boolean) {
         val w = 30.dp.toPx()
         val h = 20.dp.toPx()
-        // Outward bloom behind the thumb.
-        drawCircle(color = fill.copy(alpha = 0.25f), radius = 24.dp.toPx(), center = center)
+        // Outward bloom behind the thumb: static when idle, gently
+        // undulating (radius + alpha) while actively heating/cooling.
+        // pulsePhase is read here, in the draw phase, so the pulse
+        // redraws the dial without recomposing the page.
+        val bloomAlpha = if (pulsing) 0.18f + 0.14f * pulsePhase else 0.25f
+        val bloomRadius = if (pulsing) (24.dp + 4.dp * pulsePhase).toPx() else 24.dp.toPx()
+        drawCircle(color = fill.copy(alpha = bloomAlpha), radius = bloomRadius, center = center)
         drawRoundRect(
             color = fill.copy(alpha = if (active) 1f else 0.55f),
             topLeft = Offset(center.x - w / 2f, center.y - h / 2f),
@@ -289,7 +329,7 @@ fun ThermostatDial(
         val cx = size.width / 2f
         val cy = size.height / 2f
         val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
-        val stroke = 12.dp.toPx()
+        val stroke = trackStroke.toPx()
         val topLeft = Offset(cx - trackRadius, cy - trackRadius)
         val arcSize = Size(trackRadius * 2f, trackRadius * 2f)
         when (mode) {
@@ -395,12 +435,14 @@ fun ThermostatDial(
                 heatContainer,
                 heatOnContainer,
                 selector == SetpointSelector.HEATING,
+                pulseSelector == SetpointSelector.HEATING,
             )
             drawThumb(
                 thumbCenter(animatedCoolAngle, trackRadius, cx, cy),
                 coolContainer,
                 coolOnContainer,
                 selector == SetpointSelector.COOLING,
+                pulseSelector == SetpointSelector.COOLING,
             )
         } else {
             val (fill, dot) = when (mode) {
@@ -408,7 +450,7 @@ fun ThermostatDial(
                 "cool" -> coolSetpointContainer(scheme) to coolSetpointOnContainer(scheme)
                 else -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
             }
-            drawThumb(thumbCenter(animatedSingleAngle, trackRadius, cx, cy), fill, dot, true)
+            drawThumb(thumbCenter(animatedSingleAngle, trackRadius, cx, cy), fill, dot, true, pulseSelector != null)
         }
     }
 }

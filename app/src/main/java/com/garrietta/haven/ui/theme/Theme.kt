@@ -44,6 +44,36 @@ fun <T> springMorph(): FiniteAnimationSpec<T> =
     spring(dampingRatio = 0.72f, stiffness = 320f)
 
 /**
+ * The unified motion language (spec item 4 + the 2026-10-29 visual-bugs
+ * round). The spec's HavenMotion names map onto the existing tokens —
+ * they are NOT duplicated: FluidEasing IS EmphasizedDecelerate
+ * (0.05, 0.7, 0.1, 1.0) and ExitFast's easing IS EmphasizedAccelerate
+ * (0.3, 0.0, 0.8, 0.15), so code keeps using the existing names.
+ */
+/** Emphasized spatial: the spec's EmphasizedSpatial, for entrances. */
+fun <T> springSpatial(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
+
+/** Emphasized bounds: the spec's EmphasizedBounds, for container transforms. */
+fun <T> springBounds(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+
+/**
+ * The SINGLE press token (spec item 4). The spec gives two PressBounce
+ * definitions — 0.6/StiffnessLow in the stepper snippet and 0.55/Medium in
+ * HavenMotion — and only one ships: 0.55/Medium. It lands faster and
+ * reads as a button press rather than a wobble; the looser 0.6/Low
+ * variant is not used anywhere. Every press-scale interaction (tiles,
+ * steppers, media transports) uses this and nothing else.
+ */
+fun <T> pressBounce(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium)
+
+/** ExitFast: the spec's 180ms exit tween on the accelerate easing. */
+fun <T> exitFast(): FiniteAnimationSpec<T> =
+    tween(durationMillis = 180, easing = EmphasizedAccelerate)
+
+/**
  * The sheet-rise spring, matched to the recorded Koda mini-player
  * expansion: a fast rise (~half a second) with a soft settle and almost
  * no visible overshoot. Stiffer and more damped than the house spring on

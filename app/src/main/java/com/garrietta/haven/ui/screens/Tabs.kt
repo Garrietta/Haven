@@ -50,6 +50,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -301,6 +302,14 @@ private fun TabEditorCard(
                         yaml.lineSequence().firstOrNull { it.contains("entity:") }?.trim() ?: "card ${index + 1}",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // Entity ids are single tokens: they must ellipse,
+                        // never wrap mid-word across lines (2026-10-29
+                        // evidence video: light.lamp_socket_1 and
+                        // sensor.thermostat_current_temperature broke
+                        // mid-token in this row).
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(onClick = { onEditYaml(index, yaml) }) {

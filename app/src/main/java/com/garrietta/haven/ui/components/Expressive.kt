@@ -1,7 +1,7 @@
 package com.garrietta.haven.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import com.garrietta.haven.ui.theme.EmphasizedDecelerate
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -148,6 +148,9 @@ fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.Imag
     val playing = domain == "media_player" && state == "playing"
     val moving = domain == "cover" && coverIsMoving(state)
     val infinite = rememberInfiniteTransition(label = "badgeMotion")
+    // Continuous rotation stays linear on purpose: an eased rotation
+    // would visibly speed up and slow down every revolution. This is not
+    // a transition, so the easing audit leaves it alone.
     val rotation by infinite.animateFloat(
         0f, 360f,
         infiniteRepeatable(tween(if (alert) 12000 else 20000, easing = LinearEasing), RepeatMode.Restart),
@@ -155,12 +158,12 @@ fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.Imag
     )
     val pulse by infinite.animateFloat(
         1f, 1.08f,
-        infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        infiniteRepeatable(tween(900, easing = EmphasizedDecelerate), RepeatMode.Reverse),
         label = "badgePulse",
     )
     val lift by infinite.animateFloat(
         0f, -4f,
-        infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        infiniteRepeatable(tween(700, easing = EmphasizedDecelerate), RepeatMode.Reverse),
         label = "badgeLift",
     )
     val idle = stateShapePolygon(badgeIdleShape(domain))
@@ -318,7 +321,7 @@ fun ShimmerBox(modifier: Modifier = Modifier) {
     val infinite = rememberInfiniteTransition(label = "shimmer")
     val alpha by infinite.animateFloat(
         0.35f, 0.75f,
-        infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        infiniteRepeatable(tween(1100, easing = EmphasizedDecelerate), RepeatMode.Reverse),
         label = "shimmerAlpha",
     )
     val base = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -532,11 +535,20 @@ fun Dial(
  * Smoothed cubic-bezier sparkline with a gradient alpha area fill under
  * the curve (spec item 7). The smoothing math lives in SparklineMath so
  * it is unit-testable; this composable only draws what it returns.
+ *
+ * The drawn series is bucket-resampled first (see resampleHistory): raw
+ * 24-hour state-change history is dense and jittery, and the plain
+ * midpoint curve tracked every sample, which read as a thin jagged
+ * low-contrast line on detail pages. Resampling de-noises the line;
+ * Min/Current/Max labels still come from the raw series. The line itself
+ * is drawn heavier than before — a soft under-glow beneath a 4dp core —
+ * with a stronger gradient fill, so it holds contrast on light
+ * backgrounds without changing its accent hue.
  */
 @Composable
 fun Sparkline(points: List<HistoryPoint>, color: Color, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val segments = sparklineSegments(points, size.width, size.height)
+        val segments = sparklineSegments(resampleHistory(points), size.width, size.height)
         if (segments.isEmpty()) return@Canvas
         val line = Path().apply {
             moveTo(segments.first().x0, segments.first().y0)
@@ -551,10 +563,12 @@ fun Sparkline(points: List<HistoryPoint>, color: Color, modifier: Modifier = Mod
         drawPath(
             fill,
             Brush.verticalGradient(
-                listOf(color.copy(alpha = 0.35f), color.copy(alpha = 0f)),
+                listOf(color.copy(alpha = 0.45f), color.copy(alpha = 0f)),
             ),
         )
-        drawPath(line, color, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        // Under-glow first, then the core: presence without a hue change.
+        drawPath(line, color.copy(alpha = 0.15f), style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(line, color, style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 

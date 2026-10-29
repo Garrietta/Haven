@@ -49,11 +49,13 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.ui.components.DomainBadge
+import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.controls.EntityControlCard
+import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.FanControl
 import com.garrietta.haven.ui.controls.LightControl
 import com.garrietta.haven.ui.controls.LockControl
@@ -146,7 +148,9 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             "vacuum" -> VacuumControl(entity, vm)
             "fan" -> FanControl(entity, vm)
             "weather" -> WeatherControl(entity, vm, showForecast = true)
-            else -> EntityControlCard(entity, vm, onDetail = { }, showHeader = false)
+            // The page overlay root owns "card-<id>"; this inner card
+            // must not declare it too (one owner per key).
+            else -> EntityControlCard(entity, vm, onDetail = { }, showHeader = false, shareBounds = false)
         }
         Spacer(Modifier.height(16.dp))
         // Generic on/off actions, only where they make sense: an entity
@@ -252,18 +256,30 @@ private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
         Spacer(Modifier.height(8.dp))
         if (transportOk) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { vm.callService("media_player", "media_previous_track", entity.entityId) }) {
+                PressablePillButton(
+                    onClick = { vm.callService("media_player", "media_previous_track", entity.entityId) },
+                    modifier = Modifier.width(56.dp),
+                ) {
                     Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous")
                 }
-                Button(onClick = { vm.callService("media_player", "media_play_pause", entity.entityId) }) {
+                PressablePillButton(
+                    onClick = { vm.callService("media_player", "media_play_pause", entity.entityId) },
+                    modifier = Modifier.width(88.dp),
+                    height = 56.dp,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
                     Icon(
                         if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = if (playing) "Pause" else "Play",
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text(if (playing) "Pause" else "Play")
+                    Text(if (playing) "Pause" else "Play", fontWeight = FontWeight.SemiBold)
                 }
-                FilledTonalButton(onClick = { vm.callService("media_player", "media_next_track", entity.entityId) }) {
+                PressablePillButton(
+                    onClick = { vm.callService("media_player", "media_next_track", entity.entityId) },
+                    modifier = Modifier.width(56.dp),
+                ) {
                     Icon(Icons.Filled.SkipNext, contentDescription = "Next")
                 }
             }
@@ -332,14 +348,26 @@ private fun detailValueToString(value: Any?): String = when (value) {
     else -> value.toString()
 }
 
-/** Real 24-hour history through the existing endpoint; numeric states only. */
+/**
+ * Real 24-hour history through the existing endpoint; numeric states
+ * only. Loading and empty are distinct states: while the fetch is in
+ * flight the strip shows a shimmer, and "No history yet" appears only
+ * after a completed load returns too few points. The old code showed
+ * "No history yet" during every load, so history visibly arrived late
+ * behind a false empty state (2026-10-29 evidence video).
+ */
 @Composable
 private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
     var points by remember { mutableStateOf<List<HistoryPoint>>(emptyList()) }
+    var loaded by remember { mutableStateOf(false) }
     LaunchedEffect(entity.entityId) {
+        loaded = false
         points = vm.client.fetchHistory(entity.entityId, 24)
+        loaded = true
     }
-    if (points.size >= 2) {
+    if (!loaded) {
+        ShimmerBox(Modifier.fillMaxWidth().height(120.dp))
+    } else if (points.size >= 2) {
         val mm = sparklineMinCurrentMax(points)
         val unit = entity.attrString("unit_of_measurement")
         Column {
