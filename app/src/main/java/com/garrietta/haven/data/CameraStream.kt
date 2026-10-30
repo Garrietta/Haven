@@ -10,36 +10,40 @@ package com.garrietta.haven.data
  * fallback, just snapshot-only code. The live path is
  * `/api/camera_proxy_stream/<entity>`, which yields a multipart/x-mixed-replace
  * MJPEG stream for every camera HA can serve: native MJPEG cameras stream
- * directly. Ring is the exception: its integration overrides the MJPEG
- * handler and builds the stream from the most recent motion recording
- * (ffmpeg transcodes the recording), so the frames are a clip, not live.
- *
- * The true-live path for Ring through HA is the stream component, not the
- * proxy: WS `camera/stream` returns an HLS playlist, which is what HA's
- * own frontend plays when it shows this entity live (Garrett confirmed the
- * entity serves live, and that it is the SAME entity id Haven uses — the
- * difference was never the entity, it was the path). CameraFullscreen
- * therefore tries HLS-live FIRST for Ring (30s window — Ring session
- * start is slow), then WebRTC (WS camera/webrtc/offer) as the fallback,
- * and on total live failure shows named-stage errors + the raw HA
- * response diagnostic — never a recording, never a silent still
- * (live-only per his 2026-10-29 13:34 direction). WebRTC is second,
- * not first: the 2026-10-29 verdict video's "WebRTC: offer: empty
- * answer" proved HA's Ring integration does not implement native
- * WebRTC for this camera (the WS message carries no `result` object,
- * i.e. the command was rejected), so chasing it first only burned
- * 20s before the real path was tried. One endpoint, all four curated
- * cameras; only the presentation differs.
+ * directly. Run #38 read Ring as the exception: its integration
+ * overrides the MJPEG handler and builds the stream from the most
+ * recent motion recording (ffmpeg transcodes the recording), so the
+ * frames are a clip, not live. That reading is UNDER TEST as of the
+ * 2026-10-29 MJPEG-live round and is NOT assumed here: the frontend's
+ * confirmed live view on the default core Ring integration (no go2rtc,
+ * no extras) must come through a core transport, and with WS
+ * `camera/stream` deterministically refusing this camera ("does not
+ * support play stream service") and WS `camera/webrtc/offer`
+ * deterministically answering empty, the MJPEG proxy is the only
+ * remaining core transport that can explain it. CameraFullscreen
+ * therefore plays the proxy for Ring exactly like the other cameras
+ * — as the live path under test, never as the last-recording
+ * fallback, never a silent still (live-only per his 2026-10-29 13:34
+ * direction). The wave test decides: live motion now overturns the
+ * #38 conclusion (proxy serves live when actively streamed); a stale
+ * clip confirms it, and the next diagnostic is then the frontend's
+ * actual network requests, not another Haven guess. The HLS/WebRTC
+ * attempt code remains in the codebase (HaClient.requestHlsUrl,
+ * RingWebRtcSession) but is no longer attempted for Ring fullscreen;
+ * the HLS diagnostic helpers stay, with their unit tests.
  *
  * [MjpegParser] is pure byte handling (no Android types) so it is unit
  * tested on the JVM; decoding to Bitmap happens in [HaClient.streamCamera].
  */
 
 /**
- * True when this camera is a Ring camera. Ring's MJPEG proxy stream serves
- * its last motion recording, not live video (see the header note), so the
- * viewer must present it as "Last recording" whenever it is NOT playing
- * the HLS stream — never as live.
+ * True when this camera is a Ring camera. Routing signal: the
+ * fullscreen plays the MJPEG proxy for Ring as the live path under
+ * test (see the header note), and the "Live" badge is held back
+ * until the wave test proves the proxy's frames are live — a stale
+ * clip also renders frames. The "Last recording" presentation
+ * applies to the clips-timeline recording entries, never to the
+ * Ring fullscreen.
  *
  * Two signals, no hardcoded entity id: the `brand` state attribute, and
  * the device-registry manufacturer HaClient attaches to the entity.
