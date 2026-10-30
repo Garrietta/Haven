@@ -611,7 +611,10 @@ fun Dial(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(centerText, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                Text(centerSub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Verdict 2026-10-30: the condition subtitle
+                // ("Clear-night") washed out at onSurfaceVariant on
+                // the tinted dial panel — full onSurface here.
+                Text(centerSub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
             }
         }
     }
@@ -712,5 +715,9 @@ fun PillToggle(
 @Composable
 fun pillClearanceBottom(): Dp {
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    return 64.dp + 20.dp + navBottom
+    // 64dp pill + 20dp float + 8dp shadow margin: the old exact-fit
+    // value let the last item visually touch the pill's shadow
+    // (2026-10-30 verdict: the pill "rests directly over" bottom
+    // items). The margin guarantees daylight between item and pill.
+    return 64.dp + 20.dp + 8.dp + navBottom
 }

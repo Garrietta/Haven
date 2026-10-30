@@ -198,7 +198,10 @@ fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
     var newTabTitle by remember { mutableStateOf("") }
     // (tabId, cardIndex, yaml) of the card currently in the YAML editor, if any.
     var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+    ) {
         item {
             DetailTopBar("Manage tabs", onBack)
             Text(

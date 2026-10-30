@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import androidx.compose.foundation.layout.PaddingValues
+import com.garrietta.haven.ui.components.pillClearanceBottom
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -397,7 +399,10 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
         Text("Cards in this view", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
         val cards = views[safeSelected].optJSONArray("cards") ?: JSONArray()
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(
+            Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        ) {
             for (i in 0 until cards.length()) {
                 val card = cards.optJSONObject(i) ?: continue
                 item {

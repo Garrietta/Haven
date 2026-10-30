@@ -3,6 +3,7 @@ package com.garrietta.haven.ui.components
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import kotlin.math.pow
 import com.garrietta.haven.ui.theme.StateShape
 
 /**
@@ -233,6 +234,103 @@ fun lightBrightnessContainer(
  * chips all draw from, so condition changes are unmissable.
  * Not a scheme role: per-condition hues (there is no "rainy" role).
  */
+// ---------------------------------------------------------------------------
+// Condition display, centered-dialog geometry, and contrast floors
+// (2026-10-30 verdict round on run #75)
+// ---------------------------------------------------------------------------
+
+/**
+ * Display form of an HA condition string: compound/camelCase split
+ * + Title Case, with spaces — never a raw condition on screen.
+ * "partlycloudy" -> "Partly Cloudy" (the glued compound HA reports
+ * for partly cloudy); "clear-night" / "clear_night" -> "Clear Night";
+ * "snowy-rainy" -> "Snowy Rainy"; "sunny" -> "Sunny". Pure.
+ */
+fun formatCondition(condition: String): String {
+    if (condition.isBlank()) return condition
+    val spaced = condition
+        .replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
+        .replace('_', ' ')
+        .replace('-', ' ')
+    return spaced.split(' ').filter { it.isNotEmpty() }.flatMap { word ->
+        when (word.lowercase()) {
+            "partlycloudy" -> listOf("Partly", "Cloudy")
+            else -> listOf(word.lowercase().replaceFirstChar { it.uppercase() })
+        }
+    }.joinToString(" ")
+}
+
+/**
+ * Centered-dialog panel width (verdict spec, exact): 90% of the
+ * container, capped at 480dp — proportional on compact screens and
+ * expanded foldables alike. Pure, unit-tested; the dialog overlay
+ * applies it, never a hardcoded width.
+ */
+fun dialogPanelWidthDp(containerWidthDp: Float): Float =
+    (containerWidthDp * 0.9f).coerceAtMost(480f)
+
+/**
+ * Centered-dialog panel max height: 85% of the container; the inner
+ * body scrolls past it (scroll fallback for dense entities). Pure.
+ */
+fun dialogPanelMaxHeightDp(containerHeightDp: Float): Float =
+    containerHeightDp * 0.85f
+
+/**
+ * WCAG relative luminance (sRGB linearization). Alpha is ignored:
+ * callers composite translucent colors over their backdrop first
+ * (see [compositeOver]).
+ */
+fun relativeLuminance(color: Color): Float {
+    fun lin(c: Float): Float =
+        if (c <= 0.03928f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
+    return 0.2126f * lin(color.red) + 0.7152f * lin(color.green) + 0.0722f * lin(color.blue)
+}
+
+/** WCAG contrast ratio between two opaque colors (1..21). Pure. */
+fun contrastRatio(foreground: Color, background: Color): Float {
+    val l1 = relativeLuminance(foreground)
+    val l2 = relativeLuminance(background)
+    val (hi, lo) = if (l1 >= l2) l1 to l2 else l2 to l1
+    return (hi + 0.05f) / (lo + 0.05f)
+}
+
+/** Alpha-composites [foreground] over opaque [background]. Pure. */
+fun compositeOver(foreground: Color, background: Color): Color {
+    val a = foreground.alpha.coerceIn(0f, 1f)
+    return Color(
+        foreground.red * a + background.red * (1f - a),
+        foreground.green * a + background.green * (1f - a),
+        foreground.blue * a + background.blue * (1f - a),
+        1f,
+    )
+}
+
+/**
+ * Returns [foreground] unchanged when it already meets [minRatio]
+ * against [background]; otherwise blends it toward black or white
+ * (whichever contrasts more with the backdrop) just far enough to
+ * meet the ratio — hue family preserved, readability guaranteed.
+ * The verdict's dial-number fix: dark red/blue setpoint numbers on
+ * the pale pastel flower disc fail in both themes at full strength,
+ * and the 0.45-alpha inactive numbers fail outright; this floors
+ * them (4.5 for active numbers, 3.0 for the large-text inactive
+ * ones) instead of trusting the raw token. Pure.
+ */
+fun ensureContrast(foreground: Color, background: Color, minRatio: Float = 4.5f): Color {
+    if (contrastRatio(foreground, background) >= minRatio) return foreground
+    val towardWhite = contrastRatio(Color.White, background) >= contrastRatio(Color.Black, background)
+    val target = if (towardWhite) Color.White else Color.Black
+    var t = 0.1f
+    while (t < 1f) {
+        val candidate = lerp(foreground, target, t)
+        if (contrastRatio(candidate, background) >= minRatio) return candidate
+        t += 0.1f
+    }
+    return target
+}
+
+// ---------------------------------------------------------------------------
 fun weatherConditionColor(condition: String?): Color = when (condition?.lowercase()) {
     "sunny", "clear" -> Color(0xFFFFB300)
     "clear-night" -> Color(0xFF5C6BC0)

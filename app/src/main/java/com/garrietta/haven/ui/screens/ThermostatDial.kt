@@ -238,15 +238,27 @@ fun ThermostatDial(
                         val cy = size.height / 2f
                         val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
                         val grabR = 32.dp.toPx()
-                        fun distTo(angleDeg: Float): Float {
-                            val c = thumbCenter(angleDeg, trackRadius, cx, cy)
+                        // Staggered grab centers (see dualThumbRadii):
+                        // the drawn thumbs sit on these radii when
+                        // close, so the grab test must use them too.
+                        val (heatGrabRadius, coolGrabRadius) = if (dual) {
+                            dualThumbRadii(
+                                dial240AngleForValue(heatState.value, range),
+                                dial240AngleForValue(coolState.value, range),
+                                trackRadius, 30.dp.toPx(), 20.dp.toPx(), 4.dp.toPx(), 12.dp.toPx(),
+                            )
+                        } else {
+                            trackRadius to trackRadius
+                        }
+                        fun distTo(angleDeg: Float, radius: Float): Float {
+                            val c = thumbCenter(angleDeg, radius, cx, cy)
                             val dx = offset.x - c.x
                             val dy = offset.y - c.y
                             return sqrt(dx * dx + dy * dy)
                         }
                         grabbed = if (dual) {
-                            val dh = distTo(dial240AngleForValue(heatState.value, range))
-                            val dc = distTo(dial240AngleForValue(coolState.value, range))
+                            val dh = distTo(dial240AngleForValue(heatState.value, range), heatGrabRadius)
+                            val dc = distTo(dial240AngleForValue(coolState.value, range), coolGrabRadius)
                             when {
                                 dh <= grabR && dc <= grabR ->
                                     if (dh <= dc) SetpointSelector.HEATING else SetpointSelector.COOLING
@@ -255,7 +267,7 @@ fun ThermostatDial(
                                 else -> null
                             }
                         } else {
-                            if (distTo(dial240AngleForValue(singleState.value, range)) <= grabR) {
+                            if (distTo(dial240AngleForValue(singleState.value, range), trackRadius) <= grabR) {
                                 SetpointSelector.HEATING
                             } else {
                                 null
@@ -432,17 +444,23 @@ fun ThermostatDial(
             )
             drawText(layout, topLeft = Offset(cx - layout.size.width / 2f, cy - trackRadius + 28.dp.toPx()))
         }
-        // Pill thumbs on the track.
+        // Pill thumbs on the track. When the setpoints are close,
+        // the thumbs stagger radially (see dualThumbRadii) instead
+        // of colliding — the same radii the grab test uses.
         if (dual) {
+            val (heatThumbRadius, coolThumbRadius) = dualThumbRadii(
+                animatedHeatAngle, animatedCoolAngle,
+                trackRadius, 30.dp.toPx(), 20.dp.toPx(), 4.dp.toPx(), 12.dp.toPx(),
+            )
             drawThumb(
-                thumbCenter(animatedHeatAngle, trackRadius, cx, cy),
+                thumbCenter(animatedHeatAngle, heatThumbRadius, cx, cy),
                 heatContainer,
                 heatOnContainer,
                 selector == SetpointSelector.HEATING,
                 pulseSelector == SetpointSelector.HEATING,
             )
             drawThumb(
-                thumbCenter(animatedCoolAngle, trackRadius, cx, cy),
+                thumbCenter(animatedCoolAngle, coolThumbRadius, cx, cy),
                 coolContainer,
                 coolOnContainer,
                 selector == SetpointSelector.COOLING,

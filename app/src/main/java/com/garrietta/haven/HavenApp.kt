@@ -1,17 +1,17 @@
 package com.garrietta.haven
+import androidx.compose.animation.animateContentSize
+import com.garrietta.haven.ui.components.dialogPanelMaxHeightDp
+import com.garrietta.haven.ui.components.dialogPanelWidthDp
+import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.ui.theme.FloatingCorner
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -99,7 +99,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -131,7 +130,6 @@ import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.pillLabelVisible
 import com.garrietta.haven.ui.theme.sheetSpring
-import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
 import com.garrietta.haven.ui.components.rememberPillScrubState
@@ -146,23 +144,17 @@ import com.garrietta.haven.ui.components.LocalArcTarget
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHeroBounds
 import com.garrietta.haven.ui.components.LocalHeroTarget
+import com.garrietta.haven.ui.components.LocalMorphProgress
 import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
-import com.garrietta.haven.ui.components.MorphSurface
-import com.garrietta.haven.ui.components.centerTargetRect
 import com.garrietta.haven.ui.components.Dial
-import com.garrietta.haven.ui.components.morphBackgroundAlpha
-import com.garrietta.haven.ui.components.morphBackgroundBlend
 import com.garrietta.haven.ui.components.morphCardAlpha
 import com.garrietta.haven.ui.components.morphContentAlpha
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.ScrollVisibilityState
-import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.heroHeaderAlpha
 import com.garrietta.haven.ui.components.lerpRect
-import com.garrietta.haven.ui.components.morphPopupCorner
-import com.garrietta.haven.ui.components.popupTargetRect
 import com.garrietta.haven.ui.theme.springBounds
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
@@ -276,7 +268,9 @@ private class SheetAnim(val id: String, val source: Rect?) {
 }
 
 /** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
-private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?)
+private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?) {
+    var targetSize by mutableStateOf<IntSize?>(null)
+}
 
 /** Open thermostat pop-out morph: the climate entity plus its source card rect (same fallback rule as sheets). */
 private class PopoutAnim(val id: String, val source: Rect?) {
@@ -306,16 +300,18 @@ fun HavenApp(vm: HavenViewModel) {
             mutableStateListOf<Screen>(Screen.Today)
         }
         val current = backstack.last()
-        // Morph state machine (2026-10-29 architectural overhaul):
-        // the sheet and detail overlays below are explicit single-surface
-        // morphs, not framework sharedBounds. Each morph captures its
-        // source card's root rect at open and interpolates ONE rect to
-        // its target (and exactly back on dismiss); the source card
-        // renders alpha 0 while its morph is active (see
-        // LocalHiddenCardId), so source and destination are never both
-        // visible. The camera fullscreen keeps its own rise, and
-        // vm.pageOrigin is still set by tile taps and sheet Details
-        // because the camera path needs it.
+        // Dialog state machine (2026-10-30 centered-dialog round,
+        // superseding the 2026-10-29 architectural overhaul's
+        // single-surface morphs): the sheet, detail, and pop-out
+        // overlays below are centered dialogs, not framework
+        // sharedBounds. Each dialog captures its source card's root
+        // rect at open for the traveling header/arc (which
+        // interpolate ONE rect to the dialog header, and exactly
+        // back on dismiss); the source card fades on morphCardAlpha
+        // (see LocalMorphCardAlpha), so source and destination are
+        // never both visible. The camera fullscreen keeps its own
+        // rise, and vm.pageOrigin is still set by tile taps and
+        // dialog Details because the camera path needs it.
         val detailScreen = current as? Screen.Thermostat ?: current as? Screen.EntityDetail
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
         // Traveling-header state (2026-10-29 pop-up round): cards
@@ -334,10 +330,11 @@ fun HavenApp(vm: HavenViewModel) {
         var detailAnim by remember { mutableStateOf<DetailAnim?>(null) }
         val sheetProgress = remember { Animatable(0f) }
         val detailProgress = remember { Animatable(0f) }
-        val sheetDrag = remember { Animatable(0f) }
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
         val popoutProgress = remember { Animatable(0f) }
-        var sheetSurfaceBounds by remember { mutableStateOf<Rect?>(null) }
+        // The live dialog panel's root rect (camera-rise origin for
+        // sheet Details actions); re-reported on every panel place.
+        var sheetPanelBounds by remember { mutableStateOf<Rect?>(null) }
         // Morph generation + exiting flags (restored from #52, for
         // the animated exit below): an exit animation is async
         // again, so a top-level navigation (goTop/signOut) or a
@@ -534,7 +531,6 @@ fun HavenApp(vm: HavenViewModel) {
             val id = vm.popupEntityId
             val anim = sheetAnim
             if (id != null && anim?.id == id) {
-                sheetDrag.snapTo(0f)
                 // Always animate (unless reduce-motion): a sourced
                 // morph interpolates from the card, a sourceless one
                 // from the graceful fallback rect — never an instant
@@ -696,24 +692,13 @@ fun HavenApp(vm: HavenViewModel) {
                     },
                 ),
             ) {
-            // Overlay root: its root-coordinate origin and size anchor
-            // every morph rect (see MorphSurface). All morph overlays
-            // below render inside this Box, above the scaffold.
+            // Overlay root: its root-coordinate origin anchors every
+            // traveler rect. All dialog overlays below render inside
+            // this Box, above the scaffold.
             var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
-            var overlaySize by remember { mutableStateOf(IntSize.Zero) }
-            // Floating-shelf geometry (2026-10-29 pop-up round): every
-            // pop-up sits 16dp in from each side and 20dp + the
-            // navigation inset above the overlay bottom, so the dimmed
-            // page stays visible around it on all sides.
-            val shelfDensity = LocalDensity.current
-            val shelfSideMarginPx = with(shelfDensity) { 16.dp.toPx() }
-            val shelfBottomMarginPx = with(shelfDensity) { 20.dp.toPx() } +
-                WindowInsets.navigationBars.getBottom(shelfDensity).toFloat()
-            val shelfBottomMarginDp = with(shelfDensity) { shelfBottomMarginPx.toDp() }
             Box(
                 Modifier.fillMaxSize().onGloballyPositioned {
                     overlayOrigin = it.boundsInRoot().topLeft
-                    overlaySize = it.size
                 },
             ) {
             Scaffold(
@@ -824,417 +809,130 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
-            // Sheet morph overlay: one scrim plus one morphing surface.
-            // POP-UP ROUND (2026-10-29): the sheet is a floating shelf
-            // now — 16dp side margins, bottom margin above the pill
-            // clearance — never a full-width bottom panel. The scrim
-            // fades with progress and blocks touches from the first
-            // frame (even during the measurement frame below, when
-            // progress is still 0). The surface interpolates a
-            // single rect from the card captured at open to the
-            // measured shelf rect; the source card underneath fades
-            // out over the first 40% of enter and back in over the
-            // last 40% of exit (progress-driven alpha, not a binary
-            // hide), so nothing ever doubles and nothing ever pops.
-            // Dismiss is the smooth reverse of enter (see
-            // dismissSheet); only the sheet -> detail handoff clears
-            // instantly, so the detail morph starts from the same card
-            // without the card flashing back in between. Dragging past
-            // the threshold flings the sheet off the bottom (see
-            // below) instead of shrinking it back.
+            // Sheet dialog overlay: CENTERED DIALOG (2026-10-30
+            // verdict round) — SUPERSEDES the #67 bottom-anchored
+            // floating shelf. Every sheet opens as a content-hugged
+            // dialog centered on screen (see DialogOverlay): no
+            // full-height sheet, no blank bottom half, no status-bar
+            // collision, no slide-in, no drag-to-dismiss. The badge
+            // still travels into the dialog's header (see
+            // TravelingHeader); the dialog scales+fades from center
+            // while the icon travels — both, not one or the other.
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
                 BackHandler { dismissSheet() }
-                Box(
-                    Modifier.fillMaxSize()
-                        .background(
-                            Color.Black.copy(
-                                alpha = 0.4f * sheetProgress.value *
-                                    (1f - (sheetDrag.value / overlaySize.height.toFloat()).coerceIn(0f, 1f)),
-                            ),
-                        )
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) { dismissSheet() },
-                )
-                val targetSize = anim.targetSize
-                if (targetSize == null) {
-                    // Measurement frame: the panel content, invisible,
-                    // laid out once at its final shelf geometry (same
-                    // side/bottom margins as the surface below) so its
-                    // height can be captured AND its header can report
-                    // the traveling header's target rect. Below the
-                    // scrim, so it can neither flash nor take touches;
-                    // replaced by the morph surface on the next frame.
-                    // The hero provider lives ONLY here: the surface
-                    // content's header sits at the interpolated rect
-                    // mid-morph and must never overwrite the target.
-                    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-                    Box(
-                        Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, bottom = shelfBottomMarginDp),
-                        contentAlignment = Alignment.BottomCenter,
-                    ) {
-                        Box(
-                            Modifier.fillMaxWidth()
-                                .heightIn(max = screenHeight * 0.92f)
-                                .alpha(0f)
-                                .onGloballyPositioned { anim.targetSize = it.size },
+                val sheetP = sheetProgress.value.coerceIn(0f, 1f)
+                // Measurement frame (dialog geometry, below the
+                // scrim): the panel content, invisible, laid out once
+                // at its final dialog size so its header can report
+                // the traveling header's target rect. The hero
+                // provider lives ONLY here: the live panel's header
+                // sits under the dialog scale mid-animation and must
+                // never overwrite the target.
+                if (anim.targetSize == null) {
+                    DialogMeasureFrame(onMeasured = { anim.targetSize = it }) {
+                        CompositionLocalProvider(
+                            LocalHeroTarget provides { r -> heroTarget = anim.id to r },
+                            LocalArcTarget provides { r -> arcTarget = anim.id to r },
                         ) {
-                            CompositionLocalProvider(
-                                LocalHeroTarget provides { r -> heroTarget = anim.id to r },
-                                LocalArcTarget provides { r -> arcTarget = anim.id to r },
-                            ) {
-                                EntityPopupSheetContent(
-                                    vm, navigate, anim.id, dragging = false,
-                                    sheetBounds = sheetSurfaceBounds,
-                                    onClose = { dismissSheet() },
-                                    onDetails = { dismissSheetInstant() },
-                                )
-                            }
+                            EntityPopupSheetContent(
+                                vm, navigate, anim.id, panelBounds = sheetPanelBounds,
+                                onClose = { dismissSheet() },
+                                onDetails = { dismissSheetInstant() },
+                            )
                         }
                     }
-                } else {
-                    val target = popupTargetRect(overlayOrigin, overlaySize, targetSize, shelfSideMarginPx, shelfBottomMarginPx)
-                    val density = LocalDensity.current
-                    // Current bounds first, captured rect as fallback:
-                    // cards re-report on relayout, so rotation
-                    // mid-morph and cards that moved between open and
-                    // dismiss track correctly instead of landing on a
-                    // stale rect and snapping. Sourceless cards morph
-                    // from the graceful fallback (target + 80dp down),
-                    // never an instant appearance.
-                    val source = cardBounds[anim.id] ?: anim.source
-                    // Geometry progress is clamped: the bounds spring
-                    // overshoots past 1 (0.8 damping). lerpRect clamps
-                    // internally; this makes it explicit and shared
-                    // with the weather content fade below.
-                    val sheetP = sheetProgress.value.coerceIn(0f, 1f)
-                    val rect = if (source != null) lerpRect(source, target, sheetP)
-                        else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, sheetP)
-                    val dismissThresholdPx = with(density) { 120.dp.toPx() }
-                    MorphSurface(
-                        rect = rect,
-                        overlayOrigin = overlayOrigin,
-                        targetSize = targetSize,
-                        cornerTop = 28.dp,
-                        // Floating shelf: all four corners morph
-                        // 28dp -> 32dp across the whole animation
-                        // (see morphPopupCorner) — the radius
-                        // transitions smoothly, never snaps in.
-                        cornerAll = morphPopupCorner(sheetP),
-                        // Every morph fades its content with the steep
-                        // curve (see morphContentAlpha): the #53
-                        // weather-only linear fade did not satisfy the
-                        // verdict — the clipping/doubling read appears
-                        // on sheets AND detail pages wherever the
-                        // destination duplicates its card — so the
-                        // fade is now general, and the Koda
-                        // reveal-as-it-grows rule is superseded for
-                        // morph content.
-                        contentAlpha = morphContentAlpha(sheetP),
-                        background = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
-                        backgroundBlend = morphBackgroundBlend(sheetP),
-                        // The surface background itself ramps in over
-                        // [0, 0.35] (see morphBackgroundAlpha): at
-                        // progress 0 the surface is invisible and the
-                        // card shows through it — no blank solid rect
-                        // ever replaces the card in a single frame.
-                        backgroundAlpha = morphBackgroundAlpha(sheetP),
-                        progress = sheetP,
-                        modifier = Modifier.pointerInput(anim.id) {
-                            detectVerticalDragGestures(
-                                onDragEnd = {
-                                    if (sheetDrag.value > dismissThresholdPx) {
-                                        // Fling-off: the sheet slides
-                                        // off the bottom on the morph
-                                        // spring, then clears
-                                        // instantly — the scrim is
-                                        // already 0 by then (its alpha
-                                        // is multiplied by 1 - drag /
-                                        // height above), so no snap is
-                                        // visible. Guarded like the
-                                        // animated dismiss (generation
-                                        // + identity in the finally).
-                                        if (!sheetExiting) {
-                                            sheetExiting = true
-                                            val gen = morphGeneration
-                                            scope.launch {
-                                                try {
-                                                    if (reduceMotion) sheetDrag.snapTo(overlaySize.height.toFloat())
-                                                    else sheetDrag.animateTo(overlaySize.height.toFloat(), springMorph())
-                                                } finally {
-                                                    sheetExiting = false
-                                                    if (gen == morphGeneration && sheetAnim?.id == anim.id) {
-                                                        dismissSheetInstant()
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        // Gesture cancel: spring back to
-                                        // rest. This is NOT a return
-                                        // morph — the fling/dismiss
-                                        // rules above do not apply to
-                                        // cancelling a drag.
-                                        scope.launch { sheetDrag.animateTo(0f, springMorph()) }
-                                    }
-                                },
-                                onDragCancel = {
-                                    scope.launch { sheetDrag.animateTo(0f, springMorph()) }
-                                },
-                            ) { change, dragAmount ->
-                                change.consume()
-                                scope.launch { sheetDrag.snapTo((sheetDrag.value + dragAmount).coerceAtLeast(0f)) }
-                            }
-                        },
-                        dragOffsetY = sheetDrag.value,
-                        onPlaced = { sheetSurfaceBounds = it },
-                    ) {
-                        EntityPopupSheetContent(
-                            vm, navigate, anim.id, dragging = sheetDrag.value > 1f,
-                            sheetBounds = sheetSurfaceBounds,
-                            onClose = { dismissSheet() },
-                            onDetails = { dismissSheetInstant() },
-                        )
-                    }
-                    // Traveling header, above the surface: the card's
-                    // badge/name/state travel to the sheet's header
-                    // as ONE element (see TravelingHeader). Rendered
-                    // only once the measurement frame has reported the
-                    // target; before that the card header is still
-                    // visible, so nothing is ever duplicated.
-                    TravelingHeader(
-                        vm, anim.id, heroBounds[anim.id],
-                        heroTarget?.takeIf { it.first == anim.id }?.second,
-                        sheetP, overlayOrigin,
-                        onDismiss = { dismissSheet() },
-                    )
-                    // Traveling arc, above the surface (see
-                    // TravelingArc): the weather card's dial panel
-                    // travels into the pop-up's dial panel as ONE
-                    // element, dissolving into it over the last 10%.
-                    TravelingArc(
-                        vm, anim.id, arcBounds[anim.id],
-                        arcTarget?.takeIf { it.first == anim.id }?.second,
-                        sheetP, overlayOrigin,
+                }
+                DialogOverlay(
+                    progress = sheetP,
+                    panelBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onDismiss = { dismissSheet() },
+                    onPanelPlaced = { sheetPanelBounds = it },
+                ) {
+                    EntityPopupSheetContent(
+                        vm, navigate, anim.id, panelBounds = sheetPanelBounds,
+                        onClose = { dismissSheet() },
+                        onDetails = { dismissSheetInstant() },
                     )
                 }
+                // Traveling header, above the dialog: the card's
+                // badge/state travel to the dialog's header as ONE
+                // element. Renders at the source rect until the
+                // measurement frame reports the target (see
+                // TravelingHeader) — never a gap, never a pop.
+                TravelingHeader(
+                    vm, anim.id, heroBounds[anim.id],
+                    heroTarget?.takeIf { it.first == anim.id }?.second,
+                    sheetP, overlayOrigin,
+                    onDismiss = { dismissSheet() },
+                )
+                // Traveling arc, above the dialog (see TravelingArc).
+                TravelingArc(
+                    vm, anim.id, arcBounds[anim.id],
+                    arcTarget?.takeIf { it.first == anim.id }?.second,
+                    sheetP, overlayOrigin,
+                )
             }
-            // Detail morph overlay: POP-UP ROUND (2026-10-29) — the
-            // full-span page is GONE. Every detail destination opens
-            // as a bottom-anchored floating shelf, exactly like the
-            // sheets above: 16dp side margins, bottom margin above
-            // the pill clearance, 92% max height, all four corners
-            // morphing 28dp -> 32dp. This supersedes the old
-            // "weather's full page stands" exception: weather detail
-            // is a pop-up too. The shelf grows out of its card on the
-            // bounds spring and draws above all chrome; Back and
-            // outside-tap are the smooth reverse of enter (see
-            // dismissDetail) — the card fades back in whole, never a
-            // snap, never staged. A dim scrim fades with progress
-            // (tappable now: a floating pop-up dismisses on outside
-            // tap, like sheets and the pop-out) so Home dims
-            // progressively as the shelf grows instead of staying
-            // fully bright behind it. The shelf's travel target comes
-            // from a one-frame measurement pass at the shelf's final
-            // geometry (see below): the detail content is fixed at
-            // 92% height, so no size measurement is needed — only the
-            // top bar's rect, which the surface content could never
-            // report correctly mid-morph (its rect is interpolated).
+            // Detail dialog overlay: CENTERED DIALOG (2026-10-30
+            // verdict round) — SUPERSEDES the #67 bottom-anchored
+            // floating shelf, exactly like the sheets above. The
+            // detail content is fixed at dialog geometry (see
+            // DialogOverlay + DialogMeasureFrame); the one-frame
+            // measurement pass reports only the header/arc target
+            // rects, never a panel size — the dialog hugs its
+            // content. Back and outside-tap are the smooth reverse
+            // of enter (see dismissDetail); only the sheet -> detail
+            // handoff clears instantly.
             if (detailAnim != null) {
                 val anim = detailAnim!!
-                val density = LocalDensity.current
-                // Clamped geometry progress (see the sheet block):
-                // the bounds spring overshoots past 1, and the raw
-                // value fed the corner formula below went negative.
+                BackHandler { dismissDetail() }
                 val detailP = detailProgress.value.coerceIn(0f, 1f)
-                val detailSize = IntSize(
-                    (overlaySize.width - 2 * shelfSideMarginPx).roundToInt(),
-                    (overlaySize.height * 0.92f).roundToInt(),
-                )
-                val target = popupTargetRect(overlayOrigin, overlaySize, detailSize, shelfSideMarginPx, shelfBottomMarginPx)
-                // Same current-bounds-first rule as sheets (see above):
-                // rotation mid-morph and moved cards track correctly,
-                // sourceless cards rise from the graceful fallback.
-                val source = cardBounds[anim.entityId] ?: anim.source
-                val rect = if (source != null) lerpRect(source, target, detailP)
-                    else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, detailP)
-                val targetHero = heroTarget?.takeIf { it.first == anim.entityId }?.second
-                // Clickable dim scrim, above the scaffold and below
-                // the shelf: outside taps dismiss the pop-up.
-                Box(
-                    Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f * detailP)) // scrim dim: black overlay, not a scheme role
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) { dismissDetail() },
-                )
-                if (targetHero == null) {
-                    // Measurement frame: the detail content, invisible,
-                    // laid out once at the shelf's final geometry so
-                    // its top bar can report the traveling header's
-                    // target rect. Below the scrim's alpha (progress
-                    // is ~0 here), so it can neither flash nor take
-                    // touches; replaced by the morph surface on the
-                    // next frame. The hero provider lives ONLY here.
-                    Box(
-                        Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, bottom = shelfBottomMarginDp),
-                        contentAlignment = Alignment.BottomCenter,
-                    ) {
-                        Box(
-                            Modifier.fillMaxWidth()
-                                .height(with(density) { detailSize.height.toDp() })
-                                .alpha(0f),
+                if (anim.targetSize == null) {
+                    DialogMeasureFrame(onMeasured = { anim.targetSize = it }) {
+                        CompositionLocalProvider(
+                            LocalHeroTarget provides { r -> heroTarget = anim.entityId to r },
+                            LocalArcTarget provides { r -> arcTarget = anim.entityId to r },
                         ) {
-                            CompositionLocalProvider(
-                                LocalHeroTarget provides { r -> heroTarget = anim.entityId to r },
-                                LocalArcTarget provides { r -> arcTarget = anim.entityId to r },
-                            ) {
-                                content(anim.screen)
-                            }
+                            content(anim.screen)
                         }
                     }
-                } else {
-                    MorphSurface(
-                        rect = rect,
-                        overlayOrigin = overlayOrigin,
-                        targetSize = detailSize,
-                        cornerTop = 28.dp,
-                        // Floating shelf: all four corners morph
-                        // 28dp -> 32dp across the whole animation.
-                        cornerAll = morphPopupCorner(detailP),
-                        background = MaterialTheme.colorScheme.background,
-                        contentAlpha = morphContentAlpha(detailP),
-                        fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
-                        backgroundBlend = morphBackgroundBlend(detailP),
-                        backgroundAlpha = morphBackgroundAlpha(detailP),
-                        progress = detailP,
-                    ) {
-                        content(anim.screen)
-                    }
-                    // Traveling header, above the surface (see the
-                    // sheet block): the card's badge/name/state travel
-                    // to the pop-up's top bar as ONE element.
-                    TravelingHeader(
-                        vm, anim.entityId, heroBounds[anim.entityId],
-                        targetHero, detailP, overlayOrigin,
-                        onDismiss = { dismissDetail() },
-                    )
-                    // Traveling arc (see the sheet block): the
-                    // weather card's dial panel travels into the
-                    // detail pop-up's dial panel as ONE element.
-                    TravelingArc(
-                        vm, anim.entityId, arcBounds[anim.entityId],
-                        arcTarget?.takeIf { it.first == anim.entityId }?.second,
-                        detailP, overlayOrigin,
-                    )
                 }
+                DialogOverlay(
+                    progress = detailP,
+                    panelBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onDismiss = { dismissDetail() },
+                    onPanelPlaced = { },
+                ) {
+                    content(anim.screen)
+                }
+                TravelingHeader(
+                    vm, anim.entityId, heroBounds[anim.entityId],
+                    heroTarget?.takeIf { it.first == anim.entityId }?.second,
+                    detailP, overlayOrigin,
+                    onDismiss = { dismissDetail() },
+                )
+                TravelingArc(
+                    vm, anim.entityId, arcBounds[anim.entityId],
+                    arcTarget?.takeIf { it.first == anim.entityId }?.second,
+                    detailP, overlayOrigin,
+                )
             }
-            // Thermostat pop-out: a centered expressive morph (not a
-            // bottom sheet, not a full page). The panel is measured
-            // once at 16dp side margins, then centered in the overlay;
-            // the morph runs card -> centered panel on enter and
-            // reverses smoothly on dismiss (see dismissPopout), with
-            // the same steep content fade and current-bounds-first
-            // rule as sheets and details. The morph surface itself is
-            // transparent: the panel draws its own shapes (the
-            // scallop disc is the pop-out's own background, inside a
-            // 32dp rounded panel), and the panel background ramps in
-            // over [0, 0.35] like every other morph surface so no
-            // solid rect ever replaces the card in a single frame.
-            // Only the pop-out -> page handoff clears instantly.
+            // Thermostat pop-out: a centered dialog (2026-10-30
+            // verdict round) — the pop-out was already centered, so
+            // it keeps its centered model and gains the dialog's
+            // width rule (90% / 480dp), 85% height cap, and
+            // center-scale entrance; the old card -> panel rect
+            // morph is gone. The pop-out -> page handoff still
+            // clears instantly.
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
                 BackHandler { dismissPopout() }
-                Box(
-                    Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f * popoutProgress.value)) // scrim dim: black overlay, not a scheme role
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) { dismissPopout() },
-                )
-                val targetSize = anim.targetSize
-                if (targetSize == null) {
-                    // Measurement frame: invisible, at the panel's final
-                    // width (overlay minus 16dp margins), height capped
-                    // at 92% of the overlay. Below the scrim, so it can
-                    // neither flash nor take touches. The hero provider
-                    // lives ONLY here, so the pop-out's title row
-                    // reports the traveling header's target from final
-                    // geometry — the surface content must never
-                    // overwrite it mid-morph.
-                    val density = LocalDensity.current
-                    val maxHeight = with(density) { overlaySize.height.toDp() * 0.92f }
-                    Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                        Box(
-                            Modifier.fillMaxWidth()
-                                .heightIn(max = maxHeight)
-                                .alpha(0f)
-                                .onGloballyPositioned { anim.targetSize = it.size },
-                        ) {
-                            CompositionLocalProvider(
-                                LocalHeroTarget provides { r -> heroTarget = anim.id to r },
-                                LocalArcTarget provides { r -> arcTarget = anim.id to r },
-                            ) {
-                                ThermostatPopoutContent(
-                                    vm, anim.id,
-                                    onDetails = {
-                                        dismissPopoutInstant()
-                                        navigate(Screen.Thermostat(anim.id))
-                                    },
-                                    onClose = { dismissPopout() },
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    val target = centerTargetRect(overlayOrigin, overlaySize, targetSize)
-                    val density = LocalDensity.current
-                    val source = cardBounds[anim.id] ?: anim.source
-                    val popoutP = popoutProgress.value.coerceIn(0f, 1f)
-                    val rect = if (source != null) lerpRect(source, target, popoutP)
-                        else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, popoutP)
-                    MorphSurface(
-                        rect = rect,
-                        overlayOrigin = overlayOrigin,
-                        targetSize = targetSize,
-                        cornerTop = 0.dp,
-                        // The pop-out's radius morphs 28dp -> 32dp
-                        // across the whole animation (see
-                        // morphPopupCorner): the old fixed 32dp panel
-                        // corners inside a square-cornered surface are
-                        // exactly the "radius doesn't smoothly
-                        // transition" read from the verdict. The panel
-                        // keeps its own 32dp shape; the surface clip
-                        // governs during the morph and lands on 32dp.
-                        cornerAll = morphPopupCorner(popoutP),
-                        contentAlpha = morphContentAlpha(popoutP),
-                        background = Color.Transparent,
-                        progress = popoutP,
-                    ) {
-                        // The pop-out panel's own background blends
-                        // from the card color over the first 30% of
-                        // enter (same morphBackgroundBlend rule as
-                        // sheets/details) so the pop-out grows out of
-                        // the card instead of flashing in white — and
-                        // its alpha ramps in over [0, 0.35] (same
-                        // morphBackgroundAlpha rule), so at progress 0
-                        // the card shows through the transparent panel
-                        // and no solid rect ever replaces it.
-                        val popoutPanelBg = lerp(
-                            MaterialTheme.colorScheme.surfaceContainerLow,
-                            MaterialTheme.colorScheme.surfaceContainerHigh,
-                            morphBackgroundBlend(popoutP),
-                        ).copy(alpha = morphBackgroundAlpha(popoutP))
-                        Box(
-                            Modifier.fillMaxSize().background(
-                                popoutPanelBg,
-                                FloatingCorner,
-                            ),
+                val popoutP = popoutProgress.value.coerceIn(0f, 1f)
+                if (anim.targetSize == null) {
+                    DialogMeasureFrame(onMeasured = { anim.targetSize = it }) {
+                        CompositionLocalProvider(
+                            LocalHeroTarget provides { r -> heroTarget = anim.id to r },
+                            LocalArcTarget provides { r -> arcTarget = anim.id to r },
                         ) {
                             ThermostatPopoutContent(
                                 vm, anim.id,
@@ -1246,16 +944,31 @@ fun HavenApp(vm: HavenViewModel) {
                             )
                         }
                     }
-                    // Traveling header, above the surface (see the
-                    // sheet block): the climate card's badge/name/state
-                    // travel to the pop-out's title row as ONE element.
-                    TravelingHeader(
-                        vm, anim.id, heroBounds[anim.id],
-                        heroTarget?.takeIf { it.first == anim.id }?.second,
-                        popoutP, overlayOrigin,
-                        onDismiss = { dismissPopout() },
+                }
+                DialogOverlay(
+                    progress = popoutP,
+                    panelBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onDismiss = { dismissPopout() },
+                    onPanelPlaced = { },
+                ) {
+                    ThermostatPopoutContent(
+                        vm, anim.id,
+                        onDetails = {
+                            dismissPopoutInstant()
+                            navigate(Screen.Thermostat(anim.id))
+                        },
+                        onClose = { dismissPopout() },
                     )
                 }
+                // Traveling header, above the dialog (see the sheet
+                // block): the climate card's badge/state travel to
+                // the pop-out's title row as ONE element.
+                TravelingHeader(
+                    vm, anim.id, heroBounds[anim.id],
+                    heroTarget?.takeIf { it.first == anim.id }?.second,
+                    popoutP, overlayOrigin,
+                    onDismiss = { dismissPopout() },
+                )
             }
             } // overlay root Box
             } // CompositionLocalProvider (morph locals)
@@ -1346,70 +1059,40 @@ private fun ThermostatPopoutContent(
 }
 
 /**
- * The sheet panel's CONTENT (not the panel itself): the morph surface
- * in HavenApp owns positioning, scrim, and drag; this is the column
- * laid out inside it at the panel's measured size. Kept separate so
- * the same content serves the one-frame measurement pass and the morph
- * surface. [dragging] drives the dynamic handle (wide/thin while
- * entering or dragging, narrow/thick at rest). [sheetBounds] is the
- * surface's window rect for the camera rise origin on Details.
- * [onClose] runs the smooth animated exit (see dismissSheet);
- * [onDetails] dismisses instantly for the sheet -> detail handoff
- * (the detail morph starts from the same card, so the card never
- * flashes back in between).
+ * The sheet dialog's CONTENT (not the panel itself): the dialog
+ * overlay in HavenApp owns positioning, scrim, and sizing; this is
+ * the column laid out inside it at the panel's intrinsic size. Kept
+ * separate so the same content serves the one-frame measurement pass
+ * and the live panel. [panelBounds] is the dialog panel's window
+ * rect for the camera rise origin on Details. [onClose] runs the
+ * smooth animated exit (see dismissSheet); [onDetails] dismisses
+ * instantly for the sheet -> detail handoff (the detail dialog
+ * starts from the same card, so the card never flashes back in
+ * between).
  */
 @Composable
 private fun EntityPopupSheetContent(
     vm: HavenViewModel,
     navigate: (Screen) -> Unit,
     popupId: String,
-    dragging: Boolean,
-    sheetBounds: androidx.compose.ui.geometry.Rect?,
+    panelBounds: androidx.compose.ui.geometry.Rect?,
     onClose: () -> Unit,
     onDetails: () -> Unit,
 ) {
     val states by vm.states.collectAsState()
     val entity = states[popupId]
-    val reduceMotion = LocalReduceMotion.current
     // Traveling header target (2026-10-29 pop-up round): read during
     // composition; the header row below reports its root rect into it
     // only inside the measurement frame (the provider is absent in the
-    // morph surface, so the target can never be overwritten mid-morph).
+    // live panel, so the target can never be overwritten mid-dialog).
     val heroTarget = LocalHeroTarget.current
-    // Entering phase for the dynamic handle: wide/thin while the sheet
-    // rises, narrow/thick at rest.
-    var settled by remember { mutableStateOf(false) }
-    LaunchedEffect(popupId) {
-        kotlinx.coroutines.delay(350)
-        settled = true
-    }
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    // The dialog panel scrolls and caps height: plain column, no own
+    // scroll, no height cap, no drag handle (2026-10-30 round —
+    // dialogs do not drag, and the sheet handle was a sheet affordance).
     Column(
         Modifier.fillMaxWidth()
-            .heightIn(max = screenHeight * 0.92f)
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp).padding(bottom = 24.dp),
     ) {
-        Spacer(Modifier.height(12.dp))
-        // Fluid dynamic drag handle: 48x3.5 while entering or
-        // dragging, 32x4 at rest, on spring 0.6/Low.
-        val handleSpec: FiniteAnimationSpec<Dp> = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f)
-            else spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow)
-        val handleWidth by animateDpAsState(
-            if (dragging || !settled) 48.dp else 32.dp,
-            animationSpec = handleSpec,
-            label = "sheetHandleW",
-        )
-        val handleHeight by animateDpAsState(
-            if (dragging || !settled) 3.5.dp else 4.dp,
-            animationSpec = handleSpec,
-            label = "sheetHandleH",
-        )
-        Box(
-            Modifier.align(Alignment.CenterHorizontally)
-                .size(width = handleWidth, height = handleHeight)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)),
-        )
         Spacer(Modifier.height(12.dp))
             if (entity == null) {
                 Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1447,7 +1130,7 @@ private fun EntityPopupSheetContent(
                         title = "Details",
                         subtitle = "Open the full page",
                         onClick = {
-                            sheetBounds?.let { vm.pageOrigin = it }
+                            panelBounds?.let { vm.pageOrigin = it }
                             onDetails()
                             when (entity.domain) {
                                 "climate" -> navigate(Screen.Thermostat(popupId))
@@ -1466,6 +1149,121 @@ private fun EntityPopupSheetContent(
                 }
             }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * The centered dialog overlay (2026-10-30 verdict round —
+ * SUPERSEDES the #67 bottom-anchored floating shelf): every entity
+ * detail opens as a content-hugged dialog centered on screen.
+ * - Container: a scrim (tappable to dismiss) + a panel centered in
+ *   the safe-drawing area, so the status bar, camera cutout, and
+ *   navigation bar are respected by construction — never drawn
+ *   under, which is what fixes the status-bar collisions.
+ * - Size: width 90% capped at 480dp ([dialogPanelWidthDp]); height
+ *   capped at 85% ([dialogPanelMaxHeightDp]) with the inner body in
+ *   a scrollable column as the fallback for dense entities. Height
+ *   otherwise hugs intrinsic content exactly (no blank bottom half).
+ * - Motion: center-scale (scale 0.9 -> 1) + fade from the morph
+ *   progress, M3 bounds spring — NO vertical slide (a slide reads
+ *   as an unattached sheet). [animateContentSize] on the bounds
+ *   spring resizes the panel smoothly, re-centered by the parent,
+ *   when options expand (mode/fan dropdowns).
+ * - Content: the late fade ([morphContentAlpha]) still applies, so
+ *   content materializes once the panel is nearly full size; the
+ *   traveling header/arc (rendered above, by the caller) carry the
+ *   badge/icon continuously into the dialog header at the same
+ *   time — scale+fade does NOT replace travel.
+ * [onPanelPlaced] reports the panel's root rect (the camera-rise
+ * origin for sheet Details actions); at rest progress is 1 and the
+ * scale is exactly 1, so the rect is exact where it is used.
+ */
+@Composable
+private fun DialogOverlay(
+    progress: Float,
+    panelBackground: Color,
+    onDismiss: () -> Unit,
+    onPanelPlaced: (Rect) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val p = progress.coerceIn(0f, 1f)
+    Box(
+        Modifier.fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.4f * p))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onDismiss() },
+    )
+    Box(
+        Modifier.fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.Center,
+    ) {
+        BoxWithConstraints {
+            Box(
+                Modifier.width(dialogPanelWidthDp(maxWidth.value).dp)
+                    .heightIn(max = dialogPanelMaxHeightDp(maxHeight.value).dp)
+                    .onGloballyPositioned { onPanelPlaced(it.boundsInRoot()) }
+                    .animateContentSize(animationSpec = springBounds())
+                    .graphicsLayer {
+                        val s = 0.9f + 0.1f * p
+                        scaleX = s
+                        scaleY = s
+                        alpha = p
+                    }
+                    .clip(FloatingCorner)
+                    .background(panelBackground),
+            ) {
+                Box(
+                    Modifier.alpha(morphContentAlpha(p))
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    // Surface marker: panel content runs under LocalMorphProgress
+                    // (the dialog progress), the same contract MorphSurface used
+                    // to provide — so reportArcBounds treats it as surface
+                    // content (reports NEITHER source nor target) and destination
+                    // panels dissolve in late via dissolveIntoTraveler.
+                    CompositionLocalProvider(LocalMorphProgress provides p) {
+                        content()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The dialog's one-frame measurement pass: the same content, laid
+ * out once at final dialog geometry (same width rule, height cap,
+ * safe-drawing centering), invisible and below the scrim, so its
+ * header/arc rows can report the traveling elements' target rects.
+ * The live panel must never provide the hero/arc targets: its rect
+ * sits under the dialog scale mid-animation. [onMeasured] fires
+ * once (the caller stores it as the measured flag and drops this
+ * frame); the content may compose twice for one frame, which is
+ * safe — history refreshes dedupe in the view model.
+ */
+@Composable
+private fun DialogMeasureFrame(
+    onMeasured: (IntSize) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.Center,
+    ) {
+        BoxWithConstraints {
+            Box(
+                Modifier.width(dialogPanelWidthDp(maxWidth.value).dp)
+                    .heightIn(max = dialogPanelMaxHeightDp(maxHeight.value).dp)
+                    .alpha(0f)
+                    .onGloballyPositioned { onMeasured(it.size) },
+            ) {
+                content()
+            }
+        }
     }
 }
 
@@ -1509,9 +1307,10 @@ private fun EntityPopupSheetContent(
  *   ghosting), no blank growing panel (#60/#62's white flash), no
  *   instant snap return (#62's "sudden smack"). One element travels;
  *   the rest of the pop-up content fades in around it.
- * Rendered only when both rects are known: a sourceless card or a
- * pop-up that never reported its header simply gets the existing
- * fade mechanism, never a crash and never a jump. The badge itself
+ * A sourceless card renders nothing (the destination's late fade
+ * still shows the header at rest); a missing target renders at the
+ * source rect until the measurement frame reports (see above),
+ * never a gap and never a jump. The badge itself
  * is the dismiss affordance (tap it = dismiss, same as Back/scrim/
  * Close); taps elsewhere on the header fall through to the surface
  * below. The badge click disables once fully dissolved (progress
@@ -1531,9 +1330,16 @@ private fun TravelingHeader(
 ) {
     val states by vm.states.collectAsState()
     val entity = states[entityId] ?: return
-    if (source == null || target == null) return
+    if (source == null) return
+    // No target yet (measurement frame pending): sit exactly on the
+    // source rect instead of vanishing — the card header hides from
+    // frame 0, so returning early here left a gap where no header
+    // showed at all, then the traveler popped in mid-path (the
+    // 2026-10-30 verdict's icon jump). Once the target arrives the
+    // same lerp carries it continuously to the dialog header.
+    val targetRect = target ?: source
     val p = progress.coerceIn(0f, 1f)
-    val rect = lerpRect(source, target, p)
+    val rect = lerpRect(source, targetRect, p)
     val density = LocalDensity.current
     val accent = accentFor(entity.entityId)
     // Tile sources report their square badge rect; card sources
@@ -1597,9 +1403,11 @@ private fun TravelingHeader(
  * 10% (heroHeaderAlpha) while the destination panel dissolves in
  * on the inverse curve (dissolveIntoTraveler) — so at every frame
  * exactly one arc is visible. Non-weather entities return early
- * (their arc bounds are never reported); a missing source or
- * target renders nothing (the destination's late fade still shows
- * the arc at rest). The panel keeps its 16dp padding at every
+ * (their arc bounds are never reported); a missing source renders
+ * nothing (the destination's late fade still shows the arc at
+ * rest); a missing target renders at the source rect until the
+ * measurement frame reports, same as the header. The panel keeps
+ * its 16dp padding at every
  * size, so the Dial diameter is the lerped panel width minus 32dp
  * — at both ends that is the 220dp default, and mid-travel the
  * dial scales with the panel instead of clipping. The humidity
@@ -1619,9 +1427,12 @@ private fun TravelingArc(
     val states by vm.states.collectAsState()
     val entity = states[entityId] ?: return
     if (entity.domain != "weather") return
-    if (source == null || target == null) return
+    if (source == null) return
+    // Same no-target rule as TravelingHeader: sit on the source
+    // rect until the measurement frame reports, never a gap.
+    val targetRect = target ?: source
     val p = progress.coerceIn(0f, 1f)
-    val rect = lerpRect(source, target, p)
+    val rect = lerpRect(source, targetRect, p)
     val density = LocalDensity.current
     val temp = entity.attrDouble("temperature") ?: 0.0
     val conditionColor = weatherConditionColor(entity.state)
@@ -1644,7 +1455,7 @@ private fun TravelingArc(
             range = -10f..40f,
             onValueChange = {},
             centerText = temp.formatTemp(),
-            centerSub = entity.state.replace('_', ' ').replaceFirstChar { it.uppercase() },
+            centerSub = formatCondition(entity.state),
             accent = conditionColor,
             diameter = with(density) { (rect.width.toDp() - 32.dp).coerceAtLeast(0.dp) },
         )

@@ -1,4 +1,8 @@
 package com.garrietta.haven.ui.controls
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.alpha
+import com.garrietta.haven.ui.components.formatCondition
 
 import android.os.Handler
 import android.os.Looper
@@ -118,7 +122,7 @@ fun MoreControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = tr
  * (and binary sensors) show badge + value only.
  */
 @Composable
-fun SensorTile(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true) {
+fun SensorTile(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showChart: Boolean = true) {
     val accent = accentFor(entity.entityId)
     val numeric = entity.state.toDoubleOrNull()
     val unit = entity.attrString("unit_of_measurement")
@@ -156,16 +160,28 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true)
             }
         }
         }
-        if (numeric != null && history.size >= 2) {
-            Spacer(Modifier.height(12.dp))
-            Sparkline(history, accent, Modifier.fillMaxWidth().height(64.dp))
-            val mm = sparklineMinCurrentMax(history)
-            if (mm != null) {
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Min ${fmtSensor(mm.first, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Current ${fmtSensor(mm.second, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Max ${fmtSensor(mm.third, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Smooth chart reveal (2026-10-30 verdict: no empty-box
+        // snap): the chart fades in once history lands instead of
+        // popping. Detail passes showChart = false — its labeled
+        // strip is the single chart (see DetailHistoryStrip).
+        val chartReady = showChart && numeric != null && history.size >= 2
+        val chartAlpha by animateFloatAsState(
+            if (chartReady) 1f else 0f,
+            animationSpec = tween(300),
+            label = "sensorChartReveal",
+        )
+        if (chartReady) {
+            Column(Modifier.alpha(chartAlpha)) {
+                Spacer(Modifier.height(12.dp))
+                Sparkline(history, accent, Modifier.fillMaxWidth().height(64.dp))
+                val mm = sparklineMinCurrentMax(history)
+                if (mm != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Min ${fmtSensor(mm.first, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Current ${fmtSensor(mm.second, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Max ${fmtSensor(mm.third, unit)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -256,7 +272,7 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                     range = -10f..40f,
                     onValueChange = {},
                     centerText = temp.formatTemp(),
-                    centerSub = entity.state.replace('_', ' ').replaceFirstChar { it.uppercase() },
+                    centerSub = formatCondition(entity.state),
                     accent = conditionColor,
                 )
             }
@@ -299,7 +315,7 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                     Spacer(Modifier.width(8.dp))
                     Text(whenLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text(condition.replace('_', ' '), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatCondition(condition), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (fTemp != null) {
                     Spacer(Modifier.width(8.dp))
                     Text(fTemp.formatTemp(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
@@ -330,21 +346,23 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
     LazyRow(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
     ) {
         items(forecast) { item ->
             val whenRaw = (item["datetime"] as? String) ?: ""
             // Timeline nodes show the HOUR only (2026-10-29
             // observation, not a user directive): friendlyHourLabel's
-            // "Tomorrow 10 PM" truncates to "Tomorro..." in the 72dp
-            // node, repeated for every node. Rows elsewhere keep the
-            // day-qualified label.
+            // "Tomorrow 10 PM" truncates to "Tomorro..." in the node,
+            // repeated for every node. Rows elsewhere keep the
+            // day-qualified label. Nodes widened 72dp -> 88dp and the
+            // condition text dropped to 10sp (2026-10-30 verdict:
+            // clipped temps / truncated descriptions at the edge).
             val whenLabel = timelineHourLabel(whenRaw)
             val fTemp = (item["temperature"] as? Number)?.toDouble()
             val condition = (item["condition"] as? String) ?: ""
             val chipColor = weatherConditionColor(condition)
             Column(
-                Modifier.width(72.dp),
+                Modifier.width(88.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(whenLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -370,7 +388,7 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
                 if (fTemp != null) {
                     Text(fTemp.formatTemp(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text(condition.replace('_', ' '), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(formatCondition(condition), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

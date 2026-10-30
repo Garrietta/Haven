@@ -96,7 +96,10 @@ fun AreaDetailScreen(vm: HavenViewModel, areaId: String, onBack: () -> Unit, nav
     val entities = states.values
         .filter { if (areaId == UNASSIGNED_AREA) entityAreas[it.entityId] == null else entityAreas[it.entityId] == areaId }
         .sortedWith(compareBy({ it.domain }, { it.friendlyName }))
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+    ) {
         item { DetailTopBar(name, onBack) }
         var lastDomain: String? = null
         for (entity in entities) {

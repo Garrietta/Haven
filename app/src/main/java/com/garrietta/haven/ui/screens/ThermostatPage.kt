@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.components.compositeOver
+import com.garrietta.haven.ui.components.ensureContrast
 import com.garrietta.haven.ui.components.CoolBlue
 import com.garrietta.haven.ui.components.HeatOrange
 
@@ -105,12 +107,19 @@ import org.json.JSONObject
  * still reports the actually-set value.
  */
 @Composable
-fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
+fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, inDialog: Boolean = false) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
     val min = entity?.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity?.attrDouble("max_temp")?.toFloat() ?: 30f
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    // In a dialog the panel owns insets + sizing + scroll, so
+    // the page root is a plain column (2026-10-30 round); as a full
+    // page it keeps its own fill + status-bars padding + scrolls.
+    Column(
+        Modifier
+            .then(if (inDialog) Modifier else Modifier.fillMaxSize().statusBarsPadding())
+            .padding(horizontal = 16.dp),
+    ) {
         if (entity != null) DetailPopupHeader(entity, onBack) else DetailPopupTitleHeader("Unavailable")
         if (entity == null) {
             Text(
@@ -118,22 +127,28 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else if (LocalWideLayout.current) {
-            Row(Modifier.fillMaxSize()) {
+            Row(Modifier.then(if (inDialog) Modifier.fillMaxWidth() else Modifier.fillMaxSize())) {
                 Column(
-                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp),
+                    Modifier.weight(1f)
+                        .then(if (inDialog) Modifier else Modifier.verticalScroll(rememberScrollState()))
+                        .padding(end = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     ThermostatHeroDisc(entity, vm, min, max)
                     Spacer(Modifier.height(16.dp))
                     HeatCoolRangeBar(entity, min, max)
                 }
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 8.dp)) {
+                Column(
+                    Modifier.weight(1f)
+                        .then(if (inDialog) Modifier else Modifier.verticalScroll(rememberScrollState()))
+                        .padding(start = 8.dp),
+                ) {
                     ThermostatCards(entity, vm, states)
                 }
             }
         } else {
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                Modifier.then(if (inDialog) Modifier else Modifier.fillMaxSize().verticalScroll(rememberScrollState())),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 ThermostatHeroDisc(entity, vm, min, max)
@@ -175,8 +190,9 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
     // target, so the overlay's traveling header lands exactly here.
     // Read during composition (never inside the layout callback).
     val heroTarget = LocalHeroTarget.current
+    // The dialog panel scrolls: no own verticalScroll here.
     Column(
-        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier.fillMaxWidth().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(
@@ -214,7 +230,15 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
             Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.SCALLOP12)),
             contentAlignment = Alignment.Center,
         ) {
-            ThermostatHero(entity, vm, min, max, diameter = 260.dp)
+            ThermostatHero(
+                entity, vm, min, max, diameter = 260.dp,
+                // Numbers sit on the scallop disc: floor them against
+                // the disc color itself (2026-10-30 dial-clash fix).
+                numberBackdrop = compositeOver(
+                    modeColor.copy(alpha = 0.20f),
+                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
+            )
         }
         Spacer(Modifier.height(12.dp))
         val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
@@ -262,7 +286,13 @@ private fun ThermostatHeroDisc(entity: HaEntity, vm: HavenViewModel, min: Float,
         Modifier.size(360.dp).background(modeColor.copy(alpha = 0.18f), stateShape(StateShape.SCALLOP12)),
         contentAlignment = Alignment.Center,
     ) {
-        ThermostatHero(entity, vm, min, max)
+        ThermostatHero(
+            entity, vm, min, max,
+            numberBackdrop = compositeOver(
+                modeColor.copy(alpha = 0.18f),
+                MaterialTheme.colorScheme.background,
+            ),
+        )
     }
 }
 
@@ -291,6 +321,8 @@ fun ThermostatHero(
     min: Float,
     max: Float,
     diameter: Dp = 300.dp,
+    /** Color directly behind the dial numbers (the scallop disc). */
+    numberBackdrop: Color,
 ) {
     val current = entity.attrDouble("current_temperature")
     val accent = accentFor(entity.entityId)
@@ -374,16 +406,18 @@ fun ThermostatHero(
                             heat,
                             HeatOrange,
                             active = selector == SetpointSelector.HEATING,
+                            backdrop = numberBackdrop,
                         )
                         Spacer(Modifier.width(16.dp))
                         KineticTempText(
                             cool,
                             CoolBlue,
                             active = selector == SetpointSelector.COOLING,
+                            backdrop = numberBackdrop,
                         )
                     }
                 } else {
-                    KineticTempText(single, dialAccent, active = true, fontSize = 72.sp)
+                    KineticTempText(single, dialAccent, active = true, fontSize = 72.sp, backdrop = numberBackdrop)
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -416,7 +450,7 @@ fun ThermostatHero(
  * no overlap.
  */
 @Composable
-private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 52.sp) {
+private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 52.sp, backdrop: Color) {
     val text = value.toDouble().formatTemp()
     AnimatedContent(
         targetState = text,
@@ -437,7 +471,13 @@ private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSiz
             t,
             fontSize = fontSize,
             fontWeight = FontWeight.Bold,
-            color = if (active) color else color.copy(alpha = 0.45f),
+            // Contrast-floored numbers (2026-10-30 verdict): the
+            // raw token fails on the pastel disc in both themes, and
+            // the 0.45-alpha inactive number fails outright. Active
+            // numbers meet 4.5:1; inactive ones (52sp+ bold = large
+            // text) meet 3:1 while staying visibly muted.
+            color = if (active) ensureContrast(color, backdrop, 4.5f)
+            else ensureContrast(compositeOver(color.copy(alpha = 0.45f), backdrop), backdrop, 3.0f),
             style = TextStyle(fontFeatureSettings = "tnum"),
         )
     }

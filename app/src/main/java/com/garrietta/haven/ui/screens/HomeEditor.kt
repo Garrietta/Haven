@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import androidx.compose.foundation.layout.PaddingValues
+import com.garrietta.haven.ui.components.pillClearanceBottom
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,7 +54,10 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
     var overrides by remember { mutableStateOf(vm.settingsStore.homeLightOverrides()) }
     val lights = states.values.filter { it.domain == "light" }.sortedBy { it.friendlyName }
 
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+    ) {
         item {
             DetailTopBar("Manage home page", onBack)
             Text(

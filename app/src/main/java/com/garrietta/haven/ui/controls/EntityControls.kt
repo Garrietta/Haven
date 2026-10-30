@@ -1,4 +1,5 @@
 package com.garrietta.haven.ui.controls
+import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.ui.components.CoolBlue
 import com.garrietta.haven.ui.components.HeatOrange
 
@@ -118,6 +119,12 @@ fun HaEntity.stateText(): String {
     val unit = attrString("unit_of_measurement")
     return when (domain) {
         "sensor" -> if (unit != null) "$state $unit" else state
+        // Weather conditions go through the display formatter:
+        // HA reports "partlycloudy" glued, which must read
+        // "Partly Cloudy" everywhere (2026-10-30 verdict). Other
+        // domains keep the plain underscore transform — their
+        // strings ("heat_cool", "playing") are already readable.
+        "weather" -> formatCondition(state)
         else -> state.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 }
@@ -338,10 +345,22 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                         indication = null,
                         onClick = shapeAction,
                     )
-                    headerClickable -> Modifier.clickable { onDetail(entity.entityId) }
+                    // No ripple (same as the shape-action path
+                    // above): a ripple on a morph-source header
+                    // freezes mid-animation when the card hides for
+                    // its dialog (2026-10-30 verdict).
+                    headerClickable -> Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onDetail(entity.entityId) }
                     else -> Modifier
                 }
-                val detailClick = if (headerClickable) Modifier.clickable { onDetail(entity.entityId) } else Modifier
+                // No ripple, same frozen-ripple reason as above:
+                // this row hides with the card when its dialog opens.
+                val detailClick = if (headerClickable) Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onDetail(entity.entityId) } else Modifier
                 // Traveling header (2026-10-29 pop-up round): the
                 // header row reports its root rect and hides the
                 // moment its morph opens, so the overlay's single
@@ -445,7 +464,9 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
         Column(Modifier.weight(1f)) {
             Text(if (isOn) "On" else "Off", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             if (isOn) {
-                Text("Tap the bulb to switch off", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Verdict 2026-10-30: this subtitle washed out in
+                // light mode — full onSurface, not the variant role.
+                Text("Tap the bulb to switch off", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
             }
         }
     }

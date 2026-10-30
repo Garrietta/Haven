@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.components.compositeOver
+import com.garrietta.haven.ui.components.ensureContrast
 import com.garrietta.haven.ui.components.CoolBlue
 import com.garrietta.haven.ui.components.HeatOrange
 
@@ -395,6 +397,20 @@ private fun ClimateTileBody(vm: HavenViewModel, entity: HaEntity) {
     val current = entity.attrDouble("current_temperature")
     val heatCool = low != null && high != null
     val selector = defaultSelector(entity.state)
+    // Number backdrop = the tile container itself (same lerp as the
+    // tile root): setpoint numbers are floored against it, so the
+    // 0.45-alpha inactive numbers can no longer wash out (2026-10-30
+    // verdict: "indoor setpoints" in light mode, dial clash in both).
+    // Active numbers meet 4.5:1; inactive ones (28sp bold = large
+    // text) meet 3:1 while staying visibly muted.
+    val tileBackdrop = lerp(
+        MaterialTheme.colorScheme.surfaceContainerLow,
+        climateModeColor(entity.state, entity.attrString("hvac_action")),
+        0.15f,
+    )
+    fun setpointNumber(base: Color, active: Boolean): Color =
+        if (active) ensureContrast(base, tileBackdrop, 4.5f)
+        else ensureContrast(compositeOver(base.copy(alpha = 0.45f), tileBackdrop), tileBackdrop, 3.0f)
     Spacer(Modifier.height(8.dp))
     if (heatCool) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -402,22 +418,14 @@ private fun ClimateTileBody(vm: HavenViewModel, entity: HaEntity) {
                 low!!.formatTemp(),
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (selector == SetpointSelector.HEATING) {
-                    HeatOrange
-                } else {
-                    HeatOrange.copy(alpha = 0.45f)
-                },
+                color = setpointNumber(HeatOrange, selector == SetpointSelector.HEATING),
             )
             Spacer(Modifier.width(10.dp))
             Text(
                 high!!.formatTemp(),
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (selector == SetpointSelector.COOLING) {
-                    CoolBlue
-                } else {
-                    CoolBlue.copy(alpha = 0.45f)
-                },
+                color = setpointNumber(CoolBlue, selector == SetpointSelector.COOLING),
             )
         }
     } else if (single != null) {
@@ -426,13 +434,15 @@ private fun ClimateTileBody(vm: HavenViewModel, entity: HaEntity) {
             "cool" -> CoolBlue
             else -> accentFor(entity.entityId)
         }
-        Text(single.formatTemp(), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = singleColor)
+        Text(single.formatTemp(), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = setpointNumber(singleColor, true))
     }
     if (current != null) {
+        // Verdict 2026-10-30: the Indoor line washed out in light
+        // mode — full onSurface, not the variant role.
         Text(
             "Indoor ${current.formatTemp()}",
             fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
         )
     }

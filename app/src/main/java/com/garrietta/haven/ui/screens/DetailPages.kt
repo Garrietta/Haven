@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.alpha
 import com.garrietta.haven.ui.theme.FloatingCorner
 import com.garrietta.haven.ui.theme.LargeTopShape
 import com.garrietta.haven.ui.components.LocalReduceMotion
@@ -24,9 +26,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -121,7 +121,9 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
     if (entity == null) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+        // Dialog-owned insets/sizing: no fillMaxSize, no status
+        // bars padding — the dialog panel owns both (2026-10-30).
+        Column(Modifier.padding(horizontal = 16.dp)) {
             DetailPopupTitleHeader("Unavailable")
             Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -129,7 +131,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     }
     // Climate's full control lives on its thermostat page, not here.
     if (entity.domain == "climate") {
-        ThermostatPageScreen(vm, entityId, onBack)
+        ThermostatPageScreen(vm, entityId, onBack, inDialog = true)
         return
     }
     // Weather's full page is an expressive page (condition hero +
@@ -139,7 +141,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         return
     }
     if (entity.domain == "camera") {
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
             DetailPopupHeader(entity, onBack)
             Spacer(Modifier.height(16.dp))
             Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
@@ -171,8 +173,10 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
 @Composable
 private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -> Unit) {
     val conditionColor = weatherConditionColor(entity.state)
+    // Dialog-owned sizing/scroll: plain column, no fillMaxSize,
+    // no status-bars padding, no own scroll (2026-10-30 round).
     Column(
-        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        Modifier.padding(horizontal = 16.dp),
     ) {
         DetailPopupHeader(entity, onBack)
         Spacer(Modifier.height(16.dp))
@@ -240,7 +244,9 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             "switch", "input_boolean" -> SwitchControl(entity, vm)
             "cover" -> CoverPageControl(entity, vm)
             "lock" -> LockControl(entity, vm)
-            "sensor", "binary_sensor" -> SensorTile(entity, vm, showHeader = false)
+            // Detail keeps only the labeled strip (see history()):
+            // SensorTile's own chart would duplicate it (2026-10-30).
+            "sensor", "binary_sensor" -> SensorTile(entity, vm, showHeader = false, showChart = false)
             "media_player" -> MediaPageControl(entity, vm)
             "vacuum" -> VacuumControl(entity, vm)
             "fan" -> FanControl(entity, vm)
@@ -287,26 +293,29 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     // control, not a second state row). Every other domain keeps
     // its hero panel.
     val noHeroDomains = setOf("sensor", "binary_sensor", "light")
+    // Dialog-owned sizing/scroll (2026-10-30 round): the dialog
+    // panel caps height at 85% and scrolls, so detail roots are plain
+    // columns — no fillMaxSize, no status-bars padding, no own scroll.
     if (LocalWideLayout.current) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
             DetailPopupHeader(entity, onBack)
-            Row(Modifier.fillMaxSize()) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp)) {
+            Row(Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
                     if (entity.domain !in noHeroDomains) hero()
                     control()
                 }
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 8.dp)) {
+                Column(Modifier.weight(1f).padding(start = 8.dp)) {
                     history()
                 }
             }
         }
     } else {
-        LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            item { DetailPopupHeader(entity, onBack) }
-            if (entity.domain !in noHeroDomains) item { hero() }
-            item { control() }
-            item { history() }
-            item { Spacer(Modifier.height(16.dp)) }
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            DetailPopupHeader(entity, onBack)
+            if (entity.domain !in noHeroDomains) hero()
+            control()
+            history()
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -564,7 +573,19 @@ private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
         val points = cached
         val mm = sparklineMinCurrentMax(points)
         val unit = entity.attrString("unit_of_measurement")
-        Column {
+        // Smooth reveal (2026-10-30 verdict: never an empty box
+        // snapping to a full chart): the shimmer above covers the
+        // load, and the path fades in once data lands. The branch
+        // composes fresh when data arrives, so the fade is driven
+        // by a revealed flag, not by the (already-1) initial value.
+        var revealed by remember { mutableStateOf(false) }
+        LaunchedEffect(points) { revealed = true }
+        val stripAlpha by animateFloatAsState(
+            if (revealed) 1f else 0f,
+            animationSpec = tween(300),
+            label = "historyStripReveal",
+        )
+        Column(Modifier.alpha(stripAlpha)) {
             Sparkline(points, accentFor(entity.entityId), Modifier.fillMaxWidth().height(120.dp))
             Spacer(Modifier.height(4.dp))
             if (mm != null) {

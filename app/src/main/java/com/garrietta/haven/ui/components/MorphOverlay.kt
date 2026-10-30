@@ -251,22 +251,28 @@ fun Modifier.hideHeroWhenMorphSource(id: String): Modifier = composed {
  * (layout unchanged, alpha only) — the 2026-10-29 verdict-fix round's
  * answer to the weather pop-up still doubling on #67. The header hide
  * above covers only the header row: the source card's arc, humidity
- * line, sensor chart, and lamp hero stayed visible (fading only on
- * [morphCardAlpha]) while the pop-up's duplicate content faded in
- * over them, so two copies of the same content shared the screen.
- * With the body hidden from frame 0 — same mechanism as the header
- * hide, keyed on the morph-source id — the pop-up's content is the
- * only copy on screen at any frame, and the card restores atomically
- * on dismiss exactly as the header does (the morph surface sits
- * exactly on the card rect at progress 0 with a transparent
- * background, so the restore is invisible). Callers gate this on
- * their morph-source flag, exactly like [hideWhenMorphSource]:
- * nested/destination cards sharing the entity id must never hide.
+ * line, sensor chart, and lamp hero stayed visible while the pop-up's
+ * duplicate content faded in over them, so two copies of the same
+ * content shared the screen. Callers gate this on their morph-source
+ * flag, exactly like [hideWhenMorphSource]: nested/destination cards
+ * sharing the entity id must never hide.
+ *
+ * 2026-10-30 centered-dialog round: the hide is progress-driven
+ * ([LocalMorphCardAlpha], same curve as [hideWhenMorphSource]),
+ * NOT binary. The binary hide caused the exit flash the verdict
+ * reports (grid flickering blank tiles on dismiss): at progress 0
+ * the dialog is already invisible, but the body only returned when
+ * the dismiss coroutine cleared state frames later — blank cards
+ * with no dialog. Progress-driven, the body fades back over the
+ * last 40% of exit and is fully visible at progress 0, before any
+ * state clear — and on enter it is gone by progress 0.4, before
+ * the dialog content fades in at 0.7, so no doubling returns.
  */
 fun Modifier.hideBodyWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenCardId.current
+    val cardAlpha = LocalMorphCardAlpha.current
     graphicsLayer {
-        alpha = if (id == hiddenId) 0f else 1f
+        alpha = if (id == hiddenId) cardAlpha else 1f
     }
 }
 

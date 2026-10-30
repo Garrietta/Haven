@@ -163,6 +163,45 @@ fun dial240AngleForValue(value: Float, range: ClosedFloatingPointRange<Float>): 
 }
 
 /**
+ * Staggered radii for the dual dial thumbs (2026-10-30 verdict:
+ * the heat + cool pills collide at the top right of the ring when
+ * setpoints are 2 degrees apart, e.g. 66/68). The pills are
+ * axis-aligned 30x20dp rects, so when their centers' track distance
+ * drops below the pill width + gap they would overlap: the heat
+ * thumb moves inward and the cool thumb outward by [offset], which
+ * ramps smoothly from 0 (at [needed] + [rampPx] of track distance)
+ * to the full half-height stagger (at [needed] or closer) — no pop
+ * as a drag crosses the threshold, and at the reported top-of-ring
+ * position the 24dp radial separation clears the 20dp pill height
+ * outright. Values, grab targets, and the dial model are untouched:
+ * only the drawn radii move, and the grab test uses these same
+ * radii, so taps still land on the thumb they see. Pure.
+ */
+fun dualThumbRadii(
+    heatAngleDeg: Float,
+    coolAngleDeg: Float,
+    trackRadiusPx: Float,
+    thumbWidthPx: Float,
+    thumbHeightPx: Float,
+    gapPx: Float,
+    rampPx: Float,
+): Pair<Float, Float> {
+    val diffDeg = kotlin.math.abs(heatAngleDeg - coolAngleDeg).coerceAtMost(DIAL240_SWEEP_DEG)
+    val arcDist = trackRadiusPx * Math.toRadians(diffDeg.toDouble()).toFloat()
+    val needed = thumbWidthPx + gapPx
+    val fullOffset = (thumbHeightPx + gapPx) / 2f
+    val offset = when {
+        arcDist >= needed + rampPx -> 0f
+        arcDist <= needed -> fullOffset
+        else -> fullOffset * (needed + rampPx - arcDist) / rampPx
+    }
+    return (trackRadiusPx - offset) to (trackRadiusPx + offset)
+}
+
+/**
+
+
+/**
  * Rubber-banding past the dial ends: values inside the range pass through
  * unchanged; overshoot past either end is damped to 35% of the excess, so
  * the thumb resists instead of pinning hard. The APPLIED value is still

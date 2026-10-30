@@ -199,4 +199,50 @@ class DesignTokensTest {
         assertEquals(Color(0xFF90A4AE), weatherConditionColor(null))
         assertEquals(Color(0xFF90A4AE), weatherConditionColor("exceptional"))
     }
+
+    @Test
+    fun formatConditionSplitsAndTitles() {
+        assertEquals("Partly Cloudy", formatCondition("partlycloudy"))
+        assertEquals("Partly Cloudy", formatCondition("partly-cloudy"))
+        assertEquals("Partly Cloudy", formatCondition("partlyCloudy"))
+        assertEquals("Clear Night", formatCondition("clear-night"))
+        assertEquals("Clear Night", formatCondition("clear_night"))
+        assertEquals("Snowy Rainy", formatCondition("snowy-rainy"))
+        assertEquals("Lightning Rainy", formatCondition("lightning-rainy"))
+        assertEquals("Sunny", formatCondition("sunny"))
+        assertEquals("Windy Variant", formatCondition("windy-variant"))
+        assertEquals("", formatCondition(""))
+    }
+
+    @Test
+    fun dialogPanelGeometryMatchesSpec() {
+        assertEquals(324f, dialogPanelWidthDp(360f), 0.001f)
+        assertEquals(480f, dialogPanelWidthDp(800f), 0.001f)
+        assertEquals(680f, dialogPanelMaxHeightDp(800f), 0.001f)
+    }
+
+    @Test
+    fun contrastRatioKnownPairs() {
+        assertEquals(21f, contrastRatio(Color.Black, Color.White), 0.1f)
+        assertEquals(1f, contrastRatio(Color.Black, Color.Black), 0.001f)
+        assertTrue(contrastRatio(Color(0xFFD84315), Color.White) > 4f)
+    }
+
+    @Test
+    fun ensureContrastLiftsAndPreserves() {
+        assertEquals(Color.Black, ensureContrast(Color.Black, Color.White))
+        assertEquals(Color.White, ensureContrast(Color.White, Color.Black))
+        val darkDisc = Color(0xFF2B2930)
+        val lifted = ensureContrast(Color(0xFFD84315), darkDisc)
+        assertTrue(contrastRatio(lifted, darkDisc) >= 4.5f)
+        // Inactive-number composite: 45% heat orange over a pale disc,
+        // floored to the 3.0 large-text ratio instead of washing out.
+        val paleDisc = Color(0xFFFBE9E0)
+        val inactive = ensureContrast(
+            compositeOver(Color(0xFFD84315).copy(alpha = 0.45f), paleDisc),
+            paleDisc,
+            3.0f,
+        )
+        assertTrue(contrastRatio(inactive, paleDisc) >= 3.0f)
+    }
 }

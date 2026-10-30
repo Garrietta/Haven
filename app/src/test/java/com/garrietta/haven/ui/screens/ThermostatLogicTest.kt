@@ -286,4 +286,44 @@ class ThermostatLogicTest {
         assertEquals(67.0, clampHeatSetpoint(67.0, 50.0, 70.0), 0.001)
         assertEquals(70.0, clampHeatSetpoint(72.0, 50.0, 70.0), 0.001)
     }
+
+    @Test
+    fun dualThumbRadiiFarApartStayOnTrack() {
+        val (heat, cool) = dualThumbRadii(150f, 270f, 283.5f, 78.75f, 52.5f, 10.5f, 31.5f)
+        assertEquals(283.5f, heat, 0.001f)
+        assertEquals(283.5f, cool, 0.001f)
+    }
+
+    @Test
+    fun dualThumbRadiiCloseStaggerFully() {
+        // The verdict's 66/68 case on a 260dp dial (track 108dp).
+        val (heat, cool) = dualThumbRadii(263.45f, 272.18f, 283.5f, 78.75f, 52.5f, 10.5f, 31.5f)
+        assertEquals(252f, heat, 0.5f)
+        assertEquals(315f, cool, 0.5f)
+        assertTrue(cool - heat >= 52.5f)
+    }
+
+    @Test
+    fun dualThumbRadiiIdenticalValuesStagger() {
+        val (heat, cool) = dualThumbRadii(200f, 200f, 283.5f, 78.75f, 52.5f, 10.5f, 31.5f)
+        assertEquals(252f, heat, 0.001f)
+        assertEquals(315f, cool, 0.001f)
+    }
+
+    @Test
+    fun dualThumbRadiiRampIsContinuous() {
+        // At needed + ramp the offset is 0; at needed it is full.
+        val needed = 78.75f + 10.5f
+        val ramp = 31.5f
+        val track = 283.5f
+        fun offsetFor(arcPx: Float): Float {
+            val deg = arcPx / track * 180f / Math.PI.toFloat()
+            val (_, cool) = dualThumbRadii(200f, 200f + deg, track, 78.75f, 52.5f, 10.5f, ramp)
+            return cool - track
+        }
+        assertEquals(0f, offsetFor(needed + ramp), 0.01f)
+        assertEquals(31.5f, offsetFor(needed), 0.01f)
+        val mid = offsetFor(needed + ramp / 2f)
+        assertTrue(mid > 0f && mid < 31.5f)
+    }
 }
