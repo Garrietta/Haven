@@ -147,22 +147,38 @@ fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
 
 /** A slider that only calls the service when the user lifts their finger. */
 @Composable
+/**
+ * Slider with local drag state (the thumb follows the finger
+ * immediately; the service call fires only on release) and an
+ * optional live value label. [formatValue] renders the LOCAL drag
+ * value above the slider, so the number tracks the finger — the
+ * scannable value Nerwyn-style cards show — instead of waiting on
+ * the server round-trip. Call sites that already label their value
+ * above the slider (fan speed, input_number) pass nothing.
+ */
 fun ServiceSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     onFinished: (Float) -> Unit,
     accent: Color,
     modifier: Modifier = Modifier,
+    formatValue: ((Float) -> String)? = null,
 ) {
     var local by remember(value) { mutableStateOf(value) }
-    Slider(
-        value = local,
-        onValueChange = { local = it },
-        valueRange = range,
-        onValueChangeFinished = { onFinished(local) },
-        colors = SliderDefaults.colors(activeTrackColor = accent, thumbColor = accent),
-        modifier = modifier,
-    )
+    Column(modifier) {
+        if (formatValue != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Text(formatValue(local), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Slider(
+            value = local,
+            onValueChange = { local = it },
+            valueRange = range,
+            onValueChangeFinished = { onFinished(local) },
+            colors = SliderDefaults.colors(activeTrackColor = accent, thumbColor = accent),
+        )
+    }
 }
 
 /**
@@ -436,13 +452,14 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
     if (modes.contains("brightness") || entity.attributes.containsKey("brightness")) {
         Spacer(Modifier.height(8.dp))
         Text("Brightness", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        ServiceSlider(pct, 0f..100f, { vm.setLightBrightness(entity.entityId, it.toInt()) }, accent)
+        ServiceSlider(pct, 0f..100f, { vm.setLightBrightness(entity.entityId, it.toInt()) }, accent, formatValue = { "${it.toInt()}%" })
     }
     if (modes.contains("color_temp") || kelvin != null) {
         Text("Warm to cool", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         ServiceSlider(
             (kelvin ?: 3500).toFloat(), 2000f..6500f,
             { vm.setLightColorTemp(entity.entityId, it.toInt()) }, lightColorTempTint(kelvin),
+            formatValue = { "${it.toInt()}K" },
         )
     }
     if (modes.any { it == "hs" || it == "rgb" || it == "xy" }) {
@@ -512,7 +529,7 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
         }
     }
     Spacer(Modifier.height(8.dp))
-    ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent)
+    ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent, formatValue = { "${it.toInt()}%" })
 }
 
 
@@ -581,7 +598,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
         // The slider moves the same active setpoint and snaps to whole
         // degrees on release, so every path changes temperature in 1°
         // intervals.
-        ServiceSlider(active, min..max, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, accent)
+        ServiceSlider(active, min..max, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, accent, formatValue = { "${snapToDegree(it.toDouble()).toInt()}°" })
         if (modes.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -723,6 +740,7 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
             (volume * 100).toFloat(), 0f..100f,
             { vm.callService("media_player", "volume_set", entity.entityId, JSONObject().put("volume_level", it / 100f)) },
             accentFor(entity.entityId),
+            formatValue = { "${it.toInt()}%" },
         )
         val sources = entity.attrList("source_list")?.mapNotNull { it as? String } ?: emptyList()
         if (sources.isNotEmpty()) {
@@ -758,14 +776,13 @@ fun FanControl(entity: HaEntity, vm: HavenViewModel) {
         accentFor(entity.entityId),
     )
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Oscillate", fontSize = 13.sp)
-        Spacer(Modifier.width(8.dp))
-        Switch(
-            checked = oscillating,
-            onCheckedChange = {
-                vm.callService("fan", "oscillate", entity.entityId, JSONObject().put("oscillating", it))
-            },
+        PillToggle(
+            oscillating,
+            { vm.callService("fan", "oscillate", entity.entityId, JSONObject().put("oscillating", !oscillating)) },
+            accentFor(entity.entityId),
         )
+        Spacer(Modifier.width(12.dp))
+        Text("Oscillate", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (presets.isNotEmpty()) {
         Row(

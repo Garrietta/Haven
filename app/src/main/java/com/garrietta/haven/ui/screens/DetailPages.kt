@@ -351,7 +351,7 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
         }
         if (position != null) {
             Spacer(Modifier.height(8.dp))
-            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent)
+            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent, formatValue = { "${it.toInt()}%" })
         }
     }
 }
@@ -454,7 +454,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
         }
         if (position != null) {
             Spacer(Modifier.height(8.dp))
-            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent)
+            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent, formatValue = { "${it.toInt()}%" })
         }
     }
 }
@@ -512,6 +512,7 @@ private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
                 (volume * 100).toFloat(), 0f..100f,
                 { vm.callService("media_player", "volume_set", entity.entityId, JSONObject().put("volume_level", it / 100f)) },
                 accentFor(entity.entityId),
+                formatValue = { "${it.toInt()}%" },
             )
         }
         val sources = entity.attrList("source_list")?.mapNotNull { it as? String } ?: emptyList()

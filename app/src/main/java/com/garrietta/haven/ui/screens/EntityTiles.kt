@@ -154,8 +154,17 @@ private fun cardEntityIds(card: JSONObject): List<String> {
 }
 
 /** Natural status line: light on/off rides the icon state, the rest read out in words. */
+/** HA brightness is 0–255; tiles show it as a percentage. */
+internal fun lightBrightnessPercent(brightness255: Int): Int = brightness255 * 100 / 255
+
 private fun tileStatus(entity: HaEntity): String = when (entity.domain) {
-    "light", "switch", "input_boolean" -> if (entity.state == "on") "On" else "Off"
+    "light" -> if (entity.state == "on") {
+        // Scannable state: a lit light reads its brightness, not
+        // just "On" — "On · 75%" tells the whole state at a glance.
+        val b = entity.attrInt("brightness")?.let { lightBrightnessPercent(it) }
+        if (b != null) "On · $b%" else "On"
+    } else "Off"
+    "switch", "input_boolean" -> if (entity.state == "on") "On" else "Off"
     "cover" -> {
         val pos = entity.attrInt("current_position")
         val base = entity.stateText()
