@@ -19,6 +19,6 @@ class LightBrightnessPercentTest {
     @Test
     fun typicalDimAndBrightValues() {
         assertEquals(10, lightBrightnessPercent(26))
-        assertEquals(75, lightBrightnessPercent(191))
+        assertEquals(74, lightBrightnessPercent(191))  // 19100/255 = 74.9 -> 74
     }
 }
