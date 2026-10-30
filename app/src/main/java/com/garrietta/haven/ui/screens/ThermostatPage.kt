@@ -48,6 +48,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
@@ -60,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.ui.components.LocalHeroTarget
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.climateModeColor
@@ -103,7 +106,7 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
     val min = entity?.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity?.attrDouble("max_temp")?.toFloat() ?: 30f
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-        DetailTopBar(entity?.friendlyName ?: entityId, onBack)
+        DetailTopBar(entity?.friendlyName ?: "Unavailable", onBack)
         if (entity == null) {
             Text(
                 "This entity is no longer available.",
@@ -162,11 +165,21 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
     var modeExpanded by remember { mutableStateOf(false) }
     var fanExpanded by remember { mutableStateOf(false) }
+    // Traveling header target (2026-10-29 pop-up round): the title
+    // row reports its root rect into the measurement frame's hero
+    // target, so the overlay's traveling header lands exactly here.
+    // Read during composition (never inside the layout callback).
+    val heroTarget = LocalHeroTarget.current
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth()
+                .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")

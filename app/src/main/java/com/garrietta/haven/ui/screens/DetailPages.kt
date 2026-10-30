@@ -97,10 +97,12 @@ import java.util.Locale
 import org.json.JSONObject
 
 /**
- * Full pages, one per entity, in the Google Home / SmartThings manner:
- * a consistent header (back, domain badge, name), a hero state, the
- * domain's primary control, then real attributes. Tap a tile opens its
- * page; long-press still opens the quick sheet.
+ * Pop-ups, one per entity (2026-10-29 pop-up round — every detail
+ * destination is a bottom-anchored floating shelf now, never a
+ * full-span page): a consistent header (back, domain badge, name), a
+ * hero state, the domain's primary control, then the history chart.
+ * No attribute dump: value, state, controls, chart — nothing raw.
+ * Tap a tile opens its pop-up; long-press still opens the quick sheet.
  *
  * Honesty rule, same as the thermostat page: a section renders only when
  * backing state exists. No invented readings, scenes, schedules, or
@@ -115,7 +117,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val entity = states[entityId]
     if (entity == null) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            DetailTopBar(entityId, onBack)
+            DetailTopBar("Unavailable", onBack)
             Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
@@ -205,7 +207,6 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(entity.entityId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -258,19 +259,13 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             Spacer(Modifier.height(16.dp))
         }
     }
-    val attributes: @Composable () -> Unit = {
-        Text("Attributes", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(8.dp))
-        val attrs = entity.attributes.filterKeys { it != "friendly_name" }.toList().sortedBy { it.first }
-        for ((key, value) in attrs) {
-            DetailAttributeRow(key, detailValueToString(value))
-        }
-        // Sensor pages surface last-updated / last-changed from the real
-        // state stream; other domains keep them out of the way.
-        if (entity.domain == "sensor" || entity.domain == "binary_sensor") {
-            entity.lastUpdated?.let { DetailAttributeRow("Last updated", it) }
-            entity.lastChanged?.let { DetailAttributeRow("Last changed", it) }
-        }
+    // History only (2026-10-29 pop-up round): the raw attribute dump
+    // is gone — no attribute rows, no Last updated / Last changed
+    // timestamps, no state class, no measurement or unit rows, no raw
+    // ids. An intuitive home app shows the value, the state, the
+    // controls, and the chart — never the HA attribute table. The
+    // 24-hour history strip stays: it is a chart, not a dump.
+    val history: @Composable () -> Unit = {
         if (entity.state.toDoubleOrNull() != null) {
             Spacer(Modifier.height(24.dp))
             Text("Last 24 hours", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -288,7 +283,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                     control()
                 }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 8.dp)) {
-                    attributes()
+                    history()
                 }
             }
         }
@@ -297,7 +292,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             item { DetailTopBar(entity.friendlyName, onBack) }
             item { hero() }
             item { control() }
-            item { attributes() }
+            item { history() }
             item { Spacer(Modifier.height(16.dp)) }
         }
     }
@@ -520,39 +515,6 @@ private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
             }
         }
     }
-}
-
-/** Stacked label + full-width value; long values truncate with tap-to-copy (same as Browse). */
-@Composable
-private fun DetailAttributeRow(key: String, value: String) {
-    val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(key.replace('_', ' '), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (value.length > 200) {
-            Text(value.take(200) + "…", fontSize = 13.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = {
-                    clipboard.setText(AnnotatedString(value))
-                    copied = true
-                }) {
-                    Text(if (copied) "Copied" else "Copy full value")
-                }
-                if (copied) {
-                    Text("Copied to clipboard", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        } else {
-            Text(value, fontSize = 13.sp)
-        }
-    }
-}
-
-private fun detailValueToString(value: Any?): String = when (value) {
-    null -> "—"
-    is List<*> -> value.joinToString(", ")
-    is Map<*, *> -> value.entries.joinToString(", ") { "${it.key}: ${it.value}" }
-    else -> value.toString()
 }
 
 /**

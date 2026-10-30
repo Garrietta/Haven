@@ -91,6 +91,8 @@ import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.lightColorTempTint
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.hideWhenMorphSource
+import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
+import com.garrietta.haven.ui.components.reportHeroBounds
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.MorphShape
@@ -314,8 +316,16 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     else -> Modifier
                 }
                 val detailClick = if (headerClickable) Modifier.clickable { onDetail(entity.entityId) } else Modifier
+                // Traveling header (2026-10-29 pop-up round): the
+                // header row reports its root rect and hides the
+                // moment its morph opens, so the overlay's single
+                // traveling header — badge, name, state, Relay-style —
+                // replaces it exactly at the same rect, never beside
+                // it. Only morph sources report: nested/detail-inner
+                // cards are destinations, never sources.
+                val heroMods = if (morphSource) Modifier.reportHeroBounds(entity.entityId).hideHeroWhenMorphSource(entity.entityId) else Modifier
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier.fillMaxWidth().then(heroMods),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // State-driven badge: morphs with the entity's state.

@@ -59,6 +59,8 @@ import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.controls.shapeTapAction
 import com.garrietta.haven.ui.components.hideWhenMorphSource
+import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
+import com.garrietta.haven.ui.components.reportHeroBounds
 import com.garrietta.haven.ui.components.pillClearanceBottom
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.controls.ExpressiveStepper
@@ -276,6 +278,14 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                         polygonShape(shapeForDomain(entity.domain)),
                     )
                         .graphicsLayer(scaleX = badgeScale, scaleY = badgeScale)
+                        // Traveling header anchor (2026-10-29 pop-up
+                        // round): the badge rect is the tile header's
+                        // travel origin, and the badge hides the moment
+                        // its morph opens so the overlay's single
+                        // traveling header replaces it exactly.
+                        // Camera tiles keep the rise path and do not
+                        // report: their fullscreen is not a morph.
+                        .then(if (entity.domain != "camera") Modifier.reportHeroBounds(entity.entityId).hideHeroWhenMorphSource(entity.entityId) else Modifier)
                         .then(if (shapeAction != null) Modifier.combinedClickable(
                             interactionSource = badgeInteraction,
                             indication = null,
@@ -293,7 +303,17 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 }
             }
             Spacer(Modifier.height(16.dp))
-            Text(entity.friendlyName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                entity.friendlyName,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                // Traveling header: the tile's name hides with its
+                // badge while the morph is open, so the overlay's
+                // single traveling header is the only copy on screen.
+                modifier = if (entity.domain != "camera") Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier,
+            )
             if (entity.domain == "climate") {
                 ClimateTileBody(vm, entity)
             } else {
@@ -302,6 +322,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    modifier = if (entity.domain != "camera") Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier,
                 )
             }
         }

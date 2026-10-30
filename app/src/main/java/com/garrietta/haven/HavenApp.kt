@@ -85,6 +85,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
@@ -136,7 +137,10 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.unit.IntSize
 import com.garrietta.haven.ui.components.LocalCardBounds
+import com.garrietta.haven.ui.components.LocalHeroBounds
+import com.garrietta.haven.ui.components.LocalHeroTarget
 import com.garrietta.haven.ui.components.LocalHiddenCardId
+import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.centerTargetRect
@@ -144,12 +148,12 @@ import com.garrietta.haven.ui.components.morphBackgroundAlpha
 import com.garrietta.haven.ui.components.morphBackgroundBlend
 import com.garrietta.haven.ui.components.morphCardAlpha
 import com.garrietta.haven.ui.components.morphContentAlpha
-import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.ScrollVisibilityState
-import com.garrietta.haven.ui.components.detailTargetRect
 import com.garrietta.haven.ui.components.fallbackFromRect
+import com.garrietta.haven.ui.components.heroHeaderAlpha
 import com.garrietta.haven.ui.components.lerpRect
-import com.garrietta.haven.ui.components.sheetTargetRect
+import com.garrietta.haven.ui.components.morphPopupCorner
+import com.garrietta.haven.ui.components.popupTargetRect
 import com.garrietta.haven.ui.theme.springBounds
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
@@ -304,6 +308,12 @@ fun HavenApp(vm: HavenViewModel) {
         // because the camera path needs it.
         val detailScreen = current as? Screen.Thermostat ?: current as? Screen.EntityDetail
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
+        // Traveling-header state (2026-10-29 pop-up round): cards
+        // report header rects here, measurement frames report their
+        // pop-up header target here (id + rect, so a stale target from
+        // a previous morph can never steer the next one).
+        val heroBounds = remember { mutableStateMapOf<String, Rect>() }
+        var heroTarget by remember { mutableStateOf<Pair<String, Rect>?>(null) }
         var sheetAnim by remember { mutableStateOf<SheetAnim?>(null) }
         var detailAnim by remember { mutableStateOf<DetailAnim?>(null) }
         val sheetProgress = remember { Animatable(0f) }
@@ -345,6 +355,7 @@ fun HavenApp(vm: HavenViewModel) {
             sheetAnim = null
             detailAnim = null
             popoutAnim = null
+            heroTarget = null
             vm.closeClimatePopout()
             scrollVisibility.reset()
             backstack.clear()
@@ -386,16 +397,22 @@ fun HavenApp(vm: HavenViewModel) {
             if (detailAnim?.screen == anim.screen) {
                 detailAnim = null
             }
+            // Fresh measurement on the next open: a stale target rect
+            // (e.g. from before a rotation) would otherwise steer the
+            // next morph's traveling header to the wrong place.
+            heroTarget = null
         }
         fun dismissSheetInstant() {
             val anim = sheetAnim ?: return
             if (vm.popupEntityId == anim.id) vm.closePopup()
             if (sheetAnim?.id == anim.id) sheetAnim = null
+            heroTarget = null
         }
         fun dismissPopoutInstant() {
             val anim = popoutAnim ?: return
             if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
             if (popoutAnim?.id == anim.id) popoutAnim = null
+            heroTarget = null
         }
         // Animated dismisses: Back, scrim tap, and Close all use
         // these. The progress animates 1 -> 0 on the bounds spring
@@ -465,6 +482,7 @@ fun HavenApp(vm: HavenViewModel) {
             sheetAnim = null
             detailAnim = null
             popoutAnim = null
+            heroTarget = null
             vm.closeClimatePopout()
             vm.signOut()
             backstack.clear()
@@ -506,6 +524,7 @@ fun HavenApp(vm: HavenViewModel) {
                 } else sheetProgress.snapTo(1f)
             } else if (id == null && anim != null) {
                 sheetAnim = null
+                heroTarget = null
             }
         }
         LaunchedEffect(detailScreen?.let { detailEntityId(it) }) {
@@ -517,6 +536,7 @@ fun HavenApp(vm: HavenViewModel) {
                 } else detailProgress.snapTo(1f)
             } else if (detailScreen == null && anim != null) {
                 detailAnim = null
+                heroTarget = null
             }
         }
         // Thermostat pop-out open effect (mirrors the sheet effect):
@@ -535,6 +555,7 @@ fun HavenApp(vm: HavenViewModel) {
                 } else popoutProgress.snapTo(1f)
             } else if (id == null && anim != null) {
                 popoutAnim = null
+                heroTarget = null
             }
         }
         // Camera overlay transitions share the same language:
@@ -630,6 +651,8 @@ fun HavenApp(vm: HavenViewModel) {
             CompositionLocalProvider(
                 LocalCardBounds provides cardBounds,
                 LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
+                LocalHeroBounds provides heroBounds,
+                LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
                 // Progress-driven source-card alpha (container
                 // transform): the active morph's progress drives the
                 // card fade-out on enter and the fade-back-in on
@@ -649,6 +672,15 @@ fun HavenApp(vm: HavenViewModel) {
             // below render inside this Box, above the scaffold.
             var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
             var overlaySize by remember { mutableStateOf(IntSize.Zero) }
+            // Floating-shelf geometry (2026-10-29 pop-up round): every
+            // pop-up sits 16dp in from each side and 20dp + the
+            // navigation inset above the overlay bottom, so the dimmed
+            // page stays visible around it on all sides.
+            val shelfDensity = LocalDensity.current
+            val shelfSideMarginPx = with(shelfDensity) { 16.dp.toPx() }
+            val shelfBottomMarginPx = with(shelfDensity) { 20.dp.toPx() } +
+                WindowInsets.navigationBars.getBottom(shelfDensity).toFloat()
+            val shelfBottomMarginDp = with(shelfDensity) { shelfBottomMarginPx.toDp() }
             Box(
                 Modifier.fillMaxSize().onGloballyPositioned {
                     overlayOrigin = it.boundsInRoot().topLeft
@@ -728,7 +760,19 @@ fun HavenApp(vm: HavenViewModel) {
             // Scroll-away lives here: nested scrolls from the tab/Home
             // lists reach this Box (sheet/detail overlays are siblings
             // outside it, so their inner scrolls never move the bar).
-            Box(Modifier.fillMaxSize().padding(contentPadding).nestedScroll(scrollVisibility.nestedScrollConnection)) {
+            // DARK-MODE FIX (2026-10-29 pop-up round): this Box paints
+            // the scheme background. The activity theme is a Light
+            // parent (DayNight does not link in this material3
+            // version) and the Scaffold is transparent, so the window's
+            // white background used to show through on every page that
+            // did not paint its own background — light pages carrying
+            // dark-scheme cards and a dark pill. With the scheme
+            // background here, page, cards, pill, sheets, and pop-ups
+            // all come from ONE colorScheme per theme, in both light
+            // and dark system themes. The pill still floats above it
+            // on its own shadow; nothing about the floating bar
+            // changes.
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(contentPadding).nestedScroll(scrollVisibility.nestedScrollConnection)) {
                 // Detail pages do NOT render here: the scaffold shows
                 // the screen underneath, and the page itself lives in
                 // the overlay below (above all chrome). Every other
@@ -752,20 +796,23 @@ fun HavenApp(vm: HavenViewModel) {
             }
         }
             // Sheet morph overlay: one scrim plus one morphing surface.
-            // The scrim fades with progress and blocks touches from the
-            // first frame (even during the measurement frame below,
-            // when progress is still 0). The surface interpolates a
-            // single rect from the card captured at open to the measured
-            // panel rect; the source card underneath fades out over
-            // the first 40% of enter and back in over the last 40% of
-            // exit (progress-driven alpha, not a binary hide), so
-            // nothing ever doubles and nothing ever pops. Dismiss is
-            // the smooth reverse of enter (see dismissSheet); only
-            // the sheet -> detail handoff clears instantly, so the
-            // detail morph starts from the same card without the card
-            // flashing back in between. Dragging past the threshold
-            // flings the sheet off the bottom (see below) instead of
-            // shrinking it back.
+            // POP-UP ROUND (2026-10-29): the sheet is a floating shelf
+            // now — 16dp side margins, bottom margin above the pill
+            // clearance — never a full-width bottom panel. The scrim
+            // fades with progress and blocks touches from the first
+            // frame (even during the measurement frame below, when
+            // progress is still 0). The surface interpolates a
+            // single rect from the card captured at open to the
+            // measured shelf rect; the source card underneath fades
+            // out over the first 40% of enter and back in over the
+            // last 40% of exit (progress-driven alpha, not a binary
+            // hide), so nothing ever doubles and nothing ever pops.
+            // Dismiss is the smooth reverse of enter (see
+            // dismissSheet); only the sheet -> detail handoff clears
+            // instantly, so the detail morph starts from the same card
+            // without the card flashing back in between. Dragging past
+            // the threshold flings the sheet off the bottom (see
+            // below) instead of shrinking it back.
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
                 BackHandler { dismissSheet() }
@@ -785,28 +832,38 @@ fun HavenApp(vm: HavenViewModel) {
                 val targetSize = anim.targetSize
                 if (targetSize == null) {
                     // Measurement frame: the panel content, invisible,
-                    // laid out once at its final width so its height can
-                    // be captured. Below the scrim, so it can neither
-                    // flash nor take touches; replaced by the morph
-                    // surface on the next frame.
+                    // laid out once at its final shelf geometry (same
+                    // side/bottom margins as the surface below) so its
+                    // height can be captured AND its header can report
+                    // the traveling header's target rect. Below the
+                    // scrim, so it can neither flash nor take touches;
+                    // replaced by the morph surface on the next frame.
+                    // The hero provider lives ONLY here: the surface
+                    // content's header sits at the interpolated rect
+                    // mid-morph and must never overwrite the target.
                     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                    Box(
+                        Modifier.fillMaxSize().padding(horizontal = 16.dp, bottom = shelfBottomMarginDp),
+                        contentAlignment = Alignment.BottomCenter,
+                    ) {
                         Box(
                             Modifier.fillMaxWidth()
                                 .heightIn(max = screenHeight * 0.92f)
                                 .alpha(0f)
                                 .onGloballyPositioned { anim.targetSize = it.size },
                         ) {
-                            EntityPopupSheetContent(
-                                vm, navigate, anim.id, dragging = false,
-                                sheetBounds = sheetSurfaceBounds,
-                                onClose = { dismissSheet() },
-                                onDetails = { dismissSheetInstant() },
-                            )
+                            CompositionLocalProvider(LocalHeroTarget provides { r -> heroTarget = anim.id to r }) {
+                                EntityPopupSheetContent(
+                                    vm, navigate, anim.id, dragging = false,
+                                    sheetBounds = sheetSurfaceBounds,
+                                    onClose = { dismissSheet() },
+                                    onDetails = { dismissSheetInstant() },
+                                )
+                            }
                         }
                     }
                 } else {
-                    val target = sheetTargetRect(overlayOrigin, overlaySize, targetSize)
+                    val target = popupTargetRect(overlayOrigin, overlaySize, targetSize, shelfSideMarginPx, shelfBottomMarginPx)
                     val density = LocalDensity.current
                     // Current bounds first, captured rect as fallback:
                     // cards re-report on relayout, so rotation
@@ -829,6 +886,11 @@ fun HavenApp(vm: HavenViewModel) {
                         overlayOrigin = overlayOrigin,
                         targetSize = targetSize,
                         cornerTop = 28.dp,
+                        // Floating shelf: all four corners morph
+                        // 28dp -> 32dp across the whole animation
+                        // (see morphPopupCorner) — the radius
+                        // transitions smoothly, never snaps in.
+                        cornerAll = morphPopupCorner(sheetP),
                         // Every morph fades its content with the steep
                         // curve (see morphContentAlpha): the #53
                         // weather-only linear fade did not satisfy the
@@ -904,56 +966,115 @@ fun HavenApp(vm: HavenViewModel) {
                             onDetails = { dismissSheetInstant() },
                         )
                     }
+                    // Traveling header, above the surface: the card's
+                    // badge/name/state travel to the sheet's header
+                    // as ONE element (see TravelingHeader). Rendered
+                    // only once the measurement frame has reported the
+                    // target; before that the card header is still
+                    // visible, so nothing is ever duplicated.
+                    TravelingHeader(
+                        vm, anim.id, heroBounds[anim.id],
+                        heroTarget?.takeIf { it.first == anim.id }?.second,
+                        sheetP, overlayOrigin,
+                    )
                 }
             }
-            // Detail morph overlay: the page grows out of its card on
-            // the bounds spring and draws above all chrome (the old
-            // bottom-sheet rise for detail pages is gone — the
-            // visual-bugs round replaced it with the container morph,
-            // and this round replaces the morph mechanism itself).
-            // Back is the smooth reverse of enter (see
-            // dismissDetail): the page shrinks back onto its card
-            // while the card fades back in whole — no exit shrink
-            // without content, no snap, no staged reappearance. A
-            // non-clickable dim scrim fades with progress (detail
-            // pages dismiss via Back only, never outside tap), so
-            // Home dims progressively as the page grows instead of
-            // staying fully bright behind a translucent page — the
-            // weather-page + Home doubling read in the 2026-10-29
-            // verdict video.
+            // Detail morph overlay: POP-UP ROUND (2026-10-29) — the
+            // full-span page is GONE. Every detail destination opens
+            // as a bottom-anchored floating shelf, exactly like the
+            // sheets above: 16dp side margins, bottom margin above
+            // the pill clearance, 92% max height, all four corners
+            // morphing 28dp -> 32dp. This supersedes the old
+            // "weather's full page stands" exception: weather detail
+            // is a pop-up too. The shelf grows out of its card on the
+            // bounds spring and draws above all chrome; Back and
+            // outside-tap are the smooth reverse of enter (see
+            // dismissDetail) — the card fades back in whole, never a
+            // snap, never staged. A dim scrim fades with progress
+            // (tappable now: a floating pop-up dismisses on outside
+            // tap, like sheets and the pop-out) so Home dims
+            // progressively as the shelf grows instead of staying
+            // fully bright behind it. The shelf's travel target comes
+            // from a one-frame measurement pass at the shelf's final
+            // geometry (see below): the detail content is fixed at
+            // 92% height, so no size measurement is needed — only the
+            // top bar's rect, which the surface content could never
+            // report correctly mid-morph (its rect is interpolated).
             if (detailAnim != null) {
                 val anim = detailAnim!!
-                val target = detailTargetRect(overlayOrigin, overlaySize)
                 val density = LocalDensity.current
-                // Same current-bounds-first rule as sheets (see above):
-                // rotation mid-morph and moved cards track correctly,
-                // sourceless cards rise from the graceful fallback.
-                val source = cardBounds[anim.entityId] ?: anim.source
                 // Clamped geometry progress (see the sheet block):
                 // the bounds spring overshoots past 1, and the raw
                 // value fed the corner formula below went negative.
                 val detailP = detailProgress.value.coerceIn(0f, 1f)
+                val detailSize = IntSize(
+                    (overlaySize.width - 2 * shelfSideMarginPx).roundToInt(),
+                    (overlaySize.height * 0.92f).roundToInt(),
+                )
+                val target = popupTargetRect(overlayOrigin, overlaySize, detailSize, shelfSideMarginPx, shelfBottomMarginPx)
+                // Same current-bounds-first rule as sheets (see above):
+                // rotation mid-morph and moved cards track correctly,
+                // sourceless cards rise from the graceful fallback.
+                val source = cardBounds[anim.entityId] ?: anim.source
                 val rect = if (source != null) lerpRect(source, target, detailP)
                     else lerpRect(fallbackFromRect(target, with(density) { 80.dp.toPx() }), target, detailP)
-                // Non-clickable: it only dims, it never dismisses
-                // (Back is the detail exit) and it never swallows a
-                // tap meant for the page itself.
+                val targetHero = heroTarget?.takeIf { it.first == anim.entityId }?.second
+                // Clickable dim scrim, above the scaffold and below
+                // the shelf: outside taps dismiss the pop-up.
                 Box(
                     Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f * detailP)),
+                        .background(Color.Black.copy(alpha = 0.4f * detailP))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { dismissDetail() },
                 )
-                MorphSurface(
-                    rect = rect,
-                    overlayOrigin = overlayOrigin,
-                    targetSize = overlaySize,
-                    cornerTop = morphCornerTop(detailP),
-                    background = MaterialTheme.colorScheme.background,
-                    contentAlpha = morphContentAlpha(detailP),
-                    fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
-                    backgroundBlend = morphBackgroundBlend(detailP),
-                    backgroundAlpha = morphBackgroundAlpha(detailP),
-                ) {
-                    content(anim.screen)
+                if (targetHero == null) {
+                    // Measurement frame: the detail content, invisible,
+                    // laid out once at the shelf's final geometry so
+                    // its top bar can report the traveling header's
+                    // target rect. Below the scrim's alpha (progress
+                    // is ~0 here), so it can neither flash nor take
+                    // touches; replaced by the morph surface on the
+                    // next frame. The hero provider lives ONLY here.
+                    Box(
+                        Modifier.fillMaxSize().padding(horizontal = 16.dp, bottom = shelfBottomMarginDp),
+                        contentAlignment = Alignment.BottomCenter,
+                    ) {
+                        Box(
+                            Modifier.fillMaxWidth()
+                                .height(with(density) { detailSize.height.toDp() })
+                                .alpha(0f),
+                        ) {
+                            CompositionLocalProvider(LocalHeroTarget provides { r -> heroTarget = anim.entityId to r }) {
+                                content(anim.screen)
+                            }
+                        }
+                    }
+                } else {
+                    MorphSurface(
+                        rect = rect,
+                        overlayOrigin = overlayOrigin,
+                        targetSize = detailSize,
+                        cornerTop = 28.dp,
+                        // Floating shelf: all four corners morph
+                        // 28dp -> 32dp across the whole animation.
+                        cornerAll = morphPopupCorner(detailP),
+                        background = MaterialTheme.colorScheme.background,
+                        contentAlpha = morphContentAlpha(detailP),
+                        fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
+                        backgroundBlend = morphBackgroundBlend(detailP),
+                        backgroundAlpha = morphBackgroundAlpha(detailP),
+                    ) {
+                        content(anim.screen)
+                    }
+                    // Traveling header, above the surface (see the
+                    // sheet block): the card's badge/name/state travel
+                    // to the pop-up's top bar as ONE element.
+                    TravelingHeader(
+                        vm, anim.entityId, heroBounds[anim.entityId],
+                        targetHero, detailP, overlayOrigin,
+                    )
                 }
             }
             // Thermostat pop-out: a centered expressive morph (not a
@@ -985,7 +1106,11 @@ fun HavenApp(vm: HavenViewModel) {
                     // Measurement frame: invisible, at the panel's final
                     // width (overlay minus 16dp margins), height capped
                     // at 92% of the overlay. Below the scrim, so it can
-                    // neither flash nor take touches.
+                    // neither flash nor take touches. The hero provider
+                    // lives ONLY here, so the pop-out's title row
+                    // reports the traveling header's target from final
+                    // geometry — the surface content must never
+                    // overwrite it mid-morph.
                     val density = LocalDensity.current
                     val maxHeight = with(density) { overlaySize.height.toDp() * 0.92f }
                     Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
@@ -995,14 +1120,16 @@ fun HavenApp(vm: HavenViewModel) {
                                 .alpha(0f)
                                 .onGloballyPositioned { anim.targetSize = it.size },
                         ) {
-                            ThermostatPopoutContent(
-                                vm, anim.id,
-                                onDetails = {
-                                    dismissPopoutInstant()
-                                    navigate(Screen.Thermostat(anim.id))
-                                },
-                                onClose = { dismissPopout() },
-                            )
+                            CompositionLocalProvider(LocalHeroTarget provides { r -> heroTarget = anim.id to r }) {
+                                ThermostatPopoutContent(
+                                    vm, anim.id,
+                                    onDetails = {
+                                        dismissPopoutInstant()
+                                        navigate(Screen.Thermostat(anim.id))
+                                    },
+                                    onClose = { dismissPopout() },
+                                )
+                            }
                         }
                     }
                 } else {
@@ -1017,6 +1144,15 @@ fun HavenApp(vm: HavenViewModel) {
                         overlayOrigin = overlayOrigin,
                         targetSize = targetSize,
                         cornerTop = 0.dp,
+                        // The pop-out's radius morphs 28dp -> 32dp
+                        // across the whole animation (see
+                        // morphPopupCorner): the old fixed 32dp panel
+                        // corners inside a square-cornered surface are
+                        // exactly the "radius doesn't smoothly
+                        // transition" read from the verdict. The panel
+                        // keeps its own 32dp shape; the surface clip
+                        // governs during the morph and lands on 32dp.
+                        cornerAll = morphPopupCorner(popoutP),
                         contentAlpha = morphContentAlpha(popoutP),
                         background = Color.Transparent,
                     ) {
@@ -1050,6 +1186,14 @@ fun HavenApp(vm: HavenViewModel) {
                             )
                         }
                     }
+                    // Traveling header, above the surface (see the
+                    // sheet block): the climate card's badge/name/state
+                    // travel to the pop-out's title row as ONE element.
+                    TravelingHeader(
+                        vm, anim.id, heroBounds[anim.id],
+                        heroTarget?.takeIf { it.first == anim.id }?.second,
+                        popoutP, overlayOrigin,
+                    )
                 }
             }
             } // overlay root Box
@@ -1166,6 +1310,11 @@ private fun EntityPopupSheetContent(
     val states by vm.states.collectAsState()
     val entity = states[popupId]
     val reduceMotion = LocalReduceMotion.current
+    // Traveling header target (2026-10-29 pop-up round): read during
+    // composition; the header row below reports its root rect into it
+    // only inside the measurement frame (the provider is absent in the
+    // morph surface, so the target can never be overwritten mid-morph).
+    val heroTarget = LocalHeroTarget.current
     // Entering phase for the dynamic handle: wide/thin while the sheet
     // rises, narrow/thick at rest.
     var settled by remember { mutableStateOf(false) }
@@ -1205,7 +1354,11 @@ private fun EntityPopupSheetContent(
                 Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 val accent = accentFor(entity.entityId)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     DomainBadge(
                         entity,
                         domainIcon(entity),
@@ -1252,6 +1405,95 @@ private fun EntityPopupSheetContent(
                 }
             }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * The single traveling header (2026-10-29 pop-up round, Relay-style):
+ * the card's badge, name, and state travel position + size from the
+ * card's header rect to the pop-up's header rect as ONE element —
+ * the way Relay's contact photos expand and travel into the header —
+ * never two copies. Mechanism, and why it finally answers the
+ * doubling/flash/snap saga instead of retuning it:
+ * - The card's own header is hidden from frame 0 (see
+ *   hideHeroWhenMorphSource): at progress 0 the traveling header
+ *   sits exactly on the card header's rect, so the handoff is
+ *   invisible — no second badge, name, or state ever appears beside
+ *   the traveling one.
+ * - The pop-up's own header is hidden by the late content fade
+ *   (morphContentAlpha) until the morph nearly completes; the
+ *   traveling header dissolves into it over the last 10% (see
+ *   heroHeaderAlpha) once it has arrived at the target rect.
+ * - Exit is the exact reverse: the header reappears at the target,
+ *   travels back to the card, and the card header returns in the
+ *   same frame the morph clears — never a snap, never staged
+ *   (badge-then-text), never a blank panel.
+ * - No sharedBounds crossfade (both endpoints visible = #49's
+ *   ghosting), no blank growing panel (#60/#62's white flash), no
+ *   instant snap return (#62's "sudden smack"). One element travels;
+ *   the rest of the pop-up content fades in around it.
+ * Rendered only when both rects are known: a sourceless card or a
+ * pop-up that never reported its header simply gets the existing
+ * fade mechanism, never a crash and never a jump. The header takes
+ * no touches (no clickable): taps fall through to the surface below.
+ * Name size lerps 16sp -> 20sp card-to-pop-up; the badge fills the
+ * lerped row height, so it grows/shrinks with the travel.
+ */
+@Composable
+private fun TravelingHeader(
+    vm: HavenViewModel,
+    entityId: String,
+    source: Rect?,
+    target: Rect?,
+    progress: Float,
+    overlayOrigin: Offset,
+) {
+    val states by vm.states.collectAsState()
+    val entity = states[entityId] ?: return
+    if (source == null || target == null) return
+    val p = progress.coerceIn(0f, 1f)
+    val rect = lerpRect(source, target, p)
+    val density = LocalDensity.current
+    val accent = accentFor(entity.entityId)
+    Box(
+        Modifier
+            .offset {
+                IntOffset(
+                    (rect.left - overlayOrigin.x).roundToInt(),
+                    (rect.top - overlayOrigin.y).roundToInt(),
+                )
+            }
+            .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
+            .clipToBounds()
+            .graphicsLayer { alpha = heroHeaderAlpha(p) },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DomainBadge(
+                entity,
+                domainIcon(entity),
+                accent,
+                modifier = Modifier.size(with(density) { rect.height.toDp() }),
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entity.friendlyName,
+                    fontSize = (16 + 4 * p).sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    entity.stateText(),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -1303,7 +1545,7 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
         )
         // Badge held for Ring in this test build (see above); other
         // cameras never carried a badge here either.
-        CameraHeader(entity?.friendlyName ?: cameraId, badgeText = null, onClose = onClose)
+        CameraHeader(entity?.friendlyName ?: "Camera", badgeText = null, onClose = onClose)
     }
 }
 
@@ -1448,7 +1690,7 @@ fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: 
     BackHandler { onClose() }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         CameraMjpegBody(vm, recordingEntityId, enterProgress, recording = true, onClose = onClose)
-        CameraHeader(entity?.friendlyName ?: recordingEntityId, badgeText = "Recording", onClose = onClose)
+        CameraHeader(entity?.friendlyName ?: "Camera", badgeText = "Recording", onClose = onClose)
     }
 }
 /** Dismissible banner for the last service-call failure. */
@@ -1663,11 +1905,17 @@ fun StatusBarAppearance(background: Color) {
     }
 }
 
-/** Back arrow + title row used by every detail screen. */
+/** Back arrow + title row used by every detail screen. Reports its
+ * root rect into the measurement frame's hero target when one is
+ * provided (2026-10-29 pop-up round): detail pop-ups travel to their
+ * top bar, so the bar's rect is the travel target. Outside a
+ * measurement frame the provider is null and this is a plain row. */
 @Composable
 fun DetailTopBar(title: String, onBack: () -> Unit) {
+    val heroTarget = LocalHeroTarget.current
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
+            .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {

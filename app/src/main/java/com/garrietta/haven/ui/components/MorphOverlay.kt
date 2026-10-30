@@ -102,6 +102,29 @@ val LocalCardBounds = staticCompositionLocalOf<MutableMap<String, Rect>> { mutab
 val LocalHiddenCardId = staticCompositionLocalOf<String?> { null }
 
 /**
+ * Header bounds by entity id, in root coordinates: the card header row
+ * (EntityControlCard) or the tile badge (EntityTile). Written by cards,
+ * read by the traveling header at morph time. Separate from
+ * [LocalCardBounds]: the traveling header needs the header's own rect,
+ * not the whole card's.
+ */
+val LocalHeroBounds = staticCompositionLocalOf<MutableMap<String, Rect>> { mutableMapOf() }
+
+/** Entity id whose card header is currently hidden because its traveling header is on screen, or null. */
+val LocalHiddenHeroId = staticCompositionLocalOf<String?> { null }
+
+/**
+ * Reporter for a pop-up's own header target rect, in root coordinates.
+ * Provided ONLY around a morph's measurement frame (never around the
+ * morph surface content): the measurement frame sits at the pop-up's
+ * final geometry, so its header rect IS the travel target, while the
+ * surface content's header sits at the interpolated rect mid-morph
+ * and must never overwrite the target. Null outside measurement
+ * frames: reporting sites no-op there.
+ */
+val LocalHeroTarget = staticCompositionLocalOf<((Rect) -> Unit)?> { null }
+
+/**
  * Progress-driven alpha for the active morph source card (see
  * [hideWhenMorphSource]): 1 when no morph is active. Provided by the
  * overlay root from the active morph's progress via
@@ -119,6 +142,38 @@ fun Modifier.reportCardBounds(id: String): Modifier = composed {
     onGloballyPositioned { coords: LayoutCoordinates ->
         val rect = coords.boundsInRoot()
         if (bounds[id] != rect) bounds[id] = rect
+    }
+}
+
+/**
+ * Reports this layout's header boundsInRoot into [LocalHeroBounds]
+ * under [id] (see [reportCardBounds] for the write-once-changed rule).
+ * EntityControlCard reports its header row; EntityTile reports its
+ * badge (the tile's name/status sit below the badge, so the badge
+ * rect anchors the traveling header's position).
+ */
+fun Modifier.reportHeroBounds(id: String): Modifier = composed {
+    val bounds = LocalHeroBounds.current
+    onGloballyPositioned { coords: LayoutCoordinates ->
+        val rect = coords.boundsInRoot()
+        if (bounds[id] != rect) bounds[id] = rect
+    }
+}
+
+/**
+ * Hides this layout's header while it is the active morph source's
+ * traveling header (layout unchanged, alpha only). The card's header
+ * must vanish the moment the traveling header appears at the same
+ * rect — otherwise the morph opens with two copies of the badge,
+ * name, and state (the doubling read in every 2026-10-29 verdict
+ * video). The rest of the card still fades on [morphCardAlpha]; only
+ * the header is hidden from frame 0, because the traveling header
+ * replaces it exactly.
+ */
+fun Modifier.hideHeroWhenMorphSource(id: String): Modifier = composed {
+    val hiddenId = LocalHiddenHeroId.current
+    graphicsLayer {
+        alpha = if (id == hiddenId) 0f else 1f
     }
 }
 
@@ -186,6 +241,30 @@ fun detailTargetRect(overlayOrigin: Offset, overlaySize: IntSize): Rect =
     )
 
 /**
+ * Floating-shelf target (2026-10-29 pop-up round): the bottom-anchored
+ * floating window every detail destination now opens as — NOT a
+ * full-span page, NOT a swipe-up sheet. The panel sits [sideMarginPx]
+ * in from each side and [bottomMarginPx] above the overlay bottom
+ * (pill clearance + navigation inset), so the dimmed page stays
+ * visible around it on all sides. The top is clamped to the overlay
+ * top so an oversized panel can never extend past the screen.
+ * Pure, unit-tested.
+ */
+fun popupTargetRect(
+    overlayOrigin: Offset,
+    overlaySize: IntSize,
+    panelSize: IntSize,
+    sideMarginPx: Float,
+    bottomMarginPx: Float,
+): Rect {
+    val left = overlayOrigin.x + sideMarginPx
+    val right = overlayOrigin.x + overlaySize.width - sideMarginPx
+    val bottom = overlayOrigin.y + overlaySize.height - bottomMarginPx
+    val top = (bottom - panelSize.height).coerceAtLeast(overlayOrigin.y)
+    return Rect(left, top, right, bottom)
+}
+
+/**
  * Graceful morph origin when the source card never reported bounds
  * (e.g. a board/Lovelace card, which does not report): the target rect
  * shifted down by [offsetPx], so the surface rises into place instead
@@ -217,6 +296,35 @@ fun fallbackFromRect(target: Rect, offsetPx: Float): Rect =
  */
 fun morphCornerTop(progress: Float): Dp =
     (28.dp * (1f - progress.coerceIn(0f, 1f))).coerceAtLeast(0.dp)
+
+/**
+ * Corner radius for a morphing pop-up shelf at [progress] (0 = card,
+ * 1 = shelf): the card's 28dp lerps continuously to the shelf's
+ * 32dp across the WHOLE animation — no jump, no snap. The 2026-10-29
+ * verdict flagged the radius as not smoothly transitioning: the old
+ * pop-out drew fixed 32dp panel corners inside a square-cornered
+ * surface, so the radius appeared in one frame instead of morphing.
+ * Progress is clamped before computing and the result floored at
+ * 0.dp, same crash-proofing as [morphCornerTop] (see the spring-clamp
+ * skill). Pure, unit-tested.
+ */
+fun morphPopupCorner(progress: Float, from: Dp = 28.dp, to: Dp = 32.dp): Dp {
+    val p = progress.coerceIn(0f, 1f)
+    return (from + (to - from) * p).coerceAtLeast(0.dp)
+}
+
+/**
+ * Alpha for the traveling header at [progress]: fully visible
+ * through the morph, dissolving into the pop-up's own header over
+ * the last 10% ([0.9, 1.0]) — late enough that the header has
+ * arrived at its target rect, short enough that the two headers are
+ * never both readable. On exit the same curve runs in reverse, so
+ * the header reappears at its target and travels back to the card.
+ * Progress is clamped first, so spring overshoot lands exactly on 0.
+ * Pure, unit-tested.
+ */
+fun heroHeaderAlpha(progress: Float): Float =
+    1f - smoothstep(0.9f, 1.0f, progress)
 
 /**
  * Content alpha for a morphing surface at [progress] (0 = card,
@@ -310,7 +418,12 @@ fun morphBackgroundAlpha(progress: Float): Float =
  * [cornerTop] is the surface's top corner radius (sheets: constant 28dp;
  * detail pages: 28dp → 0dp over the morph). It is coerced to >= 0.dp
  * at the clip site: no caller can ever hand this surface a negative
- * corner again (see [morphCornerTop]). [contentAlpha] fades the
+ * corner again (see [morphCornerTop]). [cornerAll], when non-null,
+ * replaces the top-only clip with a uniform all-corner radius —
+ * the pop-up shelves clip all four corners, and the radius itself
+ * morphs via [morphPopupCorner], so the window's corners transition
+ * smoothly across the whole animation instead of snapping in.
+ * [contentAlpha] fades the
  * surface's content (1 = fully visible); every morph passes
  * [morphContentAlpha] of its progress, so content materializes only
  * once the panel is nearly full size instead of popping to full size
@@ -344,6 +457,7 @@ fun MorphSurface(
     fromBackground: Color? = null,
     backgroundBlend: Float = 1f,
     backgroundAlpha: Float = 1f,
+    cornerAll: Dp? = null,
     onPlaced: ((Rect) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -372,7 +486,10 @@ fun MorphSurface(
                 )
             }
             .size(widthDp, heightDp)
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = cornerTop.coerceAtLeast(0.dp), topEnd = cornerTop.coerceAtLeast(0.dp)))
+            .clip(
+                if (cornerAll != null) androidx.compose.foundation.shape.RoundedCornerShape(cornerAll.coerceAtLeast(0.dp))
+                else androidx.compose.foundation.shape.RoundedCornerShape(topStart = cornerTop.coerceAtLeast(0.dp), topEnd = cornerTop.coerceAtLeast(0.dp)),
+            )
             .background(effectiveBackground)
             .then(
                 if (onPlaced != null) Modifier.onGloballyPositioned { onPlaced(it.boundsInWindow()) }

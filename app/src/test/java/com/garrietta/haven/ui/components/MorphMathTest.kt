@@ -206,4 +206,66 @@ class MorphMathTest {
         assertEquals(1f, morphBackgroundAlpha(1.5f), 0.001f)
         assertEquals(1f, morphBackgroundAlpha(1.00493f), 0.001f)
     }
+
+    @Test
+    fun popupTargetRect_floatingShelfMargins() {
+        // 2026-10-29 pop-up round: the shelf sits 16dp in from each
+        // side and 20dp above the overlay bottom — never full-span.
+        // (1080x2400 overlay, 40px side margin, 50px bottom margin,
+        // 1000x1200 panel.)
+        val target = popupTargetRect(Offset(0f, 0f), IntSize(1080, 2400), IntSize(1000, 1200), 40f, 50f)
+        assertEquals(Rect(40f, 1150f, 1040f, 2350f), target)
+    }
+
+    @Test
+    fun popupTargetRect_respectsOverlayOrigin() {
+        val target = popupTargetRect(Offset(10f, 20f), IntSize(1080, 2400), IntSize(1000, 600), 40f, 50f)
+        assertEquals(Rect(50f, 1770f, 1050f, 2370f), target)
+    }
+
+    @Test
+    fun popupTargetRect_oversizedPanelClampsTop() {
+        // A panel taller than the available shelf space never extends
+        // past the overlay top; it clips at the top edge instead.
+        val target = popupTargetRect(Offset(0f, 0f), IntSize(1080, 2400), IntSize(1000, 3000), 40f, 50f)
+        assertEquals(0f, target.top, 0.001f)
+        assertEquals(2350f, target.bottom, 0.001f)
+    }
+
+    @Test
+    fun morphPopupCorner_transitionsContinuously() {
+        // 2026-10-29 pop-up round: the window's corner radius morphs
+        // 28dp -> 32dp across the WHOLE animation — no jump, no snap.
+        assertEquals(28.dp, morphPopupCorner(0f))
+        assertEquals(30.dp, morphPopupCorner(0.5f))
+        assertEquals(32.dp, morphPopupCorner(1f))
+    }
+
+    @Test
+    fun morphPopupCorner_clampsAndOvershoot() {
+        // Same crash-proofing as morphCornerTop: spring overshoot
+        // (the observed 1.00493) lands exactly on the shelf radius,
+        // never past it, never negative.
+        assertEquals(28.dp, morphPopupCorner(-1f))
+        assertEquals(32.dp, morphPopupCorner(1.5f))
+        assertEquals(32.dp, morphPopupCorner(1.00493f))
+    }
+
+    @Test
+    fun heroHeaderAlpha_visibleUntilLastTenPercent() {
+        // The traveling header is fully visible through the morph and
+        // dissolves into the pop-up's own header only over [0.9, 1.0].
+        assertEquals(1f, heroHeaderAlpha(0f), 0.001f)
+        assertEquals(1f, heroHeaderAlpha(0.5f), 0.001f)
+        assertEquals(1f, heroHeaderAlpha(0.9f), 0.001f)
+        assertEquals(0.5f, heroHeaderAlpha(0.95f), 0.001f)
+        assertEquals(0f, heroHeaderAlpha(1f), 0.001f)
+    }
+
+    @Test
+    fun heroHeaderAlpha_clampsAndOvershoot() {
+        assertEquals(1f, heroHeaderAlpha(-1f), 0.001f)
+        assertEquals(0f, heroHeaderAlpha(1.5f), 0.001f)
+        assertEquals(0f, heroHeaderAlpha(1.00493f), 0.001f)
+    }
 }
