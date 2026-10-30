@@ -140,7 +140,7 @@ fun LoginScreen(vm: HavenViewModel) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(instance.name, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(instance.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         Text(instance.url, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Text(

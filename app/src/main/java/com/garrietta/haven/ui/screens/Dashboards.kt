@@ -83,7 +83,7 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Boards", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("Boards", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
             OutlinedButton(onClick = { vm.client.refreshLovelace() }) { Text("Refresh") }
             Spacer(Modifier.width(8.dp))
             if (config != null) {
@@ -137,7 +137,7 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
         val views = config!!.views
         if (views.isEmpty()) {
-            Text("This instance has no Lovelace views yet. Create one in Edit mode.")
+            Text("This instance has no Lovelace views yet. Create one in Edit mode.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             return@Column
         }
         val safeSelected = selected.coerceIn(views.indices)

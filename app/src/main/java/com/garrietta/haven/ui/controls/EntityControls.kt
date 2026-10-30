@@ -425,7 +425,7 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(if (isOn) "On" else "Off", fontWeight = FontWeight.SemiBold)
+            Text(if (isOn) "On" else "Off", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             if (isOn) {
                 Text("Tap the bulb to switch off", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -464,7 +464,7 @@ fun SwitchControl(entity: HaEntity, vm: HavenViewModel) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         PillToggle(entity.state == "on", { vm.toggle(entity.entityId) }, accentFor(entity.entityId))
         Spacer(Modifier.width(12.dp))
-        Text(if (entity.state == "on") "On" else "Off", fontWeight = FontWeight.SemiBold)
+        Text(if (entity.state == "on") "On" else "Off", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -498,6 +498,7 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
             Text(
                 if (isGarage) "Garage door · ${entity.stateText()}" else entity.stateText(),
                 fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
@@ -644,7 +645,7 @@ fun VacuumControl(entity: HaEntity, vm: HavenViewModel) {
     val battery = entity.attrInt("battery_level")
     val fanSpeed = entity.attrString("fan_speed")
     val speeds = entity.attrList("fan_speed_list")?.mapNotNull { it as? String } ?: emptyList()
-    Text("Status: ${entity.stateText()}", fontWeight = FontWeight.SemiBold)
+    Text("Status: ${entity.stateText()}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     if (battery != null) {
         Spacer(Modifier.height(8.dp))
         Text("Battery $battery%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -686,7 +687,7 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
     val volume = entity.attrDouble("volume_level") ?: 0.5
     val playing = entity.state == "playing"
     Column {
-        Text(title, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
         if (artist != null) Text(artist, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

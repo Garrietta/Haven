@@ -88,7 +88,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
         for ((key, label) in HOME_SECTIONS) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(label, modifier = Modifier.weight(1f))
+                    Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                     Switch(
                         checked = key !in hidden,
                         onCheckedChange = { shown ->
@@ -127,7 +127,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 val defaultExcluded = light.entityId !in overrides && isIndicatorLight(light)
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(light.friendlyName, modifier = Modifier.weight(1f))
+                        Text(light.friendlyName, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                         Switch(
                             checked = shown,
                             onCheckedChange = { on ->

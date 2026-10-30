@@ -79,13 +79,19 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         if (tab == null) {
             Spacer(Modifier.height(16.dp))
-            Text("This tab was deleted.", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("This tab was deleted.", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
             Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            // Explicit onSurface + single-line ellipsis: a bare Text
+            // outside a Surface resolves its color to black, which
+            // reads as a "clipped" title in dark theme (the T
+            // vanishing into the background — the 2026-10-29
+            // verdict's "hermostat" frame). Titles stay fully
+            // rendered through the whole morph and at rest.
+            Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             OutlinedButton(onClick = { navigate(Screen.TabManager) }) { Text("Edit") }
         }
         Spacer(Modifier.height(12.dp))

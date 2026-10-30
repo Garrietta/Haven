@@ -146,10 +146,12 @@ import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.centerTargetRect
+import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.morphBackgroundAlpha
 import com.garrietta.haven.ui.components.morphBackgroundBlend
 import com.garrietta.haven.ui.components.morphCardAlpha
 import com.garrietta.haven.ui.components.morphContentAlpha
+import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.heroHeaderAlpha
@@ -160,6 +162,7 @@ import com.garrietta.haven.ui.theme.springBounds
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.domainIcon
+import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
@@ -316,6 +319,12 @@ fun HavenApp(vm: HavenViewModel) {
         // a previous morph can never steer the next one).
         val heroBounds = remember { mutableStateMapOf<String, Rect>() }
         var heroTarget by remember { mutableStateOf<Pair<String, Rect>?>(null) }
+        // Traveling-arc state (2026-10-29 verdict-fix round): the
+        // weather dial panel's source rects and pop-up target rect,
+        // mirroring the traveling-header state above. Reset on every
+        // dismiss path alongside heroTarget (see the reset sites).
+        val arcBounds = remember { mutableStateMapOf<String, Rect>() }
+        var arcTarget by remember { mutableStateOf<Pair<String, Rect>?>(null) }
         var sheetAnim by remember { mutableStateOf<SheetAnim?>(null) }
         var detailAnim by remember { mutableStateOf<DetailAnim?>(null) }
         val sheetProgress = remember { Animatable(0f) }
@@ -358,6 +367,7 @@ fun HavenApp(vm: HavenViewModel) {
             detailAnim = null
             popoutAnim = null
             heroTarget = null
+            arcTarget = null
             vm.closeClimatePopout()
             scrollVisibility.reset()
             backstack.clear()
@@ -403,18 +413,21 @@ fun HavenApp(vm: HavenViewModel) {
             // (e.g. from before a rotation) would otherwise steer the
             // next morph's traveling header to the wrong place.
             heroTarget = null
+            arcTarget = null
         }
         fun dismissSheetInstant() {
             val anim = sheetAnim ?: return
             if (vm.popupEntityId == anim.id) vm.closePopup()
             if (sheetAnim?.id == anim.id) sheetAnim = null
             heroTarget = null
+            arcTarget = null
         }
         fun dismissPopoutInstant() {
             val anim = popoutAnim ?: return
             if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
             if (popoutAnim?.id == anim.id) popoutAnim = null
             heroTarget = null
+            arcTarget = null
         }
         // Animated dismisses: Back, scrim tap, and Close all use
         // these. The progress animates 1 -> 0 on the bounds spring
@@ -485,6 +498,7 @@ fun HavenApp(vm: HavenViewModel) {
             detailAnim = null
             popoutAnim = null
             heroTarget = null
+            arcTarget = null
             vm.closeClimatePopout()
             vm.signOut()
             backstack.clear()
@@ -527,6 +541,7 @@ fun HavenApp(vm: HavenViewModel) {
             } else if (id == null && anim != null) {
                 sheetAnim = null
                 heroTarget = null
+                arcTarget = null
             }
         }
         LaunchedEffect(detailScreen?.let { detailEntityId(it) }) {
@@ -539,6 +554,7 @@ fun HavenApp(vm: HavenViewModel) {
             } else if (detailScreen == null && anim != null) {
                 detailAnim = null
                 heroTarget = null
+                arcTarget = null
             }
         }
         // Thermostat pop-out open effect (mirrors the sheet effect):
@@ -558,6 +574,7 @@ fun HavenApp(vm: HavenViewModel) {
             } else if (id == null && anim != null) {
                 popoutAnim = null
                 heroTarget = null
+                arcTarget = null
             }
         }
         // Camera overlay transitions share the same language:
@@ -654,6 +671,7 @@ fun HavenApp(vm: HavenViewModel) {
                 LocalCardBounds provides cardBounds,
                 LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
                 LocalHeroBounds provides heroBounds,
+                LocalArcBounds provides arcBounds,
                 LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
                 // Progress-driven source-card alpha (container
                 // transform): the active morph's progress drives the
@@ -854,7 +872,10 @@ fun HavenApp(vm: HavenViewModel) {
                                 .alpha(0f)
                                 .onGloballyPositioned { anim.targetSize = it.size },
                         ) {
-                            CompositionLocalProvider(LocalHeroTarget provides { r -> heroTarget = anim.id to r }) {
+                            CompositionLocalProvider(
+                                LocalHeroTarget provides { r -> heroTarget = anim.id to r },
+                                LocalArcTarget provides { r -> arcTarget = anim.id to r },
+                            ) {
                                 EntityPopupSheetContent(
                                     vm, navigate, anim.id, dragging = false,
                                     sheetBounds = sheetSurfaceBounds,
@@ -912,6 +933,7 @@ fun HavenApp(vm: HavenViewModel) {
                         // card shows through it — no blank solid rect
                         // ever replaces the card in a single frame.
                         backgroundAlpha = morphBackgroundAlpha(sheetP),
+                        progress = sheetP,
                         modifier = Modifier.pointerInput(anim.id) {
                             detectVerticalDragGestures(
                                 onDragEnd = {
@@ -979,6 +1001,15 @@ fun HavenApp(vm: HavenViewModel) {
                         heroTarget?.takeIf { it.first == anim.id }?.second,
                         sheetP, overlayOrigin,
                         onDismiss = { dismissSheet() },
+                    )
+                    // Traveling arc, above the surface (see
+                    // TravelingArc): the weather card's dial panel
+                    // travels into the pop-up's dial panel as ONE
+                    // element, dissolving into it over the last 10%.
+                    TravelingArc(
+                        vm, anim.id, arcBounds[anim.id],
+                        arcTarget?.takeIf { it.first == anim.id }?.second,
+                        sheetP, overlayOrigin,
                     )
                 }
             }
@@ -1049,7 +1080,10 @@ fun HavenApp(vm: HavenViewModel) {
                                 .height(with(density) { detailSize.height.toDp() })
                                 .alpha(0f),
                         ) {
-                            CompositionLocalProvider(LocalHeroTarget provides { r -> heroTarget = anim.entityId to r }) {
+                            CompositionLocalProvider(
+                                LocalHeroTarget provides { r -> heroTarget = anim.entityId to r },
+                                LocalArcTarget provides { r -> arcTarget = anim.entityId to r },
+                            ) {
                                 content(anim.screen)
                             }
                         }
@@ -1068,6 +1102,7 @@ fun HavenApp(vm: HavenViewModel) {
                         fromBackground = MaterialTheme.colorScheme.surfaceContainerLow,
                         backgroundBlend = morphBackgroundBlend(detailP),
                         backgroundAlpha = morphBackgroundAlpha(detailP),
+                        progress = detailP,
                     ) {
                         content(anim.screen)
                     }
@@ -1078,6 +1113,14 @@ fun HavenApp(vm: HavenViewModel) {
                         vm, anim.entityId, heroBounds[anim.entityId],
                         targetHero, detailP, overlayOrigin,
                         onDismiss = { dismissDetail() },
+                    )
+                    // Traveling arc (see the sheet block): the
+                    // weather card's dial panel travels into the
+                    // detail pop-up's dial panel as ONE element.
+                    TravelingArc(
+                        vm, anim.entityId, arcBounds[anim.entityId],
+                        arcTarget?.takeIf { it.first == anim.entityId }?.second,
+                        detailP, overlayOrigin,
                     )
                 }
             }
@@ -1124,7 +1167,10 @@ fun HavenApp(vm: HavenViewModel) {
                                 .alpha(0f)
                                 .onGloballyPositioned { anim.targetSize = it.size },
                         ) {
-                            CompositionLocalProvider(LocalHeroTarget provides { r -> heroTarget = anim.id to r }) {
+                            CompositionLocalProvider(
+                                LocalHeroTarget provides { r -> heroTarget = anim.id to r },
+                                LocalArcTarget provides { r -> arcTarget = anim.id to r },
+                            ) {
                                 ThermostatPopoutContent(
                                     vm, anim.id,
                                     onDetails = {
@@ -1159,6 +1205,7 @@ fun HavenApp(vm: HavenViewModel) {
                         cornerAll = morphPopupCorner(popoutP),
                         contentAlpha = morphContentAlpha(popoutP),
                         background = Color.Transparent,
+                        progress = popoutP,
                     ) {
                         // The pop-out panel's own background blends
                         // from the card color over the first 30% of
@@ -1526,6 +1573,72 @@ private fun TravelingHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/**
+ * The traveling weather arc (2026-10-29 verdict-fix round): the
+ * Home weather card's dial panel travels into the pop-up's dial
+ * panel as ONE element — the arc visibly moves, never doubles.
+ * Mirrors TravelingHeader exactly: the card-side panel rect
+ * (reported by WeatherControl via reportArcBounds) lerps to the
+ * measurement frame's panel rect on the same progress, the panel
+ * content (condition-tinted box + Dial) fills the lerped rect, and
+ * the traveler dissolves into the destination panel over the last
+ * 10% (heroHeaderAlpha) while the destination panel dissolves in
+ * on the inverse curve (dissolveIntoTraveler) — so at every frame
+ * exactly one arc is visible. Non-weather entities return early
+ * (their arc bounds are never reported); a missing source or
+ * target renders nothing (the destination's late fade still shows
+ * the arc at rest). The panel keeps its 16dp padding at every
+ * size, so the Dial diameter is the lerped panel width minus 32dp
+ * — at both ends that is the 220dp default, and mid-travel the
+ * dial scales with the panel instead of clipping. The humidity
+ * line and timeline are destination-only layout and fade in late
+ * with the rest of the pop-up content; the badge + arc panel are
+ * the traveling elements.
+ */
+@Composable
+private fun TravelingArc(
+    vm: HavenViewModel,
+    entityId: String,
+    source: Rect?,
+    target: Rect?,
+    progress: Float,
+    overlayOrigin: Offset,
+) {
+    val states by vm.states.collectAsState()
+    val entity = states[entityId] ?: return
+    if (entity.domain != "weather") return
+    if (source == null || target == null) return
+    val p = progress.coerceIn(0f, 1f)
+    val rect = lerpRect(source, target, p)
+    val density = LocalDensity.current
+    val temp = entity.attrDouble("temperature") ?: 0.0
+    val conditionColor = weatherConditionColor(entity.state)
+    Box(
+        Modifier
+            .offset {
+                IntOffset(
+                    (rect.left - overlayOrigin.x).roundToInt(),
+                    (rect.top - overlayOrigin.y).roundToInt(),
+                )
+            }
+            .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
+            .graphicsLayer { alpha = heroHeaderAlpha(p) }
+            .background(conditionColor.copy(alpha = 0.14f), RoundedCornerShape(28.dp))
+            .padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Dial(
+            value = temp.toFloat(),
+            range = -10f..40f,
+            onValueChange = {},
+            centerText = temp.formatTemp(),
+            centerSub = entity.state.replace('_', ' ').replaceFirstChar { it.uppercase() },
+            accent = conditionColor,
+            diameter = with(density) { (rect.width.toDp() - 32.dp).coerceAtLeast(0.dp) },
+        )
     }
 }
 

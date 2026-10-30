@@ -65,6 +65,8 @@ import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.dissolveIntoTraveler
+import com.garrietta.haven.ui.components.reportArcBounds
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.theme.ExpressiveKind
@@ -116,7 +118,7 @@ fun MoreControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean = tr
  * (and binary sensors) show badge + value only.
  */
 @Composable
-fun SensorTile(entity: HaEntity, vm: HavenViewModel) {
+fun SensorTile(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true) {
     val accent = accentFor(entity.entityId)
     val numeric = entity.state.toDoubleOrNull()
     val unit = entity.attrString("unit_of_measurement")
@@ -127,6 +129,12 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel) {
         if (numeric != null) vm.refreshHistory(entity.entityId)
     }
     Column {
+        // Detail pop-ups pass showHeader = false: the pop-up header
+        // already shows icon + name + value once (2026-10-29
+        // verdict: no repeated icon+value rows below the header), so
+        // the detail shows only the sparkline + Min/Current/Max.
+        // Cards and sheets keep the header row.
+        if (showHeader) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // 48dp badge (up from 40dp): the shape background clears
             // the value text beside it even while pulsing/rotating.
@@ -146,6 +154,7 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel) {
                     Text(deviceClass.replace('_', ' '), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+        }
         }
         if (numeric != null && history.size >= 2) {
             Spacer(Modifier.height(12.dp))
@@ -227,9 +236,19 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
             // The dial sits on a condition-tinted panel: the condition
             // color is the hero, not an accent line — the panel behind the
             // dial reads instantly as "sunny amber" or "rainy blue".
+            // Arc travel (2026-10-29 verdict: "weather panel all
+            // elements should transition up to the popup panel"):
+            // this panel reports its rect as the traveling arc's
+            // source (cards) and target (measurement frames), and
+            // dissolves into the traveling arc while inside a morph
+            // surface — so the card's arc visibly moves into the
+            // pop-up instead of vanishing and fading back in as a
+            // second copy. The humidity line below is destination
+            // layout and fades in late with the rest of the content.
             val conditionColor = weatherConditionColor(entity.state)
             Box(
-                Modifier.background(conditionColor.copy(alpha = 0.14f), RoundedCornerShape(28.dp)).padding(16.dp),
+                Modifier.reportArcBounds(entity.entityId).dissolveIntoTraveler()
+                    .background(conditionColor.copy(alpha = 0.14f), RoundedCornerShape(28.dp)).padding(16.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Dial(
@@ -315,7 +334,12 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
     ) {
         items(forecast) { item ->
             val whenRaw = (item["datetime"] as? String) ?: ""
-            val whenLabel = friendlyHourLabel(whenRaw)
+            // Timeline nodes show the HOUR only (2026-10-29
+            // observation, not a user directive): friendlyHourLabel's
+            // "Tomorrow 10 PM" truncates to "Tomorro..." in the 72dp
+            // node, repeated for every node. Rows elsewhere keep the
+            // day-qualified label.
+            val whenLabel = timelineHourLabel(whenRaw)
             val fTemp = (item["temperature"] as? Number)?.toDouble()
             val condition = (item["condition"] as? String) ?: ""
             val chipColor = weatherConditionColor(condition)
@@ -357,6 +381,12 @@ private fun forecastChipKind(condition: String): ExpressiveKind = when (conditio
     "sunny", "clear", "clear-night" -> ExpressiveKind.SUNNY
     "rainy", "pouring", "lightning", "lightning-rainy", "hail", "snowy", "snowy-rainy" -> ExpressiveKind.WAVE
     else -> ExpressiveKind.CLOUD
+}
+
+/** "2026-10-28T23:00:00" -> "11 PM", hour only, for timeline nodes (see ForecastTimeline). Falls back to the raw string. */
+private fun timelineHourLabel(raw: String): String {
+    val parsed = parseWeatherTime(raw) ?: return raw.replace('T', ' ').take(16)
+    return SimpleDateFormat("h a", Locale.US).format(parsed)
 }
 
 /** "2026-10-28T23:00:00" -> "11 PM", "Tomorrow 11 PM", or "Thu 11 PM". Falls back to the raw string. */

@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.components
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -125,6 +126,33 @@ val LocalHiddenHeroId = staticCompositionLocalOf<String?> { null }
 val LocalHeroTarget = staticCompositionLocalOf<((Rect) -> Unit)?> { null }
 
 /**
+ * Weather dial-panel bounds by entity id, in root coordinates: the
+ * condition-tinted box around WeatherControl's Dial. Written by every
+ * WeatherControl, read by the traveling arc at morph time. Separate
+ * from [LocalCardBounds]: the traveling arc needs the panel's own
+ * rect, not the whole card's.
+ */
+val LocalArcBounds = staticCompositionLocalOf<MutableMap<String, Rect>> { mutableMapOf() }
+
+/**
+ * Reporter for a pop-up's own dial-panel target rect, in root
+ * coordinates. Provided ONLY around a morph's measurement frame,
+ * mirroring [LocalHeroTarget]: the measurement frame's panel rect IS
+ * the arc travel target.
+ */
+val LocalArcTarget = staticCompositionLocalOf<((Rect) -> Unit)?> { null }
+
+/**
+ * The active morph surface's clamped progress, when the content is
+ * rendered inside one. Null everywhere else (cards, measurement
+ * frames, ordinary pages) — destination content that must dissolve
+ * in sync with a traveling element reads this instead of assuming a
+ * morph is running. Provided by [MorphSurface] from its [progress]
+ * parameter.
+ */
+val LocalMorphProgress = staticCompositionLocalOf<Float?> { null }
+
+/**
  * Progress-driven alpha for the active morph source card (see
  * [hideWhenMorphSource]): 1 when no morph is active. Provided by the
  * overlay root from the active morph's progress via
@@ -157,6 +185,47 @@ fun Modifier.reportHeroBounds(id: String): Modifier = composed {
     onGloballyPositioned { coords: LayoutCoordinates ->
         val rect = coords.boundsInRoot()
         if (bounds[id] != rect) bounds[id] = rect
+    }
+}
+
+/**
+ * Reports this layout's boundsInRoot for arc travel, split by
+ * context exactly like the hero split: a measurement frame
+ * (LocalArcTarget provided) reports ONLY the target; morph surface
+ * content (LocalMorphProgress provided) reports NEITHER — its panel
+ * sits at the interpolated rect mid-morph and must never overwrite
+ * the card-side source; ordinary card content (neither provided)
+ * writes the source map. Without this split, the surface's own
+ * panel would drag the travel source along mid-morph and the exit
+ * would land on the target rect instead of the card.
+ */
+fun Modifier.reportArcBounds(id: String): Modifier = composed {
+    val bounds = LocalArcBounds.current
+    val target = LocalArcTarget.current
+    val inSurface = LocalMorphProgress.current != null
+    onGloballyPositioned { coords: LayoutCoordinates ->
+        val rect = coords.boundsInRoot()
+        when {
+            target != null -> target(rect)
+            !inSurface && bounds[id] != rect -> bounds[id] = rect
+        }
+    }
+}
+
+/**
+ * Dissolves this layout into its traveling counterpart: while inside
+ * a morph surface, alpha follows 1 − [heroHeaderAlpha] of the
+ * surface's progress (invisible while the traveling element carries
+ * the content, fading in whole over the last 10% as the traveler
+ * dissolves into it — the same curve as the traveling header).
+ * Outside a morph surface, alpha is 1: cards and ordinary pages are
+ * unaffected, and measurement frames (which sit outside the surface)
+ * report at full alpha.
+ */
+fun Modifier.dissolveIntoTraveler(): Modifier = composed {
+    val progress = LocalMorphProgress.current
+    graphicsLayer {
+        alpha = if (progress != null) 1f - heroHeaderAlpha(progress) else 1f
     }
 }
 
@@ -483,6 +552,11 @@ fun MorphSurface(
     backgroundAlpha: Float = 1f,
     cornerAll: Dp? = null,
     onPlaced: ((Rect) -> Unit)? = null,
+    // Clamped morph progress, when the caller knows it: provided to
+    // content as LocalMorphProgress so destination elements that must
+    // dissolve in sync with a traveling element (the weather dial
+    // panel) can read it. Null means content is not in a morph.
+    progress: Float? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -525,7 +599,13 @@ fun MorphSurface(
                 .graphicsLayer { alpha = contentAlpha },
             contentAlignment = Alignment.TopStart,
         ) {
-            content()
+            if (progress != null) {
+                CompositionLocalProvider(LocalMorphProgress provides progress) {
+                    content()
+                }
+            } else {
+                content()
+            }
         }
     }
 }

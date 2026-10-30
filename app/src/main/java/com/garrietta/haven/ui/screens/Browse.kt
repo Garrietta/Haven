@@ -49,7 +49,7 @@ fun AreasScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     ) {
         item {
             Spacer(Modifier.height(16.dp))
-            Text("Areas", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("Areas", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(12.dp))
         }
         items(areas) { area ->
@@ -137,7 +137,7 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
-        Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = query,

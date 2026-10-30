@@ -237,7 +237,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             "switch", "input_boolean" -> SwitchControl(entity, vm)
             "cover" -> CoverPageControl(entity, vm)
             "lock" -> LockControl(entity, vm)
-            "sensor", "binary_sensor" -> SensorTile(entity, vm)
+            "sensor", "binary_sensor" -> SensorTile(entity, vm, showHeader = false)
             "media_player" -> MediaPageControl(entity, vm)
             "vacuum" -> VacuumControl(entity, vm)
             "fan" -> FanControl(entity, vm)
@@ -276,12 +276,20 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             Spacer(Modifier.height(16.dp))
         }
     }
+    // No second state display (2026-10-29 verdict: the header shows
+    // icon + name + value once, never repeated below it): sensors
+    // and binary sensors show only their chart/Min/Current/Max
+    // (SensorTile with showHeader = false), and lights show only
+    // their bulb control (LightControl's own On/Off label is the
+    // control, not a second state row). Every other domain keeps
+    // its hero panel.
+    val noHeroDomains = setOf("sensor", "binary_sensor", "light")
     if (LocalWideLayout.current) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
             DetailPopupHeader(entity, onBack)
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp)) {
-                    hero()
+                    if (entity.domain !in noHeroDomains) hero()
                     control()
                 }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 8.dp)) {
@@ -292,7 +300,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     } else {
         LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
             item { DetailPopupHeader(entity, onBack) }
-            item { hero() }
+            if (entity.domain !in noHeroDomains) item { hero() }
             item { control() }
             item { history() }
             item { Spacer(Modifier.height(16.dp)) }
@@ -328,7 +336,7 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
         return
     }
     Column {
-        Text(entity.stateText(), fontWeight = FontWeight.SemiBold)
+        Text(entity.stateText(), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
         if (position != null) {
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -368,7 +376,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
     val frameHeight = 200.dp
     val panelBg = MaterialTheme.colorScheme.surfaceContainer
     Column {
-        Text("Garage door · ${entity.stateText()}", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Garage door · ${entity.stateText()}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (position != null) {
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

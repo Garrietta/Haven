@@ -229,9 +229,17 @@ fun badgeColors(
             else -> climateIdleContainer(scheme) to scheme.onSurfaceVariant
         }
         "binary_sensor" -> if (alert) scheme.errorContainer to scheme.onErrorContainer
-            else accent.copy(alpha = 0.22f) to accent
+            // Untriggered is an off state: grey like an off light
+            // (2026-10-29 verdict — off icons grey everywhere, tiles
+            // matching pop-ups), not a dimmed alert color.
+            else scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         "media_player" -> if (playing) scheme.tertiaryContainer to scheme.onTertiaryContainer
-            else accent.copy(alpha = 0.22f) to accent
+            // Idle/paused is an off state: same grey rule.
+            else scheme.surfaceContainerHighest to scheme.onSurfaceVariant
+        "switch", "input_boolean", "fan" -> if (state == "on") accent.copy(alpha = 0.22f) to accent
+            // Off greys like an off light (same verdict rule); the
+            // on branch is byte-identical to the old else branch.
+            else scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         else -> accent.copy(alpha = 0.22f) to accent
     }
 }

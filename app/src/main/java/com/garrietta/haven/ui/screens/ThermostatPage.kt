@@ -11,7 +11,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -63,6 +65,7 @@ import com.garrietta.haven.DetailPopupHeader
 import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalHeroTarget
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
@@ -72,6 +75,7 @@ import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.theme.stateShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
+import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
 import org.json.JSONObject
@@ -178,9 +182,23 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
         Row(
             Modifier.fillMaxWidth()
                 .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Badge by EVERY pop-up (2026-10-29 verdict overrules
+            // #68's deliberate pop-out exception): the traveling
+            // badge dissolves into this 48dp header badge exactly
+            // like every other pop-up header, and tapping it
+            // dismisses. The top-right X stays.
+            DomainBadge(
+                entity,
+                domainIcon(entity),
+                accentFor(entity.entityId),
+                modifier = Modifier.size(48.dp).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onClose() },
+            )
+            Spacer(Modifier.width(12.dp))
             Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")
@@ -462,7 +480,7 @@ private fun HeatCoolRangeBar(entity: HaEntity, min: Float, max: Float) {
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(stateLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stateLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 if (high != null) "Cool ${high.formatTemp()}" else "",
                 fontSize = 13.sp,

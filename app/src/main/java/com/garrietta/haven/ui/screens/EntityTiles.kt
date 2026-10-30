@@ -54,6 +54,7 @@ import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.badgeColors
 import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.shapeForDomain
@@ -281,9 +282,33 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // rotation never touch the name (2026-10-29 verdict:
                 // "the text overlaps [the] — this expressive shape
                 // background should be larger").
+                // Off-state grey (2026-10-29 verdict: off icons grey
+                // everywhere, tiles matching pop-ups): when the tile
+                // is not active, domains with an off state take the
+                // pop-up's badgeColors pair verbatim (off light =
+                // surfaceContainerHighest + onSurfaceVariant, the
+                // same grey the pop-up header already used) instead
+                // of a full-strength accent glyph on a faint wash.
+                // On-state tiles keep their full color + white glyph
+                // exactly; covers keep their position rendering
+                // (closed is a position, not power) and domains
+                // without an off state keep the old wash.
+                val greyOffDomains = setOf(
+                    "light", "switch", "input_boolean", "fan",
+                    "media_player", "binary_sensor", "climate",
+                )
+                val (offBadgeBg, offBadgeGlyph) = badgeColors(
+                    MaterialTheme.colorScheme, entity, accent,
+                )
+                val badgeBg = if (badgeActive) badgeColor
+                    else if (entity.domain in greyOffDomains) offBadgeBg
+                    else badgeColor.copy(alpha = 0.18f)
+                val badgeGlyph = if (badgeActive) Color.White
+                    else if (entity.domain in greyOffDomains) offBadgeGlyph
+                    else badgeColor
                 Box(
                     Modifier.size(64.dp).background(
-                        if (badgeActive) badgeColor else badgeColor.copy(alpha = 0.18f),
+                        badgeBg,
                         polygonShape(shapeForDomain(entity.domain)),
                     )
                         .graphicsLayer(scaleX = badgeScale, scaleY = badgeScale)
@@ -306,7 +331,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     Icon(
                         domainIcon(entity),
                         contentDescription = null,
-                        tint = if (badgeActive) Color.White else badgeColor,
+                        tint = badgeGlyph,
                         modifier = Modifier.size(26.dp),
                     )
                 }
