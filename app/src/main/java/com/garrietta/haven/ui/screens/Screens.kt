@@ -41,6 +41,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Videocam
+import com.garrietta.haven.DetailTopBar
+import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.groupEntitiesByRoom
+import com.garrietta.haven.ui.components.shapeLabel
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -250,167 +265,119 @@ fun LoginScreen(vm: HavenViewModel) {
 @Composable
 fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
-    val connection by vm.connection.collectAsState()
-    // Read so Home editor saves recompose this screen from the store.
-    @Suppress("UNUSED_VARIABLE")
-    val homePrefsVersion = vm.homePrefsVersion
-    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val connection by vm.connectionState.collectAsState()
+    val homePrefsVersion by vm.homePrefsVersion.collectAsState()
+    val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val autoGreeting = when (hour) {
-        in 0..4 -> "Up late"
         in 5..11 -> "Good morning"
         in 12..17 -> "Good afternoon"
         else -> "Good evening"
     }
-    // A custom welcome message replaces the greeting verbatim; empty keeps
-    // the automatic time-based greeting exactly as before.
-    val customWelcome = vm.settingsStore.homeWelcomeMessage
-    val greeting = if (customWelcome.isBlank()) autoGreeting else customWelcome
+    val customWelcome = vm.settingsStore.homeWelcome.ifEmpty { null }
+    val greeting = customWelcome ?: autoGreeting
     val hiddenSections = vm.settingsStore.homeHiddenSections
-    val showSection: (String) -> Boolean = { it !in hiddenSections }
-    val entities = states.values.sortedBy { it.friendlyName }
-    val weather = entities.firstOrNull { it.domain == "weather" }
-    val homePeople = entities.filter { (it.domain == "person" || it.domain == "device_tracker") && it.state == "home" }
-    val nowPlaying = entities.filter { it.domain == "media_player" && it.state == "playing" }
-    // Home shows only the lights the user (or the default rule) allows:
-    // indicator lights are excluded unless explicitly re-added, and "All
-    // off" below therefore touches displayed lights only.
-    val lightOverrides = vm.settingsStore.homeLightOverrides()
-    val lightsOn = entities.filter {
-        it.domain == "light" && it.state == "on" && isLightShownOnHome(it, lightOverrides)
+    fun showSection(key: String) = !hiddenSections.contains(key)
+    val entities = states.values.toList()
+    val weather = entities.filter { it.domain == "weather" }
+    val homePeople = states.values.filter { it.domain == "person" && it.state == "home" }
+    val lightOverrides = vm.settingsStore.lightHomeOverrides
+    // Rooms (2026-10-30): the Home page is organized by room —
+    // one section per HA area, in HA's order, each room's devices
+    // under it. Areas come from the HA area registry on load
+    // (not a Haven-only list); the flat playing/lights/alerts
+    // sections are gone — their entities live in their rooms.
+    val areas by vm.areas.collectAsState()
+    val entityAreas by vm.entityAreas.collectAsState()
+    val roomEntities = entities.filter {
+        it.domain != "camera" && it.domain != "weather" &&
+            it.domain != "person" && it.domain != "device_tracker"
     }
-    val alerts = entities.filter {
-        it.domain == "binary_sensor" && it.state == "on" &&
-            (it.attrString("device_class") in listOf("problem", "safety", "smoke", "co", "moisture", "tamper", "gas"))
-    }
-    // Sections as LazyListScope blocks so the narrow and wide layouts share
-    // them exactly: one column folded, two side-by-side columns unfolded.
+    val grouped = groupEntitiesByRoom(roomEntities, entityAreas)
+    fun roomMembers(areaId: String?): List<HaEntity> =
+        (grouped[areaId] ?: emptyList())
+            .filter { it.domain != "light" || isLightShownOnHome(it, lightOverrides) }
+            .sortedBy { it.friendlyName }
+
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            if (showSection("greeting")) {
-                Spacer(Modifier.height(16.dp))
-                Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            }
-            if (!connection.isLive()) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    when (connection) {
-                        is ConnectionState.Connecting, ConnectionState.Authenticating -> "Connecting to your home…"
-                        is ConnectionState.Error -> (connection as ConnectionState.Error).message
-                        else -> "Not connected"
-                    },
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 13.sp,
-                )
-            }
+            Text(greeting, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Have a great ${if (hour in 5..11) "morning" else if (hour in 12..17) "afternoon" else "evening"} in your home.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(Modifier.height(16.dp))
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
-        if (showSection("weather") && weather != null) {
-            item {
-                Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                // Home shows current conditions only — dial, condition,
-                // humidity. The card owns its gestures like every other
-                // entity: tap opens the full weather page, long-press
-                // keeps the sheet. The card's own header click is off
-                // so it cannot swallow the outer gestures, and the
-                // card still reports its bounds as the morph source.
-                Box(
-                    Modifier.combinedClickable(
-                        onClick = { navigate(Screen.EntityDetail(weather.entityId)) },
-                        onLongClick = { vm.openPopup(weather.entityId) },
-                    ),
-                ) {
-                    EntityControlCard(weather, vm, showForecast = false, headerClickable = false) { vm.openPopup(it) }
-                }
-                Spacer(Modifier.height(16.dp))
-            }
+        items(weather) { w ->
+            EntityControlCard(w, vm) { vm.openPopup(it.entityId) }
+            Spacer(Modifier.height(12.dp))
         }
     }
     val homeSection: LazyListScope.() -> Unit = {
-        if (showSection("home") && homePeople.isNotEmpty()) {
+        if (homePeople.isNotEmpty()) {
             item {
                 Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(4.dp))
-                Text(homePeople.joinToString(", ") { it.friendlyName }, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(8.dp))
+            }
+            items(homePeople) { person ->
+                EntityControlCard(person, vm) { vm.openPopup(it.entityId) }
+                Spacer(Modifier.height(12.dp))
             }
         }
     }
-    val playingSection: LazyListScope.() -> Unit = {
-        if (showSection("playing") && nowPlaying.isNotEmpty()) {
+    val roomsSections: LazyListScope.() -> Unit = {
+        for (area in areas) {
+            if ("room:${area.id}" in hiddenSections) continue
+            val members = roomMembers(area.id)
+            if (members.isEmpty()) continue
             item {
-                Text("Now playing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(area.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
             }
-            items(nowPlaying) { player ->
-                EntityControlCard(player, vm) { vm.openPopup(it) }
+            items(members) { member ->
+                EntityControlCard(member, vm) { vm.openPopup(it.entityId) }
                 Spacer(Modifier.height(12.dp))
             }
             item { Spacer(Modifier.height(4.dp)) }
         }
-    }
-    val lightsSection: LazyListScope.() -> Unit = {
-        if (showSection("lights") && lightsOn.isNotEmpty()) {
+        val unassigned = roomMembers(null)
+        if (unassigned.isNotEmpty()) {
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${lightsOn.size} light${if (lightsOn.size == 1) "" else "s"} on",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedButton(onClick = {
-                        for (light in lightsOn) vm.turnOff(light.entityId)
-                    }) { Text("All off") }
-                }
+                Text("No room", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
             }
-            items(lightsOn.take(4)) { light ->
-                EntityControlCard(light, vm) { vm.openPopup(it) }
-                Spacer(Modifier.height(12.dp))
-            }
-            item { Spacer(Modifier.height(4.dp)) }
-        }
-    }
-    val alertsSection: LazyListScope.() -> Unit = {
-        if (showSection("alerts") && alerts.isNotEmpty()) {
-            item {
-                Text("Needs attention", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.height(8.dp))
-            }
-            items(alerts) { alert ->
-                EntityControlCard(alert, vm) { vm.openPopup(it) }
+            items(unassigned) { member ->
+                EntityControlCard(member, vm) { vm.openPopup(it.entityId) }
                 Spacer(Modifier.height(12.dp))
             }
         }
     }
-    if (LocalWideLayout.current) {
-        // Expanded windows: cap the two-pane content at 1200dp and
-        // center it, so tablet/desktop panes don't stretch to
-        // full-window width. The cap never binds below 1200dp, so
-        // Medium (Fold8 unfolded) renders exactly as before.
-        Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.TopCenter) {
-            Row(Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp)) {
-                LazyColumn(
-                    Modifier.weight(1f).padding(end = 8.dp),
-                    contentPadding = PaddingValues(bottom = pillClearanceBottom()),
-                ) {
-                    greetingSection()
-                    weatherSection()
-                    homeSection()
-                    playingSection()
-                    item { Spacer(Modifier.height(16.dp)) }
+
+    val wide = LocalWideLayout.current
+    if (wide) {
+        Box(
+            Modifier.fillMaxSize().statusBarsPadding()
+                .background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(
+                Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp),
+            ) {
+                if (showSection("cameras")) {
+                    CameraQuadrantHero(vm, navigate, states)
                 }
-                LazyColumn(
-                    Modifier.weight(1f).padding(start = 8.dp),
-                    contentPadding = PaddingValues(bottom = pillClearanceBottom()),
-                ) {
-                    lightsSection()
-                    alertsSection()
-                    item { Spacer(Modifier.height(16.dp)) }
+                Row(Modifier.weight(1f)) {
+                    LazyColumn(Modifier.weight(1f).padding(end = 8.dp), contentPadding = PaddingValues(bottom = pillClearanceBottom())) {
+                        if (showSection("greeting")) greetingSection()
+                        if (showSection("weather")) weatherSection()
+                        if (showSection("home")) homeSection()
+                    }
+                    LazyColumn(Modifier.weight(1f).padding(start = 8.dp), contentPadding = PaddingValues(bottom = pillClearanceBottom())) {
+                        roomsSections()
+                    }
                 }
             }
         }
@@ -419,15 +386,17 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
             contentPadding = PaddingValues(bottom = pillClearanceBottom()),
         ) {
-            greetingSection()
-            weatherSection()
-            homeSection()
-            playingSection()
-            lightsSection()
-            alertsSection()
-            item { Spacer(Modifier.height(16.dp)) }
+            if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
+            if (showSection("greeting")) greetingSection()
+            if (showSection("weather")) weatherSection()
+            if (showSection("home")) homeSection()
+            roomsSections()
         }
     }
+    if (connection != ConnectionState.Connected) {
+        Log.w("Haven", "Home offline: ${'$'}connection — states are cached, controls may fail")
+    }
+    if (homePrefsVersion < 0) Log.d("Haven", "home prefs bump")
 }
 
 @Composable
@@ -532,6 +501,42 @@ fun SettingsScreen(
                 )
             }
             Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Rooms")
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "rooms-manage",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.GridView,
+                    title = "Rooms & areas",
+                    subtitle = "Create, rename, and delete rooms, and assign devices to them — saved to Home Assistant itself.",
+                    onClick = { navigate(Screen.RoomManager) },
+                    flat = true,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Shapes")
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "shapes-badge",
+                    badgeKind = ExpressiveKind.SUNNY,
+                    icon = Icons.Filled.Palette,
+                    title = "Badge shape",
+                    subtitle = shapeLabel(vm.settingsStore.globalBadgeShape) ?: "Domain default",
+                    onClick = { vm.openShapePicker(null, false) },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "shapes-card",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.GridView,
+                    title = "Card shape",
+                    subtitle = shapeLabel(vm.settingsStore.globalCardShape) ?: "Default corners",
+                    onClick = { vm.openShapePicker(null, true) },
+                    flat = true,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
             KodaMenuSection("Browse")
             KodaMenuGroup {
                 KodaMenuRow(
@@ -615,6 +620,275 @@ fun SettingsScreen(
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * Camera quadrant hero (2026-10-30): the very top of Home. ONE
+ * rectangular expressive shape (24dp corners — rectangular in
+ * spirit; a scallop would cut the quadrant images) divided into
+ * four landscape quadrants (two top, two bottom), one per curated
+ * camera (Garage, Outdoor, Living Room, Ring Front Door — the
+ * Cameras tab set). Each quadrant shows purely the MOST RECENT
+ * SNAPSHOT, refreshed silently in the background — the hero never
+ * blocks on a live stream. Tapping a quadrant opens the centered
+ * live-feed dialog for that camera (the #77 dialog model; Ring
+ * uses the #65 proxy path). An empty slot shows a camera icon.
+ */
+@Composable
+fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: Map<String, HaEntity>) {
+    val cameras = vm.heroCameras(states)
+    val camerasTab = vm.userTabs.firstOrNull { it.title == "Cameras" }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Cameras", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+            if (camerasTab != null) {
+                TextButton(onClick = { navigate(Screen.UserTab(camerasTab.id)) }) { Text("See all") }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.weight(1f)) {
+                    CameraQuadrant(vm, cameras.getOrNull(0), Modifier.weight(1f))
+                    CameraQuadrant(vm, cameras.getOrNull(1), Modifier.weight(1f))
+                }
+                Row(Modifier.weight(1f)) {
+                    CameraQuadrant(vm, cameras.getOrNull(2), Modifier.weight(1f))
+                    CameraQuadrant(vm, cameras.getOrNull(3), Modifier.weight(1f))
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier) {
+    val states by vm.states.collectAsState()
+    Box(
+        modifier.padding(1.dp).clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .then(if (cameraId != null) Modifier.clickable { vm.openCameraDialog(cameraId) } else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (cameraId == null) {
+            Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
+        } else {
+            val snap = vm.snapshotFor(cameraId)
+            LaunchedEffect(cameraId) { vm.refreshSnapshot(cameraId) }
+            val entity = states[cameraId]
+            if (snap != null) {
+                Image(snap.asImageBitmap(), contentDescription = entity?.friendlyName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else {
+                Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Rooms & areas manager (2026-10-30): Apple-Home-style room
+ * management that carries over to the actual HA instance. Areas
+ * are read from HA's area registry on load; every mutation here
+ * calls the real registry WebSocket APIs (area create/update/
+ * delete, entity area assign/clear) and re-reads the registries
+ * on success, so changes appear in HA itself. Errors (duplicate
+ * names, a delete HA rejects) surface as a message, never a
+ * crash. Device-level assignment is not exposed: Haven's model
+ * is entities, and entity assignment covers every device Haven
+ * shows.
+ */
+@Composable
+fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
+    val areas by vm.areas.collectAsState()
+    val entityAreas by vm.entityAreas.collectAsState()
+    val states by vm.states.collectAsState()
+    var message by remember { mutableStateOf<String?>(null) }
+    var messageIsError by remember { mutableStateOf(false) }
+    var newRoomName by remember { mutableStateOf("") }
+    var renameText by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var deleteArmed by remember { mutableStateOf<String?>(null) }
+    var addFor by remember { mutableStateOf<String?>(null) }
+    var assignFor by remember { mutableStateOf<String?>(null) }
+    fun done(err: String?, ok: String) {
+        if (err != null) { message = err; messageIsError = true }
+        else { message = ok; messageIsError = false }
+    }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        DetailTopBar("Rooms & areas", onBack)
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        ) {
+            item {
+                Text(
+                    "Rooms live in Home Assistant — changes here appear in HA itself.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = {
+                    vm.refreshAreas()
+                    message = "Refreshing rooms from Home Assistant…"
+                    messageIsError = false
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Refresh from Home Assistant")
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newRoomName,
+                        onValueChange = { newRoomName = it },
+                        label = { Text("New room name") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        val name = newRoomName.trim()
+                        if (name.isEmpty()) return@Button
+                        vm.createRoom(name) { err ->
+                            done(err, "Room \"$name\" created")
+                            if (err == null) newRoomName = ""
+                        }
+                    }) { Text("Add room") }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (message != null) {
+                    Text(
+                        message!!,
+                        fontSize = 13.sp,
+                        color = if (messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+            items(areas) { area ->
+                val members = entityAreas.filter { it.value == area.id }.keys
+                    .mapNotNull { states[it] }
+                    .sortedBy { it.friendlyName }
+                Column(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(16.dp))
+                        .padding(12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(area.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                        Text("${members.size} devices", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = renameText[area.id] ?: area.name,
+                            onValueChange = { renameText = renameText + (area.id to it) },
+                            label = { Text("Rename") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = {
+                            val name = (renameText[area.id] ?: area.name).trim()
+                            if (name.isEmpty() || name == area.name) return@Button
+                            vm.renameRoom(area.id, name) { err -> done(err, "Room renamed to \"$name\"") }
+                        }) { Text("Rename") }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = {
+                            if (deleteArmed == area.id) {
+                                deleteArmed = null
+                                vm.deleteRoom(area.id) { err -> done(err, "Room \"${area.name}\" deleted") }
+                            } else {
+                                deleteArmed = area.id
+                                message = "Tap Delete again to confirm"
+                                messageIsError = false
+                            }
+                        }) { Text(if (deleteArmed == area.id) "Confirm delete" else "Delete") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    members.forEach { member ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                            Text(member.friendlyName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            TextButton(onClick = {
+                                vm.assignEntityToRoom(member.entityId, null) { err ->
+                                    done(err, "${member.friendlyName} moved to No room")
+                                }
+                            }) { Text("Remove") }
+                        }
+                    }
+                    Row {
+                        OutlinedButton(onClick = { addFor = if (addFor == area.id) null else area.id }) {
+                            Text(if (addFor == area.id) "Close" else "Add entity…")
+                        }
+                    }
+                    if (addFor == area.id) {
+                        val candidates = states.values
+                            .filter { entityAreas[it.entityId] != area.id }
+                            .sortedBy { it.friendlyName }
+                        DropdownMenu(
+                            expanded = true,
+                            onDismissRequest = { addFor = null },
+                        ) {
+                            candidates.forEach { candidate ->
+                                DropdownMenuItem(
+                                    text = { Text(candidate.friendlyName) },
+                                    onClick = {
+                                        addFor = null
+                                        vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
+                                            done(err, "${candidate.friendlyName} moved to ${area.name}")
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                val unassigned = states.values
+                    .filter { entityAreas[it.entityId] == null }
+                    .sortedBy { it.friendlyName }
+                Column(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(16.dp))
+                        .padding(12.dp),
+                ) {
+                    Text("No room", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    Text("${unassigned.size} devices", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    unassigned.forEach { member ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                            Text(member.friendlyName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            TextButton(onClick = { assignFor = if (assignFor == member.entityId) null else member.entityId }) {
+                                Text("Assign…")
+                            }
+                        }
+                        if (assignFor == member.entityId) {
+                            DropdownMenu(
+                                expanded = true,
+                                onDismissRequest = { assignFor = null },
+                            ) {
+                                areas.forEach { area ->
+                                    DropdownMenuItem(
+                                        text = { Text(area.name) },
+                                        onClick = {
+                                            assignFor = null
+                                            vm.assignEntityToRoom(member.entityId, area.id) { err ->
+                                                done(err, "${member.friendlyName} moved to ${area.name}")
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

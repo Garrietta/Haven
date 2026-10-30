@@ -252,13 +252,18 @@ class MorphMathTest {
     }
 
     @Test
-    fun heroHeaderAlpha_visibleUntilLastTenPercent() {
-        // The traveling header is fully visible through the morph and
-        // dissolves into the pop-up's own header only over [0.9, 1.0].
+    fun heroHeaderAlpha_visibleUntilFinalTwoPercent() {
+        // The traveling header is fully visible through the morph
+        // and hands off to the pop-up's own header only over
+        // [0.98, 1.0] (2026-10-30: was [0.9, 1.0]) — traveler and
+        // destination coincide at the handoff, so no duplicate
+        // copies are ever visible mid-flight.
         assertEquals(1f, heroHeaderAlpha(0f), 0.001f)
         assertEquals(1f, heroHeaderAlpha(0.5f), 0.001f)
         assertEquals(1f, heroHeaderAlpha(0.9f), 0.001f)
-        assertEquals(0.5f, heroHeaderAlpha(0.95f), 0.001f)
+        assertEquals(1f, heroHeaderAlpha(0.95f), 0.001f)
+        assertEquals(1f, heroHeaderAlpha(0.98f), 0.001f)
+        assertEquals(0.5f, heroHeaderAlpha(0.99f), 0.001f)
         assertEquals(0f, heroHeaderAlpha(1f), 0.001f)
     }
 
@@ -267,5 +272,16 @@ class MorphMathTest {
         assertEquals(1f, heroHeaderAlpha(-1f), 0.001f)
         assertEquals(0f, heroHeaderAlpha(1.5f), 0.001f)
         assertEquals(0f, heroHeaderAlpha(1.00493f), 0.001f)
+    }
+
+    @Test
+    fun badgeRectInRow_leadingSquareVerticallyCentered() {
+        assertEquals(Rect(0f, 8f, 48f, 56f), badgeRectInRow(Rect(0f, 0f, 100f, 64f), 48f))
+        assertEquals(Rect(10f, 28f, 58f, 76f), badgeRectInRow(Rect(10f, 20f, 110f, 84f), 48f))
+    }
+
+    @Test
+    fun badgeRectInRow_rowShorterThanBadgeFloorsAtRowTop() {
+        assertEquals(Rect(0f, 0f, 48f, 48f), badgeRectInRow(Rect(0f, 0f, 100f, 40f), 48f))
     }
 }

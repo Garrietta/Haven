@@ -88,6 +88,7 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.climateModeColor
@@ -295,8 +296,13 @@ fun shapeTapAction(vm: HavenViewModel, entity: HaEntity): (() -> Unit)? = when (
 @Composable
 fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
+    // Card-outline shape (2026-10-30 picker): a per-entity
+    // override beats the global default; without either, the
+    // token extraLarge corners are unchanged.
+    val cardShape = LocalShapePrefs.current.cardShape(entity.entityId)
+        ?: MaterialTheme.shapes.extraLarge
     Card(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = cardShape,
         // Hierarchy tokens: SurfaceContainer for root cards (Home, Boards,
         // Areas, detail pages), SurfaceContainerLow for nested cards
         // (inside the sheet, where the panel is already a container).

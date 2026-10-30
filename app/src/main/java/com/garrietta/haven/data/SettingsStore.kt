@@ -63,4 +63,53 @@ class SettingsStore(context: Context) {
         obj.put(entityId, shown)
         prefs.edit().putString("home_light_overrides_json", obj.toString()).apply()
     }
+
+    // ---- Shape picker (Settings -> Shapes, per-entity detail) ----
+
+    /** Global default badge shape key, or null = the domain default. */
+    var globalBadgeShape: String?
+        get() = prefs.getString("shape_global_badge", null)
+        set(value) = prefs.edit().putString("shape_global_badge", value).apply()
+
+    /** Global default card-outline shape key, or null = the default corners. */
+    var globalCardShape: String?
+        get() = prefs.getString("shape_global_card", null)
+        set(value) = prefs.edit().putString("shape_global_card", value).apply()
+
+    private fun shapeOverrides(key: String): Map<String, String> {
+        val raw = prefs.getString(key, null) ?: return emptyMap()
+        return try {
+            val obj = org.json.JSONObject(raw)
+            val out = mutableMapOf<String, String>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val keyName = keys.next()
+                out[keyName] = obj.optString(keyName)
+            }
+            out
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun setShapeOverride(storageKey: String, current: Map<String, String>, entityId: String, shapeKey: String?) {
+        val obj = org.json.JSONObject()
+        for ((id, value) in current) obj.put(id, value)
+        if (shapeKey == null) obj.remove(entityId) else obj.put(entityId, shapeKey)
+        prefs.edit().putString(storageKey, obj.toString()).apply()
+    }
+
+    /** Per-entity badge shape overrides (entity id -> shape key). */
+    fun badgeShapeOverrides(): Map<String, String> = shapeOverrides("shape_badge_overrides_json")
+
+    /** Records or clears one per-entity badge shape override; null clears back to the default. */
+    fun setBadgeShapeOverride(entityId: String, shapeKey: String?) =
+        setShapeOverride("shape_badge_overrides_json", badgeShapeOverrides(), entityId, shapeKey)
+
+    /** Per-entity card-outline shape overrides (entity id -> shape key). */
+    fun cardShapeOverrides(): Map<String, String> = shapeOverrides("shape_card_overrides_json")
+
+    /** Records or clears one per-entity card-outline shape override; null clears back to the default. */
+    fun setCardShapeOverride(entityId: String, shapeKey: String?) =
+        setShapeOverride("shape_card_overrides_json", cardShapeOverrides(), entityId, shapeKey)
 }

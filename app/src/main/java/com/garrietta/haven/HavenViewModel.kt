@@ -49,6 +49,8 @@ sealed class Screen {
     data class UserTab(val tabId: String) : Screen()
     data object TabManager : Screen()
     data object HomeEditor : Screen()
+    /** Rooms & areas manager (Settings): create/rename/delete HA areas and assign entities to them. */
+    data object RoomManager : Screen()
     data class EntityDetail(val entityId: String) : Screen()
     /** Full-page thermostat experience (hero dial, range bar, pills). */
     data class Thermostat(val entityId: String) : Screen()
@@ -61,6 +63,13 @@ sealed class Screen {
     data object ScriptBuilder : Screen()
     data object HelperBuilder : Screen()
 }
+
+/**
+ * The shape picker target: null = closed; entityId null = the
+ * global default; forCard false = badge shape, true = card
+ * outline shape.
+ */
+data class ShapePickerTarget(val entityId: String?, val forCard: Boolean)
 
 class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -82,6 +91,22 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     fun bumpHomePrefs() { homePrefsVersion++ }
+
+    /**
+     * Bumped whenever the shape picker saves, so HavenApp recomposes
+     * its shape-preference provider from the store and every badge
+     * and card outline updates immediately, without relaunching.
+     */
+    var shapePrefsVersion by mutableStateOf(0)
+        private set
+
+    fun bumpShapePrefs() { shapePrefsVersion++ }
+
+    var shapePickerTarget by mutableStateOf<ShapePickerTarget?>(null)
+        private set
+
+    fun openShapePicker(entityId: String?, forCard: Boolean) { shapePickerTarget = ShapePickerTarget(entityId, forCard) }
+    fun closeShapePicker() { shapePickerTarget = null }
 
     val connection = client.connection
     val states = client.states
@@ -129,6 +154,67 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openClimatePopout(entityId: String) { climatePopoutId = entityId }
     fun closeClimatePopout() { climatePopoutId = null }
+
+    /** Camera id shown in the centered live-feed dialog (Home quadrant hero), if any. */
+    var cameraDialogId by mutableStateOf<String?>(null)
+        private set
+
+    fun openCameraDialog(entityId: String) { cameraDialogId = entityId }
+    fun closeCameraDialog() { cameraDialogId = null }
+
+    /**
+     * Travel snapshots (2026-10-30 verdict: "don't recreate
+     * elements, physically move them"): the entity as it was when
+     * its dialog opened (enter) or when its dismiss started
+     * (return), so the traveling header/arc never recompute color,
+     * shape, or text mid-flight from a states emission — and never
+     * recompose on unrelated entities' state changes, which is
+     * what keeps the flight fluid at 120Hz. Captured by the dialog
+     * open effects and refreshed by the dismiss functions; cleared
+     * when the dialog closes. The dialog body itself stays live.
+     */
+    val travelSnapshots = mutableStateMapOf<String, com.garrietta.haven.data.HaEntity>()
+
+    fun captureTravelSnapshot(entityId: String) {
+        states.value[entityId]?.let { travelSnapshots[entityId] = it }
+    }
+
+    fun clearTravelSnapshot(entityId: String) { travelSnapshots.remove(entityId) }
+    fun clearAllTravelSnapshots() { travelSnapshots.clear() }
+
+    /** The Home quadrant hero's cameras: the curated Cameras-tab set, from the caller's states snapshot. */
+    fun heroCameras(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> = curatedCameras(states)
+
+    /**
+     * Room management (2026-10-30): thin wrappers over the HA
+     * registry mutations. [onDone] receives null on success or
+     * HA's error message on rejection, on the main thread.
+     */
+    fun refreshAreas() { client.refreshRegistries() }
+
+    fun createRoom(name: String, onDone: (String?) -> Unit) {
+        client.createArea(name) { ok, err ->
+            viewModelScope.launch { onDone(if (ok) null else (err ?: "Home Assistant rejected the room.")) }
+        }
+    }
+
+    fun renameRoom(areaId: String, name: String, onDone: (String?) -> Unit) {
+        client.updateArea(areaId, name) { ok, err ->
+            viewModelScope.launch { onDone(if (ok) null else (err ?: "Home Assistant rejected the rename.")) }
+        }
+    }
+
+    fun deleteRoom(areaId: String, onDone: (String?) -> Unit) {
+        client.deleteArea(areaId) { ok, err ->
+            viewModelScope.launch { onDone(if (ok) null else (err ?: "Home Assistant rejected the delete.")) }
+        }
+    }
+
+    fun assignEntityToRoom(entityId: String, areaId: String?, onDone: (String?) -> Unit) {
+        client.updateEntityArea(entityId, areaId) { ok, err ->
+            viewModelScope.launch { onDone(if (ok) null else (err ?: "Home Assistant rejected the assignment.")) }
+        }
+    }
 
     /**
      * Last live frame per camera, in memory only (never disk). The

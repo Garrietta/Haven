@@ -49,7 +49,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.graphics.shapes.RoundedPolygon
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -76,6 +77,8 @@ import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenSpring
 import com.garrietta.haven.ui.theme.polygonShape
 import com.garrietta.haven.ui.theme.springMorph
+import com.garrietta.haven.ui.theme.expressivePolygon
+import com.garrietta.haven.ui.theme.stateShape
 import com.garrietta.haven.ui.theme.stateShapePolygon
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -127,6 +130,104 @@ fun shapeForDomain(domain: String): ExpressiveKind = when (domain) {
 }
 
 /**
+ * Shape picker (2026-10-30 directive: a menu to select the shape of
+ * every icon and expressive shape in the app). Every pickable shape
+ * has a stable string key so choices persist in SettingsStore: the
+ * six ExpressiveKind families plus the ten StateShape polygons.
+ * Keys are storage keys, never display strings.
+ */
+data class ShapeOption(val key: String, val label: String)
+
+val SHAPE_OPTIONS: List<ShapeOption> = listOf(
+    ShapeOption("sunny", "Sunny"),
+    ShapeOption("flower", "Flower"),
+    ShapeOption("bun", "Bun"),
+    ShapeOption("burst", "Burst"),
+    ShapeOption("wave", "Wave"),
+    ShapeOption("cloud", "Cloud"),
+    ShapeOption("hexagon", "Hexagon"),
+    ShapeOption("scallop12", "Scallop"),
+    ShapeOption("squircle", "Squircle"),
+    ShapeOption("arc_wave", "Arc wave"),
+    ShapeOption("shield", "Shield"),
+    ShapeOption("notched_diamond", "Notched diamond"),
+    ShapeOption("star8", "Star"),
+    ShapeOption("octagon", "Octagon"),
+    ShapeOption("sunburst", "Sunburst"),
+    ShapeOption("cloud_poly", "Cloud poly"),
+)
+
+fun shapeLabel(key: String?): String? =
+    SHAPE_OPTIONS.firstOrNull { it.key == key }?.label
+
+/** A pickable key as a Compose [Shape] (for backgrounds and clips), or null for an unknown key. */
+fun shapeForKey(key: String): Shape? = when (key) {
+    "sunny" -> polygonShape(ExpressiveKind.SUNNY)
+    "flower" -> polygonShape(ExpressiveKind.FLOWER)
+    "bun" -> polygonShape(ExpressiveKind.BUN)
+    "burst" -> polygonShape(ExpressiveKind.BURST)
+    "wave" -> polygonShape(ExpressiveKind.WAVE)
+    "cloud" -> polygonShape(ExpressiveKind.CLOUD)
+    "hexagon" -> stateShape(StateShape.HEXAGON)
+    "scallop12" -> stateShape(StateShape.SCALLOP12)
+    "squircle" -> stateShape(StateShape.SQUIRCLE)
+    "arc_wave" -> stateShape(StateShape.ARC_WAVE)
+    "shield" -> stateShape(StateShape.SHIELD)
+    "notched_diamond" -> stateShape(StateShape.NOTCHED_DIAMOND)
+    "star8" -> stateShape(StateShape.STAR8)
+    "octagon" -> stateShape(StateShape.OCTAGON)
+    "sunburst" -> stateShape(StateShape.SUNBURST)
+    "cloud_poly" -> stateShape(StateShape.CLOUD_POLY)
+    else -> null
+}
+
+/** A pickable key as a morphable polygon (for [MorphPolygon] paths), or null for an unknown key. */
+fun polygonForKey(key: String): RoundedPolygon? = when (key) {
+    "sunny" -> expressivePolygon(ExpressiveKind.SUNNY)
+    "flower" -> expressivePolygon(ExpressiveKind.FLOWER)
+    "bun" -> expressivePolygon(ExpressiveKind.BUN)
+    "burst" -> expressivePolygon(ExpressiveKind.BURST)
+    "wave" -> expressivePolygon(ExpressiveKind.WAVE)
+    "cloud" -> expressivePolygon(ExpressiveKind.CLOUD)
+    "hexagon" -> stateShapePolygon(StateShape.HEXAGON)
+    "scallop12" -> stateShapePolygon(StateShape.SCALLOP12)
+    "squircle" -> stateShapePolygon(StateShape.SQUIRCLE)
+    "arc_wave" -> stateShapePolygon(StateShape.ARC_WAVE)
+    "shield" -> stateShapePolygon(StateShape.SHIELD)
+    "notched_diamond" -> stateShapePolygon(StateShape.NOTCHED_DIAMOND)
+    "star8" -> stateShapePolygon(StateShape.STAR8)
+    "octagon" -> stateShapePolygon(StateShape.OCTAGON)
+    "sunburst" -> stateShapePolygon(StateShape.SUNBURST)
+    "cloud_poly" -> stateShapePolygon(StateShape.CLOUD_POLY)
+    else -> null
+}
+
+/**
+ * The resolved shape preferences, provided by HavenApp from
+ * SettingsStore (re-read whenever [HavenViewModel.bumpShapePrefs]
+ * fires, so a picker choice applies immediately). Per-entity
+ * overrides beat the global default; null means "domain default"
+ * (badges) or "default corners" (cards). Menu-row badges keep
+ * their fixed kinds — they are navigation chrome, not entity
+ * shapes — and the camera hero container stays its rectangular
+ * 24dp shape by design.
+ */
+data class ShapePrefs(
+    val globalBadge: String?,
+    val globalCard: String?,
+    val badgeOverrides: Map<String, String>,
+    val cardOverrides: Map<String, String>,
+) {
+    fun badgeShapeKey(entityId: String): String? = badgeOverrides[entityId] ?: globalBadge
+    fun cardShapeKey(entityId: String): String? = cardOverrides[entityId] ?: globalCard
+    fun badgeShape(entityId: String): Shape? = badgeShapeKey(entityId)?.let { shapeForKey(it) }
+    fun badgePolygon(entityId: String): RoundedPolygon? = badgeShapeKey(entityId)?.let { polygonForKey(it) }
+    fun cardShape(entityId: String): Shape? = cardShapeKey(entityId)?.let { shapeForKey(it) }
+}
+
+val LocalShapePrefs = compositionLocalOf { ShapePrefs(null, null, emptyMap(), emptyMap()) }
+
+/**
  * Domain badge, now state-driven: the polygon morphs between the domain's
  * idle and active shapes on state change (Morph, spring 0.72/320), and
  * alert badges (triggered binary sensors) rotate continuously and pulse.
@@ -173,6 +274,11 @@ fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.Imag
     val idle = stateShapePolygon(badgeIdleShape(domain))
     val active = stateShapePolygon(badgeActiveShape(domain, if (domain == "weather") state else null))
     val (bg, iconTint) = badgeColors(scheme, entity, accent)
+    // Shape-picker override (2026-10-30): a picked shape replaces
+    // the idle/active morph pair with that one static shape, in
+    // the badge's exact colors — the picker's shape IS the badge.
+    // Without an override the morph pair below is unchanged.
+    val overrideShape = LocalShapePrefs.current.badgeShape(entity.entityId)
     Box(
         modifier.graphicsLayer {
             if (!reduceMotion) {
@@ -186,7 +292,11 @@ fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.Imag
         },
         contentAlignment = Alignment.Center,
     ) {
-        MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
+        if (overrideShape != null) {
+            Box(Modifier.fillMaxSize().background(bg, overrideShape))
+        } else {
+            MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
+        }
         Icon(
             icon,
             contentDescription = null,
@@ -278,9 +388,16 @@ fun TravelingBadge(
     val (bg, iconTint) = badgeColors(scheme, entity, accent)
     val domain = entity.domain
     val state = entity.state
-    val from = if (tileSource) com.garrietta.haven.ui.theme.expressivePolygon(shapeForDomain(domain))
+    // Shape-picker override (2026-10-30): the traveler morphs
+    // from the picked shape to itself (identity), so a picked
+    // badge keeps its shape across the whole travel instead of
+    // morphing through the domain/state pair.
+    val overridePolygon = LocalShapePrefs.current.badgePolygon(entity.entityId)
+    val from = overridePolygon
+        ?: if (tileSource) com.garrietta.haven.ui.theme.expressivePolygon(shapeForDomain(domain))
         else stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
-    val to = stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
+    val to = overridePolygon
+        ?: stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
     Box(modifier, contentAlignment = Alignment.Center) {
         MorphPolygon(from, to, progress.coerceIn(0f, 1f), bg, Modifier.fillMaxSize())
         Icon(

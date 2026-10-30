@@ -1,7 +1,13 @@
 package com.garrietta.haven
 import androidx.compose.animation.animateContentSize
+import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.ShapePrefs
+import com.garrietta.haven.ui.components.badgeRectInRow
+import com.garrietta.haven.ui.components.dialogNameSize
 import com.garrietta.haven.ui.components.dialogPanelMaxHeightDp
 import com.garrietta.haven.ui.components.dialogPanelWidthDp
+import com.garrietta.haven.ui.components.hideWhileTraveling
+import com.garrietta.haven.ui.components.shapeLabel
 import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.ui.theme.FloatingCorner
 
@@ -16,6 +22,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -175,7 +182,9 @@ import com.garrietta.haven.ui.screens.LoginScreen
 import com.garrietta.haven.ui.screens.SceneBuilderScreen
 import com.garrietta.haven.ui.screens.ScriptBuilderScreen
 import com.garrietta.haven.ui.screens.SearchScreen
+import com.garrietta.haven.ui.screens.RoomManagerScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
+import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.TabManagerScreen
 import com.garrietta.haven.ui.screens.ThermostatPageScreen
 import com.garrietta.haven.ui.screens.ThermostatPopout
@@ -287,6 +296,9 @@ fun HavenApp(vm: HavenViewModel) {
         "dark" -> true
         else -> isSystemInDarkTheme()
     }
+    // Read so shape-picker saves recompose the provider below from the store.
+    @Suppress("UNUSED_VARIABLE")
+    val shapePrefsVersion = vm.shapePrefsVersion
     HavenTheme(darkTheme = darkTheme) {
         // Status-bar/navigation-bar icon colors follow the background's
         // luminance (Koda's approach): light background -> dark icons, dark
@@ -372,6 +384,9 @@ fun HavenApp(vm: HavenViewModel) {
             heroTarget = null
             arcTarget = null
             vm.closeClimatePopout()
+            vm.closeCameraDialog()
+            vm.closeShapePicker()
+            vm.clearAllTravelSnapshots()
             scrollVisibility.reset()
             backstack.clear()
             backstack.add(it)
@@ -441,6 +456,7 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = detailAnim ?: return
             if (detailExiting) return
             detailExiting = true
+            vm.captureTravelSnapshot(anim.entityId)
             val gen = morphGeneration
             scope.launch {
                 try {
@@ -458,6 +474,7 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = sheetAnim ?: return
             if (sheetExiting) return
             sheetExiting = true
+            vm.captureTravelSnapshot(anim.id)
             val gen = morphGeneration
             scope.launch {
                 try {
@@ -475,6 +492,7 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = popoutAnim ?: return
             if (popoutExiting) return
             popoutExiting = true
+            vm.captureTravelSnapshot(anim.id)
             val gen = morphGeneration
             scope.launch {
                 try {
@@ -503,6 +521,9 @@ fun HavenApp(vm: HavenViewModel) {
             heroTarget = null
             arcTarget = null
             vm.closeClimatePopout()
+            vm.closeCameraDialog()
+            vm.closeShapePicker()
+            vm.clearAllTravelSnapshots()
             vm.signOut()
             backstack.clear()
             backstack.add(Screen.Today)
@@ -532,6 +553,7 @@ fun HavenApp(vm: HavenViewModel) {
             val id = vm.popupEntityId
             val anim = sheetAnim
             if (id != null && anim?.id == id) {
+                vm.captureTravelSnapshot(id)
                 // Always animate (unless reduce-motion): a sourced
                 // morph interpolates from the card, a sourceless one
                 // from the graceful fallback rect — never an instant
@@ -544,11 +566,13 @@ fun HavenApp(vm: HavenViewModel) {
                 sheetAnim = null
                 heroTarget = null
                 arcTarget = null
+                vm.clearTravelSnapshot(anim.id)
             }
         }
         LaunchedEffect(detailScreen?.let { detailEntityId(it) }) {
             val anim = detailAnim
             if (detailScreen != null && anim != null && detailEntityId(anim.screen) == detailEntityId(detailScreen)) {
+                vm.captureTravelSnapshot(detailEntityId(detailScreen))
                 if (!reduceMotion) {
                     detailProgress.snapTo(0f)
                     detailProgress.animateTo(1f, springBounds())
@@ -557,6 +581,7 @@ fun HavenApp(vm: HavenViewModel) {
                 detailAnim = null
                 heroTarget = null
                 arcTarget = null
+                vm.clearTravelSnapshot(anim.entityId)
             }
         }
         // Thermostat pop-out open effect (mirrors the sheet effect):
@@ -569,6 +594,7 @@ fun HavenApp(vm: HavenViewModel) {
             val id = vm.climatePopoutId
             val anim = popoutAnim
             if (id != null && anim?.id == id) {
+                vm.captureTravelSnapshot(id)
                 if (!reduceMotion) {
                     popoutProgress.snapTo(0f)
                     popoutProgress.animateTo(1f, springBounds())
@@ -577,6 +603,7 @@ fun HavenApp(vm: HavenViewModel) {
                 popoutAnim = null
                 heroTarget = null
                 arcTarget = null
+                vm.clearTravelSnapshot(anim.id)
             }
         }
         // Camera overlay transitions share the same language:
@@ -585,6 +612,11 @@ fun HavenApp(vm: HavenViewModel) {
         var cameraExiting by remember { mutableStateOf(false) }
         val cameraEnterProgress = remember { Animatable(0f) }
         val cameraExitProgress = remember { Animatable(1f) }
+        // Centered live-feed dialog state (2026-10-30, Home
+        // quadrant hero): mirrors the sheet dismiss pattern —
+        // animated exit on the bounds spring, then the id clears.
+        var cameraDialogExiting by remember { mutableStateOf(false) }
+        val cameraDialogProgress = remember { Animatable(0f) }
         val cameraId = vm.fullscreenCameraId
         LaunchedEffect(cameraId) {
             if (cameraId != null && !cameraExiting) {
@@ -619,12 +651,37 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
+        fun dismissCameraDialog() {
+            val id = vm.cameraDialogId ?: return
+            if (cameraDialogExiting) return
+            cameraDialogExiting = true
+            scope.launch {
+                try {
+                    if (reduceMotion) cameraDialogProgress.snapTo(0f)
+                    else cameraDialogProgress.animateTo(0f, springBounds())
+                } finally {
+                    cameraDialogExiting = false
+                    if (vm.cameraDialogId == id) vm.closeCameraDialog()
+                }
+            }
+        }
+        LaunchedEffect(vm.cameraDialogId) {
+            val id = vm.cameraDialogId
+            if (id != null && !cameraDialogExiting) {
+                if (reduceMotion) cameraDialogProgress.snapTo(1f)
+                else {
+                    cameraDialogProgress.snapTo(0f)
+                    cameraDialogProgress.animateTo(1f, springBounds())
+                }
+            }
+        }
         CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
         // Wide-layout detection lives here, above the Scaffold, so every
         // screen (and the overlays) reads the same value.
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wideLayout = maxWidth >= 600.dp
             val windowSizeClass = windowSizeClassFor(maxWidth)
+            val windowWidthDp = maxWidth
             CompositionLocalProvider(
                 LocalWideLayout provides wideLayout,
                 LocalWindowSizeClass provides windowSizeClass,
@@ -679,6 +736,15 @@ fun HavenApp(vm: HavenViewModel) {
                 LocalHeroBounds provides heroBounds,
                 LocalArcBounds provides arcBounds,
                 LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
+                // Shape picker state (2026-10-30): badges and card
+                // outlines resolve through this; re-read from the
+                // store whenever a picker save bumps the version.
+                LocalShapePrefs provides ShapePrefs(
+                    vm.settingsStore.globalBadgeShape,
+                    vm.settingsStore.globalCardShape,
+                    vm.settingsStore.badgeShapeOverrides(),
+                    vm.settingsStore.cardShapeOverrides(),
+                ),
                 // Progress-driven source-card alpha (container
                 // transform): the active morph's progress drives the
                 // card fade-out on enter and the fade-back-in on
@@ -865,6 +931,7 @@ fun HavenApp(vm: HavenViewModel) {
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
                     sheetP, overlayOrigin,
+                    nameWidthCap = (dialogPanelWidthDp(windowWidthDp.value) - 92f).dp,
                     onDismiss = { dismissSheet() },
                 )
                 // Traveling arc, above the dialog (see TravelingArc).
@@ -910,6 +977,7 @@ fun HavenApp(vm: HavenViewModel) {
                     vm, anim.entityId, heroBounds[anim.entityId],
                     heroTarget?.takeIf { it.first == anim.entityId }?.second,
                     detailP, overlayOrigin,
+                    nameWidthCap = (dialogPanelWidthDp(windowWidthDp.value) - 92f).dp,
                     onDismiss = { dismissDetail() },
                 )
                 TravelingArc(
@@ -968,6 +1036,7 @@ fun HavenApp(vm: HavenViewModel) {
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
                     popoutP, overlayOrigin,
+                    nameWidthCap = (dialogPanelWidthDp(windowWidthDp.value) - 92f).dp,
                     onDismiss = { dismissPopout() },
                 )
             }
@@ -985,6 +1054,54 @@ fun HavenApp(vm: HavenViewModel) {
                         CameraFullscreen(vm, requestCameraClose, cameraEnterProgress.value)
                     }
                 }
+            }
+            // Camera live-feed dialog (2026-10-30): the Home
+            // quadrant hero's tap target — a centered dialog (the
+            // #77 model), not fullscreen. The MJPEG body fills a
+            // 16:9 panel; the header is dialog-local (no
+            // status-bar padding: the panel is centered, never
+            // under the status bar). Ring uses the #65 proxy path
+            // through the same body; no Live badge (wave test
+            // still owed).
+            if (vm.cameraDialogId != null) {
+                val camId = vm.cameraDialogId!!
+                BackHandler { dismissCameraDialog() }
+                val camP = cameraDialogProgress.value.coerceIn(0f, 1f)
+                val camStates by vm.states.collectAsState()
+                val camEntity = camStates[camId]
+                DialogOverlay(
+                    progress = camP,
+                    panelBackground = Color.Black,
+                    onDismiss = { dismissCameraDialog() },
+                    onPanelPlaced = { },
+                ) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
+                        CameraMjpegBody(vm, camId, camP, recording = false, onClose = { dismissCameraDialog() })
+                        Row(
+                            Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                camEntity?.friendlyName ?: "Camera",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { dismissCameraDialog() }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+            // Shape picker dialog (2026-10-30): above every other
+            // overlay; opened from Settings (global default) or an
+            // entity sheet (per-entity override).
+            if (vm.shapePickerTarget != null) {
+                ShapePickerDialog(vm, vm.shapePickerTarget!!, onClose = { vm.closeShapePicker() })
             }
             }
         }
@@ -1022,6 +1139,7 @@ private fun ScreenContent(
         is Screen.UserTab -> UserTabScreen(vm, screen.tabId, navigate)
         Screen.TabManager -> TabManagerScreen(vm, goBack, navigate)
         Screen.HomeEditor -> HomeEditorScreen(vm, goBack)
+        Screen.RoomManager -> RoomManagerScreen(vm, goBack)
         // Detail pages replaced the old generic detail screen: per-domain
         // pages (climate still routes to its thermostat page inside).
         is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack)
@@ -1101,7 +1219,8 @@ private fun EntityPopupSheetContent(
                 val accent = accentFor(entity.entityId)
                 Row(
                     Modifier.fillMaxWidth()
-                        .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
+                        .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
+                        .hideWhileTraveling(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     DomainBadge(
@@ -1112,7 +1231,7 @@ private fun EntityPopupSheetContent(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(entity.friendlyName, fontSize = dialogNameSize(entity.friendlyName), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -1148,6 +1267,32 @@ private fun EntityPopupSheetContent(
                         shape = RoundedCornerShape(50),
                     ) { Text("Close") }
                 }
+                // Shape picker (2026-10-30): per-entity overrides,
+                // reachable from every entity's sheet (long-press
+                // any card or tile). The badge and card-outline
+                // shapes are picked independently; the subtitle
+                // shows the effective choice (override, else the
+                // global default, else the domain default).
+                Spacer(Modifier.height(8.dp))
+                KodaMenuRow(
+                    badgeKey = "shape-badge-${entity.entityId}",
+                    badgeKind = shapeForDomain(entity.domain),
+                    icon = domainIcon(entity),
+                    title = "Badge shape",
+                    subtitle = shapeLabel(vm.settingsStore.badgeShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalBadgeShape) ?: "Domain default",
+                    onClick = { vm.openShapePicker(entity.entityId, false) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                KodaMenuRow(
+                    badgeKey = "shape-card-${entity.entityId}",
+                    badgeKind = shapeForDomain(entity.domain),
+                    icon = domainIcon(entity),
+                    title = "Card shape",
+                    subtitle = shapeLabel(vm.settingsStore.cardShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalCardShape) ?: "Default corners",
+                    onClick = { vm.openShapePicker(entity.entityId, true) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         Spacer(Modifier.height(8.dp))
     }
@@ -1269,55 +1414,41 @@ private fun DialogMeasureFrame(
 }
 
 /**
- * The single traveling header (2026-10-29 pop-up round, Relay-style):
- * the card's badge and state travel position + size from the
- * card's header rect to the pop-up's header rect as ONE element —
- * the way Relay's contact photos expand and travel into the header —
- * never two copies. Mechanism, and why it finally answers the
- * doubling/flash/snap saga instead of retuning it:
- * - The card's own header is hidden from frame 0 (see
- *   hideHeroWhenMorphSource): at progress 0 the traveling header
- *   sits exactly on the card header's rect, so the handoff is
- *   invisible — no second badge, name, or state ever appears beside
- *   the traveling one. The card's BODY hides the same way now (see
- *   hideBodyWhenMorphSource): on #67 the arc, humidity line, and
- *   sensor charts stayed visible while the pop-up's duplicates
- *   faded in over them.
- * - The badge MORPHS SHAPE across the travel ([TravelingBadge]):
- *   tile icons render the domain's expressive polygon while header
- *   badges render state polygons, so a tile icon visibly transforms
- *   into the header shape as it travels (card sources already render
- *   the state polygon, so theirs is correctly the identity). A
- *   fixed polygon sliding into place unchanged was the 2026-10-29
- *   verdict: "relay style icons don't transition into shapes like
- *   they should".
- * - The NAME does not travel: a tile's badge-only source rect is
- *   far narrower than the name, so the traveling name ellipsized
- *   mid-morph ("Ecobee Therm...", "Eco..."). The name fades in at
- *   the destination instead, with the pop-up header's late content
- *   fade — full name, never clipped through the morph.
- * - The pop-up's own header is hidden by the late content fade
- *   (morphContentAlpha) until the morph nearly completes; the
- *   traveling header dissolves into it over the last 10% (see
- *   heroHeaderAlpha) once it has arrived at the target rect.
- * - Exit is the exact reverse: the header reappears at the target,
- *   travels back to the card, and the card header returns in the
- *   same frame the morph clears — never a snap, never staged
- *   (badge-then-text), never a blank panel.
- * - No sharedBounds crossfade (both endpoints visible = #49's
- *   ghosting), no blank growing panel (#60/#62's white flash), no
- *   instant snap return (#62's "sudden smack"). One element travels;
- *   the rest of the pop-up content fades in around it.
- * A sourceless card renders nothing (the destination's late fade
- * still shows the header at rest); a missing target renders at the
- * source rect until the measurement frame reports (see above),
- * never a gap and never a jump. The badge itself
- * is the dismiss affordance (tap it = dismiss, same as Back/scrim/
- * Close); taps elsewhere on the header fall through to the surface
- * below. The badge click disables once fully dissolved (progress
+ * The single traveling header (2026-10-29 pop-up round, Relay-style;
+ * 2026-10-30 verdict round: TRUE element travel, not recreation).
+ * The card's badge, name, and state travel as ONE element — the
+ * badge lerps along its own rect (derived from the source and
+ * target header rows with [badgeRectInRow]: tiles report their
+ * badge rect directly, cards and dialog headers report their
+ * header row, and the badge is always the row's leading square,
+ * so a 64dp tile badge, a 56dp card badge, and the 48dp dialog
+ * badge land on exactly the same rect at rest — no size pop at
+ * either end, which is what the old row-rect travel got wrong),
+ * while the name (16sp -> dialog size) and state ride beside it
+ * at the dialog's own gap (16dp -> 12dp) and width cap (the
+ * dialog name width, so the ellipsis, if any, is identical
+ * mid-flight and at rest). The name never ellipsizes mid-morph
+ * into "Ecobee Therm...": it is laid out at the destination
+ * width from frame 0 and translates with the badge.
+ *
+ * The destination header itself wears [hideWhileTraveling], so
+ * during the flight the traveler is the ONLY header on screen;
+ * the destination materializes only in the final 2% handoff
+ * window ([heroHeaderAlpha]), where traveler and destination
+ * coincide — never two copies, never a color shift between a
+ * mid-morph traveler and a fading-in destination, never text
+ * popping back up after the shape. The traveler reads the
+ * open/dismiss-time snapshot ([HavenViewModel.travelSnapshots]),
+ * never the live states flow, so no state emission mid-flight
+ * — its own or any other entity's — can recompute its color,
+ * shape, or text, or cost a frame at 120Hz; the dialog body
+ * stays live. A sourceless card renders nothing (the
+ * destination's late fade still shows the header at rest); a
+ * missing target renders at the source rect until the
+ * measurement frame reports, never a gap and never a jump.
+ * The badge itself is the dismiss affordance (tap it =
+ * dismiss); its click disables once fully handed off (progress
  * 1), so the destination header's own badge owns taps at rest.
- * Name size lerps 16sp -> 20sp card-to-pop-up; the badge fills the
- * lerped row height, so it grows/shrinks with the travel.
  */
 @Composable
 private fun TravelingHeader(
@@ -1327,28 +1458,41 @@ private fun TravelingHeader(
     target: Rect?,
     progress: Float,
     overlayOrigin: Offset,
+    nameWidthCap: Dp,
     onDismiss: () -> Unit,
 ) {
-    val states by vm.states.collectAsState()
-    val entity = states[entityId] ?: return
+    // Snapshot-first (see the ViewModel KDoc): the live flow is
+    // only the first-frame fallback before the open effect
+    // captures, and it is read as a plain value, never collected
+    // — so unrelated state emissions never recompose the flight.
+    val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
     if (source == null) return
-    // No target yet (measurement frame pending): sit exactly on the
-    // source rect instead of vanishing — the card header hides from
-    // frame 0, so returning early here left a gap where no header
-    // showed at all, then the traveler popped in mid-path (the
-    // 2026-10-30 verdict's icon jump). Once the target arrives the
-    // same lerp carries it continuously to the dialog header.
+    // No target yet (measurement frame pending): sit exactly on
+    // the source badge rect instead of vanishing — the card
+    // header hides from frame 0, so returning early here left a
+    // gap where no header showed at all, then the traveler popped
+    // in mid-path (the 2026-10-30 verdict's icon jump). Once the
+    // target arrives the same lerp carries it continuously to
+    // the dialog header.
     val targetRect = target ?: source
     val p = progress.coerceIn(0f, 1f)
-    val rect = lerpRect(source, targetRect, p)
     val density = LocalDensity.current
-    val accent = accentFor(entity.entityId)
     // Tile sources report their square badge rect; card sources
-    // report their wide header row. A near-square source is a tile
-    // badge (domain polygon); a wide source is a card header (state
-    // polygon already) — see TravelingBadge for why this matters.
+    // report their wide header row. A near-square source is a
+    // tile badge (domain polygon); a wide source is a card header
+    // (state polygon already) — see TravelingBadge for why this
+    // matters. The badge path is badge-rect to badge-rect, never
+    // row-rect to row-rect: row heights differ (64/56/48dp), so
+    // row travel always popped the badge size at the handoff.
     val tileSource = source.width < source.height * 1.5f
+    val sourceBadge = if (tileSource) source
+        else badgeRectInRow(source, with(density) { 56.dp.toPx() })
+    val targetBadge = badgeRectInRow(targetRect, with(density) { 48.dp.toPx() })
+    val rect = lerpRect(sourceBadge, targetBadge, p)
+    val accent = accentFor(entity.entityId)
     val headerAlpha = heroHeaderAlpha(p)
+    val nameSize = (16f + (dialogNameSize(entity.friendlyName).value - 16f) * p).sp
+    val gap = (16f - 4f * p).dp
     Box(
         Modifier
             .offset {
@@ -1358,7 +1502,6 @@ private fun TravelingHeader(
                 )
             }
             .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
-            .clipToBounds()
             .graphicsLayer { alpha = headerAlpha },
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -1369,7 +1512,7 @@ private fun TravelingHeader(
                 accent,
                 p,
                 tileSource,
-                modifier = Modifier.size(with(density) { rect.height.toDp() })
+                modifier = Modifier.size(with(density) { rect.width.toDp() })
                     .then(
                         if (headerAlpha > 0f) Modifier.clickable(
                             interactionSource = remember { MutableInteractionSource() },
@@ -1377,17 +1520,26 @@ private fun TravelingHeader(
                         ) { onDismiss() } else Modifier,
                     ),
             )
-            Spacer(Modifier.width(8.dp))
-            // No traveling name (see KDoc): it ellipsized mid-morph
-            // from narrow source rects. The destination header's
-            // name fades in whole with the late content fade.
-            Text(
-                entity.stateText(),
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Spacer(Modifier.width(gap))
+            Column {
+                Text(
+                    entity.friendlyName,
+                    fontSize = nameSize,
+                    fontWeight = if (p >= 0.5f) FontWeight.Bold else FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = nameWidthCap),
+                )
+                Text(
+                    entity.stateText(),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = nameWidthCap),
+                )
+            }
         }
     }
 }
@@ -1400,8 +1552,8 @@ private fun TravelingHeader(
  * (reported by WeatherControl via reportArcBounds) lerps to the
  * measurement frame's panel rect on the same progress, the panel
  * content (condition-tinted box + Dial) fills the lerped rect, and
- * the traveler dissolves into the destination panel over the last
- * 10% (heroHeaderAlpha) while the destination panel dissolves in
+ * the traveler hands off to the destination panel in the final
+ * 2% window (heroHeaderAlpha) while the destination panel dissolves in
  * on the inverse curve (dissolveIntoTraveler) — so at every frame
  * exactly one arc is visible. Non-weather entities return early
  * (their arc bounds are never reported); a missing source renders
@@ -1425,8 +1577,7 @@ private fun TravelingArc(
     progress: Float,
     overlayOrigin: Offset,
 ) {
-    val states by vm.states.collectAsState()
-    val entity = states[entityId] ?: return
+    val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
     if (entity.domain != "weather") return
     if (source == null) return
     // Same no-target rule as TravelingHeader: sit on the source
@@ -1932,7 +2083,8 @@ fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
     val accent = accentFor(entity.entityId)
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
-            .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
+            .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
+            .hideWhileTraveling(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         DomainBadge(

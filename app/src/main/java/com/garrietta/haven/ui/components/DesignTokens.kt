@@ -4,7 +4,8 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import kotlin.math.pow
-import com.garrietta.haven.ui.theme.StateShape
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.sp
 
 /**
  * Pure design-token logic for the ARCHITECTURE AND SYSTEM FOUNDATIONS round.
@@ -258,6 +259,22 @@ fun formatCondition(condition: String): String {
             else -> listOf(word.lowercase().replaceFirstChar { it.uppercase() })
         }
     }.joinToString(" ")
+}
+
+/**
+ * Dialog header name size by name length (2026-10-30 verdict:
+ * long entity names truncated to "Thermostat Current
+ * Temperatu…" in dialog headers). Steps down so the full name
+ * shows on one line instead of ellipsizing: 20sp through 22
+ * characters, 17sp through 28, 15sp beyond. The traveling header
+ * lerps to this same size, so the name never changes size at the
+ * handoff. Extremely long names still ellipsize as a last resort.
+ * Pure, unit-tested.
+ */
+fun dialogNameSize(name: String): TextUnit = when {
+    name.length <= 22 -> 20.sp
+    name.length <= 28 -> 17.sp
+    else -> 15.sp
 }
 
 /**

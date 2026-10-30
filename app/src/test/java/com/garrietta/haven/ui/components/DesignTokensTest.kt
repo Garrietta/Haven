@@ -2,6 +2,7 @@ package com.garrietta.haven.ui.components
 
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import com.garrietta.haven.ui.theme.StateShape
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -244,5 +245,15 @@ class DesignTokensTest {
             3.0f,
         )
         assertTrue(contrastRatio(inactive, paleDisc) >= 3.0f)
+    }
+
+    @Test
+    fun dialogNameSize_shrinksLongNamesInsteadOfEllipsizing() {
+        // 2026-10-30 verdict: "Thermostat Current Temperatu…"
+        // must show in full — size steps down before any ellipsis.
+        assertEquals(20.sp, dialogNameSize("Lamp"))
+        assertEquals(20.sp, dialogNameSize("Ecobee Thermostat"))
+        assertEquals(17.sp, dialogNameSize("Thermostat Current Humidity"))
+        assertEquals(15.sp, dialogNameSize("Thermostat Current Temperature"))
     }
 }

@@ -297,20 +297,13 @@ class HaClient(
         }
     }
 
-    private fun afterAuth() {
-        // Re-subscribe; the result callback is not needed for steady-state updates.
-        sendCommand("subscribe_events") { it.put("event_type", "state_changed") }
-        // States arrive via the result message, which needs a handler — so re-send
-        // get_states with a callback that actually stores them.
-        sendCommand("get_states", onResult = { msg ->
-            val result = msg.optJSONArray("result") ?: return@sendCommand
-            val map = mutableMapOf<String, HaEntity>()
-            for (i in 0 until result.length()) {
-                val e = HaEntity.fromJson(result.optJSONObject(i) ?: continue)
-                map[e.entityId] = attachManufacturer(e)
-            }
-            _states.value = map
-        })
+    /**
+     * Re-reads the area, entity, and device registries from HA (on
+     * connect via [afterAuth], and after every room mutation so the
+     * Home room sections and the Rooms screen reflect what HA
+     * itself now holds — Haven never keeps a local-only room list).
+     */
+    fun refreshRegistries() {
         sendCommand("config/area_registry/list", onResult = { msg ->
             val result = msg.optJSONArray("result") ?: return@sendCommand
             val list = mutableListOf<HaArea>()
@@ -364,6 +357,71 @@ class HaClient(
                 _entityAreas.value = entityToArea
             })
         })
+    }
+
+
+    /**
+     * Room mutations for the Rooms & areas screen (2026-10-30):
+     * create / rename / delete areas and assign entities to areas,
+     * all against HA's real registry WebSocket APIs, so changes
+     * made here appear in the HA instance itself. Callbacks report
+     * (success, errorMessage); on success the registries are
+     * re-read so areas + entityAreas flows update. The WS result
+     * handler invokes the callback for failures too, so an HA
+     * rejection (duplicate room name, refused delete) surfaces as
+     * a message instead of a silent no-op.
+     */
+    fun createArea(name: String, onResult: (Boolean, String?) -> Unit) {
+        sendCommand("config/area_registry/create", { it.put("name", name) }) { msg ->
+            val ok = msg.optBoolean("success", false)
+            if (ok) refreshRegistries()
+            onResult(ok, msg.optJSONObject("error")?.optString("message"))
+        }
+    }
+
+    fun updateArea(areaId: String, name: String, onResult: (Boolean, String?) -> Unit) {
+        sendCommand("config/area_registry/update", { it.put("area_id", areaId).put("name", name) }) { msg ->
+            val ok = msg.optBoolean("success", false)
+            if (ok) refreshRegistries()
+            onResult(ok, msg.optJSONObject("error")?.optString("message"))
+        }
+    }
+
+    fun deleteArea(areaId: String, onResult: (Boolean, String?) -> Unit) {
+        sendCommand("config/area_registry/delete", { it.put("area_id", areaId) }) { msg ->
+            val ok = msg.optBoolean("success", false)
+            if (ok) refreshRegistries()
+            onResult(ok, msg.optJSONObject("error")?.optString("message"))
+        }
+    }
+
+    /** Assigns an entity to an area, or unassigns it when [areaId] is null (sent as JSON null). */
+    fun updateEntityArea(entityId: String, areaId: String?, onResult: (Boolean, String?) -> Unit) {
+        sendCommand("config/entity_registry/update", {
+            it.put("entity_id", entityId)
+            if (areaId == null) it.put("area_id", JSONObject.NULL) else it.put("area_id", areaId)
+        }) { msg ->
+            val ok = msg.optBoolean("success", false)
+            if (ok) refreshRegistries()
+            onResult(ok, msg.optJSONObject("error")?.optString("message"))
+        }
+    }
+
+    private fun afterAuth() {
+        // Re-subscribe; the result callback is not needed for steady-state updates.
+        sendCommand("subscribe_events") { it.put("event_type", "state_changed") }
+        // States arrive via the result message, which needs a handler — so re-send
+        // get_states with a callback that actually stores them.
+        sendCommand("get_states", onResult = { msg ->
+            val result = msg.optJSONArray("result") ?: return@sendCommand
+            val map = mutableMapOf<String, HaEntity>()
+            for (i in 0 until result.length()) {
+                val e = HaEntity.fromJson(result.optJSONObject(i) ?: continue)
+                map[e.entityId] = attachManufacturer(e)
+            }
+            _states.value = map
+        })
+        refreshRegistries()
         refreshLovelace()
     }
 

@@ -57,6 +57,7 @@ import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.parseCardYaml
+import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.badgeColors
 import com.garrietta.haven.ui.components.climateModeColor
@@ -322,7 +323,11 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 Box(
                     Modifier.size(64.dp).background(
                         badgeBg,
-                        polygonShape(shapeForDomain(entity.domain)),
+                        // Tile badge shape (2026-10-30 picker): a
+                        // per-entity override beats the global
+                        // default; without either, the domain shape.
+                        LocalShapePrefs.current.badgeShape(entity.entityId)
+                            ?: polygonShape(shapeForDomain(entity.domain)),
                     )
                         .graphicsLayer(scaleX = badgeScale, scaleY = badgeScale)
                         // Traveling header anchor (2026-10-29 pop-up
@@ -513,7 +518,10 @@ private fun CameraTileVisual(vm: HavenViewModel, entity: HaEntity, accent: Color
         Box(
             Modifier.size(52.dp).background(
                 accent.copy(alpha = 0.18f),
-                polygonShape(ExpressiveKind.FLOWER),
+                // Camera placeholder shape (2026-10-30 picker):
+                // override beats the global default, else FLOWER.
+                LocalShapePrefs.current.badgeShape(entity.entityId)
+                    ?: polygonShape(ExpressiveKind.FLOWER),
             ),
             contentAlignment = Alignment.Center,
         ) {

@@ -12,10 +12,27 @@ val HOME_SECTIONS: List<Pair<String, String>> = listOf(
     "greeting" to "Greeting",
     "weather" to "Weather",
     "home" to "Who's home",
-    "playing" to "Now playing",
-    "lights" to "Lights",
-    "alerts" to "Needs attention",
+    // The camera quadrant hero at the top of Home (2026-10-30).
+    "cameras" to "Cameras",
 )
+// Room sections are toggled by "room:<areaId>" keys in the same
+// hidden-sections set (see HomeEditorScreen); they are not listed
+// here because rooms come from the HA area registry, not a fixed list.
+// Legacy keys ("playing", "lights", "alerts") from the flat Home
+// layout are ignored: those sections no longer exist — their
+// entities now live in their rooms.
+
+/**
+ * Groups entities by their HA area (2026-10-30 Home reorg):
+ * area id -> members, with null for entities assigned to no area.
+ * Pure: the Today screen filters domains (cameras to the hero,
+ * weather to its block, people to who's-home) and sorts members
+ * on top of this grouping. Unit-tested.
+ */
+fun groupEntitiesByRoom(
+    entities: List<HaEntity>,
+    entityAreas: Map<String, String>,
+): Map<String?, List<HaEntity>> = entities.groupBy { entityAreas[it.entityId] }
 
 /**
  * Default exclusion for the Home Lights section: indicator lights, not room

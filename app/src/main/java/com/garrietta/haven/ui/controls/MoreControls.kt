@@ -315,7 +315,7 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                     Spacer(Modifier.width(8.dp))
                     Text(whenLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text(formatCondition(condition), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatCondition(condition), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (fTemp != null) {
                     Spacer(Modifier.width(8.dp))
                     Text(fTemp.formatTemp(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
@@ -333,11 +333,21 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
  * be a timeline"). One node per hour: hour label, condition-colored
  * polygon badge on a continuous track, temperature, condition word.
  * The track is drawn per node (each node's 2dp segment spans its full
- * 72dp width, nodes abut with zero spacing) so the line runs unbroken
+ * node width, nodes abut with zero spacing) so the line runs unbroken
  * across hours and changes color with the condition. Same forecast
  * source and condition coloring as WeatherControl's rows; only the
  * full weather page uses the timeline — sheets, Boards, and detail
  * surfaces keep their rows.
+ *
+ * Geometry (2026-10-30 verdict: "Par" still clipped at the dialog
+ * edge at rest): the timeline lives ONLY inside centered dialogs,
+ * whose panel is narrower than the window — the #77 88dp nodes
+ * fixed in-node clipping but made the viewport-edge node straddle
+ * the panel edge on narrow windows, cutting its centered label
+ * mid-word. Nodes are 72dp with 9sp condition text (a "Partly
+ * Cloudy" label is ~52dp, so it fits its node with margin) and
+ * the row carries 12dp start / 20dp end padding, so the edge
+ * node's label clears the panel edge on folded widths too.
  */
 @Composable
 fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
@@ -346,7 +356,7 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
     LazyRow(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 20.dp),
     ) {
         items(forecast) { item ->
             val whenRaw = (item["datetime"] as? String) ?: ""
@@ -354,15 +364,13 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
             // observation, not a user directive): friendlyHourLabel's
             // "Tomorrow 10 PM" truncates to "Tomorro..." in the node,
             // repeated for every node. Rows elsewhere keep the
-            // day-qualified label. Nodes widened 72dp -> 88dp and the
-            // condition text dropped to 10sp (2026-10-30 verdict:
-            // clipped temps / truncated descriptions at the edge).
+            // day-qualified label.
             val whenLabel = timelineHourLabel(whenRaw)
             val fTemp = (item["temperature"] as? Number)?.toDouble()
             val condition = (item["condition"] as? String) ?: ""
             val chipColor = weatherConditionColor(condition)
             Column(
-                Modifier.width(88.dp),
+                Modifier.width(72.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(whenLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -388,7 +396,7 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
                 if (fTemp != null) {
                     Text(fTemp.formatTemp(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text(formatCondition(condition), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(formatCondition(condition), fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

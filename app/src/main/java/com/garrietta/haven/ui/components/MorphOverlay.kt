@@ -216,8 +216,8 @@ fun Modifier.reportArcBounds(id: String): Modifier = composed {
  * Dissolves this layout into its traveling counterpart: while inside
  * a morph surface, alpha follows 1 − [heroHeaderAlpha] of the
  * surface's progress (invisible while the traveling element carries
- * the content, fading in whole over the last 10% as the traveler
- * dissolves into it — the same curve as the traveling header).
+ * the content, materializing only in the final 2% handoff window
+ * as the traveler arrives — the same curve as the traveling header).
  * Outside a morph surface, alpha is 1: cards and ordinary pages are
  * unaffected, and measurement frames (which sit outside the surface)
  * report at full alpha.
@@ -414,16 +414,62 @@ fun morphPopupCorner(progress: Float, from: Dp = 28.dp, to: Dp = 32.dp): Dp {
 
 /**
  * Alpha for the traveling header at [progress]: fully visible
- * through the morph, dissolving into the pop-up's own header over
- * the last 10% ([0.9, 1.0]) — late enough that the header has
- * arrived at its target rect, short enough that the two headers are
- * never both readable. On exit the same curve runs in reverse, so
- * the header reappears at its target and travels back to the card.
- * Progress is clamped first, so spring overshoot lands exactly on 0.
- * Pure, unit-tested.
+ * through the morph, handing off to the pop-up's own header only
+ * over the last 2% ([0.98, 1.0]) — the 2026-10-30 verdict round's
+ * answer to "don't recreate elements, physically move them".
+ *
+ * Why 2% and not the old 10%: with a 10% dissolve window the
+ * traveler and the destination header were BOTH substantially
+ * visible for a tenth of the flight, at slightly different rects
+ * (the traveler still lerping) — the doubling, the color shift,
+ * and the "text pops back up" the verdict reports (the weather
+ * 70° arc doubling side-by-side, the lamp "On" redrawing, the
+ * "Heat • Cool" state flashing under the "Ecobee" title). With a
+ * 2% window the two copies coincide to sub-pixel accuracy at the
+ * handoff: the traveler IS the header for the whole flight, and
+ * the destination header (gated by [hideWhileTraveling], and the
+ * arc panel by [dissolveIntoTraveler] = 1 − this curve) only
+ * materializes as the traveler arrives. On exit the same curve
+ * runs in reverse: the destination header hands back to the
+ * traveler in the first 2% of the return, and the traveler
+ * carries it home. Progress is clamped first, so spring
+ * overshoot lands exactly on 0. Pure, unit-tested.
  */
 fun heroHeaderAlpha(progress: Float): Float =
-    1f - smoothstep(0.9f, 1.0f, progress)
+    1f - smoothstep(0.98f, 1.0f, progress)
+
+/**
+ * Hides a destination header while its traveling header is in
+ * flight: alpha 0 for the whole morph except the final 2%
+ * handoff window (1 − [heroHeaderAlpha]), 1 at rest and outside
+ * any morph surface. Dialog headers (sheet, detail, thermostat
+ * pop-out) wear this so the destination header can never compete
+ * with its traveler — the header the user sees mid-flight is
+ * always the traveling one, and the destination header appears
+ * exactly as the traveler arrives at its rect. Measurement frames
+ * read no progress (null) and are unaffected.
+ */
+fun Modifier.hideWhileTraveling(): Modifier = composed {
+    val progress = LocalMorphProgress.current
+    graphicsLayer {
+        alpha = if (progress == null) 1f else 1f - heroHeaderAlpha(progress)
+    }
+}
+
+/**
+ * The badge rect inside a header row rect: a [badgeSizePx] square
+ * at the row's start, vertically centered. Cards report their
+ * header ROW rect (badge + name + state) while tiles report
+ * their badge rect directly, so the traveler derives both ends
+ * of the badge path from row rects with this one rule: the badge
+ * is always the row's leading square, centered vertically, so a
+ * wrapped-name dialog row (taller than its badge) still yields
+ * the exact badge position. Pure, unit-tested.
+ */
+fun badgeRectInRow(row: Rect, badgeSizePx: Float): Rect {
+    val top = row.top + ((row.height - badgeSizePx) / 2f).coerceAtLeast(0f)
+    return Rect(row.left, top, row.left + badgeSizePx, top + badgeSizePx)
+}
 
 /**
  * Content alpha for a morphing surface at [progress] (0 = card,

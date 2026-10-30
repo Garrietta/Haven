@@ -69,7 +69,8 @@ import com.garrietta.haven.DetailPopupHeader
 import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
-import com.garrietta.haven.ui.components.DomainBadge
+import com.garrietta.haven.ui.components.dialogNameSize
+import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.LocalHeroTarget
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
@@ -197,7 +198,8 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
     ) {
         Row(
             Modifier.fillMaxWidth()
-                .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
+                .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
+                .hideWhileTraveling(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Badge by EVERY pop-up (2026-10-29 verdict overrules
@@ -215,7 +217,17 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
                 ) { onClose() },
             )
             Spacer(Modifier.width(12.dp))
-            Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            // Standard dialog header (2026-10-30): name + state
+            // below it, exactly like every sheet/detail header, so
+            // the traveling header (badge + name + state as one
+            // element) lands exactly — the old name-only title let
+            // the traveler's "Heat • Cool" state flash underneath
+            // the "Ecobee" name mid-flight, and the 18sp name
+            // popped to the traveler's 20sp at the handoff.
+            Column(Modifier.weight(1f)) {
+                Text(entity.friendlyName, fontSize = dialogNameSize(entity.friendlyName), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")
             }

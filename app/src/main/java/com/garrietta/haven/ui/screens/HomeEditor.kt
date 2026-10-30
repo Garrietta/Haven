@@ -49,6 +49,7 @@ import com.garrietta.haven.data.isLightShownOnHome
 @Composable
 fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
+    val areas by vm.areas.collectAsState()
     var welcome by remember { mutableStateOf(vm.settingsStore.homeWelcomeMessage) }
     var hidden by remember { mutableStateOf(vm.settingsStore.homeHiddenSections) }
     var overrides by remember { mutableStateOf(vm.settingsStore.homeLightOverrides()) }
@@ -61,7 +62,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
         item {
             DetailTopBar("Manage home page", onBack)
             Text(
-                "Home shows your welcome message, then the sections below. Changes apply as soon as you make them.",
+                "Home shows your welcome message, then the camera hero and room sections below. Changes apply as soon as you make them.",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -94,6 +95,33 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = key !in hidden,
+                        onCheckedChange = { shown ->
+                            hidden = if (shown) hidden - key else hidden + key
+                            vm.settingsStore.homeHiddenSections = hidden
+                            vm.bumpHomePrefs()
+                        },
+                    )
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(24.dp))
+            Text("Rooms", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Home is organized by room. Hide a room here to drop its whole section; create, rename, delete, and assign rooms in Settings → Rooms & areas (changes carry over to Home Assistant itself).",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        for (area in areas) {
+            item {
+                val key = "room:${area.id}"
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(area.name, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                     Switch(
                         checked = key !in hidden,
                         onCheckedChange = { shown ->
