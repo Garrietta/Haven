@@ -138,6 +138,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.unit.IntSize
+import com.garrietta.haven.ui.components.LocalArcBounds
+import com.garrietta.haven.ui.components.LocalArcTarget
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHeroBounds
 import com.garrietta.haven.ui.components.LocalHeroTarget
