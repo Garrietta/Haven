@@ -171,8 +171,47 @@ fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.Imag
     )
     val idle = stateShapePolygon(badgeIdleShape(domain))
     val active = stateShapePolygon(badgeActiveShape(domain, if (domain == "weather") state else null))
+    val (bg, iconTint) = badgeColors(scheme, entity, accent)
+    Box(
+        modifier.graphicsLayer {
+            if (!reduceMotion) {
+                if (alert || playing) rotationZ = rotation
+                if (alert) {
+                    scaleX = pulse
+                    scaleY = pulse
+                }
+                if (moving) translationY = lift
+            }
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = iconTint,
+            modifier = Modifier.size(26.dp),
+        )
+    }
+}
+
+/**
+ * DomainBadge's fill + glyph colors, shared verbatim by
+ * [TravelingBadge] so the traveling icon carries exactly the badge's
+ * colors at both ends of its travel (no second color table to drift).
+ */
+fun badgeColors(
+    scheme: androidx.compose.material3.ColorScheme,
+    entity: HaEntity,
+    accent: Color,
+): Pair<Color, Color> {
+    val domain = entity.domain
+    val state = entity.state
+    val hvacAction = entity.attrString("hvac_action")
+    val alert = badgeAlert(domain, state)
+    val playing = domain == "media_player" && state == "playing"
     val kelvin = entity.attrInt("color_temp_kelvin")
-    val (bg, iconTint) = when (domain) {
+    return when (domain) {
         "light" -> {
             val on = state == "on"
             lightContainerColor(scheme, kelvin, on) to
@@ -195,20 +234,46 @@ fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.Imag
             else accent.copy(alpha = 0.22f) to accent
         else -> accent.copy(alpha = 0.22f) to accent
     }
-    Box(
-        modifier.graphicsLayer {
-            if (!reduceMotion) {
-                if (alert || playing) rotationZ = rotation
-                if (alert) {
-                    scaleX = pulse
-                    scaleY = pulse
-                }
-                if (moving) translationY = lift
-            }
-        },
-        contentAlignment = Alignment.Center,
-    ) {
-        MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
+}
+
+/**
+ * The traveling badge (2026-10-29 verdict-fix round): the icon that
+ * moves with the traveling header, MORPHING ITS SHAPE across the
+ * morph — not just sliding and scaling a fixed polygon. [progress]
+ * 0 = the source card's polygon, 1 = the pop-up header badge's state
+ * polygon ([travelBadgeDestinationShape]). Tile sources render the
+ * domain's expressive polygon ([shapeForDomain]) while header
+ * badges render state polygons, so a tile icon visibly transforms
+ * into the header shape as it travels; card sources already render
+ * the state polygon, so their morph is correctly the identity
+ * (same polygon, only size + position change). The interpolation is
+ * the proven Morph + forEachCubic path ([MorphPolygon], the Koda
+ * #143 pattern): vertices interpolate, art is never inset inside a
+ * mask — the polygon fills its box exactly at every progress, so no
+ * crescent gaps appear mid-morph. Colors come from [badgeColors],
+ * identical to [DomainBadge]. Ambient badge motion (alert rotation,
+ * playing rotation, cover lift) is deliberately NOT carried into
+ * travel: the destination badge resumes it at rest, and a spinning
+ * icon mid-travel would fight the shape morph.
+ */
+@Composable
+fun TravelingBadge(
+    entity: HaEntity,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    accent: Color,
+    progress: Float,
+    tileSource: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val (bg, iconTint) = badgeColors(scheme, entity, accent)
+    val domain = entity.domain
+    val state = entity.state
+    val from = if (tileSource) com.garrietta.haven.ui.theme.expressivePolygon(shapeForDomain(domain))
+        else stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
+    val to = stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
+    Box(modifier, contentAlignment = Alignment.Center) {
+        MorphPolygon(from, to, progress.coerceIn(0f, 1f), bg, Modifier.fillMaxSize())
         Icon(
             icon,
             contentDescription = null,
@@ -267,7 +332,7 @@ fun KodaMenuRow(
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             if (subtitle != null) {
                 Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

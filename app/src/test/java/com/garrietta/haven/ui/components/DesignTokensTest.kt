@@ -116,6 +116,23 @@ class DesignTokensTest {
     }
 
     @Test
+    fun travelBadgeDestinationIsTheSettledStateShape() {
+        // Active states land on the active polygon; idle states on
+        // the idle polygon. Weather always lands active (its morph
+        // progress is 1), picking sunburst vs cloud by condition.
+        assertEquals(StateShape.SCALLOP12, travelBadgeDestinationShape("light", "on", null, null))
+        assertEquals(StateShape.HEXAGON, travelBadgeDestinationShape("light", "off", null, null))
+        assertEquals(StateShape.ARC_WAVE, travelBadgeDestinationShape("climate", "heat_cool", "heating", null))
+        assertEquals(StateShape.SQUIRCLE, travelBadgeDestinationShape("climate", "off", "idle", null))
+        assertEquals(StateShape.SHIELD, travelBadgeDestinationShape("cover", "closed", null, null))
+        assertEquals(StateShape.NOTCHED_DIAMOND, travelBadgeDestinationShape("cover", "open", null, null))
+        assertEquals(StateShape.SUNBURST, travelBadgeDestinationShape("weather", "partlycloudy", null, "partlycloudy"))
+        assertEquals(StateShape.CLOUD_POLY, travelBadgeDestinationShape("weather", "rainy", null, "rainy"))
+        assertEquals(StateShape.OCTAGON, travelBadgeDestinationShape("sensor", "72.5", null, null))
+        assertEquals(StateShape.STAR8, travelBadgeDestinationShape("media_player", "playing", null, null))
+    }
+
+    @Test
     fun coverMovingOnlyWhileOpeningOrClosing() {
         assertTrue(coverIsMoving("opening"))
         assertTrue(coverIsMoving("closing"))

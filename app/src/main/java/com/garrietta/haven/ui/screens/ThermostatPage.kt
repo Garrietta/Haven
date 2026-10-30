@@ -59,7 +59,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.garrietta.haven.DetailTopBar
+import com.garrietta.haven.DetailPopupHeader
+import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.LocalHeroTarget
@@ -106,7 +107,7 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
     val min = entity?.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity?.attrDouble("max_temp")?.toFloat() ?: 30f
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-        DetailTopBar(entity?.friendlyName ?: "Unavailable", onBack)
+        if (entity != null) DetailPopupHeader(entity, onBack) else DetailPopupTitleHeader("Unavailable")
         if (entity == null) {
             Text(
                 "This entity is no longer available.",
@@ -180,7 +181,7 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(entity.friendlyName, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")
             }

@@ -278,12 +278,12 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                         )
                     }
                     Spacer(Modifier.width(8.dp))
-                    Text(whenLabel, fontSize = 13.sp)
+                    Text(whenLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
                 }
                 Text(condition.replace('_', ' '), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (fTemp != null) {
                     Spacer(Modifier.width(8.dp))
-                    Text(fTemp.formatTemp(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(fTemp.formatTemp(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -323,7 +323,7 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
                 Modifier.width(72.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(whenLabel, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(whenLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(8.dp))
                 Box(
                     Modifier.fillMaxWidth().height(40.dp),
@@ -344,7 +344,7 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
                 }
                 Spacer(Modifier.height(8.dp))
                 if (fTemp != null) {
-                    Text(fTemp.formatTemp(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(fTemp.formatTemp(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 }
                 Text(condition.replace('_', ' '), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

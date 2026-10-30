@@ -149,6 +149,19 @@ fun weatherActiveShape(condition: String?): StateShape = when (condition?.lowerc
     else -> StateShape.CLOUD_POLY
 }
 
+/**
+ * The destination polygon for a traveling badge (2026-10-29
+ * verdict-fix round): the state polygon the pop-up header badge
+ * renders at rest — the settled end of [badgeMorphProgress], never a
+ * mid-animation blend. The traveling badge morphs its polygon from
+ * the source card's polygon to this shape across the morph (see
+ * TravelingBadge), so the icon reads as one element transforming,
+ * not sliding into place unchanged. Pure, unit-tested.
+ */
+fun travelBadgeDestinationShape(domain: String, state: String, hvacAction: String?, condition: String?): StateShape =
+    if (badgeMorphProgress(domain, state, hvacAction) >= 0.5f) badgeActiveShape(domain, condition)
+    else badgeIdleShape(domain)
+
 /** Whether a cover is mid-travel (the warning chevron lifts while moving). */
 fun coverIsMoving(state: String): Boolean = state == "opening" || state == "closing"
 

@@ -90,6 +90,7 @@ import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.lightColorTempTint
 import com.garrietta.haven.ui.components.weatherConditionColor
+import com.garrietta.haven.ui.components.hideBodyWhenMorphSource
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
@@ -293,7 +294,14 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
         ),
         modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).hideWhenMorphSource(entity.entityId) else Modifier),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        // Body hide (2026-10-29 verdict-fix round): the whole card
+        // body vanishes from frame 0 while its morph is open, exactly
+        // like the header hide above — on #67 only the header hid,
+        // so the arc, humidity line, charts, and lamp heroes stayed
+        // visible under the pop-up's duplicates. Gated on
+        // morphSource like the root hide: nested/destination cards
+        // sharing the entity id must never hide.
+        Column(Modifier.padding(16.dp).then(if (morphSource) Modifier.hideBodyWhenMorphSource(entity.entityId) else Modifier)) {
             if (showHeader) {
                 // headerClickable=false lets an outer gesture own the
                 // card (the Home weather card's combinedClickable):
@@ -342,7 +350,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)

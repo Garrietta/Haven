@@ -178,6 +178,30 @@ fun Modifier.hideHeroWhenMorphSource(id: String): Modifier = composed {
 }
 
 /**
+ * Hides this layout's BODY while it is the active morph source
+ * (layout unchanged, alpha only) — the 2026-10-29 verdict-fix round's
+ * answer to the weather pop-up still doubling on #67. The header hide
+ * above covers only the header row: the source card's arc, humidity
+ * line, sensor chart, and lamp hero stayed visible (fading only on
+ * [morphCardAlpha]) while the pop-up's duplicate content faded in
+ * over them, so two copies of the same content shared the screen.
+ * With the body hidden from frame 0 — same mechanism as the header
+ * hide, keyed on the morph-source id — the pop-up's content is the
+ * only copy on screen at any frame, and the card restores atomically
+ * on dismiss exactly as the header does (the morph surface sits
+ * exactly on the card rect at progress 0 with a transparent
+ * background, so the restore is invisible). Callers gate this on
+ * their morph-source flag, exactly like [hideWhenMorphSource]:
+ * nested/destination cards sharing the entity id must never hide.
+ */
+fun Modifier.hideBodyWhenMorphSource(id: String): Modifier = composed {
+    val hiddenId = LocalHiddenCardId.current
+    graphicsLayer {
+        alpha = if (id == hiddenId) 0f else 1f
+    }
+}
+
+/**
  * Renders this layout with the morph source's progress-driven alpha
  * while it is the active morph source (layout unchanged). The alpha
  * comes from [LocalMorphCardAlpha]: 1 at morph start (the card is

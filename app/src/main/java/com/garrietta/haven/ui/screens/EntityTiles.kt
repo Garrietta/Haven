@@ -58,6 +58,7 @@ import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.controls.shapeTapAction
+import com.garrietta.haven.ui.components.hideBodyWhenMorphSource
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
@@ -221,6 +222,14 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             .reportCardBounds(entity.entityId)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
+            // Body hide (2026-10-29 verdict-fix round): the whole
+            // tile vanishes from frame 0 while its morph is open,
+            // exactly like the header hide — the climate tile's dual
+            // numbers and steppers were the one body section the
+            // header hide did not cover, so they doubled against the
+            // pop-out's dial numbers. The surface grows from the
+            // tile rect, so the restore on dismiss is invisible.
+            .hideBodyWhenMorphSource(entity.entityId)
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -307,6 +316,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 entity.friendlyName,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 // Traveling header: the tile's name hides with its

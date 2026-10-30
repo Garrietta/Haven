@@ -286,7 +286,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         item {
             if (showSection("greeting")) {
                 Spacer(Modifier.height(16.dp))
-                Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             }
             if (!connection.isLive()) {
                 Spacer(Modifier.height(4.dp))
@@ -331,7 +331,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             item {
                 Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(4.dp))
-                Text(homePeople.joinToString(", ") { it.friendlyName }, fontSize = 16.sp)
+                Text(homePeople.joinToString(", ") { it.friendlyName }, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -443,7 +443,7 @@ fun SettingsScreen(
         contentPadding = PaddingValues(bottom = pillClearanceBottom()),
     ) {
         item {
-            Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
             KodaMenuSection("Appearance")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

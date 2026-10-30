@@ -114,9 +114,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
+import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
+import com.garrietta.haven.ui.components.TravelingBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.SheetPageContent
@@ -976,6 +978,7 @@ fun HavenApp(vm: HavenViewModel) {
                         vm, anim.id, heroBounds[anim.id],
                         heroTarget?.takeIf { it.first == anim.id }?.second,
                         sheetP, overlayOrigin,
+                        onDismiss = { dismissSheet() },
                     )
                 }
             }
@@ -1074,6 +1077,7 @@ fun HavenApp(vm: HavenViewModel) {
                     TravelingHeader(
                         vm, anim.entityId, heroBounds[anim.entityId],
                         targetHero, detailP, overlayOrigin,
+                        onDismiss = { dismissDetail() },
                     )
                 }
             }
@@ -1193,6 +1197,7 @@ fun HavenApp(vm: HavenViewModel) {
                         vm, anim.id, heroBounds[anim.id],
                         heroTarget?.takeIf { it.first == anim.id }?.second,
                         popoutP, overlayOrigin,
+                        onDismiss = { dismissPopout() },
                     )
                 }
             }
@@ -1367,7 +1372,7 @@ private fun EntityPopupSheetContent(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -1410,7 +1415,7 @@ private fun EntityPopupSheetContent(
 
 /**
  * The single traveling header (2026-10-29 pop-up round, Relay-style):
- * the card's badge, name, and state travel position + size from the
+ * the card's badge and state travel position + size from the
  * card's header rect to the pop-up's header rect as ONE element —
  * the way Relay's contact photos expand and travel into the header —
  * never two copies. Mechanism, and why it finally answers the
@@ -1419,7 +1424,23 @@ private fun EntityPopupSheetContent(
  *   hideHeroWhenMorphSource): at progress 0 the traveling header
  *   sits exactly on the card header's rect, so the handoff is
  *   invisible — no second badge, name, or state ever appears beside
- *   the traveling one.
+ *   the traveling one. The card's BODY hides the same way now (see
+ *   hideBodyWhenMorphSource): on #67 the arc, humidity line, and
+ *   sensor charts stayed visible while the pop-up's duplicates
+ *   faded in over them.
+ * - The badge MORPHS SHAPE across the travel ([TravelingBadge]):
+ *   tile icons render the domain's expressive polygon while header
+ *   badges render state polygons, so a tile icon visibly transforms
+ *   into the header shape as it travels (card sources already render
+ *   the state polygon, so theirs is correctly the identity). A
+ *   fixed polygon sliding into place unchanged was the 2026-10-29
+ *   verdict: "relay style icons don't transition into shapes like
+ *   they should".
+ * - The NAME does not travel: a tile's badge-only source rect is
+ *   far narrower than the name, so the traveling name ellipsized
+ *   mid-morph ("Ecobee Therm...", "Eco..."). The name fades in at
+ *   the destination instead, with the pop-up header's late content
+ *   fade — full name, never clipped through the morph.
  * - The pop-up's own header is hidden by the late content fade
  *   (morphContentAlpha) until the morph nearly completes; the
  *   traveling header dissolves into it over the last 10% (see
@@ -1434,8 +1455,11 @@ private fun EntityPopupSheetContent(
  *   the rest of the pop-up content fades in around it.
  * Rendered only when both rects are known: a sourceless card or a
  * pop-up that never reported its header simply gets the existing
- * fade mechanism, never a crash and never a jump. The header takes
- * no touches (no clickable): taps fall through to the surface below.
+ * fade mechanism, never a crash and never a jump. The badge itself
+ * is the dismiss affordance (tap it = dismiss, same as Back/scrim/
+ * Close); taps elsewhere on the header fall through to the surface
+ * below. The badge click disables once fully dissolved (progress
+ * 1), so the destination header's own badge owns taps at rest.
  * Name size lerps 16sp -> 20sp card-to-pop-up; the badge fills the
  * lerped row height, so it grows/shrinks with the travel.
  */
@@ -1447,6 +1471,7 @@ private fun TravelingHeader(
     target: Rect?,
     progress: Float,
     overlayOrigin: Offset,
+    onDismiss: () -> Unit,
 ) {
     val states by vm.states.collectAsState()
     val entity = states[entityId] ?: return
@@ -1455,6 +1480,12 @@ private fun TravelingHeader(
     val rect = lerpRect(source, target, p)
     val density = LocalDensity.current
     val accent = accentFor(entity.entityId)
+    // Tile sources report their square badge rect; card sources
+    // report their wide header row. A near-square source is a tile
+    // badge (domain polygon); a wide source is a card header (state
+    // polygon already) — see TravelingBadge for why this matters.
+    val tileSource = source.width < source.height * 1.5f
+    val headerAlpha = heroHeaderAlpha(p)
     Box(
         Modifier
             .offset {
@@ -1465,34 +1496,35 @@ private fun TravelingHeader(
             }
             .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
             .clipToBounds()
-            .graphicsLayer { alpha = heroHeaderAlpha(p) },
+            .graphicsLayer { alpha = headerAlpha },
         contentAlignment = Alignment.CenterStart,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            DomainBadge(
+            TravelingBadge(
                 entity,
                 domainIcon(entity),
                 accent,
-                modifier = Modifier.size(with(density) { rect.height.toDp() }),
+                p,
+                tileSource,
+                modifier = Modifier.size(with(density) { rect.height.toDp() })
+                    .then(
+                        if (headerAlpha > 0f) Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { onDismiss() } else Modifier,
+                    ),
             )
             Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    entity.friendlyName,
-                    fontSize = (16 + 4 * p).sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    entity.stateText(),
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            // No traveling name (see KDoc): it ellipsized mid-morph
+            // from narrow source rects. The destination header's
+            // name fades in whole with the late content fade.
+            Text(
+                entity.stateText(),
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -1905,11 +1937,16 @@ fun StatusBarAppearance(background: Color) {
     }
 }
 
-/** Back arrow + title row used by every detail screen. Reports its
- * root rect into the measurement frame's hero target when one is
- * provided (2026-10-29 pop-up round): detail pop-ups travel to their
- * top bar, so the bar's rect is the travel target. Outside a
- * measurement frame the provider is null and this is a plain row. */
+/** Back arrow + title row used by every FULL screen (Areas,
+ * builders, dashboards, editors, tabs, clips timeline). Detail
+ * pop-ups do NOT use this: they use [DetailPopupHeader] (traveled
+ * icon, no arrow — see below). Reports its root rect into the
+ * measurement frame's hero target when one is provided: detail
+ * pop-ups travel to their top bar, so the bar's rect is the travel
+ * target. Outside a measurement frame the provider is null and this
+ * is a plain row. Title + arrow colors are explicit (theme audit,
+ * 2026-10-29 verdict-fix round): no text or icon on any header may
+ * depend on an ambient default color. */
 @Composable
 fun DetailTopBar(title: String, onBack: () -> Unit) {
     val heroTarget = LocalHeroTarget.current
@@ -1919,9 +1956,65 @@ fun DetailTopBar(title: String, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+            Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
         }
-        Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+    }
+    Spacer(Modifier.height(4.dp))
+}
+
+/**
+ * Title-only detail pop-up header, for the vanished-entity fallback
+ * (no entity, so no badge to travel or tap): the title with no
+ * arrow, dismiss via scrim/Back like every other pop-up. Exists so
+ * even the fallback pop-up never shows a ←.
+ */
+@Composable
+fun DetailPopupTitleHeader(title: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+    Spacer(Modifier.height(4.dp))
+}
+
+/**
+ * Detail pop-up header (2026-10-29 verdict-fix round): NO back arrow.
+ * The traveled icon lands in the top-left spot — the pop-up header's
+ * leading element IS the badge, and tapping it dismisses (same as
+ * Back/scrim/Close). Title + state sit beside it, mirroring the
+ * sheet header (48dp badge + 20sp name + 13sp state) so the
+ * traveling header dissolves into it exactly. Reports its root rect
+ * into the measurement frame's hero target like [DetailTopBar] did,
+ * so the travel target is unchanged. The thermostat pop-out keeps
+ * its own title row + top-right X (not a back arrow) and is
+ * untouched by this header.
+ */
+@Composable
+fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
+    val heroTarget = LocalHeroTarget.current
+    val accent = accentFor(entity.entityId)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
+            .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DomainBadge(
+            entity,
+            domainIcon(entity),
+            accent,
+            modifier = Modifier.size(48.dp).clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onDismiss() },
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
     Spacer(Modifier.height(4.dp))
 }

@@ -60,6 +60,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.garrietta.haven.DetailPopupHeader
+import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.RecordingFullscreen
@@ -117,7 +119,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val entity = states[entityId]
     if (entity == null) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            DetailTopBar("Unavailable", onBack)
+            DetailPopupTitleHeader("Unavailable")
             Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
@@ -135,7 +137,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     }
     if (entity.domain == "camera") {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            DetailTopBar(entity.friendlyName, onBack)
+            DetailPopupHeader(entity, onBack)
             Spacer(Modifier.height(16.dp))
             Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
             Spacer(Modifier.height(16.dp))
@@ -169,7 +171,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
     Column(
         Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
     ) {
-        DetailTopBar(entity.friendlyName, onBack)
+        DetailPopupHeader(entity, onBack)
         Spacer(Modifier.height(16.dp))
         Box(
             Modifier.fillMaxWidth().background(conditionColor.copy(alpha = 0.16f), RoundedCornerShape(32.dp)).padding(vertical = 24.dp),
@@ -276,7 +278,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     }
     if (LocalWideLayout.current) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            DetailTopBar(entity.friendlyName, onBack)
+            DetailPopupHeader(entity, onBack)
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(end = 8.dp)) {
                     hero()
@@ -289,7 +291,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
         }
     } else {
         LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            item { DetailTopBar(entity.friendlyName, onBack) }
+            item { DetailPopupHeader(entity, onBack) }
             item { hero() }
             item { control() }
             item { history() }
