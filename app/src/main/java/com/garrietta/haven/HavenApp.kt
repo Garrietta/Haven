@@ -98,31 +98,21 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import org.webrtc.SurfaceViewRenderer
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
-import com.garrietta.haven.data.RingWebRtcSession
-import com.garrietta.haven.data.cameraSupportsStream
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
@@ -1269,278 +1259,59 @@ private fun EntityPopupSheetContent(
  * Fullscreen camera viewer.
  *
  * Live-only by design (his 2026-10-29 13:34 direction: never fall
- * back to the last recorded clip). Non-Ring cameras play their live
- * MJPEG stream exactly as before. Ring cameras negotiate a live
- * session in order: HLS-live FIRST (WS camera/stream with a 30s
- * window — Ring session start is slow), then WebRTC (HA's own live
- * routing, WS camera/webrtc/offer) as the fallback — and on total
- * live failure show named-stage errors + the raw HA response
- * diagnostic + a stream-support hint, with Retry. WebRTC is second,
- * not first: the 2026-10-29 verdict video's "WebRTC: offer: empty
- * answer" proved HA's Ring integration does not implement native
- * WebRTC for this camera, so trying it first only burned 20s. The
- * HLS request shape (type camera/stream + entity_id) and its
- * result.url parse were verified against HA's documented response
- * shape and are correct — a parse bug is ruled out; when HA returns
- * no URL, the error UI now shows what HA actually said. Recordings
- * live on the long-press clips timeline, never here.
+ * back to the last recorded clip). Every camera plays its MJPEG
+ * proxy stream here — including Ring, as of the 2026-10-29
+ * MJPEG-live test round. Ring previously negotiated HLS-live
+ * first (WS camera/stream, 30s) then WebRTC (WS camera/webrtc/offer);
+ * both attempts are REMOVED: HA's core Ring integration answers
+ * camera/stream deterministically with "does not support play
+ * stream service" and webrtc/offer deterministically with an empty
+ * answer, so attempting them only burned 20-50s before the only
+ * core transport that can explain the frontend's confirmed live
+ * view on the default core Ring integration (no go2rtc, no extras):
+ * the MJPEG proxy. The proxy is the live path UNDER TEST in this
+ * build, not the last-recording fallback — the #38 conclusion that
+ * the proxy serves a recording for Ring is what the wave test
+ * overturns or confirms. Badge honesty holds the "Live" badge
+ * back for Ring until that verdict: a stale clip also renders
+ * frames. Recordings live on the long-press clips timeline,
+ * never here.
  */
+
 @Composable
 private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgress: Float) {
     val cameraId = vm.fullscreenCameraId ?: return
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
+    // Ring live test path (2026-10-29): straight to the MJPEG proxy.
+    // The HLS-first (30s) + WebRTC-second attempts are REMOVED for
+    // Ring: both are proven dead by deterministic HA errors (see the
+    // KDoc above), not flakiness — attempting them first only burned
+    // 20-50s before the only core transport that can explain the
+    // frontend's confirmed live view. The proxy here is the live path
+    // UNDER TEST, not the last-recording fallback: the wave test
+    // decides whether its frames are live. No "Live" badge until
+    // that verdict lands — a stale clip also renders frames, so
+    // badge honesty holds the badge back in this build.
     val isRing = entity?.let { isRingCamera(it) } == true
     BackHandler { onClose() }
-    if (!isRing) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            CameraMjpegBody(vm, cameraId, enterProgress, recording = false, onClose = onClose)
-            CameraHeader(entity?.friendlyName ?: cameraId, badgeText = null, onClose = onClose)
-        }
-        return
-    }
-    // Ring live-only path.
-    var attempt by remember(cameraId) { mutableStateOf(0) }
-    var webrtcFailed by remember(cameraId, attempt) { mutableStateOf<String?>(null) }
-    var webrtcPlaying by remember(cameraId, attempt) { mutableStateOf(false) }
-    var hlsUrl by remember(cameraId, attempt) { mutableStateOf<String?>(null) }
-    var hlsFailed by remember(cameraId, attempt) { mutableStateOf<String?>(null) }
-    // Raw HA response diagnostic for the HLS failure (error path
-    // only — never a URL, which carries a short-lived token).
-    var hlsDiagnostic by remember(cameraId, attempt) { mutableStateOf<String?>(null) }
-    var hlsReady by remember(cameraId, attempt) { mutableStateOf(false) }
-    var hlsPlayer by remember(cameraId, attempt) { mutableStateOf<ExoPlayer?>(null) }
-    var renderer by remember(cameraId, attempt) { mutableStateOf<SurfaceViewRenderer?>(null) }
-    val context = LocalContext.current
-    // Plain (non-state) holder for this attempt's renderer view. The
-    // DisposableEffect below captures it, so the old session is
-    // closed with its own view even though the renderer STATE resets
-    // to null during the Retry recomposition before onDispose runs
-    // (reading state in onDispose would skip the close and leak the
-    // failed session on every Retry).
-    val rendererHolder = remember(cameraId, attempt) { object { var view: SurfaceViewRenderer? = null } }
-    // One WebRTC session per attempt; disposed (locally torn down)
-    // on Retry and on view close. No WS close command is sent: no
-    // confirmed camera/webrtc/close command exists, and the HA-side
-    // session expires on its own.
-    val webrtcSession = remember(cameraId, attempt) {
-        RingWebRtcSession(
-            context.applicationContext,
-            sendOffer = { offer, cb -> vm.client.requestWebRtcOffer(cameraId, offer, cb) },
-            sendCandidate = { sessionId, candidate -> vm.client.sendWebRtcCandidate(cameraId, sessionId, candidate) },
-        )
-    }
-    DisposableEffect(cameraId, attempt) {
-        val session = webrtcSession
-        val holder = rendererHolder
-        onDispose {
-            holder.view?.let { session.close(it) }
-        }
-    }
-    // Start the WebRTC session only once HLS has failed (WebRTC is
-    // the fallback path now, not the first attempt — see the KDoc
-    // above). The session object itself is created per attempt
-    // above but never started until this gate opens, and the
-    // renderer view below is only composed once the gate opens, so
-    // no WebRTC work happens while HLS is still negotiating.
-    LaunchedEffect(webrtcSession, renderer, hlsFailed) {
-        if (hlsFailed == null) return@LaunchedEffect
-        val view = renderer ?: return@LaunchedEffect
-        try {
-            webrtcSession.start(
-                view,
-                onFirstFrame = { webrtcPlaying = true },
-                onFailed = { stage -> if (webrtcFailed == null) webrtcFailed = stage },
-            )
-        } catch (e: Exception) {
-            // Defense in depth beside the session's own init guard:
-            // any throw here becomes the named error UI + the other
-            // live path, never a crash dialog.
-            if (webrtcFailed == null) webrtcFailed = "init: ${e.message ?: e.javaClass.simpleName}"
-        }
-    }
-    // WebRTC negotiation guard: 20s for offer + answer + first track.
-    // Without it a stalled negotiation would sit on "Loading" forever.
-    // Gated on HLS having failed, like the start effect above.
-    LaunchedEffect(cameraId, attempt, hlsFailed) {
-        if (hlsFailed == null) return@LaunchedEffect
-        kotlinx.coroutines.delay(20_000)
-        if (!webrtcPlaying && webrtcFailed == null) webrtcFailed = "negotiation timed out"
-    }
-    // HLS-live, FIRST path. The 30s window is deliberate: Ring SIP +
-    // ffmpeg session start is slow, and a short window was the most
-    // plausible cause of the earlier HLS failures. Late answers are
-    // dropped so no second player appears beside the first. On
-    // failure the raw HA diagnostic is kept (see hlsDiagnostic) so
-    // the error UI can show what HA actually said instead of only
-    // "no stream URL".
-    LaunchedEffect(cameraId, attempt) {
-        var answered = false
-        val timeout = launch {
-            kotlinx.coroutines.delay(30_000)
-            if (!answered) {
-                hlsFailed = "negotiation timed out"
-                hlsDiagnostic = "no response within 30s"
-            }
-        }
-        vm.client.requestHlsUrl(cameraId) { url, diagnostic ->
-            if (answered) return@requestHlsUrl
-            answered = true
-            timeout.cancel()
-            if (hlsFailed != null) return@requestHlsUrl
-            if (url != null) hlsUrl = url else {
-                hlsFailed = "no stream URL"
-                hlsDiagnostic = diagnostic
-            }
-        }
-    }
-    DisposableEffect(cameraId, attempt, hlsUrl) {
-        val url = hlsUrl ?: return@DisposableEffect onDispose {}
-        val player = vm.client.createHlsPlayer(context, url)
-        hlsPlayer = player
-        player.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) hlsReady = true
-            }
-            override fun onPlayerError(error: PlaybackException) {
-                hlsUrl = null
-                hlsFailed = "player error"
-            }
-        })
-        onDispose {
-            hlsPlayer = null
-            player?.release()
-        }
-    }
-    val live = webrtcPlaying || hlsReady
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        // WebRTC renderer: composed ONLY once HLS has failed (WebRTC
-        // is the fallback path — no renderer, no session start while
-        // HLS is still negotiating). Invisible until the first frame
-        // lands, so the connecting UI covers it meanwhile. Keyed on
-        // attempt so a Retry gets a fresh view (the old session
-        // released the old one); the holder feeds the session-close
-        // effect above.
-        if (hlsFailed != null) {
-            androidx.compose.runtime.key(attempt) {
-                AndroidView(
-                    factory = { ctx -> SurfaceViewRenderer(ctx) },
-                    update = {
-                        rendererHolder.view = it
-                        renderer = it
-                    },
-                modifier = Modifier.fillMaxSize().graphicsLayer {
-                    val s = 0.94f + 0.06f * enterProgress
-                    scaleX = s
-                    scaleY = s
-                    alpha = if (webrtcPlaying) 0.7f + 0.3f * enterProgress else 0f
-                },
-                )
-            }
-        }
-        // HLS-live player, only while it is the live path. The update
-        // block re-binds the player on recomposition: without it the
-        // factory-captured player goes stale when the HLS attempt
-        // changes, and the view can show a released player.
-        if (hlsPlayer != null) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = hlsPlayer
-                        useController = false
-                    }
-                },
-                update = { it.player = hlsPlayer },
-                modifier = Modifier.fillMaxSize().graphicsLayer {
-                    val s = 0.94f + 0.06f * enterProgress
-                    scaleX = s
-                    scaleY = s
-                    alpha = if (hlsReady) 0.7f + 0.3f * enterProgress else 0f
-                },
-            )
-        }
-        if (!live) {
-            if (webrtcFailed != null && hlsFailed != null) {
-                Column(
-                    Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("Live view unavailable", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "HLS: $hlsFailed\nWebRTC: $webrtcFailed",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                    // Raw HA response diagnostic (error path only —
-                    // never a URL, which carries a short-lived token):
-                    // what HA actually said when the HLS request
-                    // failed, so the next verdict can pinpoint the
-                    // HA-side reason instead of only "no stream URL".
-                    if (hlsDiagnostic != null) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            hlsDiagnostic!!,
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                    // Stream-support hint from the entity itself: a
-                    // camera that does not advertise SUPPORT_STREAM
-                    // will not get an HLS URL no matter how correct
-                    // the request is.
-                    entity?.let { e ->
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Camera advertises stream support: " +
-                                if (cameraSupportsStream(e)) "yes" else "no" +
-                                (e.attrInt("supported_features")?.let { " (supported_features=$it)" } ?: ""),
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = { attempt++ }) { Text("Retry") }
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onClose) { Text("Close", color = Color.White) }
-                }
-            } else {
-                Column(
-                    Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Box(
-                        Modifier.size(64.dp).background(Color.White.copy(alpha = 0.08f), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) { Text("◉", color = Color.White, fontSize = 28.sp) }
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        if (hlsFailed == null) "Loading live view…"
-                        else "HLS unavailable — trying WebRTC…",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                    )
-                }
-            }
-        }
-        // Badge honesty, same rule as before but for live only:
-        // "Live" only when a live stream is actually rendering —
-        // never on negotiation alone, never for a recording.
-        CameraHeader(
-            entity?.friendlyName ?: cameraId,
-            badgeText = if (live) "Live" else null,
-            onClose = onClose,
+        CameraMjpegBody(
+            vm, cameraId, enterProgress, recording = false, onClose = onClose,
+            connectingText = if (isRing) "Loading live view…" else null,
+            errorPrefix = if (isRing) "MJPEG proxy" else null,
         )
+        // Badge held for Ring in this test build (see above); other
+        // cameras never carried a badge here either.
+        CameraHeader(entity?.friendlyName ?: cameraId, badgeText = null, onClose = onClose)
     }
 }
 
 /**
  * Shared MJPEG body: stream effect + Playing / Connecting / Error
- * UI, used by non-Ring fullscreen (live) and by the recording
- * fullscreen (a timeline entry). [recording] switches the copy only;
+ * UI, used by fullscreen (live, all cameras including Ring) and by
+ * the recording fullscreen (a timeline entry). [recording] switches
+ * the copy only;
  * a recording view must never say "live".
  */
 @Composable
@@ -1550,6 +1321,11 @@ private fun CameraMjpegBody(
     enterProgress: Float,
     recording: Boolean,
     onClose: () -> Unit,
+    // Test-build labels for the Ring MJPEG-live path: the connecting
+    // text and the error-stage prefix. Null keeps the existing copy
+    // (non-Ring fullscreen and the recording view are byte-identical).
+    connectingText: String? = null,
+    errorPrefix: String? = null,
 ) {
     var streamState by remember(cameraId) { mutableStateOf<CameraStreamState>(CameraStreamState.Connecting) }
     var attempt by remember(cameraId) { mutableStateOf(0) }
@@ -1598,7 +1374,8 @@ private fun CameraMjpegBody(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        if (recording) "Loading recording…"
+                        if (connectingText != null) connectingText
+                        else if (recording) "Loading recording…"
                         else if (last != null) "Reconnecting…" else "Loading camera…",
                         color = Color.White,
                         fontSize = 16.sp,
@@ -1627,7 +1404,11 @@ private fun CameraMjpegBody(
                     fontSize = 18.sp,
                 )
                 Spacer(Modifier.height(8.dp))
-                Text(state.message, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+                Text(
+                    if (errorPrefix != null) "$errorPrefix: ${state.message}" else state.message,
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 14.sp,
+                )
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = { attempt++ }) { Text("Retry") }
                 Spacer(Modifier.height(8.dp))
