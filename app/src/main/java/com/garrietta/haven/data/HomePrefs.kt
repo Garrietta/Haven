@@ -9,11 +9,14 @@ package com.garrietta.haven.data
  * the header row the welcome message replaces.
  */
 val HOME_SECTIONS: List<Pair<String, String>> = listOf(
+    // Order matches the Home layout (2026-10-30 verdict round):
+    // greeting FIRST, then the camera hero, then weather, then
+    // who's-home. Room sections follow (room:<areaId> keys).
     "greeting" to "Greeting",
-    "weather" to "Weather",
-    "home" to "Who's home",
     // The camera quadrant hero at the top of Home (2026-10-30).
     "cameras" to "Cameras",
+    "weather" to "Weather",
+    "home" to "Who's home",
 )
 // Room sections are toggled by "room:<areaId>" keys in the same
 // hidden-sections set (see HomeEditorScreen); they are not listed
@@ -33,6 +36,58 @@ fun groupEntitiesByRoom(
     entities: List<HaEntity>,
     entityAreas: Map<String, String>,
 ): Map<String?, List<HaEntity>> = entities.groupBy { entityAreas[it.entityId] }
+
+/**
+ * Resolves each entity to its HA area from the two registry levels
+ * (2026-10-30 verdict round): the entity registry's own area_id wins;
+ * when an entity has none, its device registry entry's area_id is the
+ * fallback (HA's own convention — entities normally carry no area and
+ * inherit their device's). An entity with neither stays unmapped
+ * (absent from the result, never mapped to a blank area). Pure, so
+ * each registry fetch can publish independently: a partial result
+ * (entity areas without device areas, or vice versa) still resolves
+ * everything it can, and a failed fetch never blanks a map that
+ * already resolved. Unit-tested.
+ */
+fun resolveEntityAreas(
+    entityAreas: Map<String, String?>,
+    entityDevices: Map<String, String>,
+    deviceAreas: Map<String, String?>,
+): Map<String, String> {
+    val out = mutableMapOf<String, String>()
+    for ((entityId, area) in entityAreas) {
+        if (!area.isNullOrBlank()) { out[entityId] = area; continue }
+        val deviceId = entityDevices[entityId]
+        val deviceArea = deviceId?.let { deviceAreas[it] }
+        if (!deviceArea.isNullOrBlank()) out[entityId] = deviceArea
+    }
+    // Entities that appear only via a device link (no entity-registry
+    // row at all) still resolve through their device's area.
+    for ((entityId, deviceId) in entityDevices) {
+        if (entityId !in out) {
+            val deviceArea = deviceAreas[deviceId]
+            if (!deviceArea.isNullOrBlank()) out[entityId] = deviceArea
+        }
+    }
+    return out
+}
+
+/**
+ * Whether an entity belongs in Home's room sections at all
+ * (2026-10-30 verdict round). Room sections hold real, room-assignable
+ * devices; cameras live in the hero, weather in its block, people in
+ * who's-home, and the system domains below are never room devices:
+ * zone (zone.home renders as the "Home / 1" tile), sun (the "Sun /
+ * Above horizon" tile), and update (firmware/instance rows such as
+ * "Home Assistant / Unknown"). Excluding them here — and from the
+ * RoomManager unassigned list, so its counts agree with Home — keeps
+ * "No room" to real unassigned devices only. Pure, unit-tested.
+ */
+fun isHomeRoomEntity(entity: HaEntity): Boolean =
+    entity.domain !in setOf(
+        "camera", "weather", "person", "device_tracker",
+        "zone", "sun", "update",
+    )
 
 /**
  * Default exclusion for the Home Lights section: indicator lights, not room

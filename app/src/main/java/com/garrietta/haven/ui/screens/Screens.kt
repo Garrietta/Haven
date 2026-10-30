@@ -87,6 +87,20 @@ import com.garrietta.haven.data.DiscoverySource
 import com.garrietta.haven.data.isLightShownOnHome
 import com.garrietta.haven.isLive
 import com.garrietta.haven.ui.controls.EntityControlCard
+import com.garrietta.haven.data.isHomeRoomEntity
+import com.garrietta.haven.ui.components.DomainBadge
+import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.weatherConditionColor
+import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.hideWhenMorphSource
+import com.garrietta.haven.ui.components.reportHeroBounds
+import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
+import com.garrietta.haven.ui.controls.dialogHeaderState
+import com.garrietta.haven.ui.controls.domainIcon
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.ui.graphics.lerp
 import java.util.Calendar
 
 @Composable
@@ -298,10 +312,13 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     // sections are gone — their entities live in their rooms.
     val areas by vm.areas.collectAsState()
     val entityAreas by vm.entityAreas.collectAsState()
-    val roomEntities = entities.filter {
-        it.domain != "camera" && it.domain != "weather" &&
-            it.domain != "person" && it.domain != "device_tracker"
-    }
+    // Room sections hold real, room-assignable devices only
+    // (2026-10-30 verdict round): cameras live in the hero,
+    // weather in its block, people in who's-home, and zone/sun/
+    // update are system entities, never room devices — the "Home /
+    // 1", "Sun / Above horizon", and "Home Assistant / Unknown"
+    // tiles that used to pollute "No room".
+    val roomEntities = entities.filter { isHomeRoomEntity(it) }
     val grouped = groupEntitiesByRoom(roomEntities, entityAreas)
     fun roomMembers(areaId: String?): List<HaEntity> =
         (grouped[areaId] ?: emptyList())
@@ -310,25 +327,13 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
 
     // Sections as LazyListScope blocks so the narrow and wide layouts share
     // them exactly: one column folded, two side-by-side columns unfolded.
+    // The greeting is also a plain composable (GreetingBlock) so the
+    // wide layout can render it full-width ABOVE the camera hero:
+    // the 2026-10-30 verdict puts the greeting first on Home, then
+    // the hero, then weather, then who's-home, then rooms.
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            if (showSection("greeting")) {
-                Spacer(Modifier.height(16.dp))
-                Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            }
-            if (!connection.isLive()) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    when (connection) {
-                        is ConnectionState.Connecting, ConnectionState.Authenticating -> "Connecting to your home…"
-                        is ConnectionState.Error -> (connection as ConnectionState.Error).message
-                        else -> "Not connected"
-                    },
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 13.sp,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
+            GreetingBlock(greeting, connection, showSection("greeting"))
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
@@ -336,20 +341,13 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             item {
                 Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
-                // Home shows current conditions only — dial, condition,
-                // humidity. The card owns its gestures like every other
-                // entity: tap opens the full weather page, long-press
-                // keeps the sheet. The card's own header click is off
-                // so it cannot swallow the outer gestures, and the
-                // card still reports its bounds as the morph source.
-                Box(
-                    Modifier.combinedClickable(
-                        onClick = { navigate(Screen.EntityDetail(weather.entityId)) },
-                        onLongClick = { vm.openPopup(weather.entityId) },
-                    ),
-                ) {
-                    EntityControlCard(weather, vm, showForecast = false, headerClickable = false) { vm.openPopup(it) }
-                }
+                // Compact Home card (2026-10-30 verdict: "a very
+                // small [card], maybe even one third the height"):
+                // one row — badge, name, condition + temp inline —
+                // no arc, no big number on Home. The full dialog
+                // (arc + hourly forecast) is untouched: tapping
+                // still opens it, long-press still opens the sheet.
+                HomeWeatherCard(weather, vm, navigate)
                 Spacer(Modifier.height(16.dp))
             }
         }
@@ -399,6 +397,9 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         // Medium (Fold8 unfolded) renders exactly as before.
         Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp)) {
+                // Greeting FIRST, then the hero (2026-10-30 verdict):
+                // the hero is no longer the first element on Home.
+                GreetingBlock(greeting, connection, showSection("greeting"))
                 if (showSection("cameras")) {
                     CameraQuadrantHero(vm, navigate, states)
                 }
@@ -407,7 +408,6 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                         Modifier.weight(1f).padding(end = 8.dp),
                         contentPadding = PaddingValues(bottom = pillClearanceBottom()),
                     ) {
-                        greetingSection()
                         weatherSection()
                         homeSection()
                         item { Spacer(Modifier.height(16.dp)) }
@@ -427,12 +427,98 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
             contentPadding = PaddingValues(bottom = pillClearanceBottom()),
         ) {
-            if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
+            // Greeting FIRST, then the hero (2026-10-30 verdict):
+            // the hero is no longer the first element on Home.
             greetingSection()
+            if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
             weatherSection()
             homeSection()
             roomsSections()
             item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+/**
+ * The Home greeting block, shared by the narrow section and the
+ * wide full-width slot (2026-10-30 verdict round): the greeting
+ * text (or custom welcome), the connection line when not live,
+ * and the surrounding spacers — byte-identical in both layouts.
+ * The connection line renders even when the greeting itself is
+ * hidden, exactly as the old section did.
+ */
+@Composable
+private fun GreetingBlock(greeting: String, connection: ConnectionState, showGreeting: Boolean) {
+    if (showGreeting) {
+        Spacer(Modifier.height(16.dp))
+        Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+    }
+    if (!connection.isLive()) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            when (connection) {
+                is ConnectionState.Connecting, ConnectionState.Authenticating -> "Connecting to your home…"
+                is ConnectionState.Error -> (connection as ConnectionState.Error).message
+                else -> "Not connected"
+            },
+            color = MaterialTheme.colorScheme.error,
+            fontSize = 13.sp,
+        )
+    }
+    Spacer(Modifier.height(16.dp))
+}
+
+/**
+ * Compact Home weather card (2026-10-30 verdict round): one row —
+ * badge, name, condition + temperature inline ("Sunny · 72°") —
+ * about 88dp tall, roughly a quarter of the old arc card's height.
+ * The badge is 56dp at the row's start with a 16dp gap, exactly
+ * like every other card header, so the traveling header's
+ * badgeRectInRow derivation lands on the real badge with no size
+ * or position pop (the hero rect is the padded row's INNER rect:
+ * padding sits outside the reported bounds). The row reports its
+ * hero bounds and hides while traveling; the card reports its
+ * card bounds for the sheet morph. The state line is
+ * dialogHeaderState — the same string the traveler and the dialog
+ * header show — and the badge/name/state hold the open-time
+ * snapshot while a morph is open, like cards and tiles.
+ */
+@Composable
+private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    val accent = accentFor(weather.entityId)
+    val snap = vm.travelSnapshots[weather.entityId]
+    val display = snap ?: weather
+    Card(
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = lerp(
+                MaterialTheme.colorScheme.surfaceContainer,
+                weatherConditionColor(display.state),
+                0.20f,
+            ),
+        ),
+        modifier = Modifier.fillMaxWidth()
+            .reportCardBounds(weather.entityId)
+            .hideWhenMorphSource(weather.entityId),
+    ) {
+        Row(
+            Modifier.fillMaxWidth()
+                .combinedClickable(
+                    onClick = { navigate(Screen.EntityDetail(weather.entityId)) },
+                    onLongClick = { vm.openPopup(weather.entityId) },
+                )
+                .padding(16.dp)
+                .reportHeroBounds(weather.entityId)
+                .hideHeroWhenMorphSource(weather.entityId),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DomainBadge(display, domainIcon(display), accent, Modifier.size(56.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(display.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(display.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -888,8 +974,12 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 }
             }
             item {
+                // No-room here mirrors Home's room sections
+                // (2026-10-30 verdict round): system entities
+                // (zone/sun/update) are not room-assignable devices
+                // and never appear, so this count agrees with Home.
                 val unassigned = states.values
-                    .filter { entityAreas[it.entityId] == null }
+                    .filter { entityAreas[it.entityId] == null && isHomeRoomEntity(it) }
                     .sortedBy { it.friendlyName }
                 Column(
                     Modifier.fillMaxWidth().padding(bottom = 12.dp)

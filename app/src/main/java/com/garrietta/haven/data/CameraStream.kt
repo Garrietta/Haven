@@ -1,8 +1,9 @@
 package com.garrietta.haven.data
 
 /**
- * Live camera playback: the MJPEG proxy stream, plus HA's HLS stream path
- * for Ring.
+ * Camera playback: the MJPEG proxy stream for every camera, plus
+ * HA's HLS stream path (attempt code retained, not attempted for
+ * Ring) and WebRTC (same).
  *
  * Root cause of the still-image bug: the fullscreen viewer fetched ONE frame
  * from `/api/camera_proxy/<entity>` (a single JPEG snapshot) and displayed
@@ -13,24 +14,27 @@ package com.garrietta.haven.data
  * directly. Run #38 read Ring as the exception: its integration
  * overrides the MJPEG handler and builds the stream from the most
  * recent motion recording (ffmpeg transcodes the recording), so the
- * frames are a clip, not live. That reading is UNDER TEST as of the
- * 2026-10-29 MJPEG-live round and is NOT assumed here: the frontend's
- * confirmed live view on the default core Ring integration (no go2rtc,
- * no extras) must come through a core transport, and with WS
- * `camera/stream` deterministically refusing this camera ("does not
- * support play stream service") and WS `camera/webrtc/offer`
- * deterministically answering empty, the MJPEG proxy is the only
- * remaining core transport that can explain it. CameraFullscreen
- * therefore plays the proxy for Ring exactly like the other cameras
- * — as the live path under test, never as the last-recording
- * fallback, never a silent still (live-only per his 2026-10-29 13:34
- * direction). The wave test decides: live motion now overturns the
- * #38 conclusion (proxy serves live when actively streamed); a stale
- * clip confirms it, and the next diagnostic is then the frontend's
- * actual network requests, not another Haven guess. The HLS/WebRTC
- * attempt code remains in the codebase (HaClient.requestHlsUrl,
- * RingWebRtcSession) but is no longer attempted for Ring fullscreen;
- * the HLS diagnostic helpers stay, with their unit tests.
+ * frames are a clip, not live. That reading was UNDER TEST through
+ * the 2026-10-29 MJPEG-live round — and the 2026-10-30 verdict
+ * CONFIRMS it: he reports the front-door view "showing a recording
+ * now as opposed to the live view" and "bouncing back and forth"
+ * between the two. A fresh motion clip looks live-ish (a person
+ * moving on the porch); an older clip is obviously a recording;
+ * that is the flip. So for Ring the proxy IS the last-recording
+ * path, labeled as a recording everywhere it appears (fullscreen
+ * connecting text + persistent caption + error copy, hero dialog
+ * caption, detail-page button copy), never presented as live, no
+ * "Live" badge. The wave test is moot for this path — it cannot
+ * pass by construction — and now gates only a FUTURE genuine live
+ * path: the frontend's actual network requests for the Ring card
+ * (its live transport is still unidentified — WS camera/stream
+ * refuses this camera and WebRTC answers empty, so the frontend is
+ * not using either), or ring-mqtt's RTSP stream via a Generic
+ * Camera entity (whose live-stream switch reverts after ~1s on his
+ * instance, cause still unproven). The HLS/WebRTC attempt code
+ * remains in the codebase (HaClient.requestHlsUrl, RingWebRtcSession)
+ * but is no longer attempted for Ring fullscreen; the HLS diagnostic
+ * helpers stay, with their unit tests.
  *
  * [MjpegParser] is pure byte handling (no Android types) so it is unit
  * tested on the JVM; decoding to Bitmap happens in [HaClient.streamCamera].
@@ -38,12 +42,12 @@ package com.garrietta.haven.data
 
 /**
  * True when this camera is a Ring camera. Routing signal: the
- * fullscreen plays the MJPEG proxy for Ring as the live path under
- * test (see the header note), and the "Live" badge is held back
- * until the wave test proves the proxy's frames are live — a stale
- * clip also renders frames. The "Last recording" presentation
- * applies to the clips-timeline recording entries, never to the
- * Ring fullscreen.
+ * fullscreen plays the MJPEG proxy for Ring as the labeled
+ * latest-recording path (2026-10-30 verdict confirms #38), and
+ * the "Live" badge is never shown for it — a fresh clip also
+ * renders moving frames. The "Last recording" presentation
+ * applies to the clips-timeline recording entries AND to the
+ * Ring fullscreen/dialog, never as a live claim.
  *
  * Two signals, no hardcoded entity id: the `brand` state attribute, and
  * the device-registry manufacturer HaClient attaches to the entity.

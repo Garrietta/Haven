@@ -126,6 +126,7 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
+import com.garrietta.haven.ui.components.DialogTitleText
 import com.garrietta.haven.ui.components.TravelingBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalWideLayout
@@ -166,9 +167,9 @@ import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.theme.springBounds
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
+import com.garrietta.haven.ui.controls.dialogHeaderState
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
-import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
 import com.garrietta.haven.ui.screens.AutomationBuilderScreen
@@ -1076,20 +1077,39 @@ fun HavenApp(vm: HavenViewModel) {
                     onPanelPlaced = { },
                 ) {
                     Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
-                        CameraMjpegBody(vm, camId, camP, recording = false, onClose = { dismissCameraDialog() })
+                        // The hero dialog's MJPEG body is a recording
+                        // for Ring (same verdict as fullscreen) and
+                        // live for native cameras; `recording` only
+                        // switches the connecting/error copy.
+                        CameraMjpegBody(vm, camId, camP, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
                         Row(
                             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                camEntity?.friendlyName ?: "Camera",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    camEntity?.friendlyName ?: "Camera",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                // Ring honesty (2026-10-30 verdict):
+                                // the proxy serves the most recent
+                                // motion recording for Ring, never
+                                // live — the dialog says so under
+                                // the name, like the fullscreen.
+                                if (camEntity?.let { isRingCamera(it) } == true) {
+                                    Text(
+                                        "Latest motion recording · Not live",
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                             IconButton(onClick = { dismissCameraDialog() }) {
                                 Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
                             }
@@ -1231,8 +1251,8 @@ private fun EntityPopupSheetContent(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(entity.friendlyName, fontSize = dialogNameSize(entity.friendlyName), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
+                        Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
@@ -1254,7 +1274,9 @@ private fun EntityPopupSheetContent(
                             onDetails()
                             when (entity.domain) {
                                 "climate" -> navigate(Screen.Thermostat(popupId))
-                                // Cameras open their live viewer, not a static page.
+                                // Cameras open their fullscreen viewer,
+                                // not a static page (Ring: the latest
+                                // motion recording, labeled as such).
                                 "camera" -> vm.openCameraFullscreen(popupId)
                                 else -> navigate(Screen.EntityDetail(popupId))
                             }
@@ -1527,12 +1549,18 @@ private fun TravelingHeader(
                     fontSize = nameSize,
                     fontWeight = if (p >= 0.5f) FontWeight.Bold else FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
+                    // Long names travel on two lines (2026-10-30
+                    // verdict round): dialog headers now fit long
+                    // names by wrapping, so a one-line traveler
+                    // would reflow to full at the handoff — two
+                    // lines throughout makes the handoff a small
+                    // size step instead.
+                    maxLines = if (entity.friendlyName.length > 28) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = nameWidthCap),
                 )
                 Text(
-                    entity.stateText(),
+                    entity.dialogHeaderState(),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1617,24 +1645,23 @@ private fun TravelingArc(
 /**
  * Fullscreen camera viewer.
  *
- * Live-only by design (his 2026-10-29 13:34 direction: never fall
- * back to the last recorded clip). Every camera plays its MJPEG
- * proxy stream here — including Ring, as of the 2026-10-29
- * MJPEG-live test round. Ring previously negotiated HLS-live
+ * Live for native cameras; a labeled RECORDING for Ring
+ * (2026-10-30 verdict confirms #38: the MJPEG proxy serves the
+ * most recent motion recording for Ring, and his "bouncing back
+ * and forth" is a fresh clip looking live-ish vs an older clip
+ * reading as a recording). Ring previously negotiated HLS-live
  * first (WS camera/stream, 30s) then WebRTC (WS camera/webrtc/offer);
  * both attempts are REMOVED: HA's core Ring integration answers
  * camera/stream deterministically with "does not support play
  * stream service" and webrtc/offer deterministically with an empty
- * answer, so attempting them only burned 20-50s before the only
- * core transport that can explain the frontend's confirmed live
- * view on the default core Ring integration (no go2rtc, no extras):
- * the MJPEG proxy. The proxy is the live path UNDER TEST in this
- * build, not the last-recording fallback — the #38 conclusion that
- * the proxy serves a recording for Ring is what the wave test
- * overturns or confirms. Badge honesty holds the "Live" badge
- * back for Ring until that verdict: a stale clip also renders
- * frames. Recordings live on the long-press clips timeline,
- * never here.
+ * answer. The proxy stays as the Ring path — but labeled as a
+ * recording everywhere (connecting text, persistent caption,
+ * error copy), never presented as live, no "Live" badge. The
+ * wave test is moot for this path: it cannot pass by
+ * construction. Genuine live for Ring would need a new path
+ * (ring-mqtt RTSP via a Generic Camera entity, or the frontend's
+ * actual transport once diagnosed). Timeline recordings live on
+ * the long-press clips timeline, as before.
  */
 
 @Composable
@@ -1642,27 +1669,34 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     val cameraId = vm.fullscreenCameraId ?: return
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
-    // Ring live test path (2026-10-29): straight to the MJPEG proxy.
-    // The HLS-first (30s) + WebRTC-second attempts are REMOVED for
-    // Ring: both are proven dead by deterministic HA errors (see the
-    // KDoc above), not flakiness — attempting them first only burned
-    // 20-50s before the only core transport that can explain the
-    // frontend's confirmed live view. The proxy here is the live path
-    // UNDER TEST, not the last-recording fallback: the wave test
-    // decides whether its frames are live. No "Live" badge until
-    // that verdict lands — a stale clip also renders frames, so
-    // badge honesty holds the badge back in this build.
+    // Ring recording path (2026-10-30 verdict CONFIRMS #38): the
+    // MJPEG proxy serves the most recent motion recording for
+    // Ring — a fresh clip looks live-ish (a person moving on the
+    // porch), an older clip is obviously a recording, which is
+    // exactly the "bouncing back and forth" he reports. The HLS
+    // and WebRTC attempts stay REMOVED (deterministic HA errors,
+    // not flakiness). The proxy is therefore LABELED as a
+    // recording everywhere it appears for Ring — never presented
+    // as live, no "Live" badge — and the wave test is now moot
+    // for this path: it cannot pass by construction. A cued wave
+    // would only gate a FUTURE genuine live path (ring-mqtt RTSP
+    // via a Generic Camera entity, or the frontend's actual
+    // transport once diagnosed), not this one.
     val isRing = entity?.let { isRingCamera(it) } == true
     BackHandler { onClose() }
     Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
         CameraMjpegBody(
-            vm, cameraId, enterProgress, recording = false, onClose = onClose,
-            connectingText = if (isRing) "Loading live view…" else null,
+            vm, cameraId, enterProgress, recording = isRing, onClose = onClose,
+            connectingText = if (isRing) "Loading recording…" else null,
             errorPrefix = if (isRing) "MJPEG proxy" else null,
         )
-        // Badge held for Ring in this test build (see above); other
-        // cameras never carried a badge here either.
-        CameraHeader(entity?.friendlyName ?: "Camera", badgeText = null, onClose = onClose)
+        // Ring carries its recording caption persistently (see
+        // above); other cameras never carried a badge here either.
+        CameraHeader(
+            entity?.friendlyName ?: "Camera",
+            badgeText = if (isRing) "Latest motion recording · Not live" else null,
+            onClose = onClose,
+        )
     }
 }
 
@@ -1680,9 +1714,9 @@ private fun CameraMjpegBody(
     enterProgress: Float,
     recording: Boolean,
     onClose: () -> Unit,
-    // Test-build labels for the Ring MJPEG-live path: the connecting
-    // text and the error-stage prefix. Null keeps the existing copy
-    // (non-Ring fullscreen and the recording view are byte-identical).
+    // Ring recording labels: the connecting text and the
+    // error-stage prefix. Null keeps the existing copy (non-Ring
+    // fullscreen and the recording view are byte-identical).
     connectingText: String? = null,
     errorPrefix: String? = null,
 ) {
@@ -2098,8 +2132,8 @@ fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(entity.friendlyName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
+            Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
     Spacer(Modifier.height(4.dp))

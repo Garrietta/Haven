@@ -130,6 +130,23 @@ fun HaEntity.stateText(): String {
     }
 }
 
+/**
+ * The single header state line shared by every surface that shows an
+ * entity's name + state (2026-10-30 verdict round): cards, the
+ * traveling header, and dialog headers all call this one function,
+ * so the string can never disagree between the card, the traveler,
+ * and the destination — the "redrawing of the text" the verdict
+ * reports was partly three call sites formatting the same state
+ * three ways. Weather appends its temperature (the temperature
+ * attribute is the state's number); every other domain is exactly
+ * [stateText]. Pure, unit-tested.
+ */
+fun HaEntity.dialogHeaderState(): String {
+    if (domain != "weather") return stateText()
+    val temp = attrDouble("temperature")?.formatTemp()
+    return if (temp != null) "${formatCondition(state)} · $temp" else stateText()
+}
+
 fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
     "light" -> Icons.Filled.Lightbulb
     "switch", "input_boolean" -> Icons.Filled.Power
@@ -296,6 +313,18 @@ fun shapeTapAction(vm: HavenViewModel, entity: HaEntity): (() -> Unit)? = when (
 @Composable
 fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
+    // Snapshot-held visuals (2026-10-30 verdict round): when this
+    // card is the active morph source, its badge, name, state, and
+    // container tint resolve from the open-time snapshot, never the
+    // live entity — the live state can move mid-flight (a setpoint
+    // drag settling, hvac_action flipping), which read as a color
+    // shift on open and a dark-then-muted flash on dismiss. Only
+    // morph sources take the snapshot: destination cards sharing
+    // the id (dialog-inner cards) stay live, and body controls and
+    // actuation still use the live entity — only display visuals
+    // are held. No snapshot (sheet without one, no morph) = live.
+    val snap = if (morphSource) vm.travelSnapshots[entity.entityId] else null
+    val display = snap ?: entity
     // Card-outline shape (2026-10-30 picker): a per-entity
     // override beats the global default; without either, the
     // token extraLarge corners are unchanged.
@@ -311,14 +340,14 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
         // climate cards — so state reads on the card face itself.
         colors = CardDefaults.cardColors(
             containerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
-            else if (entity.domain == "weather") lerp(
+            else if (display.domain == "weather") lerp(
                 MaterialTheme.colorScheme.surfaceContainer,
-                weatherConditionColor(entity.state),
+                weatherConditionColor(display.state),
                 0.20f,
             )
-            else if (entity.domain == "climate") lerp(
+            else if (display.domain == "climate") lerp(
                 MaterialTheme.colorScheme.surfaceContainer,
-                climateModeColor(entity.state, entity.attrString("hvac_action")),
+                climateModeColor(display.state, display.attrString("hvac_action")),
                 0.15f,
             )
             else MaterialTheme.colorScheme.surfaceContainer,
@@ -386,15 +415,15 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     // rotation never touch the name (2026-10-29
                     // verdict: "the text overlaps [the] — this
                     // expressive shape background should be larger").
-                    DomainBadge(entity, domainIcon(entity), accent, Modifier.size(56.dp).then(badgeClick))
+                    DomainBadge(display, domainIcon(display), accent, Modifier.size(56.dp).then(badgeClick))
                     Spacer(Modifier.width(16.dp))
                     Row(
                         Modifier.weight(1f).then(detailClick),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(entity.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(display.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(display.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

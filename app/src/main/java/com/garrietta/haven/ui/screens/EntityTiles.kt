@@ -196,8 +196,15 @@ private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -
 @Composable
 fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)? = null) {
     val accent = accentFor(entity.entityId)
-    val active = ((entity.domain == "light" || entity.domain == "switch" || entity.domain == "input_boolean") &&
-        entity.state == "on") || (entity.domain == "cover" && entity.state == "open")
+    // Snapshot-held visuals (2026-10-30 verdict round, same rule as
+    // cards): while this tile's morph is open, its badge, name,
+    // state, and container tint resolve from the open/dismiss-time
+    // snapshot, never the live entity — the live state can move
+    // mid-flight (a setpoint drag settling, hvac_action flipping),
+    // which read as a color shift on open and a dark-then-muted
+    // flash on dismiss. Body controls and actuation stay live.
+    val snap = vm.travelSnapshots[entity.entityId]
+    val display = snap ?: entity
     // The tile's window bounds feed the camera rise origin (and are
     // kept for it). Detail/sheet morphs use the root bounds reported
     // to the shared map (see MorphOverlay), never this rect.
@@ -215,19 +222,19 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         color = when {
             // Lit tiles tint by kelvin AND brightness: a dim light reads
             // dimmer than a bright one, never full-tint at 10%.
-            entity.domain == "light" && entity.state == "on" ->
+            display.domain == "light" && display.state == "on" ->
                 lightBrightnessContainer(
                     MaterialTheme.colorScheme,
-                    entity.attrInt("color_temp_kelvin"),
-                    entity.attrInt("brightness")?.let { it * 100 / 255 },
+                    display.attrInt("color_temp_kelvin"),
+                    display.attrInt("brightness")?.let { it * 100 / 255 },
                     true,
                 )
             // Climate tiles carry their mode color at low alpha — the
             // mode is visible on the tab grid, not just on the page.
-            entity.domain == "climate" ->
+            display.domain == "climate" ->
                 lerp(
                     MaterialTheme.colorScheme.surfaceContainerLow,
-                    climateModeColor(entity.state, entity.attrString("hvac_action")),
+                    climateModeColor(display.state, display.attrString("hvac_action")),
                     0.15f,
                 )
             else -> MaterialTheme.colorScheme.surfaceContainerLow
@@ -277,11 +284,30 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // the mode color (full when the system is on, muted
                 // when off/idle); the light shape morph on toggle is
                 // untouched (DomainBadge still morphs hexagon->scallop).
-                val badgeColor = if (entity.domain == "climate") {
-                    climateModeColor(entity.state, entity.attrString("hvac_action"))
-                } else accent
-                val badgeActive = active || (entity.domain == "climate" &&
-                    entity.state != "off" && entity.attrString("hvac_action") != "idle")
+                // One badge pipeline (2026-10-30 verdict round): the
+                // tile badge takes badgeColors verbatim — the same
+                // function the traveling badge and every dialog
+                // header badge use — so a tile icon's color at rest
+                // is identical to its dialog color, on open AND on
+                // dismiss. The old tile pipeline used full-strength
+                // climateModeColor/accent for active tiles, which no
+                // dialog ever used: the shift was structural, not
+                // state drift. Tradeoff, stated plainly: tile badges
+                // now read as container/wash tones like dialogs
+                // (climate = setpoint containers, lights = kelvin
+                // containers, sensors = accent wash) instead of
+                // full-strength color — the tile container tints
+                // (kelvin/brightness, climate mode) are untouched,
+                // so tiles still read their state at a glance.
+                // Off-state grey (2026-10-29 verdict: off icons grey
+                // everywhere, tiles matching pop-ups) falls out of
+                // badgeColors itself: off lights, fans, media, and
+                // untriggered binary sensors all return the pop-up
+                // grey pair (surfaceContainerHighest +
+                // onSurfaceVariant) from that one function.
+                val (badgeBg, badgeGlyph) = badgeColors(
+                    MaterialTheme.colorScheme, display, accent,
+                )
                 val shapeAction = shapeTapAction(vm, entity)
                 val badgeInteraction = remember { MutableInteractionSource() }
                 val badgePressed by badgeInteraction.collectIsPressedAsState()
@@ -296,30 +322,6 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // rotation never touch the name (2026-10-29 verdict:
                 // "the text overlaps [the] — this expressive shape
                 // background should be larger").
-                // Off-state grey (2026-10-29 verdict: off icons grey
-                // everywhere, tiles matching pop-ups): when the tile
-                // is not active, domains with an off state take the
-                // pop-up's badgeColors pair verbatim (off light =
-                // surfaceContainerHighest + onSurfaceVariant, the
-                // same grey the pop-up header already used) instead
-                // of a full-strength accent glyph on a faint wash.
-                // On-state tiles keep their full color + white glyph
-                // exactly; covers keep their position rendering
-                // (closed is a position, not power) and domains
-                // without an off state keep the old wash.
-                val greyOffDomains = setOf(
-                    "light", "switch", "input_boolean", "fan",
-                    "media_player", "binary_sensor", "climate",
-                )
-                val (offBadgeBg, offBadgeGlyph) = badgeColors(
-                    MaterialTheme.colorScheme, entity, accent,
-                )
-                val badgeBg = if (badgeActive) badgeColor
-                    else if (entity.domain in greyOffDomains) offBadgeBg
-                    else badgeColor.copy(alpha = 0.18f)
-                val badgeGlyph = if (badgeActive) Color.White
-                    else if (entity.domain in greyOffDomains) offBadgeGlyph
-                    else badgeColor
                 Box(
                     Modifier.size(64.dp).background(
                         badgeBg,
@@ -356,7 +358,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                entity.friendlyName,
+                display.friendlyName,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -371,7 +373,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 ClimateTileBody(vm, entity)
             } else {
                 Text(
-                    tileStatus(entity),
+                    tileStatus(display),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

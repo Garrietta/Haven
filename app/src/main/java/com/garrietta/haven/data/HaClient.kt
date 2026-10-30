@@ -62,6 +62,15 @@ class HaClient(
     private val _entityAreas = MutableStateFlow<Map<String, String>>(emptyMap())
     val entityAreas: StateFlow<Map<String, String>> = _entityAreas.asStateFlow()
 
+    /**
+     * Latest registry parts, kept so each fetch can recompute the
+     * map independently (2026-10-30 verdict round): entity-registry
+     * areas, entity→device links, device-registry areas.
+     */
+    private var registryEntityAreas: Map<String, String?> = emptyMap()
+    private var registryEntityDevices: Map<String, String> = emptyMap()
+    private var registryDeviceAreas: Map<String, String?> = emptyMap()
+
     private val _lovelace = MutableStateFlow<LovelaceConfig?>(null)
     val lovelace: StateFlow<LovelaceConfig?> = _lovelace.asStateFlow()
 
@@ -298,65 +307,112 @@ class HaClient(
     }
 
     /**
+     * Reads a registry result defensively: the HA WebSocket result is
+     * normally a bare JSONArray, but some versions/proxies wrap it in
+     * an object (under "result", "areas", "entities", or "devices").
+     * A result in none of those shapes yields an empty list — the
+     * caller then leaves its previously published state alone.
+     */
+    private fun registryItems(msg: JSONObject): List<JSONObject> {
+        val direct = msg.optJSONArray("result")
+        if (direct != null) return (0 until direct.length()).mapNotNull { direct.optJSONObject(it) }
+        val wrapped = msg.optJSONObject("result")
+        if (wrapped != null) {
+            for (key in listOf("areas", "entities", "devices")) {
+                val arr = wrapped.optJSONArray(key)
+                if (arr != null) return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+            }
+        }
+        return emptyList()
+    }
+
+    /**
      * Re-reads the area, entity, and device registries from HA (on
      * connect via [afterAuth], and after every room mutation so the
      * Home room sections and the Rooms screen reflect what HA
      * itself now holds — Haven never keeps a local-only room list).
+     *
+     * The three fetches are INDEPENDENT (2026-10-30 verdict round):
+     * each publishes its own part and recomputes the entity→area map
+     * from whatever has arrived so far, via the pure
+     * [resolveEntityAreas] (entity area wins, device area fallback).
+     * The old shape nested the device fetch inside the entity
+     * callback, so any failure or shape surprise in the entity call
+     * silently skipped the device call too — and _entityAreas was
+     * only ever published from that inner callback, so a failed
+     * entity fetch left the map EMPTY while areas displayed fine:
+     * exactly the "rooms toggled ON, no sections on Home" symptom.
+     * A failed or empty fetch now leaves the previously published
+     * map alone (never blanked by a partial failure).
      */
     fun refreshRegistries() {
         sendCommand("config/area_registry/list", onResult = { msg ->
-            val result = msg.optJSONArray("result") ?: return@sendCommand
+            val items = registryItems(msg)
             val list = mutableListOf<HaArea>()
-            for (i in 0 until result.length()) {
-                val o = result.optJSONObject(i) ?: continue
+            for (o in items) {
                 val id = o.optString("area_id").ifEmpty { o.optString("id") }
+                if (id.isEmpty()) continue
                 list.add(HaArea(id, o.optString("name"), o.optString("icon").ifEmpty { null }))
             }
-            _areas.value = list.sortedBy { it.name }
+            if (list.isNotEmpty()) _areas.value = list.sortedBy { it.name }
         })
         sendCommand("config/entity_registry/list", onResult = { msg ->
-            val result = msg.optJSONArray("result") ?: return@sendCommand
-            val entityToArea = mutableMapOf<String, String>()
+            val items = registryItems(msg)
+            val entityToArea = mutableMapOf<String, String?>()
             val entityToDevice = mutableMapOf<String, String>()
-            for (i in 0 until result.length()) {
-                val o = result.optJSONObject(i) ?: continue
+            for (o in items) {
                 val entityId = o.optString("entity_id")
+                if (entityId.isEmpty()) continue
                 val areaId = o.optString("area_id")
                 if (areaId.isNotEmpty()) entityToArea[entityId] = areaId
                 val deviceId = o.optString("device_id")
                 if (deviceId.isNotEmpty()) entityToDevice[entityId] = deviceId
             }
-            // Resolve device-level areas second.
-            sendCommand("config/device_registry/list", onResult = { dmsg ->
-                val dresult = dmsg.optJSONArray("result")
-                if (dresult != null) {
-                    val deviceToArea = mutableMapOf<String, String>()
-                    val deviceToMaker = mutableMapOf<String, String>()
-                    for (j in 0 until dresult.length()) {
-                        val d = dresult.optJSONObject(j) ?: continue
-                        val areaId = d.optString("area_id")
-                        if (areaId.isNotEmpty()) deviceToArea[d.optString("id")] = areaId
-                        // Manufacturer per device: the second Ring signal.
-                        // Camera state attributes on this instance do not
-                        // carry `brand`, which is why run #38's label never
-                        // fired — the device registry is the ground truth
-                        // for who made the device.
-                        val maker = d.optString("manufacturer")
-                        if (maker.isNotEmpty()) deviceToMaker[d.optString("id")] = maker
-                    }
-                    for ((entityId, deviceId) in entityToDevice) {
-                        if (!entityToArea.containsKey(entityId)) {
-                            deviceToArea[deviceId]?.let { entityToArea[entityId] = it }
-                        }
-                    }
-                    manufacturerByEntity = entityToDevice.mapNotNull { (entityId, deviceId) ->
-                        deviceToMaker[deviceId]?.let { entityId to it }
-                    }.toMap()
-                    reattachManufacturers()
-                }
-                _entityAreas.value = entityToArea
-            })
+            if (entityToArea.isNotEmpty() || entityToDevice.isNotEmpty()) {
+                registryEntityAreas = entityToArea
+                registryEntityDevices = entityToDevice
+                publishEntityAreas()
+            }
         })
+        sendCommand("config/device_registry/list", onResult = { dmsg ->
+            val items = registryItems(dmsg)
+            val deviceToArea = mutableMapOf<String, String?>()
+            val deviceToMaker = mutableMapOf<String, String>()
+            for (d in items) {
+                val id = d.optString("id")
+                if (id.isEmpty()) continue
+                val areaId = d.optString("area_id")
+                if (areaId.isNotEmpty()) deviceToArea[id] = areaId
+                // Manufacturer per device: the second Ring signal.
+                // Camera state attributes on this instance do not
+                // carry `brand`, which is why run #38's label never
+                // fired — the device registry is the ground truth
+                // for who made the device.
+                val maker = d.optString("manufacturer")
+                if (maker.isNotEmpty()) deviceToMaker[id] = maker
+            }
+            if (deviceToArea.isNotEmpty() || deviceToMaker.isNotEmpty()) {
+                registryDeviceAreas = deviceToArea
+                manufacturerByEntity = registryEntityDevices.mapNotNull { (entityId, deviceId) ->
+                    deviceToMaker[deviceId]?.let { entityId to it }
+                }.toMap()
+                reattachManufacturers()
+                publishEntityAreas()
+            }
+        })
+    }
+
+    /**
+     * Recomputes [_entityAreas] from the latest registry parts.
+     * Skipped until at least one registry part has arrived, so a
+     * device-first arrival (which knows no entity→device links yet)
+     * can never blank a previously resolved map.
+     */
+    private fun publishEntityAreas() {
+        if (registryEntityAreas.isEmpty() && registryEntityDevices.isEmpty()) return
+        _entityAreas.value = resolveEntityAreas(
+            registryEntityAreas, registryEntityDevices, registryDeviceAreas,
+        )
     }
 
 

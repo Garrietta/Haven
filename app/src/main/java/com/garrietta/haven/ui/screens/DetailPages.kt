@@ -150,11 +150,10 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
                 vm.openCameraFullscreen(entityId)
                 onBack()
             }) {
-                // Fullscreen is live-only now (Ring via WebRTC, others
-                // via MJPEG); recordings live on the long-press
-                // timeline, so the button promises live for every
-                // camera alike.
-                Text("Open live view")
+                // Ring shows its latest motion recording (labeled as
+                // such in fullscreen); native cameras show live.
+                // The button promises live only where it is live.
+                Text(if (isRingCamera(entity)) "Open latest recording" else "Open live view")
             }
         }
         return

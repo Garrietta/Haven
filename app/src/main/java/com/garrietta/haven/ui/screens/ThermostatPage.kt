@@ -70,7 +70,7 @@ import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.DomainBadge
-import com.garrietta.haven.ui.components.dialogNameSize
+import com.garrietta.haven.ui.components.DialogTitleText
 import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.LocalHeroTarget
 import com.garrietta.haven.ui.components.LocalWideLayout
@@ -81,6 +81,7 @@ import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.theme.stateShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
+import com.garrietta.haven.ui.controls.dialogHeaderState
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
@@ -226,8 +227,8 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
             // the "Ecobee" name mid-flight, and the 18sp name
             // popped to the traveler's 20sp at the handoff.
             Column(Modifier.weight(1f)) {
-                Text(entity.friendlyName, fontSize = dialogNameSize(entity.friendlyName), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(entity.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
+                Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")

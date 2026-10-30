@@ -16,6 +16,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -58,10 +59,13 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -228,6 +232,41 @@ data class ShapePrefs(
 }
 
 val LocalShapePrefs = compositionLocalOf { ShapePrefs(null, null, emptyMap(), emptyMap()) }
+
+/**
+ * A dialog header name that fits its MEASURED width (2026-10-30
+ * verdict round): the old char-count sizing (dialogNameSize)
+ * still truncated "Thermostat Current Temperature" (30 chars) in
+ * a 90%-width dialog, because 15sp × 30 chars ≈ 248dp exceeds the
+ * ~200–224dp a 48dp badge + close leave on a folded phone.
+ * This measures the real available width (BoxWithConstraints on
+ * the title column) and picks the largest of 20/17/15/13sp that
+ * fits on one line; if none fits, the name wraps to two lines at
+ * 13sp — the full name always shows, with ellipsis only as the
+ * last resort for names longer than two lines at 13sp. The
+ * traveling header keeps its char-count interpolation (its end
+ * size is dialogNameSize), but names longer than 28 chars travel
+ * on two lines, so the handoff to this measured layout is a small
+ * size step, never an ellipsis-to-full reflow.
+ */
+@Composable
+fun DialogTitleText(name: String, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier) {
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        val maxWidthPx = with(density) { maxWidth.toPx() }
+        val sizes = listOf(20.sp, 17.sp, 15.sp, 13.sp)
+        val chosen = sizes.firstOrNull { size ->
+            val style = TextStyle(fontSize = size, fontWeight = FontWeight.Bold)
+            measurer.measure(AnnotatedString(name), style).size.width <= maxWidthPx
+        }
+        if (chosen != null) {
+            Text(name, fontSize = chosen, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            Text(name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
 
 /**
  * Domain badge, now state-driven: the polygon morphs between the domain's
