@@ -69,6 +69,7 @@ import com.garrietta.haven.DetailPopupHeader
 import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.dialogNameSize
 import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.LocalHeroTarget

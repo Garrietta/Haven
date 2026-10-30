@@ -50,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.Path
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -79,6 +80,7 @@ import com.garrietta.haven.ui.theme.polygonShape
 import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.theme.expressivePolygon
 import com.garrietta.haven.ui.theme.stateShape
+import com.garrietta.haven.ui.theme.StateShape
 import com.garrietta.haven.ui.theme.stateShapePolygon
 import kotlin.math.atan2
 import kotlin.math.cos

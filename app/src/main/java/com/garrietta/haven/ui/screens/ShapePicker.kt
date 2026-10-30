@@ -35,10 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.ShapePickerTarget
-import com.garrietta.haven.ui.components.FloatingCorner
+import com.garrietta.haven.ui.theme.FloatingCorner
 import com.garrietta.haven.ui.components.SHAPE_OPTIONS
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.components.domainIcon
+import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.components.shapeForKey
 import com.garrietta.haven.ui.components.shapeLabel
 import androidx.compose.material3.Icon

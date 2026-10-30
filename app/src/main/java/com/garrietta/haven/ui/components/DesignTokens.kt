@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.lerp
 import kotlin.math.pow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import com.garrietta.haven.ui.theme.StateShape
 
 /**
  * Pure design-token logic for the ARCHITECTURE AND SYSTEM FOUNDATIONS round.

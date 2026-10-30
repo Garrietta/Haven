@@ -42,6 +42,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
@@ -265,22 +268,29 @@ fun LoginScreen(vm: HavenViewModel) {
 @Composable
 fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
-    val connection by vm.connectionState.collectAsState()
-    val homePrefsVersion by vm.homePrefsVersion.collectAsState()
-    val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
+    val connection by vm.connection.collectAsState()
+    // Read so Home editor saves recompose this screen from the store.
+    @Suppress("UNUSED_VARIABLE")
+    val homePrefsVersion = vm.homePrefsVersion
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val autoGreeting = when (hour) {
+        in 0..4 -> "Up late"
         in 5..11 -> "Good morning"
         in 12..17 -> "Good afternoon"
         else -> "Good evening"
     }
-    val customWelcome = vm.settingsStore.homeWelcome.ifEmpty { null }
-    val greeting = customWelcome ?: autoGreeting
+    // A custom welcome message replaces the greeting verbatim; empty keeps
+    // the automatic time-based greeting exactly as before.
+    val customWelcome = vm.settingsStore.homeWelcomeMessage
+    val greeting = if (customWelcome.isBlank()) autoGreeting else customWelcome
     val hiddenSections = vm.settingsStore.homeHiddenSections
-    fun showSection(key: String) = !hiddenSections.contains(key)
-    val entities = states.values.toList()
-    val weather = entities.filter { it.domain == "weather" }
-    val homePeople = states.values.filter { it.domain == "person" && it.state == "home" }
-    val lightOverrides = vm.settingsStore.lightHomeOverrides
+    val showSection: (String) -> Boolean = { it !in hiddenSections }
+    val entities = states.values.sortedBy { it.friendlyName }
+    val weather = entities.firstOrNull { it.domain == "weather" }
+    val homePeople = entities.filter { (it.domain == "person" || it.domain == "device_tracker") && it.state == "home" }
+    // Home shows only the lights the user (or the default rule) allows:
+    // indicator lights are excluded unless explicitly re-added.
+    val lightOverrides = vm.settingsStore.homeLightOverrides()
     // Rooms (2026-10-30): the Home page is organized by room —
     // one section per HA area, in HA's order, each room's devices
     // under it. Areas come from the HA area registry on load
@@ -298,33 +308,59 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             .filter { it.domain != "light" || isLightShownOnHome(it, lightOverrides) }
             .sortedBy { it.friendlyName }
 
+    // Sections as LazyListScope blocks so the narrow and wide layouts share
+    // them exactly: one column folded, two side-by-side columns unfolded.
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            Text(greeting, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Have a great ${if (hour in 5..11) "morning" else if (hour in 12..17) "afternoon" else "evening"} in your home.",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (showSection("greeting")) {
+                Spacer(Modifier.height(16.dp))
+                Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            }
+            if (!connection.isLive()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when (connection) {
+                        is ConnectionState.Connecting, ConnectionState.Authenticating -> "Connecting to your home…"
+                        is ConnectionState.Error -> (connection as ConnectionState.Error).message
+                        else -> "Not connected"
+                    },
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 13.sp,
+                )
+            }
             Spacer(Modifier.height(16.dp))
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
-        items(weather) { w ->
-            EntityControlCard(w, vm) { vm.openPopup(it.entityId) }
-            Spacer(Modifier.height(12.dp))
+        if (showSection("weather") && weather != null) {
+            item {
+                Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(8.dp))
+                // Home shows current conditions only — dial, condition,
+                // humidity. The card owns its gestures like every other
+                // entity: tap opens the full weather page, long-press
+                // keeps the sheet. The card's own header click is off
+                // so it cannot swallow the outer gestures, and the
+                // card still reports its bounds as the morph source.
+                Box(
+                    Modifier.combinedClickable(
+                        onClick = { navigate(Screen.EntityDetail(weather.entityId)) },
+                        onLongClick = { vm.openPopup(weather.entityId) },
+                    ),
+                ) {
+                    EntityControlCard(weather, vm, showForecast = false, headerClickable = false) { vm.openPopup(it) }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
         }
     }
     val homeSection: LazyListScope.() -> Unit = {
-        if (homePeople.isNotEmpty()) {
+        if (showSection("home") && homePeople.isNotEmpty()) {
             item {
                 Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-            }
-            items(homePeople) { person ->
-                EntityControlCard(person, vm) { vm.openPopup(it.entityId) }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(4.dp))
+                Text(homePeople.joinToString(", ") { it.friendlyName }, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
@@ -356,27 +392,32 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
     }
 
-    val wide = LocalWideLayout.current
-    if (wide) {
-        Box(
-            Modifier.fillMaxSize().statusBarsPadding()
-                .background(MaterialTheme.colorScheme.background),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            Column(
-                Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp),
-            ) {
+    if (LocalWideLayout.current) {
+        // Expanded windows: cap the two-pane content at 1200dp and
+        // center it, so tablet/desktop panes don't stretch to
+        // full-window width. The cap never binds below 1200dp, so
+        // Medium (Fold8 unfolded) renders exactly as before.
+        Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.TopCenter) {
+            Column(Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp)) {
                 if (showSection("cameras")) {
                     CameraQuadrantHero(vm, navigate, states)
                 }
                 Row(Modifier.weight(1f)) {
-                    LazyColumn(Modifier.weight(1f).padding(end = 8.dp), contentPadding = PaddingValues(bottom = pillClearanceBottom())) {
-                        if (showSection("greeting")) greetingSection()
-                        if (showSection("weather")) weatherSection()
-                        if (showSection("home")) homeSection()
+                    LazyColumn(
+                        Modifier.weight(1f).padding(end = 8.dp),
+                        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+                    ) {
+                        greetingSection()
+                        weatherSection()
+                        homeSection()
+                        item { Spacer(Modifier.height(16.dp)) }
                     }
-                    LazyColumn(Modifier.weight(1f).padding(start = 8.dp), contentPadding = PaddingValues(bottom = pillClearanceBottom())) {
+                    LazyColumn(
+                        Modifier.weight(1f).padding(start = 8.dp),
+                        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+                    ) {
                         roomsSections()
+                        item { Spacer(Modifier.height(16.dp)) }
                     }
                 }
             }
@@ -387,16 +428,13 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             contentPadding = PaddingValues(bottom = pillClearanceBottom()),
         ) {
             if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
-            if (showSection("greeting")) greetingSection()
-            if (showSection("weather")) weatherSection()
-            if (showSection("home")) homeSection()
+            greetingSection()
+            weatherSection()
+            homeSection()
             roomsSections()
+            item { Spacer(Modifier.height(16.dp)) }
         }
     }
-    if (connection != ConnectionState.Connected) {
-        Log.w("Haven", "Home offline: ${'$'}connection — states are cached, controls may fail")
-    }
-    if (homePrefsVersion < 0) Log.d("Haven", "home prefs bump")
 }
 
 @Composable
