@@ -122,6 +122,8 @@ import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.TravelingBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalWideLayout
+import com.garrietta.haven.ui.components.LocalWindowSizeClass
+import com.garrietta.haven.ui.components.windowSizeClassFor
 import com.garrietta.haven.ui.components.SheetPageContent
 import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.shapeForDomain
@@ -625,7 +627,11 @@ fun HavenApp(vm: HavenViewModel) {
         // screen (and the overlays) reads the same value.
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wideLayout = maxWidth >= 600.dp
-            CompositionLocalProvider(LocalWideLayout provides wideLayout) {
+            val windowSizeClass = windowSizeClassFor(maxWidth)
+            CompositionLocalProvider(
+                LocalWideLayout provides wideLayout,
+                LocalWindowSizeClass provides windowSizeClass,
+            ) {
             // One content lambda shared by the scaffold and the detail
             // overlay below, so both render the same screens.
             val content: @Composable (Screen) -> Unit = { screen ->

@@ -62,6 +62,8 @@ import com.garrietta.haven.data.UserTab
 import com.garrietta.haven.data.cardType
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalWideLayout
+import com.garrietta.haven.ui.components.LocalWindowSizeClass
+import com.garrietta.haven.ui.components.WindowSizeClass
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.pillClearanceBottom
 import org.json.JSONObject
@@ -113,14 +115,19 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
 
 /**
  * One list of cards that becomes a 2-column grid on wide (unfolded)
- * layouts. Boards and tab screens share it so wide mode is consistent;
- * the per-card renderer (including broken-YAML handling) is the caller's.
+ * layouts and a 3-column grid on Expanded windows (tablets, large
+ * desktop windows). Boards and tab screens share it so wide mode is
+ * consistent; the per-card renderer (including broken-YAML handling)
+ * is the caller's. Medium (the Fold8 unfolded) keeps 2 columns — the
+ * third column is an Expanded-only optimization, never a behavior
+ * change for the Fold8.
  */
 @Composable
 fun <T> AdaptiveCardList(items: List<T>, render: @Composable (T) -> Unit) {
     if (LocalWideLayout.current) {
+        val columns = if (LocalWindowSizeClass.current == WindowSizeClass.EXPANDED) 3 else 2
         LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+            columns = GridCells.Fixed(columns),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = pillClearanceBottom()),

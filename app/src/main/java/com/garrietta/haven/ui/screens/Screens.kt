@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -386,24 +388,30 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
     }
     if (LocalWideLayout.current) {
-        Row(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
-            LazyColumn(
-                Modifier.weight(1f).padding(end = 8.dp),
-                contentPadding = PaddingValues(bottom = pillClearanceBottom()),
-            ) {
-                greetingSection()
-                weatherSection()
-                homeSection()
-                playingSection()
-                item { Spacer(Modifier.height(16.dp)) }
-            }
-            LazyColumn(
-                Modifier.weight(1f).padding(start = 8.dp),
-                contentPadding = PaddingValues(bottom = pillClearanceBottom()),
-            ) {
-                lightsSection()
-                alertsSection()
-                item { Spacer(Modifier.height(16.dp)) }
+        // Expanded windows: cap the two-pane content at 1200dp and
+        // center it, so tablet/desktop panes don't stretch to
+        // full-window width. The cap never binds below 1200dp, so
+        // Medium (Fold8 unfolded) renders exactly as before.
+        Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.TopCenter) {
+            Row(Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp)) {
+                LazyColumn(
+                    Modifier.weight(1f).padding(end = 8.dp),
+                    contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+                ) {
+                    greetingSection()
+                    weatherSection()
+                    homeSection()
+                    playingSection()
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
+                LazyColumn(
+                    Modifier.weight(1f).padding(start = 8.dp),
+                    contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+                ) {
+                    lightsSection()
+                    alertsSection()
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
             }
         }
     } else {
