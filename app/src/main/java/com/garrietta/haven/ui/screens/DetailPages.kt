@@ -1,9 +1,10 @@
 package com.garrietta.haven.ui.screens
 import com.garrietta.haven.ui.theme.FloatingCorner
 import com.garrietta.haven.ui.theme.LargeTopShape
+import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.theme.havenMotion
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -374,7 +375,13 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
 @Composable
 private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?, accent: Color) {
     val fill = garageDoorFillFraction(position, entity.state)
-    val animatedFill by animateFloatAsState(fill, tween(600), label = "garageDoorFill")
+    // Fluid container transformation (design-system sprint): the door
+    // fill rides the house spring, not a 600ms tween, and the animated
+    // value is clamped at both use sites — a spring overshoot past 1
+    // must never draw the door taller than its frame.
+    val reduceMotion = LocalReduceMotion.current
+    val animatedFill by animateFloatAsState(fill, havenMotion(reduceMotion), label = "garageDoorFill")
+    val fillClamped = animatedFill.coerceIn(0f, 1f)
     val frameHeight = 200.dp
     val panelBg = MaterialTheme.colorScheme.surfaceContainer
     Column {
@@ -392,7 +399,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
             // bottom edge is the door's own straight edge.
             Box(
                 Modifier.fillMaxWidth()
-                    .height(frameHeight * animatedFill)
+                    .height(frameHeight * fillClamped)
                     .align(Alignment.TopCenter)
                     .background(
                         accent,
@@ -403,7 +410,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
             // the fill reaches them.
             for (quarter in 1..3) {
                 val dividerY = frameHeight * (quarter / 4f)
-                if (animatedFill * frameHeight.value > dividerY.value) {
+                if (fillClamped * frameHeight.value > dividerY.value) {
                     Box(
                         Modifier.fillMaxWidth()
                             .height(2.dp)

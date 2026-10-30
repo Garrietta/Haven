@@ -187,6 +187,15 @@ fun MorphShape(
     )
 }
 
+/**
+ * Pure clamp for morph progress (spring-value clamping rule): every
+ * value derived from animated progress is clamped to [0, 1] BEFORE
+ * computing geometry. An underdamped spring overshoots its target
+ * (the observed 1.00493 peak crashed production in #53), so the
+ * morph path must never see out-of-range progress.
+ */
+fun clampMorphProgress(progress: Float): Float = progress.coerceIn(0f, 1f)
+
 /** The same live morph, for state polygons directly. */
 @Composable
 fun MorphPolygon(
@@ -203,7 +212,9 @@ fun MorphPolygon(
         val cy = size.height / 2f
         val path = Path()
         var first = true
-        morph.forEachCubic(progress) { cubic ->
+        // Clamped at the construction site: no future caller can hand
+        // the morph an out-of-range progress (see clampMorphProgress).
+        morph.forEachCubic(clampMorphProgress(progress)) { cubic ->
             val ax0 = cx + cubic.anchor0X * scale
             val ay0 = cy + cubic.anchor0Y * scale
             if (first) {

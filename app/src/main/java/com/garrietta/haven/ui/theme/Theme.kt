@@ -41,9 +41,10 @@ val EmphasizedAccelerate: Easing = CubicBezierEasing(0.3f, 0.0f, 0.8f, 0.15f)
 fun <T> springBouncy(): FiniteAnimationSpec<T> =
     spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow)
 
-/** Spring Snappy: tighter, for quick controls. */
+/** Spring Snappy: tighter, for quick controls. Canonical tactile values:
+ * Spring.DampingRatioLowBouncy + Spring.StiffnessMedium (was 0.78/Medium). */
 fun <T> springSnappy(): FiniteAnimationSpec<T> =
-    spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMedium)
+    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)
 
 /** Morph spring: shape and bounds morphs. */
 fun <T> springMorph(): FiniteAnimationSpec<T> =
@@ -56,24 +57,27 @@ fun <T> springMorph(): FiniteAnimationSpec<T> =
  * (0.05, 0.7, 0.1, 1.0) and ExitFast's easing IS EmphasizedAccelerate
  * (0.3, 0.0, 0.8, 0.15), so code keeps using the existing names.
  */
-/** Emphasized spatial: the spec's EmphasizedSpatial, for entrances. */
+/** Emphasized spatial: the spec's EmphasizedSpatial, for entrances.
+ * Canonical LowBouncy damping (was 0.78); stiffness stays MediumLow
+ * because this is a spatial spring (pill exit, panel travel), not a
+ * tactile press — the tactile targets above carry StiffnessMedium. */
 fun <T> springSpatial(): FiniteAnimationSpec<T> =
-    spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
+    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
 
 /** Emphasized bounds: the spec's EmphasizedBounds, for container transforms. */
 fun <T> springBounds(): FiniteAnimationSpec<T> =
     spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
 
 /**
- * The SINGLE press token (spec item 4). The spec gives two PressBounce
- * definitions — 0.6/StiffnessLow in the stepper snippet and 0.55/Medium in
- * HavenMotion — and only one ships: 0.55/Medium. It lands faster and
- * reads as a button press rather than a wobble; the looser 0.6/Low
- * variant is not used anywhere. Every press-scale interaction (tiles,
- * steppers, media transports) uses this and nothing else.
+ * The SINGLE press token (spec item 4). Canonical tactile values:
+ * Spring.DampingRatioMediumBouncy + Spring.StiffnessMedium, adopted
+ * into the token in the design-system sprint (was 0.55/Medium — the
+ * 0.05 damping difference is imperceptible, the canonical value is
+ * greppable). Every press-scale interaction (tiles, steppers, media
+ * transports) uses this and nothing else.
  */
 fun <T> pressBounce(): FiniteAnimationSpec<T> =
-    spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium)
+    spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
 
 /**
  * Overhaul-spec HavenMotion mapping (2026-10-29 architectural round):
@@ -82,13 +86,24 @@ fun <T> pressBounce(): FiniteAnimationSpec<T> =
  * SpatialSpring (0.82/MediumLow) -> springBounds (0.8/MediumLow) for the
  * modal rect interpolation (0.02 damping apart, imperceptible);
  * PillSpring (0.78/MediumLow) -> springSpatial (exact) for the pill exit;
- * InteractiveBounce (0.52/Medium) -> pressBounce (0.55/Medium), the one
+ * InteractiveBounce (0.52/Medium) -> pressBounce (0.5/Medium), the one
  * press token. No new tokens were added for this round.
  *
  * Production-upgrade mapping (2026-10-29 verdict round): the new
  * draft's PillSlideSpring (0.85/MediumLow) -> springSpatial as well —
  * one pill-motion token for modal-exit and scroll-away alike, so the
  * pill never animates on two different springs at once.
+ *
+ * Design-system sprint mapping (canonical springs, adopted INTO the
+ * tokens, never ad-hoc at call sites): tactile targets use
+ * DampingRatioMediumBouncy + StiffnessMedium (pressBounce) and
+ * DampingRatioLowBouncy + StiffnessMedium (springSnappy). Spatial and
+ * container springs keep their tuned values — havenSpring (380/0.62),
+ * springBounds (0.8/MediumLow), springMorph (0.72/320), sheet rise
+ * (500/0.85) — because they are not tactile targets: the sheet rise
+ * is deliberately almost overshoot-free (matched to Koda's sheet),
+ * and the house spatial feel is capped ("nothing crazy"). Adopting
+ * bouncy values into the spatial springs would break both.
  */
 
 /** ExitFast: the spec's 180ms exit tween on the accelerate easing. */
