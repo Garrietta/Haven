@@ -248,7 +248,7 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
             val conditionColor = weatherConditionColor(entity.state)
             Box(
                 Modifier.reportArcBounds(entity.entityId).dissolveIntoTraveler()
-                    .background(conditionColor.copy(alpha = 0.14f), RoundedCornerShape(28.dp)).padding(16.dp),
+                    .background(conditionColor.copy(alpha = 0.14f), MaterialTheme.shapes.extraLarge).padding(16.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Dial(
@@ -452,7 +452,7 @@ fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
         if (bitmap != null) {
             Box(
                 Modifier.fillMaxWidth().height(180.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.large)
                     .clickable { vm.openCameraFullscreen(entity.entityId) },
             ) {
                 Image(
@@ -470,7 +470,7 @@ fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
             // 2026-10-29 evidence video).
             Box(
                 Modifier.fillMaxWidth().height(180.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp)),
+                    .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.large),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("No snapshot yet", color = MaterialTheme.colorScheme.onSurfaceVariant)

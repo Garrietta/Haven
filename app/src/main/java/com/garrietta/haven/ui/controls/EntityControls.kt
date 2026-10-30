@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.controls
+import com.garrietta.haven.ui.components.CoolBlue
+import com.garrietta.haven.ui.components.HeatOrange
 
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -271,7 +273,7 @@ fun shapeTapAction(vm: HavenViewModel, entity: HaEntity): (() -> Unit)? = when (
 fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
     Card(
-        shape = RoundedCornerShape(28.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         // Hierarchy tokens: SurfaceContainer for root cards (Home, Boards,
         // Areas, detail pages), SurfaceContainerLow for nested cards
         // (inside the sheet, where the panel is already a container).
@@ -484,12 +486,12 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
         )
         Box(
             Modifier.size(width = 84.dp, height = 110.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)),
+                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.large),
         ) {
             Box(
                 Modifier.fillMaxWidth()
                     .height(110.dp * animatedDoorFraction)
-                    .background(accent, RoundedCornerShape(16.dp))
+                    .background(accent, MaterialTheme.shapes.large)
                     .align(Alignment.TopCenter),
             )
         }
@@ -513,8 +515,6 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
     ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent)
 }
 
-private val HEAT_COLOR = Color(0xFFD84315)
-private val COOL_COLOR = Color(0xFF1565C0)
 
 @Composable
 fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
@@ -542,7 +542,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
         single
     }
     val dialAccent: Color = if (heatCool) {
-        if (selector == SetpointSelector.HEATING) HEAT_COLOR else COOL_COLOR
+        if (selector == SetpointSelector.HEATING) HeatOrange else CoolBlue
     } else {
         accent
     }

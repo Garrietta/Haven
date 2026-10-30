@@ -158,7 +158,7 @@ private fun TabCardView(
     }
     if (card == null) {
         Card(
-            shape = RoundedCornerShape(28.dp),
+            shape = MaterialTheme.shapes.extraLarge,
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -256,7 +256,7 @@ private fun TabEditorCard(
     var newCardEntity by remember { mutableStateOf("") }
     var typeMenuFor by remember { mutableStateOf<Int?>(null) }
     Card(
-        shape = RoundedCornerShape(28.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -435,7 +435,7 @@ private fun CardYamlEditor(initialYaml: String, onDismiss: () -> Unit, onSave: (
     var text by remember { mutableStateOf(initialYaml) }
     var error by remember { mutableStateOf<String?>(null) }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
             Column(Modifier.padding(20.dp)) {
                 Text("Card YAML", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
@@ -483,7 +483,7 @@ fun GaugeCard(card: JSONObject, entity: HaEntity) {
     val max = if (card.has("max")) card.optDouble("max") else entity.attrDouble("max") ?: 100.0
     val unit = card.optString("unit").ifEmpty { entity.attrString("unit_of_measurement") ?: "" }
     Card(
-        shape = RoundedCornerShape(28.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = Modifier.fillMaxWidth(),
     ) {

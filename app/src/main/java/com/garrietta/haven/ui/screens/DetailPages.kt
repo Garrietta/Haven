@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.theme.FloatingCorner
+import com.garrietta.haven.ui.theme.LargeTopShape
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -174,7 +176,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         DetailPopupHeader(entity, onBack)
         Spacer(Modifier.height(16.dp))
         Box(
-            Modifier.fillMaxWidth().background(conditionColor.copy(alpha = 0.16f), RoundedCornerShape(32.dp)).padding(vertical = 24.dp),
+            Modifier.fillMaxWidth().background(conditionColor.copy(alpha = 0.16f), FloatingCorner).padding(vertical = 24.dp),
             contentAlignment = Alignment.Center,
         ) {
             WeatherControl(entity, vm, showForecast = false)
@@ -221,7 +223,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                         entity.attrInt("brightness")?.let { it * 100 / 255 },
                         entity.state == "on",
                     ),
-                    RoundedCornerShape(28.dp),
+                    MaterialTheme.shapes.extraLarge,
                 ).padding(16.dp),
             ) {
                 heroRow()
@@ -383,7 +385,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
         Spacer(Modifier.height(8.dp))
         Box(
             Modifier.fillMaxWidth().height(frameHeight)
-                .background(panelBg, RoundedCornerShape(20.dp)),
+                .background(panelBg, MaterialTheme.shapes.large),
         ) {
             // The door itself: top-aligned fill, height = closed
             // fraction of the frame. Rounded top corners only — the
@@ -394,7 +396,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
                     .align(Alignment.TopCenter)
                     .background(
                         accent,
-                        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                        LargeTopShape,
                     ),
             )
             // Segment dividers at the quarter heights, only where
@@ -740,7 +742,7 @@ private fun RecordingRow(vm: HavenViewModel, sibling: HaEntity, onTap: () -> Uni
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(96.dp, 64.dp).clip(RoundedCornerShape(12.dp))
+            Modifier.size(96.dp, 64.dp).clip(MaterialTheme.shapes.medium)
                 .background(MaterialTheme.colorScheme.surfaceContainer),
             contentAlignment = Alignment.Center,
         ) {
@@ -782,7 +784,7 @@ private fun ClipRow(vm: HavenViewModel, clip: HaClient.MediaChild, onTap: () -> 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(96.dp, 64.dp).clip(RoundedCornerShape(12.dp))
+            Modifier.size(96.dp, 64.dp).clip(MaterialTheme.shapes.medium)
                 .background(MaterialTheme.colorScheme.surfaceContainer),
             contentAlignment = Alignment.Center,
         ) {
@@ -829,7 +831,7 @@ private fun ClipPlayerScreen(
             p.release()
         }
     }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
         when {
             resolving -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -94,7 +94,8 @@ val LocalReduceMotion = compositionLocalOf { false }
  */
 val LocalWideLayout = compositionLocalOf { false }
 
-/** Stable per-entity accent color, hashed from the entity id (same idea as Relay's palettes). */
+/** Stable per-entity accent color, hashed from the entity id (same idea as Relay's palettes).
+ * Not a scheme role: an identity palette — each entity keeps its accent across launches. */
 private val ACCENTS = listOf(
     Color(0xFFF59E0B), Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFF8B5CF6),
     Color(0xFFEC4899), Color(0xFFF97316), Color(0xFF84CC16), Color(0xFF3B82F6),
@@ -328,7 +329,7 @@ fun KodaMenuRow(
     val accent = accentFor(badgeKey)
     val row = Modifier
         .fillMaxWidth()
-        .then(if (flat) Modifier else Modifier.background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(20.dp)))
+        .then(if (flat) Modifier else Modifier.background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.large))
         .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
         .padding(horizontal = 12.dp, vertical = 12.dp)
     Row(row.then(modifier), verticalAlignment = Alignment.CenterVertically) {
@@ -358,7 +359,7 @@ fun KodaMenuRow(
 }
 
 /**
- * Inset grouped rounded section (spec item 9): a 24dp-corner
+ * Inset grouped rounded section (spec item 9): an extraLarge-corner
  * surfaceContainer card holding flat [KodaMenuRow]s separated by
  * [KodaMenuDivider]s. Used by Settings; the sheet Details row keeps its
  * standalone 20dp row.
@@ -367,7 +368,7 @@ fun KodaMenuRow(
 fun KodaMenuGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Column(content = content)
@@ -687,7 +688,7 @@ fun PillToggle(
             from = ExpressiveKind.BUN,
             to = ExpressiveKind.SUNNY,
             progress = progress,
-            color = if (checked) Color.White.copy(alpha = 0.35f)
+            color = if (checked) Color.White.copy(alpha = 0.35f) // switch glyph on a colored track: white by M3 switch spec
             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
             modifier = Modifier.size(56.dp).align(Alignment.Center),
         )
@@ -695,7 +696,7 @@ fun PillToggle(
             Modifier
                 .padding(start = 6.dp + 40.dp * progress, top = 6.dp)
                 .size(44.dp)
-                .background(Color.White, RoundedCornerShape(50)),
+                .background(Color.White, RoundedCornerShape(50)), // switch thumb: white by M3 switch spec (50 = 50% pill, not dp)
         )
     }
 }

@@ -191,7 +191,7 @@ fun LovelaceCardView(
             val entity = cardEntity(card)?.let { states[it] }
             if (entity != null) {
                 Card(
-                    shape = RoundedCornerShape(28.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     modifier = Modifier.fillMaxWidth().clickable { vm.openPopup(entity.entityId) },
                 ) {
@@ -230,7 +230,7 @@ fun LovelaceCardView(
         }
         "glance" -> {
             Card(
-                shape = RoundedCornerShape(28.dp),
+                shape = MaterialTheme.shapes.extraLarge,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -256,7 +256,7 @@ fun LovelaceCardView(
             val area = areas.firstOrNull { it.id == areaId }
             val count = states.values.count { entityAreas[it.entityId] == areaId }
             Card(
-                shape = RoundedCornerShape(28.dp),
+                shape = MaterialTheme.shapes.extraLarge,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth().clickable { navigate(Screen.AreaDetail(areaId)) },
             ) {
@@ -311,7 +311,7 @@ fun LovelaceCardView(
         }
         "markdown" -> {
             Card(
-                shape = RoundedCornerShape(28.dp),
+                shape = MaterialTheme.shapes.extraLarge,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -320,7 +320,7 @@ fun LovelaceCardView(
         }
         else -> {
             Card(
-                shape = RoundedCornerShape(28.dp),
+                shape = MaterialTheme.shapes.extraLarge,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth(),
             ) {

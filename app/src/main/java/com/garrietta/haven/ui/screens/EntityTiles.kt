@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.components.CoolBlue
+import com.garrietta.haven.ui.components.HeatOrange
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -197,7 +199,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         label = "tilePress",
     )
     Surface(
-        shape = RoundedCornerShape(28.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         color = when {
             // Lit tiles tint by kelvin AND brightness: a dim light reads
             // dimmer than a bright one, never full-tint at 10%.
@@ -365,8 +367,6 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
 }
 
 // Heat/cool colors match the thermostat page's dial colors.
-private val TILE_HEAT_COLOR = Color(0xFFD84315)
-private val TILE_COOL_COLOR = Color(0xFF1565C0)
 
 /**
  * Google Home Favorites-style climate tile: dual numbers (heat left,
@@ -394,9 +394,9 @@ private fun ClimateTileBody(vm: HavenViewModel, entity: HaEntity) {
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (selector == SetpointSelector.HEATING) {
-                    TILE_HEAT_COLOR
+                    HeatOrange
                 } else {
-                    TILE_HEAT_COLOR.copy(alpha = 0.45f)
+                    HeatOrange.copy(alpha = 0.45f)
                 },
             )
             Spacer(Modifier.width(10.dp))
@@ -405,16 +405,16 @@ private fun ClimateTileBody(vm: HavenViewModel, entity: HaEntity) {
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (selector == SetpointSelector.COOLING) {
-                    TILE_COOL_COLOR
+                    CoolBlue
                 } else {
-                    TILE_COOL_COLOR.copy(alpha = 0.45f)
+                    CoolBlue.copy(alpha = 0.45f)
                 },
             )
         }
     } else if (single != null) {
         val singleColor = when (entity.state) {
-            "heat" -> TILE_HEAT_COLOR
-            "cool" -> TILE_COOL_COLOR
+            "heat" -> HeatOrange
+            "cool" -> CoolBlue
             else -> accentFor(entity.entityId)
         }
         Text(single.formatTemp(), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = singleColor)
@@ -488,7 +488,7 @@ private fun CameraTileVisual(vm: HavenViewModel, entity: HaEntity, accent: Color
             snap.asImageBitmap(),
             contentDescription = entity.friendlyName,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(20.dp)),
+            modifier = Modifier.fillMaxWidth().height(96.dp).clip(MaterialTheme.shapes.large),
         )
     } else {
         Box(
@@ -506,7 +506,7 @@ private fun CameraTileVisual(vm: HavenViewModel, entity: HaEntity, accent: Color
 @Composable
 private fun MissingEntityTile(id: String) {
     Surface(
-        shape = RoundedCornerShape(28.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth(),
     ) {

@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.components.CoolBlue
+import com.garrietta.haven.ui.components.HeatOrange
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
@@ -80,8 +82,6 @@ import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.stateText
 import org.json.JSONObject
 
-private val HEAT_COLOR = Color(0xFFD84315)
-private val COOL_COLOR = Color(0xFF1565C0)
 
 /**
  * The thermostat as a full page, not a sheet, laid out the way Google
@@ -316,11 +316,11 @@ fun ThermostatHero(
         else -> null
     }
     val dialAccent: Color = if (heatCool) {
-        if (selector == SetpointSelector.HEATING) HEAT_COLOR else COOL_COLOR
+        if (selector == SetpointSelector.HEATING) HeatOrange else CoolBlue
     } else {
         when (entity.state) {
-            "heat" -> HEAT_COLOR
-            "cool" -> COOL_COLOR
+            "heat" -> HeatOrange
+            "cool" -> CoolBlue
             else -> accent
         }
     }
@@ -372,13 +372,13 @@ fun ThermostatHero(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         KineticTempText(
                             heat,
-                            HEAT_COLOR,
+                            HeatOrange,
                             active = selector == SetpointSelector.HEATING,
                         )
                         Spacer(Modifier.width(16.dp))
                         KineticTempText(
                             cool,
-                            COOL_COLOR,
+                            CoolBlue,
                             active = selector == SetpointSelector.COOLING,
                         )
                     }
@@ -460,16 +460,16 @@ private fun HeatCoolRangeBar(entity: HaEntity, min: Float, max: Float) {
     val maxD = max.toDouble()
     Column(Modifier.fillMaxWidth()) {
         val barBackground = if (heatCool) {
-            Modifier.background(Brush.horizontalGradient(listOf(HEAT_COLOR, COOL_COLOR)))
+            Modifier.background(Brush.horizontalGradient(listOf(HeatOrange, CoolBlue)))
         } else {
             Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
         }
         BoxWithConstraints(
             Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(50)).then(barBackground),
         ) {
-            if (low != null) RangeMarker(rangeFraction(low, minD, maxD), HEAT_COLOR, maxWidth)
-            if (high != null) RangeMarker(rangeFraction(high, minD, maxD), COOL_COLOR, maxWidth)
-            if (single != null) RangeMarker(rangeFraction(single, minD, maxD), COOL_COLOR, maxWidth)
+            if (low != null) RangeMarker(rangeFraction(low, minD, maxD), HeatOrange, maxWidth)
+            if (high != null) RangeMarker(rangeFraction(high, minD, maxD), CoolBlue, maxWidth)
+            if (single != null) RangeMarker(rangeFraction(single, minD, maxD), CoolBlue, maxWidth)
             if (current != null) RangeMarker(rangeFraction(current, minD, maxD), Color.White, maxWidth)
         }
         Spacer(Modifier.height(6.dp))
@@ -503,7 +503,7 @@ private fun RangeMarker(fraction: Float, color: Color, barWidth: Dp) {
 @Composable
 private fun ThermostatCard(label: String, content: @Composable () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(28.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -555,7 +555,7 @@ private fun GooglePill(
         label = "chevron",
     )
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         onClick = onToggle,
         modifier = modifier,
@@ -682,7 +682,7 @@ private fun ThermostatCards(entity: HaEntity, vm: HavenViewModel, states: Map<St
         // Google Home's temperature rows: no card label, just the rows —
         // and the Outdoor row only when a real source backs it.
         Surface(
-            shape = RoundedCornerShape(28.dp),
+            shape = MaterialTheme.shapes.extraLarge,
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             modifier = Modifier.fillMaxWidth(),
         ) {

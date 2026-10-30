@@ -9,6 +9,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -16,6 +17,10 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
 
 /** The house spring: bouncy, shared by every animated control in Haven. */
 fun <T> havenSpring(): FiniteAnimationSpec<T> = spring(stiffness = 380f, dampingRatio = 0.62f)
@@ -102,6 +107,50 @@ fun <T> sheetSpring(): FiniteAnimationSpec<T> = spring(stiffness = 500f, damping
 fun <T> havenMotion(reduceMotion: Boolean): FiniteAnimationSpec<T> =
     if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else havenSpring()
 
+/**
+ * Haven's shape scale, on the Material 3 token scale (ExtraSmall through
+ * ExtraLarge): 4 / 8 / 12 / 16 / 28dp. Rectangular containers use these
+ * tokens via MaterialTheme.shapes — never a hardcoded dp corner.
+ * The expressive polygon system (Shapes.kt) is a separate layer above
+ * tokens and is intentionally NOT part of this scale: polygons are
+ * never replaced by rounded rectangles.
+ *
+ * Three-tier mapping, per the M3 token spec: reference values (the dp
+ * numbers below) -> system tokens (MaterialTheme.shapes) -> component
+ * tokens (DesignTokens.kt, which point at ColorScheme roles). Code
+ * reads the system token, never the raw dp.
+ */
+val HavenShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+/**
+ * Top-only variant of the large token, for fills whose bottom edge is
+ * the element's own straight edge (the garage door fill). Derived from
+ * HavenShapes.large so it tracks the token — never a hardcoded dp.
+ * (Shapes fields are typed as Shape, so the top corners cannot be
+ * read off MaterialTheme.shapes.large directly.)
+ */
+val LargeTopShape: Shape = (HavenShapes.large as RoundedCornerShape).copy(
+    bottomStart = CornerSize(0.dp),
+    bottomEnd = CornerSize(0.dp),
+)
+
+/**
+ * The one corner above the token scale, kept as a single named value
+ * rather than scattered dp: floating elements (pop-up panels, the pill
+ * bar, the weather hero inside a pop-up) rest at 32dp, and the pop-up
+ * corner morph animates to exactly this value (morphPopupCorner).
+ * M3's Shapes scale caps at ExtraLarge (28dp); this endpoint
+ * intentionally exceeds it, so it lives here — not as a hardcoded dp
+ * at each call site.
+ */
+val FloatingCorner = RoundedCornerShape(32.dp)
+
 @Composable
 fun HavenTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -124,6 +173,7 @@ fun HavenTheme(
     MaterialTheme(
         colorScheme = scheme,
         typography = Typography(),
+        shapes = HavenShapes,
         content = content,
     )
 }

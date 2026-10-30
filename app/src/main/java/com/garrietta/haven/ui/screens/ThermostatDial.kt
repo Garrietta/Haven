@@ -1,4 +1,5 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.components.CoolBlue
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
@@ -95,10 +96,12 @@ import kotlin.math.sqrt
  * Google-Home orange/blue — container pastels are unreadable as dial
  * text and thumbs, so the tokens live where containers exist.
  */
+// Dial arc gradient stops: amber→crimson heat, cyan→cobalt cool. Not scheme roles:
+// gradients need two stops each, and the cool end is the shared CoolBlue below.
 private val HEAT_ARC_START = Color(0xFFFF8F00)
 private val HEAT_ARC_END = Color(0xFFC62828)
 private val COOL_ARC_START = Color(0xFF00BCD4)
-private val COOL_ARC_END = Color(0xFF1565C0)
+private val COOL_ARC_END = CoolBlue // single source: DesignTokens.CoolBlue
 
 @Composable
 fun ThermostatDial(

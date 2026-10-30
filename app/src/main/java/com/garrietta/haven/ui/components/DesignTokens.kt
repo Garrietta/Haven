@@ -41,7 +41,8 @@ fun pillLabelVisible(label: String, isSelected: Boolean): Boolean =
 fun lightTempBlendFraction(kelvin: Int?): Float =
     if (kelvin == null) 0.5f else (kelvin - 2000).coerceIn(0, 4500) / 4500f
 
-/** Glyph tint following bulb color temperature: warm amber to cool white-blue. */
+/** Glyph tint following bulb color temperature: warm amber to cool white-blue.
+ * Not a scheme role: a continuous kelvin ramp (2000K→6500K), not a container. */
 fun lightColorTempTint(kelvin: Int?): Color =
     lerp(Color(0xFFFFB300), Color(0xFFCCE4FF), lightTempBlendFraction(kelvin))
 
@@ -173,6 +174,17 @@ fun coverIsMoving(state: String): Boolean = state == "opening" || state == "clos
 // ---------------------------------------------------------------------------
 
 /**
+ * Semantic state colors, NOT ColorScheme roles: the scheme has no
+ * heat/cool role, so heating orange and cooling blue are named values
+ * owned here — the single source of truth. Every heat/cool constant
+ * elsewhere (dial arcs, tiles, thermostat pages) must reference these,
+ * never re-declare the hex. Values are run #38's Google-Home
+ * orange/blue: container pastels are unreadable as dial text/thumbs.
+ */
+val HeatOrange = Color(0xFFD84315)
+val CoolBlue = Color(0xFF1565C0)
+
+/**
  * Prominent dynamic color for a climate entity: warm orange while
  * heating, cool blue while cooling. hvac_action, when present,
  * decides completely (it is the live truth): heating/preheating →
@@ -186,12 +198,12 @@ fun coverIsMoving(state: String): Boolean = state == "opening" || state == "clos
  * state that is neither.
  */
 fun climateModeColor(state: String, hvacAction: String?): Color = when {
-    hvacAction == "heating" || hvacAction == "preheating" -> Color(0xFFD84315)
-    hvacAction == "cooling" -> Color(0xFF1565C0)
+    hvacAction == "heating" || hvacAction == "preheating" -> HeatOrange
+    hvacAction == "cooling" -> CoolBlue
     hvacAction != null -> Color(0xFF78909C)
-    state == "heat" -> Color(0xFFD84315)
-    state == "cool" -> Color(0xFF1565C0)
-    state == "heat_cool" || state == "auto" -> Color(0xFFD84315)
+    state == "heat" -> HeatOrange
+    state == "cool" -> CoolBlue
+    state == "heat_cool" || state == "auto" -> HeatOrange
     else -> Color(0xFF78909C)
 }
 
@@ -219,6 +231,7 @@ fun lightBrightnessContainer(
  * Weather's prominent color by condition — the same hue family the
  * weather page hero, the front weather card tint, and the forecast
  * chips all draw from, so condition changes are unmissable.
+ * Not a scheme role: per-condition hues (there is no "rainy" role).
  */
 fun weatherConditionColor(condition: String?): Color = when (condition?.lowercase()) {
     "sunny", "clear" -> Color(0xFFFFB300)

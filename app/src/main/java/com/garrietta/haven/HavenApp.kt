@@ -1,4 +1,5 @@
 package com.garrietta.haven
+import com.garrietta.haven.ui.theme.FloatingCorner
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -1059,7 +1060,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // the shelf: outside taps dismiss the pop-up.
                 Box(
                     Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f * detailP))
+                        .background(Color.Black.copy(alpha = 0.4f * detailP)) // scrim dim: black overlay, not a scheme role
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -1144,7 +1145,7 @@ fun HavenApp(vm: HavenViewModel) {
                 BackHandler { dismissPopout() }
                 Box(
                     Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f * popoutProgress.value))
+                        .background(Color.Black.copy(alpha = 0.4f * popoutProgress.value)) // scrim dim: black overlay, not a scheme role
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -1226,7 +1227,7 @@ fun HavenApp(vm: HavenViewModel) {
                         Box(
                             Modifier.fillMaxSize().background(
                                 popoutPanelBg,
-                                RoundedCornerShape(32.dp),
+                                FloatingCorner,
                             ),
                         ) {
                             ThermostatPopoutContent(
@@ -1628,7 +1629,7 @@ private fun TravelingArc(
             }
             .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
             .graphicsLayer { alpha = heroHeaderAlpha(p) }
-            .background(conditionColor.copy(alpha = 0.14f), RoundedCornerShape(28.dp))
+            .background(conditionColor.copy(alpha = 0.14f), MaterialTheme.shapes.extraLarge)
             .padding(16.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1684,7 +1685,7 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     // badge honesty holds the badge back in this build.
     val isRing = entity?.let { isRingCamera(it) } == true
     BackHandler { onClose() }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
         CameraMjpegBody(
             vm, cameraId, enterProgress, recording = false, onClose = onClose,
             connectingText = if (isRing) "Loading live view…" else null,
@@ -1758,7 +1759,7 @@ private fun CameraMjpegBody(
                     Box(
                         Modifier.size(120.dp, 8.dp).background(
                             Color.White.copy(alpha = 0.12f),
-                            RoundedCornerShape(4.dp),
+                            MaterialTheme.shapes.extraSmall,
                         ),
                     )
                     Spacer(Modifier.height(16.dp))
@@ -1835,7 +1836,7 @@ fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: 
     val states by vm.states.collectAsState()
     val entity = states[recordingEntityId]
     BackHandler { onClose() }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
         CameraMjpegBody(vm, recordingEntityId, enterProgress, recording = true, onClose = onClose)
         CameraHeader(entity?.friendlyName ?: "Camera", badgeText = "Recording", onClose = onClose)
     }
@@ -1845,7 +1846,7 @@ fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: 
 private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.errorContainer,
         shadowElevation = 6.dp,
     ) {
@@ -1925,7 +1926,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
         BoxWithConstraints {
             Surface(
                 modifier = Modifier.wrapContentWidth().widthIn(max = maxWidth),
-                shape = RoundedCornerShape(32.dp),
+                shape = FloatingCorner,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
                 tonalElevation = 8.dp,
                 shadowElevation = 16.dp,
