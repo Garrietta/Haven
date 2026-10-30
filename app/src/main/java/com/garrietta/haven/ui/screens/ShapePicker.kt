@@ -140,7 +140,7 @@ fun ShapePickerDialog(vm: HavenViewModel, target: ShapePickerTarget, onClose: ()
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Box(
-                                    Modifier.size(56.dp).background(accent, shapeForKey(option.key)),
+                                    Modifier.size(56.dp).background(accent, shapeForKey(option.key) ?: RoundedCornerShape(16.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     if (entity != null) {

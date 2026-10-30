@@ -374,7 +374,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(8.dp))
             }
             items(members) { member ->
-                EntityControlCard(member, vm) { vm.openPopup(it.entityId) }
+                EntityControlCard(member, vm) { vm.openPopup(it) }
                 Spacer(Modifier.height(12.dp))
             }
             item { Spacer(Modifier.height(4.dp)) }
@@ -386,7 +386,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 Spacer(Modifier.height(8.dp))
             }
             items(unassigned) { member ->
-                EntityControlCard(member, vm) { vm.openPopup(it.entityId) }
+                EntityControlCard(member, vm) { vm.openPopup(it) }
                 Spacer(Modifier.height(12.dp))
             }
         }
