@@ -199,9 +199,6 @@ fun dualThumbRadii(
 }
 
 /**
-
-
-/**
  * Rubber-banding past the dial ends: values inside the range pass through
  * unchanged; overshoot past either end is damped to 35% of the excess, so
  * the thumb resists instead of pinning hard. The APPLIED value is still
