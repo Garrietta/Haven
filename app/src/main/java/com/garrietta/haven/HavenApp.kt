@@ -843,7 +843,7 @@ fun HavenApp(vm: HavenViewModel) {
                     // mid-morph and must never overwrite the target.
                     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
                     Box(
-                        Modifier.fillMaxSize().padding(horizontal = 16.dp, bottom = shelfBottomMarginDp),
+                        Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, bottom = shelfBottomMarginDp),
                         contentAlignment = Alignment.BottomCenter,
                     ) {
                         Box(
@@ -1038,7 +1038,7 @@ fun HavenApp(vm: HavenViewModel) {
                     // touches; replaced by the morph surface on the
                     // next frame. The hero provider lives ONLY here.
                     Box(
-                        Modifier.fillMaxSize().padding(horizontal = 16.dp, bottom = shelfBottomMarginDp),
+                        Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, bottom = shelfBottomMarginDp),
                         contentAlignment = Alignment.BottomCenter,
                     ) {
                         Box(
