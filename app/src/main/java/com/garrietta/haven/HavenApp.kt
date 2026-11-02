@@ -1021,13 +1021,31 @@ fun HavenApp(vm: HavenViewModel) {
                 val anim = detailAnim!!
                 BackHandler { dismissDetail() }
                 val detailP = detailProgress.value.coerceIn(0f, 1f)
+                // Thermostat detail renders WITHOUT its own scroll
+                // here (inDialog = true, same as DetailPageScreen's
+                // climate branch): the panel's scroll wrapper already
+                // scrolls, and ThermostatPageScreen's own
+                // verticalScroll inside it measures with infinite
+                // height constraints — a fatal
+                // IllegalStateException at measure time, which is
+                // the #89 crash (popout Details -> instant death,
+                // no detail frame ever rendered). Every other panel
+                // content is already dialog-owned (plain column, no
+                // own scroll); the thermostat page was the one
+                // exception. The scaffold base render keeps its own
+                // scroll (finite constraints there).
+                val thermostatScreen = anim.screen as? Screen.Thermostat
                 if (anim.targetSize == null) {
                     PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
                         CompositionLocalProvider(
                             LocalHeroTarget provides { r -> heroTarget = anim.entityId to r },
                             LocalArcTarget provides { r -> arcTarget = anim.entityId to r },
                         ) {
-                            content(anim.screen)
+                            if (thermostatScreen != null) {
+                                ThermostatPageScreen(vm, thermostatScreen.entityId, { dismissDetail() }, inDialog = true)
+                            } else {
+                                content(anim.screen)
+                            }
                         }
                     }
                 }
@@ -1039,7 +1057,11 @@ fun HavenApp(vm: HavenViewModel) {
                     onDismiss = { dismissDetail() },
                     isClosing = detailExiting,
                 ) {
-                    content(anim.screen)
+                    if (thermostatScreen != null) {
+                        ThermostatPageScreen(vm, thermostatScreen.entityId, { dismissDetail() }, inDialog = true)
+                    } else {
+                        content(anim.screen)
+                    }
                 }
                 TravelingHeader(
                     vm, anim.entityId, heroBounds[anim.entityId],

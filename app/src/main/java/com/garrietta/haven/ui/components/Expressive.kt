@@ -366,16 +366,25 @@ fun badgeColors(
         "light" -> {
             val on = state == "on"
             val bg = if (on) {
-                // Inverted tokens (2026-11-01 round 1): a lit light
-                // keeps its expressive polygon badge — a saturated
-                // primary badge with an onPrimaryContainer glyph —
-                // instead of washing out to a pale container whose
-                // glyph reads as a bare dark icon.
+                // Inverted tokens (2026-11-01 round 1, corrected by
+                // the hotfix): a lit light keeps its expressive
+                // polygon badge. Round 1 paired the primary badge
+                // with an onPrimaryContainer glyph — a MISMATCHED
+                // pair: in the dark theme primary is a light pastel
+                // AND onPrimaryContainer is light, so the glyph
+                // washed out pale-on-pale (the #89 Standing Lamp
+                // badge); in the light theme the dark
+                // onPrimaryContainer on saturated primary is weak
+                // too. The matched pair is primary + onPrimary,
+                // floored to 4.5:1, so the glyph reads on every
+                // dynamic palette, card and panel header alike
+                // (this single table feeds DomainBadge,
+                // TravelingBadge, and the panel headers).
                 scheme.primary
             } else {
                 lightContainerColor(scheme, kelvin, on)
             }
-            bg to if (on) scheme.onPrimaryContainer else scheme.onSurfaceVariant
+            bg to if (on) ensureContrast(scheme.onPrimary, scheme.primary) else scheme.onSurfaceVariant
         }
         // Read-only sensors are inactive by construction: their
         // badges resolve to the muted scheme pair synchronously

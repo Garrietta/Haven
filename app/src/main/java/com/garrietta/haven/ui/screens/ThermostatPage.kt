@@ -240,14 +240,21 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
         // Scalloped disc + radial dial: the disc is the pop-out's
         // expressive shape, mode-colored; the dial sits centered on it.
         Box(
-            // 320dp disc (up from 300dp): the 260dp dial's 28dp thumb
-            // bloom reaches 158dp from center, past the old 150dp disc
-            // radius — the disc now clears the bloom with room to spare.
+            // 320dp disc, 240dp dial (hotfix, was 260dp): the old
+            // dial's outer (cool) thumb bloom reached 144dp from
+            // center against the 160dp disc radius, and the
+            // SCALLOP12 edge dips inward past that at the top —
+            // which is where both thumbs sit when setpoints are
+            // close (67/69) — so the thumbs crowded the scallop
+            // border. At 240dp the outer bloom reaches 134dp,
+            // clearing the deepest scallop dip with room to spare.
+            // Grab targets use the same radii, so taps still land
+            // on the thumb they see.
             Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.SCALLOP12)),
             contentAlignment = Alignment.Center,
         ) {
             ThermostatHero(
-                entity, vm, min, max, diameter = 260.dp,
+                entity, vm, min, max, diameter = 240.dp,
                 // Numbers sit on the scallop disc: floor them against
                 // the disc color itself (2026-10-30 dial-clash fix).
                 numberBackdrop = compositeOver(
@@ -334,7 +341,19 @@ private fun SegmentedOptionBar(
                         activeContentColor = active.second,
                     )
                 } else {
-                    SegmentedButtonDefaults.colors()
+                    // Unified selected treatment (hotfix): the
+                    // default secondaryContainer reads as dim grey
+                    // on this dark palette, so a selected Mode/Fan
+                    // segment looked unselected next to the
+                    // saturated Heat/Cool setpoint segments. Every
+                    // bar now selects with the same weight — filled
+                    // container + checkmark + semibold label — with
+                    // the hue semantic on the setpoint bar (heat/
+                    // cool) and palette-primary elsewhere.
+                    SegmentedButtonDefaults.colors(
+                        activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
                 },
                 label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             )
@@ -367,13 +386,16 @@ private fun orderedFanModes(modes: List<String>): List<String> {
 private fun ThermostatHeroDisc(entity: HaEntity, vm: HavenViewModel, min: Float, max: Float) {
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     Box(
-        // 360dp disc (up from 340dp): the 300dp hero's 28dp thumb bloom
-        // reaches 178dp from center, past the old 170dp disc radius.
+        // 360dp disc, 280dp dial (hotfix, was 300dp): same
+        // scallop-dip clearance as the pop-out — the old outer
+        // bloom reached 164dp against the 180dp disc radius, and
+        // the top scallop dip swallowed the margin when setpoints
+        // were close. At 280dp the outer bloom reaches 154dp.
         Modifier.size(360.dp).background(modeColor.copy(alpha = 0.18f), stateShape(StateShape.SCALLOP12)),
         contentAlignment = Alignment.Center,
     ) {
         ThermostatHero(
-            entity, vm, min, max,
+            entity, vm, min, max, diameter = 280.dp,
             numberBackdrop = compositeOver(
                 modeColor.copy(alpha = 0.18f),
                 MaterialTheme.colorScheme.background,

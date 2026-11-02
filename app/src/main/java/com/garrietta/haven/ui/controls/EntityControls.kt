@@ -588,9 +588,29 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
             )
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
+            // Sheet-panel path of the GarageDoorMenu rule: the
+            // round-1 disable landed only on the detail-page path,
+            // so this sheet control left Close fully enabled while
+            // closed. Invalid-direction actions are disabled AND
+            // dimmed to 0.38 alpha (muted colors alone read as
+            // identical greys on this dark dynamic palette). The
+            // state/position test uses the REPORTED position (not
+            // the display fallback, which defaults unknown to 0 and
+            // would disable Close mid-travel).
+            val reportedPosition = entity.attrInt("current_position")
+            val isClosed = entity.state == "closed" || reportedPosition == 0
+            val isOpen = entity.state == "open" || reportedPosition == 100
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { vm.callService("cover", "open_cover", entity.entityId) }) { Text("Open") }
-                FilledTonalButton(onClick = { vm.callService("cover", "close_cover", entity.entityId) }) { Text("Close") }
+                FilledTonalButton(
+                    onClick = { vm.callService("cover", "open_cover", entity.entityId) },
+                    modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
+                    enabled = !isOpen,
+                ) { Text("Open") }
+                FilledTonalButton(
+                    onClick = { vm.callService("cover", "close_cover", entity.entityId) },
+                    modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
+                    enabled = !isClosed,
+                ) { Text("Close") }
                 OutlinedButton(onClick = { vm.callService("cover", "stop_cover", entity.entityId) }) { Text("Stop") }
             }
         }

@@ -248,6 +248,24 @@ class DesignTokensTest {
     }
 
     @Test
+    fun litLightBadgeGlyphClearsContrastFloor() {
+        // Hotfix regression: round 1 paired the primary badge with
+        // an onPrimaryContainer glyph — pale-on-pale in the dark
+        // theme (primary is a light pastel there, and so is
+        // onPrimaryContainer). The matched primary + onPrimary
+        // pair, floored, must clear 4.5:1 on both schemes, so the
+        // polygon badge reads on every dynamic palette.
+        val lamp = com.garrietta.haven.data.HaEntity(
+            "light.standing_lamp_socket_1", "on",
+            mapOf("friendly_name" to "Standing Lamp"),
+        )
+        for (scheme in listOf(lightColorScheme(), androidx.compose.material3.darkColorScheme())) {
+            val (bg, glyph) = badgeColors(scheme, lamp, Color.Gray)
+            assertTrue(contrastRatio(glyph, bg) >= 4.5f)
+        }
+    }
+
+    @Test
     fun dialogNameSize_shrinksLongNamesInsteadOfEllipsizing() {
         // 2026-10-30 verdict: "Thermostat Current Temperatu…"
         // must show in full — size steps down before any ellipsis.

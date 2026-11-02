@@ -381,9 +381,23 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(8.dp))
+        // Same invalid-direction rule as GarageDoorMenu: Close
+        // disabled + dimmed while closed, Open disabled + dimmed
+        // while open (Stop always enabled). See the sheet
+        // CoverControl for the panel path of the same rule.
+        val isClosed = entity.state == "closed" || position == 0
+        val isOpen = entity.state == "open" || position == 100
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { vm.callService("cover", "open_cover", entity.entityId) }) { Text("Open") }
-            FilledTonalButton(onClick = { vm.callService("cover", "close_cover", entity.entityId) }) { Text("Close") }
+            FilledTonalButton(
+                onClick = { vm.callService("cover", "open_cover", entity.entityId) },
+                modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
+                enabled = !isOpen,
+            ) { Text("Open") }
+            FilledTonalButton(
+                onClick = { vm.callService("cover", "close_cover", entity.entityId) },
+                modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
+                enabled = !isClosed,
+            ) { Text("Close") }
             OutlinedButton(onClick = { vm.callService("cover", "stop_cover", entity.entityId) }) { Text("Stop") }
         }
         if (position != null) {
@@ -417,6 +431,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
     val animatedOpen by animateFloatAsState(openFraction.coerceIn(0f, 1f), havenMotion(reduceMotion), label = "garageDoorOpen")
     val openClamped = animatedOpen.coerceIn(0f, 1f)
     val isClosed = entity.state == "closed" || position == 0
+    val isOpen = entity.state == "open" || position == 100
     Column {
         Text("Garage door · ${entity.stateText()}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (position != null) {
@@ -437,16 +452,26 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            // Invalid-direction actions are disabled AND dimmed to
+            // 0.38 alpha (2026-11-01 hotfix): on this dark dynamic
+            // palette secondaryContainer and surfaceContainerHighest
+            // read as near-identical greys, so the muted-colors-only
+            // treatment from round 1 looked fully active while
+            // closed. The alpha drop is unmistakable against the
+            // full-alpha siblings, and enabled = false blocks taps.
             PressablePillButton(
                 onClick = { vm.callService("cover", "open_cover", entity.entityId) },
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
+                enabled = !isOpen,
+                containerColor = if (isOpen) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = if (isOpen) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Open", fontWeight = FontWeight.SemiBold)
             }
             PressablePillButton(
                 onClick = { vm.callService("cover", "close_cover", entity.entityId) },
+                modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
                 enabled = !isClosed,
                 containerColor = if (isClosed) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = if (isClosed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
