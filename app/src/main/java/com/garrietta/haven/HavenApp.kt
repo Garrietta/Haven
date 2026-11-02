@@ -123,6 +123,7 @@ import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.isRingCamera
+import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.DialogTitleText
@@ -1091,7 +1092,7 @@ fun HavenApp(vm: HavenViewModel) {
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    camEntity?.friendlyName ?: "Camera",
+                                    camEntity?.let { displayCameraName(it) } ?: "Camera",
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
@@ -1256,7 +1257,7 @@ private fun EntityPopupSheetContent(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
+                        DialogTitleText(displayCameraName(entity), Modifier.fillMaxWidth())
                         Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -1682,7 +1683,7 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
         // Ring carries its recording caption persistently (see
         // above); other cameras never carried a badge here either.
         CameraHeader(
-            entity?.friendlyName ?: "Camera",
+            entity?.let { displayCameraName(it) } ?: "Camera",
             badgeText = if (isRing) "Latest motion recording · Not live" else null,
             onClose = onClose,
         )
@@ -1830,7 +1831,7 @@ fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: 
     BackHandler { onClose() }
     Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
         CameraMjpegBody(vm, recordingEntityId, enterProgress, recording = true, onClose = onClose)
-        CameraHeader(entity?.friendlyName ?: "Camera", badgeText = "Recording", onClose = onClose)
+        CameraHeader(entity?.let { displayCameraName(it) } ?: "Camera", badgeText = "Recording", onClose = onClose)
     }
 }
 /** Dismissible banner for the last service-call failure. */
@@ -2132,7 +2133,7 @@ fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
+            DialogTitleText(displayCameraName(entity), Modifier.fillMaxWidth())
             Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

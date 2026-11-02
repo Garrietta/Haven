@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,7 +12,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -86,7 +87,6 @@ import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.DiscoverySource
 import com.garrietta.haven.data.isLightShownOnHome
 import com.garrietta.haven.isLive
-import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.data.isHomeRoomEntity
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.accentFor
@@ -99,8 +99,30 @@ import com.garrietta.haven.ui.controls.dialogHeaderState
 import com.garrietta.haven.ui.controls.domainIcon
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.LocalWindowSizeClass
+import com.garrietta.haven.ui.components.WindowSizeClass
+import com.garrietta.haven.ui.components.badgeColors
+import com.garrietta.haven.ui.components.climateModeColor
+import com.garrietta.haven.ui.components.ensureContrast
+import com.garrietta.haven.ui.components.hideBodyWhenMorphSource
+import com.garrietta.haven.ui.components.lightBrightnessContainer
+import com.garrietta.haven.ui.components.shapeForDomain
+import com.garrietta.haven.ui.controls.formatTemp
+import com.garrietta.haven.ui.controls.shapeTapAction
+import com.garrietta.haven.ui.controls.stateText
+import com.garrietta.haven.ui.theme.polygonShape
+import com.garrietta.haven.ui.theme.pressBounce
+import com.garrietta.haven.data.displayCameraName
+import com.garrietta.haven.data.isRingCamera
 import java.util.Calendar
 
 @Composable
@@ -325,12 +347,12 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
             .filter { it.domain != "light" || isLightShownOnHome(it, lightOverrides) }
             .sortedBy { it.friendlyName }
 
-    // Sections as LazyListScope blocks so the narrow and wide layouts share
-    // them exactly: one column folded, two side-by-side columns unfolded.
-    // The greeting is also a plain composable (GreetingBlock) so the
-    // wide layout can render it full-width ABOVE the camera hero:
-    // the 2026-10-30 verdict puts the greeting first on Home, then
-    // the hero, then weather, then who's-home, then rooms.
+    // The greeting is a plain composable (GreetingBlock) so both
+    // layouts render it ABOVE the camera hero: the 2026-10-30 verdict
+    // puts the greeting first on Home, then the hero, then weather,
+    // then who's-home, then rooms. Weather and who's-home are plain
+    // composables too (WeatherBlock, HomeBlock), shared by the folded
+    // LazyColumn and the unfolded scrolling Column.
     val greetingSection: LazyListScope.() -> Unit = {
         item {
             GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
@@ -338,88 +360,94 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
     }
     val weatherSection: LazyListScope.() -> Unit = {
         if (showSection("weather") && weather != null) {
-            item {
-                Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                // Compact Home card (2026-10-30 verdict: "a very
-                // small [card], maybe even one third the height"):
-                // one row — badge, name, condition + temp inline —
-                // no arc, no big number on Home. The full dialog
-                // (arc + hourly forecast) is untouched: tapping
-                // still opens it, long-press still opens the sheet.
-                HomeWeatherCard(weather, vm, navigate)
-                Spacer(Modifier.height(16.dp))
-            }
+            item { WeatherBlock(weather, vm, navigate) }
         }
     }
     val homeSection: LazyListScope.() -> Unit = {
         if (showSection("home") && homePeople.isNotEmpty()) {
-            item {
-                Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(4.dp))
-                Text(homePeople.joinToString(", ") { it.friendlyName }, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.height(16.dp))
-            }
+            item { HomeBlock(homePeople) }
         }
     }
-    val roomsSections: LazyListScope.() -> Unit = {
+    // Visible room sections, in HA order, after the hidden-section
+    // filter: one (areaId, heading, members) triple per room, with a
+    // null areaId for "No room". The room-filter chips narrow this
+    // list; "My Home" (null filter) shows all. A hidden room never
+    // gets a chip, so selecting it is impossible and the list can
+    // never come up empty from a stale filter.
+    val allRooms: List<Triple<String?, String, List<HaEntity>>> = buildList {
         for (area in areas) {
             if ("room:${area.id}" in hiddenSections) continue
             val members = roomMembers(area.id)
             if (members.isEmpty()) continue
-            item {
-                Text(area.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-            }
-            items(members) { member ->
-                EntityControlCard(member, vm) { vm.openPopup(it) }
-                Spacer(Modifier.height(12.dp))
-            }
-            item { Spacer(Modifier.height(4.dp)) }
+            add(Triple(area.id, area.name, members))
         }
         val unassigned = roomMembers(null)
-        if (unassigned.isNotEmpty()) {
-            item {
-                Text("No room", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-            }
-            items(unassigned) { member ->
-                EntityControlCard(member, vm) { vm.openPopup(it) }
-                Spacer(Modifier.height(12.dp))
-            }
+        if (unassigned.isNotEmpty()) add(Triple(null, "No room", unassigned))
+    }
+    // Room-filter chips (Gemini mockup round, 2026-11-01): "My Home"
+    // plus one chip per visible room, in HA order. The filter narrows
+    // the room sections only — greeting, hero, weather, and who's-home
+    // always stay — so a chip tap never blanks the page.
+    var roomFilter by remember { mutableStateOf<RoomFilter>(RoomFilter.All) }
+    val visibleRooms = when (val f = roomFilter) {
+        RoomFilter.All -> allRooms
+        is RoomFilter.Area -> allRooms.filter { (id, _, _) -> id == f.id }
+        RoomFilter.Unassigned -> allRooms.filter { (id, _, _) -> id == null }
+    }
+    // Chips actually shown: "My Home" + one per visible room.
+    val roomChips: List<Pair<RoomFilter, String>> = buildList {
+        add(RoomFilter.All to "My Home")
+        for ((id, name, _) in allRooms) {
+            add((if (id == null) RoomFilter.Unassigned else RoomFilter.Area(id)) to name)
         }
     }
+    // Grid columns per room section: 2 on phones and the Fold8
+    // (mockup folded = 2 columns), 3 on EXPANDED windows, matching
+    // the existing behavior map (WindowSize: EXPANDED adds a column).
+    val roomGridColumns = if (LocalWindowSizeClass.current == WindowSizeClass.EXPANDED) 3 else 2
 
     if (LocalWideLayout.current) {
-        // Expanded windows: cap the two-pane content at 1200dp and
-        // center it, so tablet/desktop panes don't stretch to
-        // full-window width. The cap never binds below 1200dp, so
-        // Medium (Fold8 unfolded) renders exactly as before.
-        Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.TopCenter) {
-            Column(Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp)) {
+        // Unfolded, two columns (Gemini mockup round, 2026-11-01):
+        // left = masthead + greeting + chips + camera hero (weather
+        // and who's-home under it); right = room grids. ONE scrolling
+        // page, not two half-width lists under a fixed header — the
+        // old split is exactly why unfolded Home "couldn't scroll":
+        // the greeting + 16:9 hero were fixed, filling most of the
+        // viewport, and only the narrow strips below them scrolled,
+        // each inside its own column, so a drag on the hero or the
+        // greeting did nothing at all. Here a drag anywhere scrolls
+        // the whole page, and the camera sits in the left column
+        // only, never full width. The 1200dp cap + centering from
+        // the old wide layout is kept.
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Column(
+                Modifier.widthIn(max = 1200.dp).fillMaxWidth().statusBarsPadding()
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            ) {
                 // Greeting FIRST, then the hero (2026-10-30 verdict):
                 // the hero is no longer the first element on Home.
                 GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
-                if (showSection("cameras")) {
-                    CameraQuadrantHero(vm, navigate, states)
-                }
-                Row(Modifier.weight(1f)) {
-                    LazyColumn(
-                        Modifier.weight(1f).padding(end = 8.dp),
-                        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
-                    ) {
-                        weatherSection()
-                        homeSection()
-                        item { Spacer(Modifier.height(16.dp)) }
+                RoomFilterChips(roomChips, roomFilter) { roomFilter = it }
+                Spacer(Modifier.height(12.dp))
+                Row {
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        if (showSection("cameras")) {
+                            CameraQuadrantHero(vm, navigate, states)
+                        }
+                        if (showSection("weather") && weather != null) {
+                            WeatherBlock(weather, vm, navigate)
+                        }
+                        if (showSection("home") && homePeople.isNotEmpty()) {
+                            HomeBlock(homePeople)
+                        }
                     }
-                    LazyColumn(
-                        Modifier.weight(1f).padding(start = 8.dp),
-                        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
-                    ) {
-                        roomsSections()
-                        item { Spacer(Modifier.height(16.dp)) }
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                        for ((_, name, members) in visibleRooms) {
+                            RoomSectionGrid(name, members, vm, roomGridColumns)
+                        }
                     }
                 }
+                Spacer(Modifier.height(pillClearanceBottom()))
             }
         }
     } else {
@@ -430,11 +458,322 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
             // Greeting FIRST, then the hero (2026-10-30 verdict):
             // the hero is no longer the first element on Home.
             greetingSection()
+            item { RoomFilterChips(roomChips, roomFilter) { roomFilter = it } }
+            item { Spacer(Modifier.height(12.dp)) }
             if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
             weatherSection()
             homeSection()
-            roomsSections()
+            for ((_, name, members) in visibleRooms) {
+                item { RoomSectionGrid(name, members, vm, roomGridColumns) }
+            }
             item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+/**
+ * Room-filter selection for Home (Gemini mockup round, 2026-11-01):
+ * All = "My Home" (every visible room), Area(id) = one HA room,
+ * Unassigned = the "No room" section. Data objects/classes so chip
+ * equality is structural, never string matching on room names.
+ */
+private sealed interface RoomFilter {
+    data object All : RoomFilter
+    data class Area(val id: String) : RoomFilter
+    data object Unassigned : RoomFilter
+}
+
+/**
+ * Horizontally scrollable room-filter chips (mockup: "My Home" pale
+ * green when selected, gray pills otherwise). Custom pills, not
+ * FilterChip: FilterChip draws a checkmark on selection, which the
+ * mockup does not have. Selected = primaryContainer/onPrimaryContainer
+ * from the scheme (the mockup's pale green, scheme-correct in both
+ * modes); unselected = surfaceContainer/onSurfaceVariant.
+ */
+@Composable
+private fun RoomFilterChips(
+    chips: List<Pair<RoomFilter, String>>,
+    selected: RoomFilter,
+    onSelect: (RoomFilter) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        for ((filter, label) in chips) {
+            val isSelected = filter == selected
+            Box(
+                Modifier.clip(RoundedCornerShape(50))
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainer,
+                    )
+                    .clickable { onSelect(filter) }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    label,
+                    fontSize = 14.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Compact Home weather block (2026-10-30 verdict: "a very small
+ * [card], maybe even one third the height"): one row — badge, name,
+ * condition + temp inline — no arc, no big number on Home. The full
+ * dialog (arc + hourly forecast) is untouched: tapping still opens
+ * it, long-press still opens the sheet. Shared by the folded list
+ * and the unfolded left column.
+ */
+@Composable
+private fun WeatherBlock(weather: HaEntity, vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(8.dp))
+    HomeWeatherCard(weather, vm, navigate)
+    Spacer(Modifier.height(16.dp))
+}
+
+/** Who's-home block, shared by the folded list and the unfolded left column. */
+@Composable
+private fun HomeBlock(homePeople: List<HaEntity>) {
+    Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(4.dp))
+    Text(homePeople.joinToString(", ") { it.friendlyName }, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+    Spacer(Modifier.height(16.dp))
+}
+
+/**
+ * One room section as a mockup-language grid: heading + rows of
+ * [columns] cards (2 folded / Fold8, 3 on EXPANDED). A plain Column,
+ * so it slots into both the folded LazyColumn (as one item per room)
+ * and the unfolded left/right columns. A short final row pads its
+ * missing cells with spacers so cards keep their grid width.
+ */
+@Composable
+private fun RoomSectionGrid(
+    name: String,
+    members: List<HaEntity>,
+    vm: HavenViewModel,
+    columns: Int,
+) {
+    Column {
+        Text(name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(8.dp))
+        for (row in members.chunked(columns)) {
+            Row {
+                for (member in row) {
+                    Box(Modifier.weight(1f)) { HomeRoomCard(vm, member) }
+                    if (member != row.last()) Spacer(Modifier.width(12.dp))
+                }
+                repeat(columns - row.size) {
+                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+}
+
+/**
+ * Mockup status line for a room card: the whole state at a glance,
+ * in the mockup's words ("On • 100%", "Heating to 75%", "Locked").
+ * Lights read brightness; climate reads its heating/cooling target
+ * when one exists; covers read position; everything else reads its
+ * plain state text. Never a raw attribute dump.
+ */
+private fun homeCardStatus(entity: HaEntity): String = when (entity.domain) {
+    "light" -> if (entity.state == "on") {
+        val b = entity.attrInt("brightness")?.let { it * 100 / 255 }
+        if (b != null) "On • $b%" else "On"
+    } else "Off"
+    "switch", "input_boolean" -> if (entity.state == "on") "On" else "Off"
+    "cover" -> {
+        val pos = entity.attrInt("current_position")
+        val base = entity.stateText()
+        if (pos != null && pos != 0 && pos != 100) "$base • $pos% open" else base
+    }
+    "climate" -> {
+        val action = entity.attrString("hvac_action")
+        val target = entity.attrDouble("temperature")
+            ?: entity.attrDouble("target_temp_low")
+            ?: entity.attrDouble("target_temp_high")
+        when {
+            action == "heating" && target != null -> "Heating to ${target.formatTemp()}"
+            action == "cooling" && target != null -> "Cooling to ${target.formatTemp()}"
+            else -> entity.stateText()
+        }
+    }
+    else -> entity.stateText()
+}
+
+/**
+ * Mockup-language room card (Gemini mockup round, 2026-11-01):
+ * varied squircle card (the shape picker's per-entity override wins,
+ * else extraLarge), pastel tint (kelvin + brightness for lit lights,
+ * mode color for climate, neutral otherwise), expressive badge from
+ * the same badgeColors pipeline as tiles and dialogs (dark saturated
+ * icon circle when active, grey when off — OFF icons grey, standing
+ * law), bold name + small status line, and a toggle top-right for
+ * binary entities / the current temperature for climate, mirroring
+ * the mockup's Island (toggle) and Greenhouse (72°) cards.
+ *
+ * Interactions mirror the tab tiles exactly: background tap opens
+ * the centered dialog (Home behavior — never a full page), badge tap
+ * actuates where a shape action exists, long-press opens the dialog.
+ * Morph wiring mirrors EntityTile: the card reports its bounds and
+ * hides while its morph is open, and the badge anchors the traveling
+ * header (the name/status sit below the badge, so the badge rect is
+ * the travel origin, exactly as the tile comment states).
+ *
+ * Dark-mode legibility: name and status are floored to 4.5:1 against
+ * the card's own container via ensureContrast (the #83 light-glyph
+ * precedent) — the dim-grey-on-tinted-tile failure from the unfolded
+ * video's Living Room lights tab cannot recur here.
+ */
+@Composable
+private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
+    val accent = accentFor(entity.entityId)
+    // Snapshot-held visuals, same rule as tiles and cards: while this
+    // card's morph is open, badge/name/state/container resolve from
+    // the open-time snapshot, never the live entity. Actuation stays
+    // live.
+    val snap = vm.travelSnapshots[entity.entityId]
+    val display = snap ?: entity
+    val scheme = MaterialTheme.colorScheme
+    val container = when {
+        display.domain == "light" && display.state == "on" ->
+            lightBrightnessContainer(
+                scheme,
+                display.attrInt("color_temp_kelvin"),
+                display.attrInt("brightness")?.let { it * 100 / 255 },
+                true,
+            )
+        display.domain == "climate" ->
+            lerp(
+                scheme.surfaceContainerLow,
+                climateModeColor(display.state, display.attrString("hvac_action")),
+                0.15f,
+            )
+        else -> scheme.surfaceContainerLow
+    }
+    val nameColor = ensureContrast(scheme.onSurface, container, 4.5f)
+    val statusColor = ensureContrast(scheme.onSurfaceVariant, container, 4.5f)
+    val (badgeBg, badgeGlyph) = badgeColors(scheme, display, accent)
+    val shapeAction = shapeTapAction(vm, entity)
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val reduceMotion = com.garrietta.haven.ui.components.LocalReduceMotion.current
+    val pressScale by androidx.compose.animation.core.animateFloatAsState(
+        if (pressed) 0.97f else 1f,
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
+        label = "roomCardPress",
+    )
+    val badgeInteraction = remember { MutableInteractionSource() }
+    val badgePressed by badgeInteraction.collectIsPressedAsState()
+    val badgeScale by androidx.compose.animation.core.animateFloatAsState(
+        if (badgePressed) 0.92f else 1f,
+        animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
+        label = "roomCardBadgePress",
+    )
+    Surface(
+        // Card-outline shape (2026-10-30 picker): a per-entity
+        // override beats the global default; without either, the
+        // token extraLarge corners are unchanged.
+        shape = LocalShapePrefs.current.cardShape(entity.entityId)
+            ?: MaterialTheme.shapes.extraLarge,
+        color = container,
+        modifier = Modifier.fillMaxWidth()
+            .reportCardBounds(entity.entityId)
+            .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
+            .hideWhenMorphSource(entity.entityId)
+            .hideBodyWhenMorphSource(entity.entityId)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = { vm.openPopup(entity.entityId) },
+                onLongClick = { vm.openPopup(entity.entityId) },
+            ),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(56.dp).background(
+                        badgeBg,
+                        // Tile badge shape (2026-10-30 picker): a
+                        // per-entity override beats the global
+                        // default; without either, the domain shape.
+                        LocalShapePrefs.current.badgeShape(entity.entityId)
+                            ?: polygonShape(shapeForDomain(entity.domain)),
+                    )
+                        .graphicsLayer(scaleX = badgeScale, scaleY = badgeScale)
+                        // Traveling header anchor: the badge rect is
+                        // the travel origin (tile precedent), and the
+                        // badge hides the moment its morph opens.
+                        .reportHeroBounds(entity.entityId)
+                        .hideHeroWhenMorphSource(entity.entityId)
+                        .then(if (shapeAction != null) Modifier.combinedClickable(
+                            interactionSource = badgeInteraction,
+                            indication = null,
+                            onClick = shapeAction,
+                            onLongClick = { vm.openPopup(entity.entityId) },
+                        ) else Modifier),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        domainIcon(display),
+                        contentDescription = null,
+                        tint = badgeGlyph,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                // Trailing control, mockup-style: a toggle for binary
+                // entities (tap flips, never opens the dialog — the
+                // Switch consumes its own press), the current
+                // temperature for climate, nothing for the rest.
+                when (entity.domain) {
+                    "light", "switch", "input_boolean", "fan" -> Switch(
+                        checked = entity.state == "on",
+                        onCheckedChange = { vm.toggle(entity.entityId) },
+                    )
+                    "climate" -> entity.attrDouble("current_temperature")?.let { cur ->
+                        Text(
+                            cur.formatTemp(),
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ensureContrast(scheme.onSurface, container, 4.5f),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                display.friendlyName,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                color = nameColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.hideHeroWhenMorphSource(entity.entityId),
+            )
+            Text(
+                homeCardStatus(display),
+                fontSize = 13.sp,
+                color = statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.hideHeroWhenMorphSource(entity.entityId),
+            )
         }
     }
 }
@@ -474,7 +813,13 @@ private fun GreetingBlock(
 ) {
     if (showGreeting) {
         Spacer(Modifier.height(16.dp))
-        Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        // Mockup masthead (Gemini mockup round, 2026-11-01): the very
+        // large bold "Haven" masthead, with the greeting as the smaller
+        // gray subheading under it — the mockup's header, not a second
+        // greeting. The connection line below is untouched (#83).
+        Text("Haven", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.height(2.dp))
+        Text(greeting, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (!connection.isLive()) {
         Spacer(Modifier.height(4.dp))
@@ -891,6 +1236,59 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                 Image(snap.asImageBitmap(), contentDescription = entity?.friendlyName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
                 Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
+            }
+            // Mockup-language overlay (Gemini mockup round,
+            // 2026-11-01): the mockup's Front Door card carries its
+            // title over the photo with a LIVE badge — each quadrant
+            // gets the same treatment: status pill top-left, camera
+            // name bottom-left over a bottom scrim. The pill is
+            // honest by construction: LIVE only for genuinely live
+            // native feeds, Recording for Ring (never a LIVE badge
+            // on a recording — standing honesty law). The name uses
+            // the display name, so the Ring quadrant never reads
+            // "Front Door Live view". No motion subtitle: the mockup's
+            // "Motion detected" is demo data, and no per-camera motion
+            // state exists to show honestly — the pill carries the
+            // live/recording distinction instead.
+            if (entity != null) {
+                val isRing = isRingCamera(entity)
+                Box(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier.align(Alignment.BottomStart).fillMaxWidth().height(56.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
+                                ),
+                            ),
+                    )
+                    Row(
+                        Modifier.align(Alignment.TopStart).padding(8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!isRing) {
+                            Box(
+                                Modifier.size(6.dp).clip(CircleShape)
+                                    .background(Color(0xFF4CAF50)),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("Recording", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Text(
+                        displayCameraName(entity),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                    )
+                }
             }
         }
     }

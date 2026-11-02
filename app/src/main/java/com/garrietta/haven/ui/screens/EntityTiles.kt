@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.accentFor
@@ -358,7 +359,12 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                display.friendlyName,
+                // Display name: the Ring camera's HA name is
+                // "Front Door Live view" — the tile title from the
+                // unfolded video. displayCameraName strips that
+                // suffix for Ring only; every other entity is
+                // byte-identical.
+                displayCameraName(display),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onSurface,

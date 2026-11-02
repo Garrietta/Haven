@@ -73,6 +73,7 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.findRecordingSibling
 import com.garrietta.haven.data.formatHaTimestamp
 import com.garrietta.haven.data.isRingCamera
+import com.garrietta.haven.data.displayCameraName
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.garrietta.haven.ui.components.DomainBadge
@@ -625,7 +626,11 @@ private fun fmtDetailHistory(v: Double, unit: String?): String {
 fun CameraClipsScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
-    val name = entity?.friendlyName ?: entityId
+    // Display name, not the raw friendly name: HA calls the Ring
+    // camera "Front Door Live view", so the clips title used to read
+    // "Front Door Live view clips" while the content says "Not live".
+    // displayCameraName strips that suffix for Ring only.
+    val name = entity?.let { displayCameraName(it) } ?: entityId
     var loading by remember(entityId) { mutableStateOf(true) }
     var clips by remember(entityId) { mutableStateOf<List<HaClient.MediaChild>>(emptyList()) }
     var playing by remember(entityId) { mutableStateOf<HaClient.MediaChild?>(null) }
@@ -686,7 +691,12 @@ fun CameraClipsScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) 
     }
 
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
+        // Status-bar inset (Gemini mockup round, 2026-11-01): every
+        // other DetailTopBar caller pads its root, but this screen
+        // did not — its title ran into the status bar on the
+        // unfolded video (the purple-arrow frame). Same padding as
+        // its siblings, nothing else changes.
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
             DetailTopBar(title = "$name clips", onBack = onBack)
             when {
                 loading -> {
@@ -700,7 +710,7 @@ fun CameraClipsScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) 
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
-                        Text("No recorded clips", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("No recorded clips", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Home Assistant exposes no recorded-clip list for this camera.",
@@ -782,12 +792,16 @@ private fun RecordingRow(vm: HavenViewModel, sibling: HaEntity, onTap: () -> Uni
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(sibling.friendlyName, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            // Explicit onSurface (dark-mode audit, 2026-11-01): this
+            // bare Row provides no content color, so the old
+            // color-less Text defaulted to black — invisible on the
+            // dark background, same class as the empty-state heading.
+            Text(sibling.friendlyName, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
             val stamp = formatHaTimestamp(sibling.lastChanged ?: sibling.lastUpdated)
             Text(
                 stamp ?: "Last recording",
@@ -824,12 +838,15 @@ private fun ClipRow(vm: HavenViewModel, clip: HaClient.MediaChild, onTap: () -> 
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(clip.title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            // Explicit onSurface: same bare-Row, no-content-color
+            // case as RecordingRow above — the old color-less title
+            // defaulted to black in dark mode.
+            Text(clip.title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 "Tap to play",
                 fontSize = 14.sp,
