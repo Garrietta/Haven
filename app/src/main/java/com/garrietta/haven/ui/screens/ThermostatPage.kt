@@ -200,32 +200,30 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
     ) {
         Row(
             Modifier.fillMaxWidth()
-                .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
-                .hideWhileTraveling(),
+                .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Badge by EVERY pop-up (2026-10-29 verdict overrules
             // #68's deliberate pop-out exception): the traveling
             // badge dissolves into this 48dp header badge exactly
             // like every other pop-up header, and tapping it
-            // dismisses. The top-right X stays.
+            // dismisses. The top-right X stays. Badge only hides
+            // while traveling (2026-11-01 polish round): the
+            // name/state text stays visible from the panel's first
+            // frame — hiding the whole row held the title back
+            // until the final 2% handoff window.
             DomainBadge(
                 entity,
                 domainIcon(entity),
                 accentFor(entity.entityId),
-                modifier = Modifier.size(48.dp).clickable(
+                modifier = Modifier.size(48.dp).hideWhileTraveling().clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) { onClose() },
             )
             Spacer(Modifier.width(12.dp))
             // Standard dialog header (2026-10-30): name + state
-            // below it, exactly like every sheet/detail header, so
-            // the traveling header (badge + name + state as one
-            // element) lands exactly — the old name-only title let
-            // the traveler's "Heat • Cool" state flash underneath
-            // the "Ecobee" name mid-flight, and the 18sp name
-            // popped to the traveler's 20sp at the handoff.
+            // below it, exactly like every sheet/detail header.
             Column(Modifier.weight(1f)) {
                 DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
                 Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -280,7 +280,7 @@ fun LoginScreen(vm: HavenViewModel) {
 }
 
 @Composable
-fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
+fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired: () -> Unit) {
     val states by vm.states.collectAsState()
     val connection by vm.connection.collectAsState()
     // Read so Home editor saves recompose this screen from the store.
@@ -333,7 +333,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     // the hero, then weather, then who's-home, then rooms.
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            GreetingBlock(greeting, connection, showSection("greeting"))
+            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
@@ -399,7 +399,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             Column(Modifier.widthIn(max = 1200.dp).fillMaxHeight().padding(horizontal = 16.dp)) {
                 // Greeting FIRST, then the hero (2026-10-30 verdict):
                 // the hero is no longer the first element on Home.
-                GreetingBlock(greeting, connection, showSection("greeting"))
+                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
                 if (showSection("cameras")) {
                     CameraQuadrantHero(vm, navigate, states)
                 }
@@ -447,23 +447,84 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
  * The connection line renders even when the greeting itself is
  * hidden, exactly as the old section did.
  */
+/**
+ * Greeting + connection line (2026-11-01 polish round): a transient
+ * connection loss is NEVER a red banner and never a modal — it is a
+ * small inline spinner row in this exact slot, in-flow (it pushes
+ * content down, it overlays nothing), which clears on its own the
+ * moment the connection recovers. The row distinguishes three cases:
+ * a retry already in flight (spinner + "Reconnecting…" when cached
+ * content is on screen, "Connecting…" on a cold first load, so the
+ * subtitle stays stable across Error <-> Connecting cycles during
+ * an outage), a hard auth failure (no spinner — the token was
+ * rejected and no retry is scheduled — inline variant-colored text
+ * that taps through to sign in again), and plain Disconnected
+ * (variant-colored "Not connected", no spinner). Retries are
+ * indefinite, so there is no "retries exhausted" state to present:
+ * the spinner simply stays until the connection recovers or the
+ * failure turns into an auth rejection.
+ */
 @Composable
-private fun GreetingBlock(greeting: String, connection: ConnectionState, showGreeting: Boolean) {
+private fun GreetingBlock(
+    greeting: String,
+    connection: ConnectionState,
+    showGreeting: Boolean,
+    hasCachedContent: Boolean,
+    onSignInExpired: (() -> Unit)?,
+) {
     if (showGreeting) {
         Spacer(Modifier.height(16.dp))
         Text(greeting, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
     }
     if (!connection.isLive()) {
         Spacer(Modifier.height(4.dp))
-        Text(
-            when (connection) {
-                is ConnectionState.Connecting, ConnectionState.Authenticating -> "Connecting to your home…"
-                is ConnectionState.Error -> (connection as ConnectionState.Error).message
-                else -> "Not connected"
-            },
-            color = MaterialTheme.colorScheme.error,
-            fontSize = 13.sp,
-        )
+        when (connection) {
+            is ConnectionState.Connecting, ConnectionState.Authenticating -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (hasCachedContent) "Reconnecting…" else "Connecting to your home…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+            is ConnectionState.Error -> if (connection.retrying) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (hasCachedContent) "Reconnecting…" else "Connecting…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                    )
+                }
+            } else {
+                Text(
+                    "Sign-in expired — tap to sign in again",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    modifier = if (onSignInExpired != null) Modifier.clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                    ) { onSignInExpired() } else Modifier,
+                )
+            }
+            else -> Text(
+                "Not connected",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+            )
+        }
     }
     Spacer(Modifier.height(16.dp))
 }
@@ -777,14 +838,20 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
                 .clip(RoundedCornerShape(24.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         ) {
+            // One clean rounded rectangle (2026-11-01 polish round):
+            // ONLY the outer corners are rounded — every quadrant
+            // used to round all four corners, so the touching inner
+            // edges curved and the center cross looked broken.
+            // Touching edges are square now; the 1dp gutters read
+            // as the split between quadrants.
             Column(Modifier.fillMaxSize()) {
                 Row(Modifier.weight(1f)) {
-                    CameraQuadrant(vm, cameras.getOrNull(0), Modifier.weight(1f))
-                    CameraQuadrant(vm, cameras.getOrNull(1), Modifier.weight(1f))
+                    CameraQuadrant(vm, cameras.getOrNull(0), Modifier.weight(1f), RoundedCornerShape(topStart = 24.dp))
+                    CameraQuadrant(vm, cameras.getOrNull(1), Modifier.weight(1f), RoundedCornerShape(topEnd = 24.dp))
                 }
                 Row(Modifier.weight(1f)) {
-                    CameraQuadrant(vm, cameras.getOrNull(2), Modifier.weight(1f))
-                    CameraQuadrant(vm, cameras.getOrNull(3), Modifier.weight(1f))
+                    CameraQuadrant(vm, cameras.getOrNull(2), Modifier.weight(1f), RoundedCornerShape(bottomStart = 24.dp))
+                    CameraQuadrant(vm, cameras.getOrNull(3), Modifier.weight(1f), RoundedCornerShape(bottomEnd = 24.dp))
                 }
             }
         }
@@ -793,10 +860,10 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
 }
 
 @Composable
-private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier) {
+private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier, corners: RoundedCornerShape = RoundedCornerShape(0.dp)) {
     val states by vm.states.collectAsState()
     Box(
-        modifier.padding(1.dp).clip(RoundedCornerShape(8.dp))
+        modifier.padding(1.dp).clip(corners)
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .then(if (cameraId != null) Modifier.clickable { vm.openCameraDialog(cameraId) } else Modifier),
         contentAlignment = Alignment.Center,
@@ -805,7 +872,20 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
         } else {
             val snap = vm.snapshotFor(cameraId)
-            LaunchedEffect(cameraId) { vm.refreshSnapshot(cameraId) }
+            // Cache-first, fetch deferred (2026-11-01 polish round):
+            // when a cached image exists it is already on screen,
+            // so the fresh fetch waits ~1s instead of racing app
+            // open (the old immediate fetch left the top-right
+            // quadrant blank for ~5s while four fetches queued).
+            // With no cache there is nothing to protect, so the
+            // fetch starts at once. refreshSnapshot itself only
+            // swaps in a finished image and only when the cached
+            // one is stale, so a failed or in-flight fetch never
+            // blanks a quadrant.
+            LaunchedEffect(cameraId) {
+                if (vm.snapshotFor(cameraId) != null) kotlinx.coroutines.delay(1000)
+                vm.refreshSnapshot(cameraId)
+            }
             val entity = states[cameraId]
             if (snap != null) {
                 Image(snap.asImageBitmap(), contentDescription = entity?.friendlyName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())

@@ -113,7 +113,14 @@ sealed class ConnectionState {
     data object Connecting : ConnectionState()
     data object Authenticating : ConnectionState()
     data object Connected : ConnectionState()
-    data class Error(val message: String) : ConnectionState()
+    /**
+     * [retrying] is true when the client is already counting down to
+     * its next reconnect attempt (2026-11-01 polish round): the UI
+     * shows an inline "Reconnecting…" spinner for those, and only
+     * those, errors. A hard failure (auth rejection) has
+     * retrying = false and must never be presented as transient.
+     */
+    data class Error(val message: String, val retrying: Boolean = false) : ConnectionState()
 }
 
 /** One history point for sparklines (state as a number, epoch millis). */

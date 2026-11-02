@@ -268,17 +268,84 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     val snapshotCache = mutableStateMapOf<String, android.graphics.Bitmap>()
     private val snapshotRefreshing = mutableSetOf<String>()
+    /** Epoch millis of the image currently held for each camera (disk load or fresh fetch). */
+    private val snapshotTimestamps = mutableMapOf<String, Long>()
+    /** A cached snapshot younger than this is "fresh": no refetch (2026-11-01 polish round). */
+    private val snapshotFreshMs = 60_000L
 
-    fun snapshotFor(entityId: String): android.graphics.Bitmap? = snapshotCache[entityId]
+    /** Cache key: the entity id sanitized for use as a file name (disk and memory share it, so a disk-loaded image is found by [snapshotFor]). */
+    private fun snapshotKey(entityId: String): String = entityId.replace(Regex("[^A-Za-z0-9_-]"), "_")
 
+    fun snapshotFor(entityId: String): android.graphics.Bitmap? = snapshotCache[snapshotKey(entityId)]
+
+    /**
+     * Cache-first snapshot refresh (2026-11-01 polish round): a
+     * fetch only starts when the held image is absent or older
+     * than [snapshotFreshMs] — a fresh image is never swapped out
+     * — and a finished image replaces the held one atomically, so
+     * a failed or in-flight fetch can never blank a quadrant. On
+     * success the image is also persisted to disk, so the NEXT
+     * cold open paints last-known images immediately (see
+     * [loadDiskSnapshots], run from init before first composition).
+     */
     fun refreshSnapshot(entityId: String) {
-        if (entityId in snapshotRefreshing) return
-        snapshotRefreshing += entityId
+        val key = snapshotKey(entityId)
+        if (key in snapshotRefreshing) return
+        val heldAt = snapshotTimestamps[key]
+        if (snapshotCache.containsKey(key) && heldAt != null &&
+            System.currentTimeMillis() - heldAt < snapshotFreshMs
+        ) return
+        snapshotRefreshing += key
         viewModelScope.launch {
             try {
-                client.fetchCameraBitmap(entityId)?.let { snapshotCache[entityId] = it }
+                client.fetchCameraBitmap(entityId)?.let { bitmap ->
+                    snapshotCache[key] = bitmap
+                    snapshotTimestamps[key] = System.currentTimeMillis()
+                    persistSnapshot(entityId, bitmap)
+                }
             } finally {
-                snapshotRefreshing -= entityId
+                snapshotRefreshing -= key
+            }
+        }
+    }
+
+    private fun snapshotFile(entityId: String): java.io.File {
+        val dir = java.io.File(getApplication<Application>().filesDir, "camera_snapshots")
+        return java.io.File(dir, snapshotKey(entityId) + ".jpg")
+    }
+
+    /** Loads last-known snapshots from disk into the cache (best effort: a corrupt file is skipped, never fatal). */
+    fun loadDiskSnapshots() {
+        try {
+            val dir = java.io.File(getApplication<Application>().filesDir, "camera_snapshots")
+            if (!dir.isDirectory) return
+            for (file in dir.listFiles() ?: return) {
+                if (!file.name.endsWith(".jpg")) continue
+                try {
+                    val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath) ?: continue
+                    val key = file.nameWithoutExtension
+                    snapshotCache[key] = bitmap
+                    snapshotTimestamps[key] = file.lastModified()
+                } catch (_: Exception) {
+                    // Corrupt entry: skip it, keep the rest.
+                }
+            }
+        } catch (_: Exception) {
+            // Disk cache is best effort; a missing directory or permission
+            // problem must never block startup.
+        }
+    }
+
+    private fun persistSnapshot(entityId: String, bitmap: android.graphics.Bitmap) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = snapshotFile(entityId)
+                file.parentFile?.mkdirs()
+                file.outputStream().use { out ->
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                }
+            } catch (_: Exception) {
+                // Disk persistence is best effort; the in-memory image already updated.
             }
         }
     }
@@ -352,6 +419,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     init {
+        // Last-known camera snapshots paint from the first frame:
+        // load them before any composition runs (2026-11-01 polish
+        // round). Best effort — see loadDiskSnapshots.
+        loadDiskSnapshots()
         // Dashboard choice must be wired before autoConnect: connect ->
         // auth_ok -> refreshLovelace reads the preference on its first run.
         client.preferredLovelacePath = settingsStore.selectedDashboardPath

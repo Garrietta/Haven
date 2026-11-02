@@ -366,9 +366,19 @@ fun badgeColors(
     return when (domain) {
         "light" -> {
             val on = state == "on"
-            lightContainerColor(scheme, kelvin, on) to
-                if (on) lerp(scheme.onSecondaryContainer, scheme.onTertiaryContainer, lightTempBlendFraction(kelvin))
-                else scheme.onSurfaceVariant
+            val bg = lightContainerColor(scheme, kelvin, on)
+            // Lit-light glyph floor (2026-11-01 polish round): on a
+            // dynamic palette the on-container lerp can land too
+            // close to its container (on device the bulb rendered
+            // invisible against the lit tile), so the glyph is
+            // floored to 4.5:1 against its own badge background.
+            // A no-op when the pair already contrasts; other domains
+            // are untouched.
+            bg to if (on) ensureContrast(
+                lerp(scheme.onSecondaryContainer, scheme.onTertiaryContainer, lightTempBlendFraction(kelvin)),
+                bg,
+                4.5f,
+            ) else scheme.onSurfaceVariant
         }
         "climate" -> when {
             state == "off" -> climateIdleContainer(scheme) to scheme.onSurfaceVariant

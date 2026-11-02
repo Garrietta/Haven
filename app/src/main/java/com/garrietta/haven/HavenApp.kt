@@ -3,7 +3,6 @@ import androidx.compose.animation.animateContentSize
 import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.ShapePrefs
 import com.garrietta.haven.ui.components.badgeRectInRow
-import com.garrietta.haven.ui.components.dialogNameSize
 import com.garrietta.haven.ui.components.dialogPanelMaxHeightDp
 import com.garrietta.haven.ui.components.dialogPanelWidthDp
 import com.garrietta.haven.ui.components.hideWhileTraveling
@@ -159,7 +158,6 @@ import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.morphCardAlpha
-import com.garrietta.haven.ui.components.morphContentAlpha
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.heroHeaderAlpha
@@ -682,7 +680,6 @@ fun HavenApp(vm: HavenViewModel) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wideLayout = maxWidth >= 600.dp
             val windowSizeClass = windowSizeClassFor(maxWidth)
-            val windowWidthDp = maxWidth
             CompositionLocalProvider(
                 LocalWideLayout provides wideLayout,
                 LocalWindowSizeClass provides windowSizeClass,
@@ -748,10 +745,19 @@ fun HavenApp(vm: HavenViewModel) {
                 ),
                 // Progress-driven source-card alpha (container
                 // transform): the active morph's progress drives the
-                // card fade-out on enter and the fade-back-in on
-                // exit, so the card and the surface read as one
-                // element. No morph -> fully visible.
-                LocalMorphCardAlpha provides morphCardAlpha(
+                // card fade-out on enter, so the card and the surface
+                // read as one element. On EXIT the card is fully
+                // opaque throughout (2026-11-01 polish round): the
+                // old exit fade-back-in composited the translucent
+                // card over the dark scrim/panel remnants, which read
+                // as a darker, more saturated icon flash, and left a
+                // window where neither dialog nor card text was
+                // visible. With the card at full alpha under the
+                // leaving panel, exit is a reveal — the panel fades
+                // and shrinks away over an already-present page —
+                // so text never disappears and icons never shift
+                // color mid-exit. No morph -> fully visible.
+                LocalMorphCardAlpha provides if (sheetExiting || detailExiting || popoutExiting) 1f else morphCardAlpha(
                     when {
                         sheetAnim != null -> sheetProgress.value
                         detailAnim != null -> detailProgress.value
@@ -932,7 +938,6 @@ fun HavenApp(vm: HavenViewModel) {
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
                     sheetP, overlayOrigin,
-                    nameWidthCap = (dialogPanelWidthDp(windowWidthDp.value) - 92f).dp,
                     onDismiss = { dismissSheet() },
                 )
                 // Traveling arc, above the dialog (see TravelingArc).
@@ -978,7 +983,6 @@ fun HavenApp(vm: HavenViewModel) {
                     vm, anim.entityId, heroBounds[anim.entityId],
                     heroTarget?.takeIf { it.first == anim.entityId }?.second,
                     detailP, overlayOrigin,
-                    nameWidthCap = (dialogPanelWidthDp(windowWidthDp.value) - 92f).dp,
                     onDismiss = { dismissDetail() },
                 )
                 TravelingArc(
@@ -1037,7 +1041,6 @@ fun HavenApp(vm: HavenViewModel) {
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
                     popoutP, overlayOrigin,
-                    nameWidthCap = (dialogPanelWidthDp(windowWidthDp.value) - 92f).dp,
                     onDismiss = { dismissPopout() },
                 )
             }
@@ -1143,7 +1146,7 @@ private fun ScreenContent(
     onSignOut: () -> Unit,
 ) {
     when (screen) {
-        Screen.Today -> TodayScreen(vm, navigate)
+        Screen.Today -> TodayScreen(vm, navigate, onSignInExpired = signOut)
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)
@@ -1239,15 +1242,17 @@ private fun EntityPopupSheetContent(
                 val accent = accentFor(entity.entityId)
                 Row(
                     Modifier.fillMaxWidth()
-                        .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
-                        .hideWhileTraveling(),
+                        .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // Badge only hides while traveling (2026-11-01
+                    // polish round): the title text stays visible
+                    // from the panel's first frame.
                     DomainBadge(
                         entity,
                         domainIcon(entity),
                         accent,
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(48.dp).hideWhileTraveling(),
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
@@ -1337,11 +1342,15 @@ private fun EntityPopupSheetContent(
  *   as an unattached sheet). [animateContentSize] on the bounds
  *   spring resizes the panel smoothly, re-centered by the parent,
  *   when options expand (mode/fan dropdowns).
- * - Content: the late fade ([morphContentAlpha]) still applies, so
- *   content materializes once the panel is nearly full size; the
- *   traveling header/arc (rendered above, by the caller) carry the
- *   badge/icon continuously into the dialog header at the same
- *   time — scale+fade does NOT replace travel.
+ * - Content: NO late fade (2026-11-01 polish round): content
+ *   tracks the panel's own scale+fade, so it is present from the
+ *   panel's first frame and never materializes late. The traveling
+ *   badge/arc (rendered above, by the caller) still carry the
+ *   badge/icon continuously into the dialog header — scale+fade
+ *   does NOT replace travel — but the header TEXT lives in the
+ *   panel from frame 0 (see TravelingHeader: it is badge-only
+ *   now, and destination headers hide only their badge while
+ *   traveling, never their text).
  * [onPanelPlaced] reports the panel's root rect (the camera-rise
  * origin for sheet Details actions); at rest progress is 1 and the
  * scale is exactly 1, so the rect is exact where it is used.
@@ -1384,8 +1393,14 @@ private fun DialogOverlay(
                     .background(panelBackground),
             ) {
                 Box(
-                    Modifier.alpha(morphContentAlpha(p))
-                        .verticalScroll(rememberScrollState()),
+                    // No second fade here (2026-11-01 polish round):
+                    // the panel's own graphicsLayer alpha already
+                    // fades content in with the panel. The old
+                    // morphContentAlpha fade held content invisible
+                    // until p = 0.7, which is exactly the "title
+                    // draws late" complaint and, on exit, the window
+                    // where neither dialog nor card text was visible.
+                    Modifier.verticalScroll(rememberScrollState()),
                 ) {
                     // Surface marker: panel content runs under LocalMorphProgress
                     // (the dialog progress), the same contract MorphSurface used
@@ -1437,29 +1452,30 @@ private fun DialogMeasureFrame(
 
 /**
  * The single traveling header (2026-10-29 pop-up round, Relay-style;
- * 2026-10-30 verdict round: TRUE element travel, not recreation).
- * The card's badge, name, and state travel as ONE element — the
- * badge lerps along its own rect (derived from the source and
- * target header rows with [badgeRectInRow]: tiles report their
- * badge rect directly, cards and dialog headers report their
- * header row, and the badge is always the row's leading square,
- * so a 64dp tile badge, a 56dp card badge, and the 48dp dialog
- * badge land on exactly the same rect at rest — no size pop at
- * either end, which is what the old row-rect travel got wrong),
- * while the name (16sp -> dialog size) and state ride beside it
- * at the dialog's own gap (16dp -> 12dp) and width cap (the
- * dialog name width, so the ellipsis, if any, is identical
- * mid-flight and at rest). The name never ellipsizes mid-morph
- * into "Ecobee Therm...": it is laid out at the destination
- * width from frame 0 and translates with the badge.
+ * 2026-10-30 verdict round: TRUE element travel, not recreation;
+ * 2026-11-01 polish round: BADGE ONLY). The badge lerps along its
+ * own rect (derived from the source and target header rows with
+ * [badgeRectInRow]: tiles report their badge rect directly, cards
+ * and dialog headers report their header row, and the badge is
+ * always the row's leading square, so a 64dp tile badge, a 56dp
+ * card badge, and the 48dp dialog badge land on exactly the same
+ * rect at rest — no size pop at either end, which is what the old
+ * row-rect travel got wrong). The name and state NO LONGER travel:
+ * they live in the dialog header from the panel's first frame
+ * (destination headers hide only their badge while traveling,
+ * never their text), because the traveling text was the "title
+ * draws late" complaint — the user looks at the panel, not at the
+ * badge's flight path, and the panel's own title only arrived in
+ * the final 2% handoff window. With text omnipresent in the panel
+ * and only the badge traveling, there is never a doubled header
+ * and never a late title.
  *
- * The destination header itself wears [hideWhileTraveling], so
- * during the flight the traveler is the ONLY header on screen;
- * the destination materializes only in the final 2% handoff
+ * The destination header's badge wears [hideWhileTraveling], so
+ * during the flight the traveler is the ONLY badge on screen;
+ * the destination badge materializes only in the final 2% handoff
  * window ([heroHeaderAlpha]), where traveler and destination
  * coincide — never two copies, never a color shift between a
- * mid-morph traveler and a fading-in destination, never text
- * popping back up after the shape. The traveler reads the
+ * mid-morph traveler and a fading-in destination. The traveler reads the
  * open/dismiss-time snapshot ([HavenViewModel.travelSnapshots]),
  * never the live states flow, so no state emission mid-flight
  * — its own or any other entity's — can recompute its color,
@@ -1480,7 +1496,6 @@ private fun TravelingHeader(
     target: Rect?,
     progress: Float,
     overlayOrigin: Offset,
-    nameWidthCap: Dp,
     onDismiss: () -> Unit,
 ) {
     // Snapshot-first (see the ViewModel KDoc): the live flow is
@@ -1513,8 +1528,10 @@ private fun TravelingHeader(
     val rect = lerpRect(sourceBadge, targetBadge, p)
     val accent = accentFor(entity.entityId)
     val headerAlpha = heroHeaderAlpha(p)
-    val nameSize = (16f + (dialogNameSize(entity.friendlyName).value - 16f) * p).sp
-    val gap = (16f - 4f * p).dp
+    // Badge only (2026-11-01 polish round): the name/state text
+    // used to ride beside the badge here, but the destination
+    // header now shows its own text from frame 0 — keeping the
+    // traveler's text would double it through the flight.
     Box(
         Modifier
             .offset {
@@ -1525,50 +1542,22 @@ private fun TravelingHeader(
             }
             .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
             .graphicsLayer { alpha = headerAlpha },
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = Alignment.Center,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TravelingBadge(
-                entity,
-                domainIcon(entity),
-                accent,
-                p,
-                tileSource,
-                modifier = Modifier.size(with(density) { rect.width.toDp() })
-                    .then(
-                        if (headerAlpha > 0f) Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) { onDismiss() } else Modifier,
-                    ),
-            )
-            Spacer(Modifier.width(gap))
-            Column {
-                Text(
-                    entity.friendlyName,
-                    fontSize = nameSize,
-                    fontWeight = if (p >= 0.5f) FontWeight.Bold else FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    // Long names travel on two lines (2026-10-30
-                    // verdict round): dialog headers now fit long
-                    // names by wrapping, so a one-line traveler
-                    // would reflow to full at the handoff — two
-                    // lines throughout makes the handoff a small
-                    // size step instead.
-                    maxLines = if (entity.friendlyName.length > 28) 2 else 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = nameWidthCap),
-                )
-                Text(
-                    entity.dialogHeaderState(),
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = nameWidthCap),
-                )
-            }
-        }
+        TravelingBadge(
+            entity,
+            domainIcon(entity),
+            accent,
+            p,
+            tileSource,
+            modifier = Modifier.size(with(density) { rect.width.toDp() })
+                .then(
+                    if (headerAlpha > 0f) Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onDismiss() } else Modifier,
+                ),
+        )
     }
 }
 
@@ -1959,7 +1948,15 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             }
             // Scrolls horizontally once tabs overflow; short bars stay centered.
             Row(
-                modifier = Modifier.wrapContentWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp).pillScrub(scrub),
+                // Row horizontal padding 18dp (2026-11-01 polish
+                // round, was 10dp): the selected indicator overhangs
+                // its item by 8dp each side, so at 10dp the first /
+                // last selected pill sat ~2dp from the bar's
+                // background edge — flush, while middle tabs float
+                // inset. 18dp gives edge selections the same ~10dp
+                // breathing room inside the bar. Height unchanged
+                // (8 + 48 + 8 = 64dp); auto-width centering untouched.
+                modifier = Modifier.wrapContentWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp).pillScrub(scrub),
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2117,15 +2114,18 @@ fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
     val accent = accentFor(entity.entityId)
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
-            .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
-            .hideWhileTraveling(),
+            .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Badge only hides while traveling (2026-11-01 polish
+        // round): the name/state text stays visible from the
+        // panel's first frame — hiding the whole row held the
+        // title back until the final 2% handoff window.
         DomainBadge(
             entity,
             domainIcon(entity),
             accent,
-            modifier = Modifier.size(48.dp).clickable(
+            modifier = Modifier.size(48.dp).hideWhileTraveling().clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) { onDismiss() },

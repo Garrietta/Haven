@@ -209,7 +209,10 @@ class HaClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 socket = null
                 if (!manualDisconnect) {
-                    _connection.value = ConnectionState.Error(t.message ?: "Connection failed")
+                    // Transient drop: the reconnect loop below is
+                    // already armed, so the UI may present this as
+                    // "Reconnecting…" rather than a failure banner.
+                    _connection.value = ConnectionState.Error(t.message ?: "Connection failed", retrying = true)
                     scheduleReconnect()
                 }
             }
@@ -217,7 +220,7 @@ class HaClient(
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 socket = null
                 if (!manualDisconnect) {
-                    _connection.value = ConnectionState.Error("Connection closed")
+                    _connection.value = ConnectionState.Error("Connection closed", retrying = true)
                     scheduleReconnect()
                 }
             }
