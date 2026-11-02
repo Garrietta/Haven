@@ -1323,7 +1323,11 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
         else { message = ok; messageIsError = false }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    // Status-bar inset: same missing-inset class as the clips screen
+    // (this root Column was the only other DetailTopBar screen
+    // without one — every sibling pads its root). Deviation from
+    // the round brief, reported: one line, same fix as clips.
+    Column(Modifier.fillMaxSize().statusBarsPadding().background(MaterialTheme.colorScheme.background)) {
         DetailTopBar("Rooms & areas", onBack)
         LazyColumn(
             Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
