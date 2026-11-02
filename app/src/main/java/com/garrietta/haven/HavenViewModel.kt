@@ -3,6 +3,7 @@ package com.garrietta.haven
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -10,6 +11,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.garrietta.haven.data.ConnectionState
+import com.garrietta.haven.data.FRONT_DOOR_LIVE_MAX_MS
+import com.garrietta.haven.data.FRONT_DOOR_LIVE_STREAM_SWITCH_ID
 import com.garrietta.haven.data.HaClient
 import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.data.HaDiscovery
@@ -28,6 +31,8 @@ import com.garrietta.haven.data.normalizeInstanceUrl
 import com.garrietta.haven.data.probeFailureMessage
 import com.garrietta.haven.data.probeInstance
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -161,6 +166,69 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openCameraDialog(entityId: String) { cameraDialogId = entityId }
     fun closeCameraDialog() { cameraDialogId = null }
+
+    /**
+     * Front Door live probe (Round 2): ownership of the ring-mqtt
+     * live-stream switch while the Front Door panel's Live View tab
+     * is engaged. The switch is battery-dangerous on a 77% wireless
+     * doorbell, so every exit turns it off: panel close, tab flip
+     * to Event History, app background, and a watchdog cap. All
+     * transitions log under the Haven tag with the FrontDoorLive
+     * prefix so the device test can report the probe from logcat.
+     * Idempotent by [frontDoorLiveEngaged]: a second disengage (the
+     * panel's dismiss hook AND its dispose effect both fire) never
+     * sends a duplicate turn_off, and a start while already engaged
+     * never restarts the watchdog.
+     */
+    var frontDoorLiveEngaged by mutableStateOf(false)
+        private set
+
+    /** Why the live session last stopped, for the panel's paused UI. Null while never stopped. */
+    var frontDoorLiveStopReason by mutableStateOf<String?>(null)
+        private set
+
+    private var frontDoorLiveWatchdog: Job? = null
+
+    fun startFrontDoorLive() {
+        if (frontDoorLiveEngaged) return
+        frontDoorLiveEngaged = true
+        frontDoorLiveStopReason = null
+        Log.d("Haven", "FrontDoorLive: engage — switch.turn_on $FRONT_DOOR_LIVE_STREAM_SWITCH_ID")
+        turnOn(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+        frontDoorLiveWatchdog?.cancel()
+        frontDoorLiveWatchdog = viewModelScope.launch {
+            delay(FRONT_DOOR_LIVE_MAX_MS)
+            Log.w("Haven", "FrontDoorLive: watchdog cap reached — switch.turn_off $FRONT_DOOR_LIVE_STREAM_SWITCH_ID")
+            disengageFrontDoorLive("watchdog-cap")
+        }
+    }
+
+    fun disengageFrontDoorLive(reason: String) {
+        if (!frontDoorLiveEngaged) return
+        frontDoorLiveEngaged = false
+        frontDoorLiveStopReason = reason
+        frontDoorLiveWatchdog?.cancel()
+        frontDoorLiveWatchdog = null
+        Log.d("Haven", "FrontDoorLive: disengage ($reason) — switch.turn_off $FRONT_DOOR_LIVE_STREAM_SWITCH_ID")
+        turnOff(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+    }
+
+    /** App backgrounded (MainActivity.onStop): a backgrounded live session must never hold the switch. */
+    fun onAppBackgrounded() {
+        if (frontDoorLiveEngaged) disengageFrontDoorLive("background")
+    }
+
+    override fun onCleared() {
+        if (frontDoorLiveEngaged) {
+            // Best effort: the process may be going away, so this is
+            // fire-and-forget, never a reason to keep the ViewModel alive.
+            try {
+                client.callService("switch", "turn_off", FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+            } catch (_: Exception) {
+            }
+        }
+        super.onCleared()
+    }
 
     /**
      * Travel snapshots (2026-10-30 verdict: "don't recreate

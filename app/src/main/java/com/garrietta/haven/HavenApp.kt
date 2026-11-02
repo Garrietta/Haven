@@ -115,11 +115,24 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.util.Log
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.runtime.key
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
+import com.garrietta.haven.data.FRONT_DOOR_BATTERY_SENSOR_ID
+import com.garrietta.haven.data.FRONT_DOOR_LIVE_STREAM_SWITCH_ID
+import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.RingWebRtcSession
+import com.garrietta.haven.data.frontDoorShowsLiveBadge
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.displayCameraName
+import org.webrtc.SurfaceViewRenderer
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.DialogTitleText
@@ -682,6 +695,10 @@ fun HavenApp(vm: HavenViewModel) {
         fun dismissCameraDialog() {
             val id = vm.cameraDialogId ?: return
             if (cameraDialogExiting) return
+            // Front Door live probe: the switch turns off the moment
+            // dismissal starts, not after the close animation lands —
+            // the panel's dispose effect disengages again (no-op).
+            vm.disengageFrontDoorLive("panel-close")
             cameraDialogExiting = true
             scope.launch {
                 try {
@@ -1163,6 +1180,13 @@ fun HavenApp(vm: HavenViewModel) {
                     scrollContent = false,
                     isClosing = cameraDialogExiting,
                 ) {
+                    // Front Door live probe (Round 2): the Front
+                    // Door panel alone gets the Live View / Event
+                    // History toggle; every other camera keeps the
+                    // exact body below, byte for byte.
+                    if (camId == FRONT_DOOR_LIVE_VIEW_ID) {
+                        FrontDoorCameraPanel(vm, camId, camP, onClose = { dismissCameraDialog() })
+                    } else {
                     Box(Modifier.fillMaxSize().background(Color.Black)) {
                         // The hero panel's MJPEG body is a recording
                         // for Ring (same verdict as fullscreen) and
@@ -1206,6 +1230,7 @@ fun HavenApp(vm: HavenViewModel) {
                             }
                         }
                     }
+                    } // else: non-Front-Door cameras keep the exact body above
                 }
             }
             } // overlay root Box
@@ -1829,6 +1854,353 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
 }
 
 /**
+ * Front Door panel (Round 2 live probe): the hero panel for
+ * camera.front_door_live_view ONLY — every other camera keeps the
+ * plain MJPEG body. A segmented Live View / Event History toggle
+ * sits at the top, under the name.
+ *
+ * Live View is an attempt chain, never a claim:
+ *  1. The tab engages the ring-mqtt live-stream switch
+ *     (ViewModel-owned, auto-off on panel close, tab flip, app
+ *     background, and a 10-minute watchdog cap).
+ *  2. WebRTC via the existing RingWebRtcSession + the app's WS
+ *     connection (camera/webrtc/offer). A usable non-empty answer
+ *     plus a first decoded frame earns the LIVE badge; an empty /
+ *     failed answer, or a 20s offer timeout, falls through promptly
+ *     to step 3 — no hang, no endless spinner, and the toggle to
+ *     Event History is always tappable.
+ *  3. The MJPEG proxy stream for the live-view camera, with the
+ *     switch on. Frames here earn the LIVE badge ONLY while the
+ *     switch state is confirmed on (see frontDoorShowsLiveBadge);
+ *     if the switch reverts to off mid-stream, the badge drops and
+ *     the status line says the frames are being treated as a
+ *     recording. The wave test is what proves live: the status line
+ *     tells the tester to wave and watch for it promptly.
+ *  4. If MJPEG also errors, the status line names both failures and
+ *     offers one tap to Event History.
+ *
+ * Event History is the UNCHANGED recording body (the MJPEG proxy
+ * labeled "Latest motion recording · Not live"), exactly as before.
+ * The panel never scrolls internally (PanelOverlay passes
+ * scrollContent = false for cameras): this is a full-size Box with
+ * a top chrome overlay, no verticalScroll anywhere — the #92
+ * dialog-scroll crash class stays closed.
+ *
+ * Instrumentation: every transition logs under the Haven tag with
+ * the FrontDoorLive prefix; the status line mirrors the active
+ * path on screen. No entity id is ever printed on this surface.
+ */
+private enum class FrontDoorTab { LIVE, HISTORY }
+
+private enum class FrontDoorLivePhase { WEBRTC_CONNECTING, WEBRTC_LIVE, MJPEG }
+
+@Composable
+private fun FrontDoorCameraPanel(
+    vm: HavenViewModel,
+    cameraId: String,
+    enterProgress: Float,
+    onClose: () -> Unit,
+) {
+    val states by vm.states.collectAsState()
+    val entity = states[cameraId]
+    val switchOn = states[FRONT_DOOR_LIVE_STREAM_SWITCH_ID]?.state == "on"
+    val battery = states[FRONT_DOOR_BATTERY_SENSOR_ID]?.state
+    val engaged = vm.frontDoorLiveEngaged
+    val stopReason = vm.frontDoorLiveStopReason
+
+    var tab by remember { mutableStateOf(FrontDoorTab.LIVE) }
+    var phase by remember { mutableStateOf(FrontDoorLivePhase.WEBRTC_CONNECTING) }
+    var webrtcAttempt by remember { mutableIntStateOf(0) }
+    var webrtcFrames by remember { mutableStateOf(false) }
+    var webrtcOutcome by remember { mutableStateOf<String?>(null) }
+    var mjpegFrames by remember { mutableStateOf(false) }
+    var mjpegError by remember { mutableStateOf<String?>(null) }
+
+    // Engagement: the Live tab owns the switch. Resetting the probe
+    // on every Live activation keeps a stale phase from surviving a
+    // History round-trip or a background stop.
+    LaunchedEffect(tab) {
+        if (tab == FrontDoorTab.LIVE) {
+            phase = FrontDoorLivePhase.WEBRTC_CONNECTING
+            webrtcAttempt++
+            webrtcFrames = false
+            webrtcOutcome = null
+            mjpegFrames = false
+            mjpegError = null
+            vm.startFrontDoorLive()
+        }
+    }
+    // Backstop disengage: fires when the tab flips AND when the
+    // panel unmounts (the dismiss hook fires first; this is a no-op
+    // then). Never fires for History — already disengaged on flip.
+    DisposableEffect(tab) {
+        onDispose {
+            if (tab == FrontDoorTab.LIVE) vm.disengageFrontDoorLive("tab-or-panel-leave")
+        }
+    }
+
+    // WebRTC session: created in this effect, closed in its onDispose,
+    // so leaving a WebRTC phase (fallback, background stop, tab flip)
+    // always tears the peer connection down. The renderer is held in
+    // a plain holder (not State): the AndroidView factory runs during
+    // composition, before effects, so it is always set when this
+    // effect runs — and a fresh renderer per attempt means a Resume
+    // after a background stop never re-inits a released surface.
+    val context = LocalContext.current
+    val rendererHolder = remember { object { var renderer: SurfaceViewRenderer? = null } }
+    val inWebRtcPhase = phase == FrontDoorLivePhase.WEBRTC_CONNECTING ||
+        phase == FrontDoorLivePhase.WEBRTC_LIVE
+    DisposableEffect(inWebRtcPhase, webrtcAttempt, engaged) {
+        val renderer = rendererHolder.renderer
+        if (!inWebRtcPhase || !engaged || renderer == null) {
+            onDispose { }
+        } else {
+            val attemptAtStart = webrtcAttempt
+            val session = RingWebRtcSession(
+                appContext = context.applicationContext,
+                sendOffer = { offerSdp, onAnswer ->
+                    Log.d("Haven", "FrontDoorLive: webrtc offer sent (attempt $attemptAtStart)")
+                    vm.client.requestWebRtcOffer(cameraId, offerSdp) { answer ->
+                        if (webrtcAttempt != attemptAtStart) return@requestWebRtcOffer
+                        if (answer.error != null || answer.answerSdp.isNullOrEmpty()) {
+                            Log.w("Haven", "FrontDoorLive: webrtc answer EMPTY/failed: ${answer.error ?: "no SDP"}")
+                            webrtcOutcome = "empty answer (${answer.error ?: "no SDP"})"
+                            phase = FrontDoorLivePhase.MJPEG
+                        } else {
+                            Log.d("Haven", "FrontDoorLive: webrtc answer usable")
+                            webrtcOutcome = "answer usable"
+                        }
+                    }
+                },
+                sendCandidate = { sessionId, candidateSdp ->
+                    vm.client.sendWebRtcCandidate(cameraId, sessionId, candidateSdp)
+                },
+            )
+            session.start(
+                renderer = renderer,
+                onFirstFrame = {
+                    if (webrtcAttempt != attemptAtStart) return@start
+                    Log.d("Haven", "FrontDoorLive: webrtc FIRST FRAME — live frames rendering")
+                    webrtcFrames = true
+                    phase = FrontDoorLivePhase.WEBRTC_LIVE
+                },
+                onFailed = { stage ->
+                    if (webrtcAttempt != attemptAtStart) return@start
+                    Log.w("Haven", "FrontDoorLive: webrtc failed stage=$stage")
+                    webrtcOutcome = "failed ($stage)"
+                    phase = FrontDoorLivePhase.MJPEG
+                },
+            )
+            onDispose {
+                session.close(renderer)
+            }
+        }
+    }
+
+    // Offer timeout: the WS callback may never fire on a dead socket,
+    // so a WebRTC attempt that hears nothing in 20s falls through to
+    // MJPEG instead of hanging. The effect restarts on every phase
+    // change, so a completed attempt cancels its own timeout.
+    LaunchedEffect(phase, webrtcAttempt) {
+        if (phase != FrontDoorLivePhase.WEBRTC_CONNECTING) return@LaunchedEffect
+        delay(20_000)
+        Log.w("Haven", "FrontDoorLive: webrtc offer timed out (20s, no answer)")
+        webrtcOutcome = "timed out (no answer in 20s)"
+        phase = FrontDoorLivePhase.MJPEG
+    }
+
+    val showLive = frontDoorShowsLiveBadge(webrtcFrames, mjpegFrames, switchOn)
+    val pathLine = when {
+        tab == FrontDoorTab.HISTORY -> "Latest motion recording · Not live"
+        !engaged -> "Live paused — the live-stream switch is off"
+        phase == FrontDoorLivePhase.WEBRTC_CONNECTING -> "Live path: WebRTC offer sent — waiting for an answer…"
+        phase == FrontDoorLivePhase.WEBRTC_LIVE -> "Live via WebRTC — frames rendering"
+        phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn ->
+            "Live path: live-stream switch + MJPEG frames — wave at the door to confirm this is live"
+        phase == FrontDoorLivePhase.MJPEG && mjpegFrames && !switchOn ->
+            "MJPEG frames, but the live-stream switch is off — treating this as a recording"
+        phase == FrontDoorLivePhase.MJPEG && mjpegError != null ->
+            "Live paths failed (WebRTC: ${webrtcOutcome ?: "?"}; MJPEG: $mjpegError)"
+        phase == FrontDoorLivePhase.MJPEG ->
+            "Live path: live-stream switch on — waiting for MJPEG frames (WebRTC: ${webrtcOutcome ?: "?"})"
+        else -> ""
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        when {
+            tab == FrontDoorTab.HISTORY -> {
+                CameraMjpegBody(vm, cameraId, enterProgress, recording = true, onClose = onClose)
+            }
+            !engaged -> {
+                Column(
+                    Modifier.fillMaxSize().padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        when (stopReason) {
+                            "background" -> "Live paused when the app backgrounded"
+                            "watchdog-cap" -> "Live stopped after the 10-minute cap"
+                            else -> "Starting live…"
+                        },
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "The live-stream switch is off, so the doorbell battery is safe.",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 14.sp,
+                    )
+                    if (stopReason != null) {
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = {
+                            phase = FrontDoorLivePhase.WEBRTC_CONNECTING
+                            webrtcAttempt++
+                            webrtcFrames = false
+                            webrtcOutcome = null
+                            mjpegFrames = false
+                            mjpegError = null
+                            vm.startFrontDoorLive()
+                        }) { Text("Resume live") }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { tab = FrontDoorTab.HISTORY }) {
+                            Text("Show latest recording", color = Color.White)
+                        }
+                    }
+                }
+            }
+            phase == FrontDoorLivePhase.MJPEG -> {
+                CameraMjpegBody(
+                    vm, cameraId, enterProgress, recording = false, onClose = onClose,
+                    onFirstFrame = {
+                        Log.d("Haven", "FrontDoorLive: mjpeg first frame (switch on=$switchOn)")
+                        mjpegFrames = true
+                    },
+                    onError = { message ->
+                        Log.w("Haven", "FrontDoorLive: mjpeg error: $message")
+                        mjpegError = message
+                    },
+                )
+            }
+            else -> {
+                // WebRTC phases share one mounted renderer: moving
+                // CONNECTING -> LIVE must NOT remount the view, or
+                // the session's frames would land on a released
+                // surface. The key is the attempt, not the phase.
+                key(webrtcAttempt) {
+                    AndroidView(
+                        factory = { ctx ->
+                            SurfaceViewRenderer(ctx).also { rendererHolder.renderer = it }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                if (phase == FrontDoorLivePhase.WEBRTC_CONNECTING) {
+                    Column(
+                        Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("Connecting to live view…", color = Color.White, fontSize = 16.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Trying WebRTC first; falls back to the live-stream switch if HA answers empty.",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 14.sp,
+                        )
+                    }
+                }
+            }
+        }
+        // Top scrim + chrome, above the body on both tabs.
+        Box(
+            Modifier.align(Alignment.TopStart).fillMaxWidth().height(240.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent),
+                    ),
+                ),
+        )
+        Column(
+            Modifier.align(Alignment.TopStart).fillMaxWidth()
+                .statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+                Text(
+                    entity?.let { displayCameraName(it) } ?: "Camera",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (showLive) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        Modifier.clip(RoundedCornerShape(50))
+                            .background(Color(0xFFD32F2F))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.size(6.dp).clip(CircleShape)
+                                .background(Color.White),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.15f)).padding(4.dp),
+            ) {
+                FrontDoorTabOption("Live View", tab == FrontDoorTab.LIVE) { tab = FrontDoorTab.LIVE }
+                FrontDoorTabOption("Event History", tab == FrontDoorTab.HISTORY) { tab = FrontDoorTab.HISTORY }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(pathLine, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "Live-stream switch: " + if (switchOn) "On" else "Off" +
+                    (battery?.let { " · Battery $it%" } ?: "") +
+                    " · Auto-off on close, background, or 10 min",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+            )
+            if (tab == FrontDoorTab.LIVE && engaged) {
+                TextButton(onClick = { tab = FrontDoorTab.HISTORY }) {
+                    Text("Show latest recording instead", color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.FrontDoorTabOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.weight(1f).clip(RoundedCornerShape(50))
+            .background(if (selected) Color.White else Color.Transparent)
+            .clickable { onClick() }.padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (selected) Color.Black else Color.White,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+/**
  * Shared MJPEG body: stream effect + Playing / Connecting / Error
  * UI, used by fullscreen (live, all cameras including Ring) and by
  * the recording fullscreen (a timeline entry). [recording] switches
@@ -1847,12 +2219,26 @@ private fun CameraMjpegBody(
     // fullscreen and the recording view are byte-identical).
     connectingText: String? = null,
     errorPrefix: String? = null,
+    // Front Door live probe (Round 2): fired once per stream start
+    // on the first decoded frame, and on the error stage. Null keeps
+    // every existing caller byte-identical; the callbacks run on the
+    // stream's main-thread post, never during composition.
+    onFirstFrame: (() -> Unit)? = null,
+    onError: ((String) -> Unit)? = null,
 ) {
     var streamState by remember(cameraId) { mutableStateOf<CameraStreamState>(CameraStreamState.Connecting) }
     var attempt by remember(cameraId) { mutableStateOf(0) }
     LaunchedEffect(cameraId, attempt) {
+        var firstFrameSeen = false
         val job = vm.client.streamCamera(cameraId) { state ->
-            if (state is CameraStreamState.Playing) vm.cacheCameraFrame(cameraId, state.frame)
+            if (state is CameraStreamState.Playing) {
+                vm.cacheCameraFrame(cameraId, state.frame)
+                if (!firstFrameSeen) {
+                    firstFrameSeen = true
+                    onFirstFrame?.invoke()
+                }
+            }
+            if (state is CameraStreamState.Error) onError?.invoke(state.message)
             streamState = state
         }
         try {

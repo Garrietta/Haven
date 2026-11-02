@@ -122,6 +122,8 @@ import com.garrietta.haven.ui.controls.shapeTapAction
 import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.theme.polygonShape
 import com.garrietta.haven.ui.theme.pressBounce
+import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
+import com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.isRingCamera
 import java.util.Calendar
@@ -1253,7 +1255,19 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
         if (cameraId == null) {
             Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
         } else {
-            val snap = vm.snapshotFor(cameraId)
+            // Front Door live probe (Round 2): the Front Door
+            // quadrant's static thumbnail comes from the dedicated
+            // snapshot camera (camera.front_door_snapshot, "Ring
+            // Doorbell") when it exists, instead of the live-view
+            // camera's proxy — a still thumbnail for a still card.
+            // The tap target stays the live-view panel, and the
+            // morph-source / hide keys stay on cameraId, so the
+            // panel morph is untouched. Falls back to cameraId when
+            // the snapshot entity is absent.
+            val thumbnailId = if (cameraId == FRONT_DOOR_LIVE_VIEW_ID &&
+                states[FRONT_DOOR_SNAPSHOT_ID] != null
+            ) FRONT_DOOR_SNAPSHOT_ID else cameraId
+            val snap = vm.snapshotFor(thumbnailId)
             // Cache-first, fetch deferred (2026-11-01 polish round):
             // when a cached image exists it is already on screen,
             // so the fresh fetch waits ~1s instead of racing app
@@ -1264,9 +1278,9 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // swaps in a finished image and only when the cached
             // one is stale, so a failed or in-flight fetch never
             // blanks a quadrant.
-            LaunchedEffect(cameraId) {
-                if (vm.snapshotFor(cameraId) != null) kotlinx.coroutines.delay(1000)
-                vm.refreshSnapshot(cameraId)
+            LaunchedEffect(thumbnailId) {
+                if (vm.snapshotFor(thumbnailId) != null) kotlinx.coroutines.delay(1000)
+                vm.refreshSnapshot(thumbnailId)
             }
             val entity = states[cameraId]
             if (snap != null) {

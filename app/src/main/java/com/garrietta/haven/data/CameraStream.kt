@@ -86,6 +86,35 @@ fun displayCameraName(entity: HaEntity): String {
 }
 
 /**
+ * Front Door live probe (Round 2, 2026-11-02): the exact entity ids
+ * from the user's Home Assistant template export (366 entities). The
+ * panel's live path is keyed on these ids only — no guessing, no
+ * name matching — so a renamed friendly name can never reroute it.
+ */
+const val FRONT_DOOR_LIVE_VIEW_ID = "camera.front_door_live_view"
+const val FRONT_DOOR_SNAPSHOT_ID = "camera.front_door_snapshot"
+const val FRONT_DOOR_LIVE_STREAM_SWITCH_ID = "switch.front_door_live_stream"
+const val FRONT_DOOR_BATTERY_SENSOR_ID = "sensor.front_door_battery"
+
+/** Watchdog cap for a Front Door live session: the switch auto-offs after this long even if the panel stays open. */
+const val FRONT_DOOR_LIVE_MAX_MS = 10 * 60 * 1000L
+
+/**
+ * The LIVE badge rule, as a pure function so it is unit tested: the
+ * badge shows ONLY while frames are actually rendering on a live
+ * path — WebRTC first frame, or MJPEG frames while the ring-mqtt
+ * live-stream switch is confirmed on. MJPEG frames with the switch
+ * off are the recording path (the 2026-10-30 verdict: the proxy
+ * serves the most recent motion recording), so they never earn the
+ * badge. No frames, no badge, regardless of what was attempted.
+ */
+fun frontDoorShowsLiveBadge(
+    webrtcFrames: Boolean,
+    mjpegFrames: Boolean,
+    liveSwitchOn: Boolean,
+): Boolean = webrtcFrames || (mjpegFrames && liveSwitchOn)
+
+/**
  * Pulls the HLS playlist URL out of a WS `camera/stream` result message.
  * Pure (JSONObject only) so it is unit tested on the JVM. Returns null
  * when HA reports failure, when the result has no URL, or when the URL

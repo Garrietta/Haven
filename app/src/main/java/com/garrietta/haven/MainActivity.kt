@@ -24,6 +24,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Front Door live probe (Round 2): backgrounding must never
+    // leave the ring-mqtt live-stream switch on — the ViewModel
+    // disengages (switch off + watchdog cancel) if a live session
+    // is engaged, and no-ops otherwise. onStop also fires on
+    // rotation; the panel re-engages on remount if still on Live
+    // View, so a rotation costs a live restart, never a stuck switch.
+    override fun onStop() {
+        super.onStop()
+        vm.onAppBackgrounded()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
