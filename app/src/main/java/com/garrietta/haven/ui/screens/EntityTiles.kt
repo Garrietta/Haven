@@ -182,9 +182,12 @@ private fun tileStatus(entity: HaEntity): String = when (entity.domain) {
     else -> entity.stateText()
 }
 
-/** Tap routing: climate opens the centered expressive pop-out, cameras
- * open fullscreen live, everything else opens its full page (or the
- * sheet when there is no navigator, e.g. Boards cards). */
+/** Tap routing: climate opens the expressive pop-out panel, cameras
+ * open fullscreen live, everything else opens its full page panel
+ * (or the sheet panel when there is no navigator, e.g. Boards
+ * cards). Lights never reach this function on tap anymore — a light
+ * tile tap toggles inline (see EntityTile) — but a light long-press
+ * routes through here to its panel, like every other domain. */
 private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)?) {
     when (entity.domain) {
         "climate" -> vm.openClimatePopout(entity.entityId)
@@ -256,16 +259,28 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
+                // Lights toggle inline on tap (the same vm.toggle
+                // path the badge shape action uses, optimistic guard
+                // included) — no panel, no dialog. Every other
+                // domain keeps its tap routing (climate panel,
+                // camera fullscreen, detail panel).
                 onClick = {
-                    tileBounds?.let { vm.pageOrigin = it }
-                    openPage(vm, entity, navigate)
+                    if (entity.domain == "light") {
+                        vm.toggle(entity.entityId)
+                    } else {
+                        tileBounds?.let { vm.pageOrigin = it }
+                        openPage(vm, entity, navigate)
+                    }
                 },
                 // Long-press on a camera opens its recorded-clips
-                // timeline (full page); every other domain keeps the
-                // quick sheet. Without a navigator (Boards cards) the
-                // sheet is still the fallback.
+                // timeline (full page, unchanged); a long-press on
+                // a light opens its panel (the tap no longer does);
+                // every other domain keeps the quick sheet panel.
+                // Without a navigator (Boards cards) the sheet is
+                // still the fallback.
                 onLongClick = {
                     if (entity.domain == "camera" && navigate != null) navigate(Screen.CameraClips(entity.entityId))
+                    else if (entity.domain == "light") openPage(vm, entity, navigate)
                     else vm.openPopup(entity.entityId)
                 },
             ),

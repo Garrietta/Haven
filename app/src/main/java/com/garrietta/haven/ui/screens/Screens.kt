@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -407,47 +408,54 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
     val roomGridColumns = if (LocalWindowSizeClass.current == WindowSizeClass.EXPANDED) 3 else 2
 
     if (LocalWideLayout.current) {
-        // Unfolded, two columns (Gemini mockup round, 2026-11-01):
-        // left = masthead + greeting + chips + camera hero (weather
-        // and who's-home under it); right = room grids. ONE scrolling
-        // page, not two half-width lists under a fixed header — the
-        // old split is exactly why unfolded Home "couldn't scroll":
-        // the greeting + 16:9 hero were fixed, filling most of the
-        // viewport, and only the narrow strips below them scrolled,
-        // each inside its own column, so a drag on the hero or the
-        // greeting did nothing at all. Here a drag anywhere scrolls
-        // the whole page, and the camera sits in the left column
-        // only, never full width. The 1200dp cap + centering from
-        // the old wide layout is kept.
+        // Unfolded, two columns (Gemini mockup round, 2026-11-01;
+        // independent scrolling since the 2026-11-01 panels round):
+        // left = greeting + chips + camera hero (weather and
+        // who's-home under it); right = room grids. Each column is
+        // its OWN scrollable region (its own rememberScrollState),
+        // replacing #85's single unified verticalScroll page: a drag
+        // on the left scrolls the left column only, and a drag on
+        // the right scrolls the room grids only, so a long room list
+        // never pushes the hero off-screen and vice versa. The
+        // 1200dp cap + centering from the old wide layout is kept.
+        // No pill clearance: unfolded chrome is the left-edge rail,
+        // not the floating pill, so the old pill spacer would only
+        // leave dead space — each column ends with 16dp of
+        // breathing room instead, so nothing clips at the bottom.
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            Column(
-                Modifier.widthIn(max = 1200.dp).fillMaxWidth().statusBarsPadding()
-                    .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            Row(
+                Modifier.widthIn(max = 1200.dp).fillMaxWidth().fillMaxHeight()
+                    .statusBarsPadding().padding(horizontal = 16.dp),
             ) {
-                // Greeting FIRST, then the hero (2026-10-30 verdict):
-                // the hero is no longer the first element on Home.
-                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
-                RoomFilterChips(roomChips, roomFilter) { roomFilter = it }
-                Spacer(Modifier.height(12.dp))
-                Row {
-                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                        if (showSection("cameras")) {
-                            CameraQuadrantHero(vm, navigate, states)
-                        }
-                        if (showSection("weather") && weather != null) {
-                            WeatherBlock(weather, vm, navigate)
-                        }
-                        if (showSection("home") && homePeople.isNotEmpty()) {
-                            HomeBlock(homePeople)
-                        }
+                Column(
+                    Modifier.weight(1f).padding(end = 8.dp).fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    // Greeting FIRST, then the hero (2026-10-30 verdict):
+                    // the hero is no longer the first element on Home.
+                    GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
+                    RoomFilterChips(roomChips, roomFilter) { roomFilter = it }
+                    Spacer(Modifier.height(12.dp))
+                    if (showSection("cameras")) {
+                        CameraQuadrantHero(vm, navigate, states)
                     }
-                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                        for ((_, name, members) in visibleRooms) {
-                            RoomSectionGrid(name, members, vm, roomGridColumns)
-                        }
+                    if (showSection("weather") && weather != null) {
+                        WeatherBlock(weather, vm, navigate)
                     }
+                    if (showSection("home") && homePeople.isNotEmpty()) {
+                        HomeBlock(homePeople)
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
-                Spacer(Modifier.height(pillClearanceBottom()))
+                Column(
+                    Modifier.weight(1f).padding(start = 8.dp).fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    for ((_, name, members) in visibleRooms) {
+                        RoomSectionGrid(name, members, vm, roomGridColumns)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
             }
         }
     } else {
@@ -627,13 +635,16 @@ private fun homeCardStatus(entity: HaEntity): String = when (entity.domain) {
  * binary entities / the current temperature for climate, mirroring
  * the mockup's Island (toggle) and Greenhouse (72°) cards.
  *
- * Interactions mirror the tab tiles exactly: background tap opens
- * the centered dialog (Home behavior — never a full page), badge tap
- * actuates where a shape action exists, long-press opens the dialog.
- * Morph wiring mirrors EntityTile: the card reports its bounds and
- * hides while its morph is open, and the badge anchors the traveling
- * header (the name/status sit below the badge, so the badge rect is
- * the travel origin, exactly as the tile comment states).
+ * Interactions mirror the tab tiles exactly: background tap on a
+ * LIGHT toggles it directly inline (no panel, no dialog — the
+ * 2026-11-01 panels round's card-level model); background tap on
+ * any other domain opens its full-screen panel (Home behavior —
+ * never a full page); badge tap actuates where a shape action
+ * exists; long-press opens the panel. Morph wiring mirrors
+ * EntityTile: the card reports its bounds and hides while its morph
+ * is open, and the badge anchors the traveling header (the
+ * name/status sit below the badge, so the badge rect is the travel
+ * origin, exactly as the tile comment states).
  *
  * Dark-mode legibility: name and status are floored to 4.5:1 against
  * the card's own container via ensureContrast (the #83 light-glyph
@@ -700,7 +711,16 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = { vm.openPopup(entity.entityId) },
+                // Lights toggle inline on tap (the same vm.toggle
+                // path the trailing Switch and the badge shape
+                // action use, optimistic guard included); every
+                // other domain opens its panel. Long-press always
+                // opens the panel, so a light's panel (brightness,
+                // color, shape picker) is one long-press away.
+                onClick = {
+                    if (entity.domain == "light") vm.toggle(entity.entityId)
+                    else vm.openPopup(entity.entityId)
+                },
                 onLongClick = { vm.openPopup(entity.entityId) },
             ),
     ) {

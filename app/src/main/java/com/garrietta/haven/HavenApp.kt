@@ -1,10 +1,9 @@
 package com.garrietta.haven
-import androidx.compose.animation.animateContentSize
 import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.ShapePrefs
+import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.badgeRectInRow
-import com.garrietta.haven.ui.components.dialogPanelMaxHeightDp
-import com.garrietta.haven.ui.components.dialogPanelWidthDp
+import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.shapeLabel
 import com.garrietta.haven.ui.components.formatCondition
@@ -21,7 +20,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -33,12 +31,12 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -92,8 +90,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
@@ -158,11 +154,13 @@ import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
 import com.garrietta.haven.ui.components.Dial
+import com.garrietta.haven.ui.components.lerpRect
+import com.garrietta.haven.ui.components.morphBackgroundAlpha
 import com.garrietta.haven.ui.components.morphCardAlpha
+import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.heroHeaderAlpha
-import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.theme.springBounds
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
@@ -255,6 +253,24 @@ private fun isTopLevel(screen: Screen): Boolean = when (screen) {
     else -> false
 }
 
+/**
+ * Shared nav selection for the pill bar and the vertical rail:
+ * Home is always index 0, user tabs follow in order, Settings is
+ * always last. A legacy screen selects nothing. Both chrome
+ * variants read this one function, so they can never disagree
+ * about which tab is selected.
+ */
+private fun selectedNavIndex(
+    current: Screen,
+    barItems: List<NavItem>,
+    userTabs: List<com.garrietta.haven.data.UserTab>,
+): Int? = when (current) {
+    Screen.Today -> 0
+    is Screen.UserTab -> userTabs.indexOfFirst { it.id == current.tabId }.takeIf { it >= 0 }?.plus(1)
+    Screen.Settings -> barItems.lastIndex
+    else -> null
+}
+
 /** Entity id a detail screen belongs to (the shared card key it morphs from). */
 private fun detailEntityId(screen: Screen): String = when (screen) {
     is Screen.Thermostat -> screen.entityId
@@ -313,18 +329,18 @@ fun HavenApp(vm: HavenViewModel) {
             mutableStateListOf<Screen>(Screen.Today)
         }
         val current = backstack.last()
-        // Dialog state machine (2026-10-30 centered-dialog round,
-        // superseding the 2026-10-29 architectural overhaul's
-        // single-surface morphs): the sheet, detail, and pop-out
-        // overlays below are centered dialogs, not framework
-        // sharedBounds. Each dialog captures its source card's root
+        // Panel state machine (2026-11-01 morphing-panels round,
+        // superseding the 2026-10-30 centered-dialog round): the
+        // sheet, detail, and pop-out overlays below are FULL-SCREEN
+        // panels, not centered dialogs and not framework
+        // sharedBounds. Each panel captures its source card's root
         // rect at open for the traveling header/arc (which
-        // interpolate ONE rect to the dialog header, and exactly
+        // interpolate ONE rect to the panel header, and exactly
         // back on dismiss); the source card fades on morphCardAlpha
         // (see LocalMorphCardAlpha), so source and destination are
         // never both visible. The camera fullscreen keeps its own
         // rise, and vm.pageOrigin is still set by tile taps and
-        // dialog Details because the camera path needs it.
+        // panel Details because the camera path needs it.
         val detailScreen = current as? Screen.Thermostat ?: current as? Screen.EntityDetail
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
         // Traveling-header state (2026-10-29 pop-up round): cards
@@ -345,7 +361,7 @@ fun HavenApp(vm: HavenViewModel) {
         val detailProgress = remember { Animatable(0f) }
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
         val popoutProgress = remember { Animatable(0f) }
-        // The live dialog panel's root rect (camera-rise origin for
+        // The live panel's root rect (camera-rise origin for
         // sheet Details actions); re-reported on every panel place.
         var sheetPanelBounds by remember { mutableStateOf<Rect?>(null) }
         // Morph generation + exiting flags (restored from #52, for
@@ -356,7 +372,7 @@ fun HavenApp(vm: HavenViewModel) {
         // coroutine checks the generation + identity in its finally
         // block and only clears state that still belongs to the
         // morph that started. The exiting flags keep a second
-        // dismiss (double back-press, scrim + Close together) from
+        // dismiss (double back-press, back arrow + Close together) from
         // launching a second animation on the same progress
         // Animatable.
         var morphGeneration by remember { mutableIntStateOf(0) }
@@ -447,7 +463,7 @@ fun HavenApp(vm: HavenViewModel) {
             heroTarget = null
             arcTarget = null
         }
-        // Animated dismisses: Back, scrim tap, and Close all use
+        // Animated dismisses: Back, the back arrow, and Close all use
         // these. The progress animates 1 -> 0 on the bounds spring
         // (snapped under reduce-motion); only then is the trigger
         // cleared, and only if the generation + identity still
@@ -708,9 +724,9 @@ fun HavenApp(vm: HavenViewModel) {
             }
             // Morph locals: cards report bounds here, and the active
             // morph source hides here. The scaffold blur from #49 is
-            // GONE: the pill now exits the viewport during modals (see
+            // GONE: the pill now exits the viewport during panels (see
             // the pill-exit below), which replaces the blur as the answer
-            // to the scrim problem, and the scrim alone dims the page.
+            // to the panel problem, and the panel itself covers the page.
             val modalActive = sheetAnim != null || detailAnim != null || popoutAnim != null
             // Scroll-away (production-upgrade round): the pill slides
             // out of view on a downward scroll past 8dp and returns on
@@ -750,9 +766,9 @@ fun HavenApp(vm: HavenViewModel) {
                 // read as one element. On EXIT the card is fully
                 // opaque throughout (2026-11-01 polish round): the
                 // old exit fade-back-in composited the translucent
-                // card over the dark scrim/panel remnants, which read
+                // card over the dark panel remnants, which read
                 // as a darker, more saturated icon flash, and left a
-                // window where neither dialog nor card text was
+                // window where neither panel nor card text was
                 // visible. With the card at full alpha under the
                 // leaving panel, exit is a reveal — the panel fades
                 // and shrinks away over an already-present page —
@@ -768,15 +784,33 @@ fun HavenApp(vm: HavenViewModel) {
                 ),
             ) {
             // Overlay root: its root-coordinate origin anchors every
-            // traveler rect. All dialog overlays below render inside
-            // this Box, above the scaffold.
+            // traveler rect. All panel overlays below render inside
+            // this Box, above the scaffold (and above the rail).
             var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
             Box(
                 Modifier.fillMaxSize().onGloballyPositioned {
                     overlayOrigin = it.boundsInRoot().topLeft
                 },
             ) {
+            // Unfolded chrome (2026-11-01 panels round): the floating
+            // bottom pill becomes a vertical rail on the left edge,
+            // carrying the same tabs, selection, and goTop behavior
+            // as the pill (see VerticalRail). Folded keeps the pill
+            // unchanged. The rail is nav chrome, not scroll-away
+            // chrome: it never slides away on scroll, and an open
+            // panel (a later sibling of this Row) covers it exactly
+            // as today's pill-exit rule covers the pill.
+            Row(Modifier.fillMaxSize()) {
+            if (LocalWideLayout.current && isTopLevel(current)) {
+                val barItems = pillBarItems(vm.userTabs)
+                VerticalRail(
+                    items = barItems,
+                    selectedIndex = selectedNavIndex(current, barItems, vm.userTabs),
+                    onSelect = goTop,
+                )
+            }
             Scaffold(
+                modifier = if (LocalWideLayout.current) Modifier.weight(1f) else Modifier,
             // Transparent container: the default background painted a
             // full-width opaque band in the reserved bottom-bar zone —
             // near-white in light mode, the "white box" that sliced
@@ -796,14 +830,11 @@ fun HavenApp(vm: HavenViewModel) {
             // clearance instead.
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
-                if (isTopLevel(current)) {
+                // Folded only: unfolded shows the rail instead, so
+                // no bottom bar is reserved or rendered there.
+                if (!LocalWideLayout.current && isTopLevel(current)) {
                     val barItems = pillBarItems(vm.userTabs)
-                    val selectedIndex = when (current) {
-                        Screen.Today -> 0
-                        is Screen.UserTab -> vm.userTabs.indexOfFirst { it.id == current.tabId }.takeIf { it >= 0 }?.plus(1)
-                        Screen.Settings -> barItems.lastIndex
-                        else -> null
-                    }
+                    val selectedIndex = selectedNavIndex(current, barItems, vm.userTabs)
                     PillNav(
                         items = barItems,
                         selectedIndex = selectedIndex,
@@ -821,10 +852,10 @@ fun HavenApp(vm: HavenViewModel) {
                             // slides 96dp down out of the viewport on
                             // the pill spring; it returns when the
                             // modal closes or the user scrolls back
-                            // up. The scrim (fillMaxSize, above the
+                            // up. The panel (fillMaxSize, above the
                             // scaffold) already intercepts touches, so
                             // the exiting pill is never tappable
-                            // mid-modal.
+                            // mid-panel.
                             .graphicsLayer {
                                 alpha = 1f - pillExit
                                 translationY = 96.dp.toPx() * pillExit
@@ -884,28 +915,30 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
-            // Sheet dialog overlay: CENTERED DIALOG (2026-10-30
-            // verdict round) — SUPERSEDES the #67 bottom-anchored
-            // floating shelf. Every sheet opens as a content-hugged
-            // dialog centered on screen (see DialogOverlay): no
-            // full-height sheet, no blank bottom half, no status-bar
-            // collision, no slide-in, no drag-to-dismiss. The badge
-            // still travels into the dialog's header (see
-            // TravelingHeader); the dialog scales+fades from center
-            // while the icon travels — both, not one or the other.
+            } // Row: rail + scaffold (unfolded) / scaffold alone (folded)
+            // Sheet panel overlay: FULL-SCREEN PANEL (2026-11-01
+            // panels round) — SUPERSEDES the 2026-10-30 centered
+            // dialog. The sheet's content is unchanged; only its
+            // container morphs from the source card rect to
+            // full-screen (see PanelOverlay). No scrim: the opaque
+            // panel covers the page at rest. The badge still
+            // travels into the panel's header (see
+            // TravelingHeader) while the panel morphs — both, not
+            // one or the other. No drag-to-dismiss: Back and the
+            // panel's back arrow dismiss (see dismissSheet).
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
                 BackHandler { dismissSheet() }
                 val sheetP = sheetProgress.value.coerceIn(0f, 1f)
-                // Measurement frame (dialog geometry, below the
-                // scrim): the panel content, invisible, laid out once
-                // at its final dialog size so its header can report
-                // the traveling header's target rect. The hero
+                // Measurement frame (panel geometry, below the
+                // panel): the panel content, invisible, laid out once
+                // at its final full-screen size so its header can
+                // report the traveling header's target rect. The hero
                 // provider lives ONLY here: the live panel's header
-                // sits under the dialog scale mid-animation and must
-                // never overwrite the target.
+                // sits at the interpolated morph rect mid-animation
+                // and must never overwrite the target.
                 if (anim.targetSize == null) {
-                    DialogMeasureFrame(onMeasured = { anim.targetSize = it }) {
+                    PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
                         CompositionLocalProvider(
                             LocalHeroTarget provides { r -> heroTarget = anim.id to r },
                             LocalArcTarget provides { r -> arcTarget = anim.id to r },
@@ -918,9 +951,11 @@ fun HavenApp(vm: HavenViewModel) {
                         }
                     }
                 }
-                DialogOverlay(
+                PanelOverlay(
                     progress = sheetP,
-                    panelBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    source = cardBounds[anim.id] ?: anim.source,
+                    overlayOrigin = overlayOrigin,
+                    panelBackground = MaterialTheme.colorScheme.background,
                     onDismiss = { dismissSheet() },
                     onPanelPlaced = { sheetPanelBounds = it },
                 ) {
@@ -930,8 +965,8 @@ fun HavenApp(vm: HavenViewModel) {
                         onDetails = { dismissSheetInstant() },
                     )
                 }
-                // Traveling header, above the dialog: the card's
-                // badge/state travel to the dialog's header as ONE
+                // Traveling header, above the panel: the card's
+                // badge/state travel to the panel's header as ONE
                 // element. Renders at the source rect until the
                 // measurement frame reports the target (see
                 // TravelingHeader) — never a gap, never a pop.
@@ -941,29 +976,28 @@ fun HavenApp(vm: HavenViewModel) {
                     sheetP, overlayOrigin,
                     onDismiss = { dismissSheet() },
                 )
-                // Traveling arc, above the dialog (see TravelingArc).
+                // Traveling arc, above the panel (see TravelingArc).
                 TravelingArc(
                     vm, anim.id, arcBounds[anim.id],
                     arcTarget?.takeIf { it.first == anim.id }?.second,
                     sheetP, overlayOrigin,
                 )
             }
-            // Detail dialog overlay: CENTERED DIALOG (2026-10-30
-            // verdict round) — SUPERSEDES the #67 bottom-anchored
-            // floating shelf, exactly like the sheets above. The
-            // detail content is fixed at dialog geometry (see
-            // DialogOverlay + DialogMeasureFrame); the one-frame
-            // measurement pass reports only the header/arc target
-            // rects, never a panel size — the dialog hugs its
-            // content. Back and outside-tap are the smooth reverse
-            // of enter (see dismissDetail); only the sheet -> detail
+            // Detail panel overlay: FULL-SCREEN PANEL (2026-11-01
+            // panels round) — SUPERSEDES the 2026-10-30 centered
+            // dialog, exactly like the sheets above. The detail
+            // content is unchanged; the one-frame measurement pass
+            // reports only the header/arc target rects, never a
+            // panel size — the panel is full-screen. Back and the
+            // panel's back arrow are the smooth reverse of enter
+            // (see dismissDetail); only the sheet -> detail
             // handoff clears instantly.
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 BackHandler { dismissDetail() }
                 val detailP = detailProgress.value.coerceIn(0f, 1f)
                 if (anim.targetSize == null) {
-                    DialogMeasureFrame(onMeasured = { anim.targetSize = it }) {
+                    PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
                         CompositionLocalProvider(
                             LocalHeroTarget provides { r -> heroTarget = anim.entityId to r },
                             LocalArcTarget provides { r -> arcTarget = anim.entityId to r },
@@ -972,11 +1006,12 @@ fun HavenApp(vm: HavenViewModel) {
                         }
                     }
                 }
-                DialogOverlay(
+                PanelOverlay(
                     progress = detailP,
-                    panelBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    source = cardBounds[anim.entityId] ?: anim.source,
+                    overlayOrigin = overlayOrigin,
+                    panelBackground = MaterialTheme.colorScheme.background,
                     onDismiss = { dismissDetail() },
-                    onPanelPlaced = { },
                 ) {
                     content(anim.screen)
                 }
@@ -992,19 +1027,21 @@ fun HavenApp(vm: HavenViewModel) {
                     detailP, overlayOrigin,
                 )
             }
-            // Thermostat pop-out: a centered dialog (2026-10-30
-            // verdict round) — the pop-out was already centered, so
-            // it keeps its centered model and gains the dialog's
-            // width rule (90% / 480dp), 85% height cap, and
-            // center-scale entrance; the old card -> panel rect
-            // morph is gone. The pop-out -> page handoff still
-            // clears instantly.
+            // Thermostat pop-out panel: FULL-SCREEN PANEL (2026-11-01
+            // panels round) — SUPERSEDES the 2026-10-30 centered
+            // dialog. The pop-out's content (radial dial, mode/fan
+            // pills, Details/Close) is unchanged — only the
+            // container changes, from centered dialog to a panel
+            // morphing from the climate card rect to full-screen,
+            // so the dial gets full touch targets on narrow cover
+            // screens. The pop-out -> page handoff still clears
+            // instantly.
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
                 BackHandler { dismissPopout() }
                 val popoutP = popoutProgress.value.coerceIn(0f, 1f)
                 if (anim.targetSize == null) {
-                    DialogMeasureFrame(onMeasured = { anim.targetSize = it }) {
+                    PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
                         CompositionLocalProvider(
                             LocalHeroTarget provides { r -> heroTarget = anim.id to r },
                             LocalArcTarget provides { r -> arcTarget = anim.id to r },
@@ -1020,11 +1057,12 @@ fun HavenApp(vm: HavenViewModel) {
                         }
                     }
                 }
-                DialogOverlay(
+                PanelOverlay(
                     progress = popoutP,
-                    panelBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    source = cardBounds[anim.id] ?: anim.source,
+                    overlayOrigin = overlayOrigin,
+                    panelBackground = MaterialTheme.colorScheme.background,
                     onDismiss = { dismissPopout() },
-                    onPanelPlaced = { },
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
@@ -1035,9 +1073,9 @@ fun HavenApp(vm: HavenViewModel) {
                         onClose = { dismissPopout() },
                     )
                 }
-                // Traveling header, above the dialog (see the sheet
+                // Traveling header, above the panel (see the sheet
                 // block): the climate card's badge/state travel to
-                // the pop-out's title row as ONE element.
+                // the panel's title row as ONE element.
                 TravelingHeader(
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
@@ -1045,43 +1083,35 @@ fun HavenApp(vm: HavenViewModel) {
                     onDismiss = { dismissPopout() },
                 )
             }
-            } // overlay root Box
-            } // CompositionLocalProvider (morph locals)
-            // Camera overlays stay outside the shared layout: they rise as
-            // bottom-sheet pages from their tile origin, not as morphs.
-            if (cameraId != null) {
-                if (cameraExiting) {
-                    SheetPageContent(vm.pageOrigin, cameraExitProgress.value, background = Color.Black) {
-                        CameraFullscreen(vm, requestCameraClose, cameraExitProgress.value)
-                    }
-                } else {
-                    SheetPageContent(vm.pageOrigin, cameraEnterProgress.value, background = Color.Black) {
-                        CameraFullscreen(vm, requestCameraClose, cameraEnterProgress.value)
-                    }
-                }
-            }
-            // Camera live-feed dialog (2026-10-30): the Home
-            // quadrant hero's tap target — a centered dialog (the
-            // #77 model), not fullscreen. The MJPEG body fills a
-            // 16:9 panel; the header is dialog-local (no
-            // status-bar padding: the panel is centered, never
-            // under the status bar). Ring uses the #65 proxy path
-            // through the same body; no Live badge (wave test
-            // still owed).
+            // Camera live-feed panel (2026-11-01 panels round): the
+            // Home quadrant hero's tap target, formerly a centered
+            // 16:9 dialog — now a full-screen panel like every other
+            // device surface, so no centered device dialog remains.
+            // The MJPEG body fills the panel; Ring uses the #65
+            // proxy path through the same body and stays labeled
+            // as a recording, never live. No back bar: the panel's
+            // own header row carries the Close button, and Back
+            // dismisses (see dismissCameraDialog). This block moved
+            // inside the overlay root so the morph shares its
+            // origin with the other panels; the camera fullscreen
+            // below still draws above it.
             if (vm.cameraDialogId != null) {
                 val camId = vm.cameraDialogId!!
                 BackHandler { dismissCameraDialog() }
                 val camP = cameraDialogProgress.value.coerceIn(0f, 1f)
                 val camStates by vm.states.collectAsState()
                 val camEntity = camStates[camId]
-                DialogOverlay(
+                PanelOverlay(
                     progress = camP,
+                    source = cardBounds[camId],
+                    overlayOrigin = overlayOrigin,
                     panelBackground = Color.Black,
                     onDismiss = { dismissCameraDialog() },
-                    onPanelPlaced = { },
+                    showBackBar = false,
+                    scrollContent = false,
                 ) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
-                        // The hero dialog's MJPEG body is a recording
+                    Box(Modifier.fillMaxSize().background(Color.Black)) {
+                        // The hero panel's MJPEG body is a recording
                         // for Ring (same verdict as fullscreen) and
                         // live for native cameras; `recording` only
                         // switches the connecting/error copy.
@@ -1102,7 +1132,7 @@ fun HavenApp(vm: HavenViewModel) {
                                 // Ring honesty (2026-10-30 verdict):
                                 // the proxy serves the most recent
                                 // motion recording for Ring, never
-                                // live — the dialog says so under
+                                // live — the panel says so under
                                 // the name, like the fullscreen.
                                 if (camEntity?.let { isRingCamera(it) } == true) {
                                     Text(
@@ -1118,6 +1148,21 @@ fun HavenApp(vm: HavenViewModel) {
                                 Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
                             }
                         }
+                    }
+                }
+            }
+            } // overlay root Box
+            } // CompositionLocalProvider (morph locals)
+            // Camera overlays stay outside the shared layout: they rise as
+            // bottom-sheet pages from their tile origin, not as morphs.
+            if (cameraId != null) {
+                if (cameraExiting) {
+                    SheetPageContent(vm.pageOrigin, cameraExitProgress.value, background = Color.Black) {
+                        CameraFullscreen(vm, requestCameraClose, cameraExitProgress.value)
+                    }
+                } else {
+                    SheetPageContent(vm.pageOrigin, cameraEnterProgress.value, background = Color.Black) {
+                        CameraFullscreen(vm, requestCameraClose, cameraEnterProgress.value)
                     }
                 }
             }
@@ -1202,14 +1247,14 @@ private fun ThermostatPopoutContent(
 }
 
 /**
- * The sheet dialog's CONTENT (not the panel itself): the dialog
- * overlay in HavenApp owns positioning, scrim, and sizing; this is
+ * The sheet panel's CONTENT (not the panel itself): the panel
+ * overlay in HavenApp owns positioning and sizing; this is
  * the column laid out inside it at the panel's intrinsic size. Kept
  * separate so the same content serves the one-frame measurement pass
- * and the live panel. [panelBounds] is the dialog panel's window
+ * and the live panel. [panelBounds] is the panel's window
  * rect for the camera rise origin on Details. [onClose] runs the
  * smooth animated exit (see dismissSheet); [onDetails] dismisses
- * instantly for the sheet -> detail handoff (the detail dialog
+ * instantly for the sheet -> detail handoff (the detail panel
  * starts from the same card, so the card never flashes back in
  * between).
  */
@@ -1227,11 +1272,11 @@ private fun EntityPopupSheetContent(
     // Traveling header target (2026-10-29 pop-up round): read during
     // composition; the header row below reports its root rect into it
     // only inside the measurement frame (the provider is absent in the
-    // live panel, so the target can never be overwritten mid-dialog).
+    // live panel, so the target can never be overwritten mid-panel).
     val heroTarget = LocalHeroTarget.current
-    // The dialog panel scrolls and caps height: plain column, no own
-    // scroll, no height cap, no drag handle (2026-10-30 round —
-    // dialogs do not drag, and the sheet handle was a sheet affordance).
+    // The panel scrolls: plain column, no own scroll, no drag
+    // handle (2026-10-30 round — panels do not drag, and the sheet
+    // handle was a sheet affordance).
     Column(
         Modifier.fillMaxWidth()
             .padding(horizontal = 16.dp).padding(bottom = 24.dp),
@@ -1327,88 +1372,124 @@ private fun EntityPopupSheetContent(
 }
 
 /**
- * The centered dialog overlay (2026-10-30 verdict round —
- * SUPERSEDES the #67 bottom-anchored floating shelf): every entity
- * detail opens as a content-hugged dialog centered on screen.
- * - Container: a scrim (tappable to dismiss) + a panel centered in
- *   the safe-drawing area, so the status bar, camera cutout, and
- *   navigation bar are respected by construction — never drawn
- *   under, which is what fixes the status-bar collisions.
- * - Size: width 90% capped at 480dp ([dialogPanelWidthDp]); height
- *   capped at 85% ([dialogPanelMaxHeightDp]) with the inner body in
- *   a scrollable column as the fallback for dense entities. Height
- *   otherwise hugs intrinsic content exactly (no blank bottom half).
- * - Motion: center-scale (scale 0.9 -> 1) + fade from the morph
- *   progress, M3 bounds spring — NO vertical slide (a slide reads
- *   as an unattached sheet). [animateContentSize] on the bounds
- *   spring resizes the panel smoothly, re-centered by the parent,
- *   when options expand (mode/fan dropdowns).
- * - Content: NO late fade (2026-11-01 polish round): content
- *   tracks the panel's own scale+fade, so it is present from the
- *   panel's first frame and never materializes late. The traveling
- *   badge/arc (rendered above, by the caller) still carry the
- *   badge/icon continuously into the dialog header — scale+fade
- *   does NOT replace travel — but the header TEXT lives in the
- *   panel from frame 0 (see TravelingHeader: it is badge-only
- *   now, and destination headers hide only their badge while
- *   traveling, never their text).
- * [onPanelPlaced] reports the panel's root rect (the camera-rise
- * origin for sheet Details actions); at rest progress is 1 and the
- * scale is exactly 1, so the rect is exact where it is used.
+ * The full-screen panel overlay (2026-11-01 panels round —
+ * SUPERSEDES the 2026-10-30 centered dialog): every device detail
+ * opens as a panel morphing from its source card rect to
+ * full-screen, on BOTH folded and unfolded postures. No centered
+ * device dialog remains; the only dialog left is the shape picker
+ * (see ShapePickerDialog, intentionally preserved).
+ * - Container: NO scrim — the panel is opaque at rest (scheme
+ *   background, or black for cameras) and covers the page, so no
+ *   dimmed page shows around it. A touch interceptor fills the
+ *   screen behind the morphing rect so taps outside the still-
+ *   small panel mid-flight never reach the page below; it takes
+ *   no action itself (dismiss is Back / the back arrow / the
+ *   panel's own Close or badge, never an outside tap).
+ * - Morph: the panel rect lerps from the source card rect (or the
+ *   graceful fallback rect, target shifted 80dp down, when the
+ *   card never reported bounds) to the full overlay rect on the
+ *   caller-supplied morph [progress] — the SAME Animatable +
+ *   springBounds progress that drove the old dialog, so an
+ *   appear interrupted by a dismiss reverses cleanly mid-flight
+ *   instead of jumping (an Animatable's animateTo cancels and
+ *   restarts from the current value). The rect, corners
+ *   (28dp -> 0dp via [morphCornerTop]), and background ramp
+ *   ([morphBackgroundAlpha]: transparent at the card, opaque once
+ *   grown) all come from MorphOverlay helpers via [MorphSurface];
+ *   no parallel morph system. Content is laid out once at full
+ *   size and clipped to the growing rect (never scaled), so it is
+ *   present from the panel's first frame and never materializes
+ *   late; destination headers hide only their badge while
+ *   traveling (see TravelingHeader), never their text.
+ * - Chrome: status-bar padding + a back arrow row above the
+ *   content (suppressed only for the camera panel, whose own
+ *   header row carries Close). No drag-to-dismiss: Back and the
+ *   back arrow are the dismiss paths, plus each panel's own
+ *   Close/badge affordance.
+ * - Scroll: the panel body scrolls (the old dialog's scroll
+ *   wrapper, same structure), so dialog-threaded pages that own
+ *   no scroll of their own (sheet, detail, pop-out) scroll here.
+ *   [scrollContent] = false skips the scroll wrapper for content
+ *   that owns its own full-size layout (the camera panel's video
+ *   body), where a fillMaxSize child inside a scroll container
+ *   would have no definite height to fill.
+ * [onPanelPlaced] reports the panel's full-screen root rect once
+ * it reaches rest (the camera-rise origin for sheet Details
+ * actions); at rest the rect is exact where it is used.
  */
 @Composable
-private fun DialogOverlay(
+private fun PanelOverlay(
     progress: Float,
+    source: Rect?,
+    overlayOrigin: Offset,
     panelBackground: Color,
     onDismiss: () -> Unit,
-    onPanelPlaced: (Rect) -> Unit,
+    showBackBar: Boolean = true,
+    scrollContent: Boolean = true,
+    onPanelPlaced: ((Rect) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val p = progress.coerceIn(0f, 1f)
-    Box(
-        Modifier.fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.4f * p))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { onDismiss() },
-    )
-    Box(
-        Modifier.fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing),
-        contentAlignment = Alignment.Center,
-    ) {
-        BoxWithConstraints {
-            Box(
-                Modifier.width(dialogPanelWidthDp(maxWidth.value).dp)
-                    .heightIn(max = dialogPanelMaxHeightDp(maxHeight.value).dp)
-                    .onGloballyPositioned { onPanelPlaced(it.boundsInRoot()) }
-                    .animateContentSize(animationSpec = springBounds())
-                    .graphicsLayer {
-                        val s = 0.9f + 0.1f * p
-                        scaleX = s
-                        scaleY = s
-                        alpha = p
-                    }
-                    .clip(FloatingCorner)
-                    .background(panelBackground),
+    Box(Modifier.fillMaxSize()) {
+        // Touch interceptor (see the KDoc): consumes taps outside
+        // the still-small morph rect mid-flight, takes no action.
+        Box(
+            Modifier.fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { },
+        )
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val density = LocalDensity.current
+            val targetWidthPx = with(density) { maxWidth.toPx() }
+            val targetHeightPx = with(density) { maxHeight.toPx() }
+            val target = Rect(
+                overlayOrigin.x,
+                overlayOrigin.y,
+                overlayOrigin.x + targetWidthPx,
+                overlayOrigin.y + targetHeightPx,
+            )
+            val from = source ?: fallbackFromRect(target, with(density) { 80.dp.toPx() })
+            if (p >= 1f && onPanelPlaced != null) {
+                LaunchedEffect(Unit) { onPanelPlaced(target) }
+            }
+            MorphSurface(
+                rect = lerpRect(from, target, p),
+                overlayOrigin = overlayOrigin,
+                targetSize = IntSize(targetWidthPx.roundToInt(), targetHeightPx.roundToInt()),
+                cornerTop = morphCornerTop(p),
+                cornerAll = morphCornerTop(p),
+                background = panelBackground,
+                backgroundAlpha = morphBackgroundAlpha(p),
+                progress = p,
             ) {
-                Box(
-                    // No second fade here (2026-11-01 polish round):
-                    // the panel's own graphicsLayer alpha already
-                    // fades content in with the panel. The old
-                    // morphContentAlpha fade held content invisible
-                    // until p = 0.7, which is exactly the "title
-                    // draws late" complaint and, on exit, the window
-                    // where neither dialog nor card text was visible.
-                    Modifier.verticalScroll(rememberScrollState()),
-                ) {
-                    // Surface marker: panel content runs under LocalMorphProgress
-                    // (the dialog progress), the same contract MorphSurface used
-                    // to provide — so reportArcBounds treats it as surface
-                    // content (reports NEITHER source nor target) and destination
-                    // panels dissolve in late via dissolveIntoTraveler.
-                    CompositionLocalProvider(LocalMorphProgress provides p) {
+                if (scrollContent) {
+                    Box(
+                        Modifier.fillMaxSize().statusBarsPadding()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Column(Modifier.fillMaxWidth()) {
+                            if (showBackBar) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    IconButton(onClick = onDismiss) {
+                                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                                    }
+                                }
+                            }
+                            content()
+                        }
+                    }
+                } else {
+                    // Full-size content (camera video): no scroll
+                    // wrapper, so fillMaxSize resolves against the
+                    // panel's definite size, not an unbounded scroll
+                    // height. No back bar here either (callers that
+                    // skip scrolling carry their own header).
+                    Box(Modifier.fillMaxSize().statusBarsPadding()) {
                         content()
                     }
                 }
@@ -1418,35 +1499,29 @@ private fun DialogOverlay(
 }
 
 /**
- * The dialog's one-frame measurement pass: the same content, laid
- * out once at final dialog geometry (same width rule, height cap,
- * safe-drawing centering), invisible and below the scrim, so its
- * header/arc rows can report the traveling elements' target rects.
- * The live panel must never provide the hero/arc targets: its rect
- * sits under the dialog scale mid-animation. [onMeasured] fires
- * once (the caller stores it as the measured flag and drops this
- * frame); the content may compose twice for one frame, which is
- * safe — history refreshes dedupe in the view model.
+ * The panel's one-frame measurement pass: the same content, laid
+ * out once at final full-screen geometry (status-bar padding
+ * included, matching PanelOverlay), invisible and below the panel,
+ * so its header/arc rows can report the traveling elements'
+ * target rects. The live panel must never provide the hero/arc
+ * targets: its header sits at the interpolated morph rect
+ * mid-animation. [onMeasured] fires once (the caller stores it as
+ * the measured flag and drops this frame); the content may compose
+ * twice for one frame, which is safe — history refreshes dedupe
+ * in the view model.
  */
 @Composable
-private fun DialogMeasureFrame(
+private fun PanelMeasureFrame(
     onMeasured: (IntSize) -> Unit,
     content: @Composable () -> Unit,
 ) {
     Box(
         Modifier.fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing),
-        contentAlignment = Alignment.Center,
+            .alpha(0f)
+            .onGloballyPositioned { onMeasured(it.size) },
     ) {
-        BoxWithConstraints {
-            Box(
-                Modifier.width(dialogPanelWidthDp(maxWidth.value).dp)
-                    .heightIn(max = dialogPanelMaxHeightDp(maxHeight.value).dp)
-                    .alpha(0f)
-                    .onGloballyPositioned { onMeasured(it.size) },
-            ) {
-                content()
-            }
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            content()
         }
     }
 }
@@ -1860,6 +1935,137 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
 }
 
 /**
+ * The unfolded vertical navigation rail (2026-11-01 panels round):
+ * the pill bar's unfolded form — same items ([pillBarItems]),
+ * same selection ([selectedNavIndex]), same goTop destination
+ * behavior, on the left edge at full height. The pill's rules
+ * carry over: a single indicator morphs between tabs by animating
+ * its measured top/bottom bounds on the pill spring
+ * ([springSpatial], snapped under reduce-motion); labels follow
+ * the committed selection only, with no animation, under the same
+ * [pillLabelVisible] rule as the pill (selected + at most 10
+ * characters, else icon only). Differences, all deliberate: items
+ * stack icon-over-label in 72dp rows (touch targets at least as
+ * large as the pill's 48dp rows); the rail never scrolls away
+ * (it is nav chrome, and an open panel covers it anyway); and it
+ * enters on the pill spring from a 16dp left offset instead of
+ * appearing instantly. The column scrolls vertically once tabs
+ * overflow the viewport height.
+ */
+@Composable
+private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
+    val reduceMotion = LocalReduceMotion.current
+    val haptics = LocalHapticFeedback.current
+    val currentIndex = selectedIndex ?: -1
+    // Rail enter: spring in from the left edge on mount (the rail
+    // remounts whenever the window crosses the wide threshold, so
+    // this is also the fold/unfold transition). Snapped under
+    // reduce-motion, like every other spring in this round.
+    val railEnter = remember { Animatable(if (reduceMotion) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        if (!reduceMotion) railEnter.animateTo(1f, springSpatial())
+    }
+    // Measured item positions, in window coordinates: the rail
+    // origin is subtracted, so the indicator stays correct while
+    // the column scrolls.
+    var railOrigin by remember { mutableStateOf(0f) }
+    var itemRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
+    val targetRect = itemRects[currentIndex]
+    val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
+        else springSpatial()
+    val indicatorTop by animateFloatAsState(
+        targetRect?.let { it.top - railOrigin } ?: 0f,
+        animationSpec = indicatorSpec,
+        label = "railTop",
+    )
+    val indicatorBottom by animateFloatAsState(
+        targetRect?.let { it.bottom - railOrigin } ?: 0f,
+        animationSpec = indicatorSpec,
+        label = "railBottom",
+    )
+    val density = LocalDensity.current
+    Box(
+        modifier
+            .width(88.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .graphicsLayer {
+                alpha = railEnter.value
+                translationX = -16.dp.toPx() * (1f - railEnter.value)
+            },
+    ) {
+        Box(
+            Modifier.fillMaxSize()
+                .onGloballyPositioned { railOrigin = it.boundsInWindow().top },
+        ) {
+            // The morphing indicator, behind the items, padded 6dp
+            // beyond the measured item rect on each side (the pill's
+            // 8dp rule, tightened for the rail's narrower items):
+            // item height snaps instantly at selection while the
+            // indicator glides, so the padding absorbs transient
+            // overflow exactly as it does on the pill.
+            if (targetRect != null) {
+                val indicatorPad = with(density) { 6.dp.toPx() }
+                Box(
+                    Modifier.align(Alignment.TopCenter)
+                        .offset { IntOffset(0, (indicatorTop - indicatorPad).roundToInt()) }
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .height(with(density) { (indicatorBottom - indicatorTop + indicatorPad * 2).toDp() })
+                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                )
+            }
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                for ((index, item) in items.withIndex()) {
+                    val highlighted = index == currentIndex
+                    val showLabel = pillLabelVisible(item.label, index == currentIndex)
+                    val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    Box(
+                        modifier = Modifier.width(80.dp).height(72.dp)
+                            .onGloballyPositioned { itemRects = itemRects + (index to it.boundsInWindow()) }
+                            .clickable {
+                                if (index != currentIndex) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                    onSelect(item.screen)
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                if (highlighted) item.icon else item.outlinedIcon,
+                                contentDescription = item.label,
+                                tint = contentColor,
+                                modifier = Modifier.size(24.dp),
+                            )
+                            if (showLabel) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    item.label,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = contentColor,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * The pill-bar bottom navigation, rebuilt on measured positions: a single
  * indicator morphs between tabs by animating its left/right bounds with
  * spring(0.74, 380) from the tabs' measured window rects — it is never
@@ -2083,8 +2289,8 @@ fun DetailTopBar(title: String, onBack: () -> Unit) {
 /**
  * Title-only detail pop-up header, for the vanished-entity fallback
  * (no entity, so no badge to travel or tap): the title with no
- * arrow, dismiss via scrim/Back like every other pop-up. Exists so
- * even the fallback pop-up never shows a ←.
+ * arrow, dismiss via the panel's back arrow/Back like every other
+ * pop-up. Exists so even the fallback pop-up never shows a ←.
  */
 @Composable
 fun DetailPopupTitleHeader(title: String) {
