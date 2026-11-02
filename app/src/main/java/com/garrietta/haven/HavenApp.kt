@@ -1146,7 +1146,7 @@ private fun ScreenContent(
     onSignOut: () -> Unit,
 ) {
     when (screen) {
-        Screen.Today -> TodayScreen(vm, navigate, onSignInExpired = signOut)
+        Screen.Today -> TodayScreen(vm, navigate, onSignInExpired = onSignOut)
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)
