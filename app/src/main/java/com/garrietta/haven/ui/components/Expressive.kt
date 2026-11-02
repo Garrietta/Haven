@@ -386,14 +386,19 @@ fun badgeColors(
             }
             bg to if (on) ensureContrast(scheme.onPrimary, scheme.primary) else scheme.onSurfaceVariant
         }
-        // Read-only sensors are inactive by construction: their
-        // badges resolve to the muted scheme pair synchronously
-        // from scheme + domain + state alone — never from the raw
-        // per-entity accent — so no first recomposition frame can
-        // flash a full-saturation accent glyph before settling
-        // muted (the thermostat-sensor sibling flash on panel
-        // return). The value text still carries the reading.
-        "sensor" -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
+        // Sensor badges (Round 4, replacing #89's purely-muted
+        // pair): semantic colors again, but still resolved
+        // SYNCHRONOUSLY — sensorBadgeColors is a pure function of
+        // the entity id / device class / name, never an animation
+        // or a later-frame lookup — so no first recomposition
+        // frame can flash a darker saturated shade before settling.
+        // Temperature = coral-red, humidity = sky-blue; every
+        // other sensor keeps its accent wash (same synchrony).
+        "sensor" -> {
+            val kind = sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName)
+            sensorBadgeColors(kind)
+                ?: (accent.copy(alpha = 0.22f) to accent)
+        }
         "climate" -> when {
             state == "off" -> climateIdleContainer(scheme) to scheme.onSurfaceVariant
             hvacAction == "cooling" || state == "cool" ->
@@ -863,7 +868,13 @@ fun PillToggle(
         animationSpec = havenSpring(),
         label = "pill",
     )
-    val progress = if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress
+    // Clamped BEFORE any padding math (Round 4 crash fix): the
+    // house spring (380/0.62) overshoots its target, so an
+    // unclamped progress feeds negative padding into the knob
+    // layout — IllegalArgumentException ("Padding must be
+    // non-negative") on the overshoot frame. The same clamp
+    // covers VerticalPillToggle below.
+    val progress = (if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress).coerceIn(0f, 1f)
     val track = if (checked) onColor else MaterialTheme.colorScheme.surfaceVariant
     Box(
         modifier
@@ -911,7 +922,12 @@ fun VerticalPillToggle(
         animationSpec = havenSpring(),
         label = "verticalPill",
     )
-    val progress = if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress
+    // Same overshoot clamp as PillToggle above: without it the
+    // ON swing overshoots past 1 and the knob's top padding goes
+    // negative (fatal); the OFF swing overshoots below 0 and the
+    // knob travels past the track's bottom edge (clipped, not
+    // fatal, but wrong). Clamped, the knob stays inside [4, 88]dp.
+    val progress = (if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress).coerceIn(0f, 1f)
     val track = if (checked) onColor else MaterialTheme.colorScheme.surfaceVariant
     Box(
         modifier

@@ -175,4 +175,23 @@ class Round3LogicTest {
             unmapped.map { it.entityId },
         )
     }
+
+    // Round 4: humanized enum/option labels for Security + vacuum
+    // panels — underscores to spaces, title case, acronyms kept.
+    @Test fun humanizeOptionLabel_boostIq() {
+        assertEquals("Boost IQ", humanizeOptionLabel("Boost_IQ"))
+        assertEquals("Boost IQ", humanizeOptionLabel("boost_iq"))
+    }
+
+    @Test fun humanizeOptionLabel_underscoresAndCamel() {
+        assertEquals("Auto Empty", humanizeOptionLabel("auto_empty"))
+        assertEquals("Auto Empty", humanizeOptionLabel("autoEmpty"))
+        // LED is a kept acronym, not title-cased to "Led".
+        assertEquals("LED Strip", humanizeOptionLabel("led_strip"))
+    }
+
+    @Test fun humanizeOptionLabel_blankPassthrough() {
+        assertEquals("", humanizeOptionLabel(""))
+        assertEquals("   ", humanizeOptionLabel("   "))
+    }
 }

@@ -211,6 +211,56 @@ fun climateModeColor(state: String, hvacAction: String?): Color = when {
 }
 
 /**
+ * Sensor kind, resolved synchronously from the entity id, the
+ * device_class attribute, or the friendly name — never from an
+ * async lookup — so badge colors and icons resolve in the same
+ * composition frame on every surface (the Round 4 no-flash rule:
+ * a token that needs a later frame to settle is a flash).
+ * TEMPERATURE/HUMIDITY are the Ecobee pair; BATTERY, POWER, and
+ * LIGHT cover the other sensors with an obvious icon; anything
+ * else is OTHER and keeps the muted badge pair.
+ */
+enum class SensorKind { TEMPERATURE, HUMIDITY, BATTERY, POWER, LIGHT, OTHER }
+
+fun sensorKind(entityId: String, deviceClass: String?, friendlyName: String?): SensorKind {
+    val id = entityId.lowercase()
+    val dc = deviceClass?.lowercase()
+    val name = friendlyName?.lowercase() ?: ""
+    return when {
+        dc == "temperature" || "_temperature" in id || "temperature" in name -> SensorKind.TEMPERATURE
+        dc == "humidity" || "_humidity" in id || "humidity" in name -> SensorKind.HUMIDITY
+        dc == "battery" || "_battery" in id || "battery" in name -> SensorKind.BATTERY
+        dc in setOf("power", "energy") || "_power" in id || "_energy" in id ||
+            "power" in name || "energy" in name -> SensorKind.POWER
+        dc == "illuminance" || "illuminance" in id || "illuminance" in name -> SensorKind.LIGHT
+        else -> SensorKind.OTHER
+    }
+}
+
+/**
+ * Semantic badge colors for sensors (Round 4, replacing the
+ * #89 purely-muted sensor badges): warm coral-red for
+ * temperature, sky-blue for humidity. Fixed hues, not scheme
+ * roles — the scheme has no temperature/humidity role — with
+ * glyph colors floored to 3:1 against the fill (the large-icon
+ * floor used elsewhere for 26dp glyphs). Pure and synchronous:
+ * badgeColors calls this with the entity alone, so no badge can
+ * flash a different shade before settling.
+ */
+fun sensorBadgeColors(kind: SensorKind): Pair<Color, Color>? = when (kind) {
+    SensorKind.TEMPERATURE -> Color(0xFFEF5350) to Color.White
+    SensorKind.HUMIDITY -> Color(0xFF29B6F6) to Color(0xFF01579B)
+    else -> null
+}
+
+/** Card-face tint for a sensor, at the same low alpha climate and weather cards use. Null for OTHER. */
+fun sensorCardTint(kind: SensorKind): Color? = when (kind) {
+    SensorKind.TEMPERATURE -> Color(0xFFEF5350)
+    SensorKind.HUMIDITY -> Color(0xFF29B6F6)
+    else -> null
+}
+
+/**
  * Light container scaled by brightness: the kelvin-tinted container
  * at full brightness, fading toward the neutral idle container as the
  * light dims (floored at 0.25 so a dim light still reads tinted, never

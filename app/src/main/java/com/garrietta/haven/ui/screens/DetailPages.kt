@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -97,6 +98,7 @@ import com.garrietta.haven.ui.controls.ServiceSlider
 import com.garrietta.haven.ui.controls.SwitchControl
 import com.garrietta.haven.ui.controls.VacuumControl
 import com.garrietta.haven.ui.controls.WeatherControl
+import com.garrietta.haven.ui.controls.WeatherHeroCard
 import com.garrietta.haven.ui.controls.SensorTile
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.stateText
@@ -131,9 +133,11 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         }
         return
     }
-    // Climate's full control lives on its thermostat page, not here.
+    // Climate safety net (Round 4): any path still landing on an
+    // EntityDetail for climate renders the primary dial panel
+    // directly — the secondary thermostat page is deleted.
     if (entity.domain == "climate") {
-        ThermostatPageScreen(vm, entityId, onBack, inDialog = true)
+        ThermostatPopout(entity, vm, onClose = onBack)
         return
     }
     // Weather's full page is an expressive page (condition hero +
@@ -173,7 +177,6 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
  */
 @Composable
 private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -> Unit) {
-    val conditionColor = weatherConditionColor(entity.state)
     // Dialog-owned sizing/scroll: plain column, no fillMaxSize,
     // no status-bars padding, no own scroll (2026-10-30 round).
     Column(
@@ -181,12 +184,12 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
     ) {
         DetailPopupHeader(entity, onBack)
         Spacer(Modifier.height(16.dp))
-        Box(
-            Modifier.fillMaxWidth().background(conditionColor.copy(alpha = 0.16f), FloatingCorner).padding(vertical = 24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            WeatherControl(entity, vm, showForecast = false)
-        }
+        // Round 4: the static non-functional grey semicircle gauge
+        // (WeatherControl's display-only Dial) is GONE from this
+        // panel — replaced by an expressive hero card (current
+        // temperature, condition icon, high/low, humidity). The
+        // Dial survives only in sheets/cards via WeatherControl.
+        WeatherHeroCard(entity, vm)
         Spacer(Modifier.height(16.dp))
         Text("Hourly forecast", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
@@ -252,7 +255,10 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
             // entity or attribute to bind them to, and inventing
             // a binding would actuate nothing real — flagged in
             // the round report instead.
-            "light" -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            "light" -> Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 VerticalPillToggle(
                     checked = entity.state == "on",
                     onToggle = { vm.toggle(entity.entityId) },
@@ -266,6 +272,13 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                 )
                 Spacer(Modifier.height(16.dp))
                 LightControl(entity, vm, showBulb = false)
+                // Round 4: the light panel is never an empty white
+                // screen — device status cards below the pill:
+                // power state, room assignment, last-changed
+                // timestamp, and the linked smart plug's state.
+                // Any line with no backing data is omitted, never
+                // fabricated; no entity ids are shown.
+                LightStatusCard(entity, vm)
             }
             "switch", "input_boolean" -> SwitchControl(entity, vm)
             "cover" -> CoverPageControl(entity, vm)
@@ -949,5 +962,58 @@ private fun ClipPlayerScreen(
             onClick = onClose,
             modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
         ) { Text("Close", color = Color.White) }
+    }
+}
+
+/**
+ * Device status card for the expanded light panel (Round 4):
+ * power state (+ brightness % when the attribute exists), room
+ * assignment (from the HA area registry), last-changed timestamp
+ * (formatted, never a raw ISO string), and the linked smart plug
+ * status — Lamp Socket 1 for Lamp
+ * (light.lamp_socket_1 -> switch.smart_indoor_plug_3_socket_1)
+ * and Standing lamp Socket 1 for Standing Lamp
+ * (light.standing_lamp_socket_1 -> switch.standing_lamp_socket_1).
+ * A row renders only when its data exists; the whole card hides
+ * when nothing backs it. No entity ids on the surface.
+ */
+@Composable
+private fun LightStatusCard(entity: HaEntity, vm: HavenViewModel) {
+    val states by vm.states.collectAsState()
+    val areas by vm.areas.collectAsState()
+    val entityAreas by vm.entityAreas.collectAsState()
+    val linkedPlugId = when (entity.entityId) {
+        "light.lamp_socket_1" -> "switch.smart_indoor_plug_3_socket_1"
+        "light.standing_lamp_socket_1" -> "switch.standing_lamp_socket_1"
+        else -> null
+    }
+    val plug = linkedPlugId?.let { states[it] }
+    val areaName = entityAreas[entity.entityId]?.let { areaId -> areas.firstOrNull { it.id == areaId }?.name }
+    val lastChanged = formatHaTimestamp(entity.lastChanged ?: entity.lastUpdated)
+    val brightness = entity.attrInt("brightness")?.let { it * 100 / 255 }
+    val rows = buildList {
+        add("Power" to if (entity.state == "on") {
+            if (brightness != null) "On • $brightness%" else "On"
+        } else "Off")
+        if (areaName != null) add("Room" to areaName)
+        if (lastChanged != null) add("Last changed" to lastChanged)
+        if (plug != null) add(plug.friendlyName to if (plug.state == "on") "On" else "Off")
+    }
+    if (rows.isEmpty()) return
+    Spacer(Modifier.height(16.dp))
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            for ((label, value) in rows) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(value, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                }
+                if ((label to value) != rows.last()) Spacer(Modifier.height(8.dp))
+            }
+        }
     }
 }

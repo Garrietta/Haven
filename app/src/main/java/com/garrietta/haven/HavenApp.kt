@@ -10,9 +10,16 @@ import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.ui.theme.FloatingCorner
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -170,6 +177,8 @@ import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.components.morphBackgroundAlpha
 import com.garrietta.haven.ui.components.morphCardAlpha
+import com.garrietta.haven.ui.components.morphExitCardAlpha
+import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.components.morphCloseContentAlpha
 import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.weatherConditionColor
@@ -198,7 +207,6 @@ import com.garrietta.haven.ui.screens.RoomManagerScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.TabManagerScreen
-import com.garrietta.haven.ui.screens.ThermostatPageScreen
 import com.garrietta.haven.ui.screens.ThermostatPopout
 import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.GreenhousePanelScreen
@@ -292,7 +300,6 @@ private fun selectedNavIndex(
 
 /** Entity id a detail screen belongs to (the shared card key it morphs from). Round 3 panels morph from their source card where one exists on Home; the updates panel has no Home card, so it uses the graceful fallback rect. */
 private fun detailEntityId(screen: Screen): String = when (screen) {
-    is Screen.Thermostat -> screen.entityId
     is Screen.EntityDetail -> screen.entityId
     is Screen.MediaPanel -> screen.entityId
     is Screen.VacuumPanel -> "vacuum.t2292"
@@ -365,7 +372,7 @@ fun HavenApp(vm: HavenViewModel) {
         // rise, and vm.pageOrigin is still set by tile taps and
         // panel Details because the camera path needs it.
         val detailScreen = when (current) {
-            is Screen.Thermostat, is Screen.EntityDetail,
+            is Screen.EntityDetail,
             is Screen.VacuumPanel, is Screen.MediaPanel,
             is Screen.SecurityPanel, is Screen.GreenhousePanel,
             is Screen.UpdatesPanel -> current
@@ -831,7 +838,16 @@ fun HavenApp(vm: HavenViewModel) {
                         popoutAnim != null -> popoutProgress.value
                         else -> 1f
                     }.coerceIn(0f, 1f)
-                    if (exitP <= 0.02f) 1f else 0f
+                    // Round 4 exit flash fix (proven curve mismatch:
+                    // the old binary hide left the slot blank while
+                    // panel content was already gone, then popped
+                    // the card in one frame): the card stays hidden
+                    // exactly while panel content is visible
+                    // (progress > 0.85) and fades in smoothly over
+                    // [0.85 -> 0] — no frame has both at full
+                    // opacity (no doubling) and no frame has
+                    // neither (no blank slot, no pop).
+                    morphExitCardAlpha(exitP)
                 } else morphCardAlpha(
                     when {
                         sheetAnim != null -> sheetProgress.value
@@ -850,18 +866,20 @@ fun HavenApp(vm: HavenViewModel) {
                     overlayOrigin = it.boundsInRoot().topLeft
                 },
             ) {
-            // Unfolded chrome (2026-11-01 panels round): the floating
-            // bottom pill becomes a vertical rail on the left edge,
-            // carrying the same tabs, selection, and goTop behavior
-            // as the pill (see VerticalRail). Folded keeps the pill
-            // unchanged. The rail is nav chrome, not scroll-away
-            // chrome: it never slides away on scroll, and an open
-            // panel (a later sibling of this Row) covers it exactly
-            // as today's pill-exit rule covers the pill.
+            // Unfolded chrome (Round 4): the floating bottom pill
+            // becomes a floating vertical SIDE PILL on the left
+            // edge (Koda-style, margined — NOT #86's full-height
+            // rail), carrying the same tabs, selection, and goTop
+            // behavior as the pill (see VerticalSidePill). Folded
+            // keeps the pill unchanged. The side pill is nav
+            // chrome, not scroll-away chrome: it never slides away
+            // on scroll, and an open panel (a later sibling of
+            // this Row) covers it exactly as today's pill-exit rule
+            // covers the pill.
             Row(Modifier.fillMaxSize()) {
             if (LocalWideLayout.current && isTopLevel(current)) {
                 val barItems = pillBarItems(vm.userTabs)
-                VerticalRail(
+                VerticalSidePill(
                     items = barItems,
                     selectedIndex = selectedNavIndex(current, barItems, vm.userTabs),
                     onSelect = goTop,
@@ -956,14 +974,31 @@ fun HavenApp(vm: HavenViewModel) {
                 // the overlay below (above all chrome). Every other
                 // destination renders normally.
                 val base = when (current) {
-                    is Screen.Thermostat, is Screen.EntityDetail,
+                    is Screen.EntityDetail,
                     is Screen.VacuumPanel, is Screen.MediaPanel,
                     is Screen.SecurityPanel, is Screen.GreenhousePanel,
                     is Screen.UpdatesPanel ->
                         backstack.getOrNull(backstack.lastIndex - 1) ?: Screen.Today
                     else -> current
                 }
-                content(base)
+                // Round 4: top-level tab switches use a shared-axis
+                // transition (horizontal slide + fade on the house
+                // spring) instead of an instant swap; panel morphs
+                // are untouched (they already use springBounds).
+                // Under reduce-motion the switch stays instant.
+                val reduceMotionTop = LocalReduceMotion.current
+                if (reduceMotionTop) {
+                    content(base)
+                } else {
+                    AnimatedContent(
+                        targetState = base,
+                        transitionSpec = {
+                            (slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn()) togetherWith
+                                (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut())
+                        }.using(SizeTransform(clip = false)),
+                        label = "topLevelScreen",
+                    ) { screen -> content(screen) }
+                }
                 // A failed tap used to vanish silently; now it banners here on
                 // every screen until dismissed.
                 val serviceError by vm.serviceError.collectAsState()
@@ -976,7 +1011,7 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
-            } // Row: rail + scaffold (unfolded) / scaffold alone (folded)
+            } // Row: side pill + scaffold (unfolded) / scaffold alone (folded)
             // Sheet panel overlay: FULL-SCREEN PANEL (2026-11-01
             // panels round) — SUPERSEDES the 2026-10-30 centered
             // dialog. The sheet's content is unchanged; only its
@@ -1056,31 +1091,19 @@ fun HavenApp(vm: HavenViewModel) {
                 val anim = detailAnim!!
                 BackHandler { dismissDetail() }
                 val detailP = detailProgress.value.coerceIn(0f, 1f)
-                // Thermostat detail renders WITHOUT its own scroll
-                // here (inDialog = true, same as DetailPageScreen's
-                // climate branch): the panel's scroll wrapper already
-                // scrolls, and ThermostatPageScreen's own
-                // verticalScroll inside it measures with infinite
-                // height constraints — a fatal
-                // IllegalStateException at measure time, which is
-                // the #89 crash (popout Details -> instant death,
-                // no detail frame ever rendered). Every other panel
-                // content is already dialog-owned (plain column, no
-                // own scroll); the thermostat page was the one
-                // exception. The scaffold base render keeps its own
-                // scroll (finite constraints there).
-                val thermostatScreen = anim.screen as? Screen.Thermostat
+                // Round 4: the thermostat detail special-case is
+                // gone with Screen.Thermostat — every detail panel
+                // content is dialog-owned (plain column, no own
+                // scroll), so the panel's scroll wrapper owns
+                // scrolling for all of them. The #92 inDialog crash
+                // fix for the deleted route is moot.
                 if (anim.targetSize == null) {
                     PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
                         CompositionLocalProvider(
                             LocalHeroTarget provides { r -> heroTarget = anim.entityId to r },
                             LocalArcTarget provides { r -> arcTarget = anim.entityId to r },
                         ) {
-                            if (thermostatScreen != null) {
-                                ThermostatPageScreen(vm, thermostatScreen.entityId, { dismissDetail() }, inDialog = true)
-                            } else {
-                                content(anim.screen)
-                            }
+                            content(anim.screen)
                         }
                     }
                 }
@@ -1092,11 +1115,7 @@ fun HavenApp(vm: HavenViewModel) {
                     onDismiss = { dismissDetail() },
                     isClosing = detailExiting,
                 ) {
-                    if (thermostatScreen != null) {
-                        ThermostatPageScreen(vm, thermostatScreen.entityId, { dismissDetail() }, inDialog = true)
-                    } else {
-                        content(anim.screen)
-                    }
+                    content(anim.screen)
                 }
                 TravelingHeader(
                     vm, anim.entityId, heroBounds[anim.entityId],
@@ -1110,15 +1129,13 @@ fun HavenApp(vm: HavenViewModel) {
                     detailP, overlayOrigin,
                 )
             }
-            // Thermostat pop-out panel: FULL-SCREEN PANEL (2026-11-01
-            // panels round) — SUPERSEDES the 2026-10-30 centered
-            // dialog. The pop-out's content (radial dial, mode/fan
-            // pills, Details/Close) is unchanged — only the
-            // container changes, from centered dialog to a panel
+            // Thermostat pop-out panel (Round 4: the ONLY
+            // thermostat panel — tap and long-press on the Ecobee
+            // card both land here; the old pop-out -> Details page
+            // handoff is deleted with Screen.Thermostat): a panel
             // morphing from the climate card rect to full-screen,
             // so the dial gets full touch targets on narrow cover
-            // screens. The pop-out -> page handoff still clears
-            // instantly.
+            // screens.
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
                 BackHandler { dismissPopout() }
@@ -1131,10 +1148,6 @@ fun HavenApp(vm: HavenViewModel) {
                         ) {
                             ThermostatPopoutContent(
                                 vm, anim.id,
-                                onDetails = {
-                                    dismissPopoutInstant()
-                                    navigate(Screen.Thermostat(anim.id))
-                                },
                                 onClose = { dismissPopout() },
                             )
                         }
@@ -1150,10 +1163,6 @@ fun HavenApp(vm: HavenViewModel) {
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
-                        onDetails = {
-                            dismissPopoutInstant()
-                            navigate(Screen.Thermostat(anim.id))
-                        },
                         onClose = { dismissPopout() },
                     )
                 }
@@ -1312,7 +1321,6 @@ private fun ScreenContent(
         // Detail pages replaced the old generic detail screen: per-domain
         // pages (climate still routes to its thermostat page inside).
         is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack)
-        is Screen.Thermostat -> ThermostatPageScreen(vm, screen.entityId, goBack)
         // Round 3 panels: full-screen morph panels, same machinery.
         is Screen.VacuumPanel -> VacuumPanelScreen(vm, goBack)
         is Screen.MediaPanel -> MediaPanelScreen(vm, screen.entityId, goBack)
@@ -1336,7 +1344,6 @@ private fun ScreenContent(
 private fun ThermostatPopoutContent(
     vm: HavenViewModel,
     entityId: String,
-    onDetails: () -> Unit,
     onClose: () -> Unit,
 ) {
     val states by vm.states.collectAsState()
@@ -1348,7 +1355,7 @@ private fun ThermostatPopoutContent(
             OutlinedButton(onClick = onClose) { Text("Close") }
         }
     } else {
-        ThermostatPopout(entity, vm, onDetails, onClose)
+        ThermostatPopout(entity, vm, onClose)
     }
 }
 
@@ -1407,7 +1414,10 @@ private fun EntityPopupSheetContent(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        DialogTitleText(displayCameraName(entity), Modifier.fillMaxWidth())
+                        DialogTitleText(
+                if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
+                Modifier.fillMaxWidth(),
+            )
                         Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -1429,7 +1439,13 @@ private fun EntityPopupSheetContent(
                             panelBounds?.let { vm.pageOrigin = it }
                             onDetails()
                             when (entity.domain) {
-                                "climate" -> navigate(Screen.Thermostat(popupId))
+                                // Round 4: the secondary thermostat
+                                // page is deleted — a sheet climate
+                                // Details tap opens the primary dial
+                                // panel instead (safety net; the
+                                // sheet's onDetails dismiss above
+                                // already ran before this when).
+                                "climate" -> vm.openClimatePopout(popupId)
                                 // Cameras open their fullscreen viewer,
                                 // not a static page (Ring: the latest
                                 // motion recording, labeled as such).
@@ -1633,6 +1649,15 @@ private fun PanelMeasureFrame(
             .onGloballyPositioned { onMeasured(it.size) },
     ) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            // Round 4 header-badge alignment fix: the live panel
+            // sits below a 48dp back-bar row (IconButton) +
+            // status-bar padding, but this measurement frame had
+            // status-bar padding only — so every measured header
+            // target rect sat ~48dp too high, roughly where the
+            // back arrow sits, and the final-2% handoff read as
+            // "spawn over the back arrow and drop into place".
+            // The spacer aligns measured targets with live ones.
+            Spacer(Modifier.height(48.dp))
             content()
         }
     }
@@ -1692,6 +1717,11 @@ private fun TravelingHeader(
     // — so unrelated state emissions never recompose the flight.
     val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
     if (source == null) return
+    // Round 4 origin guard: a never-reported source rect lerps
+    // from (0, 0) — the window origin, over the back arrow —
+    // so a zero-size source renders nothing instead of a badge
+    // that appears to spawn at the origin and drop into place.
+    if (source.width <= 0f || source.height <= 0f) return
     // No target yet (measurement frame pending): sit exactly on
     // the source badge rect instead of vanishing — the card
     // header hides from frame 0, so returning early here left a
@@ -2034,19 +2064,20 @@ private fun FrontDoorCameraPanel(
     }
 
     val showLive = frontDoorShowsLiveBadge(webrtcFrames, mjpegFrames, switchOn)
+    // Round 4: clean user-facing status only — the #93 debug
+    // "Live path: …" wording (switch + MJPEG internals, WebRTC
+    // outcomes, "?" placeholders) is retired. The LIVE badge
+    // rule is unchanged: it shows only while frames render on a
+    // live path.
     val pathLine = when {
         tab == FrontDoorTab.HISTORY -> "Latest motion recording · Not live"
         !engaged -> "Live paused — the live-stream switch is off"
-        phase == FrontDoorLivePhase.WEBRTC_CONNECTING -> "Live path: WebRTC offer sent — waiting for an answer…"
-        phase == FrontDoorLivePhase.WEBRTC_LIVE -> "Live via WebRTC — frames rendering"
-        phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn ->
-            "Live path: live-stream switch + MJPEG frames — wave at the door to confirm this is live"
-        phase == FrontDoorLivePhase.MJPEG && mjpegFrames && !switchOn ->
-            "MJPEG frames, but the live-stream switch is off — treating this as a recording"
-        phase == FrontDoorLivePhase.MJPEG && mjpegError != null ->
-            "Live paths failed (WebRTC: ${webrtcOutcome ?: "?"}; MJPEG: $mjpegError)"
-        phase == FrontDoorLivePhase.MJPEG ->
-            "Live path: live-stream switch on — waiting for MJPEG frames (WebRTC: ${webrtcOutcome ?: "?"})"
+        phase == FrontDoorLivePhase.WEBRTC_CONNECTING -> "Connecting to live view…"
+        phase == FrontDoorLivePhase.WEBRTC_LIVE -> "Live"
+        phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn -> "Live view"
+        phase == FrontDoorLivePhase.MJPEG && mjpegFrames && !switchOn -> "Latest motion recording"
+        phase == FrontDoorLivePhase.MJPEG && mjpegError != null -> "Live view unavailable"
+        phase == FrontDoorLivePhase.MJPEG -> "Connecting to live view…"
         else -> ""
     }
 
@@ -2127,12 +2158,6 @@ private fun FrontDoorCameraPanel(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text("Connecting to live view…", color = Color.White, fontSize = 16.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Trying WebRTC first; falls back to the live-stream switch if HA answers empty.",
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 14.sp,
-                        )
                     }
                 }
             }
@@ -2424,26 +2449,36 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
  * overflow the viewport height.
  */
 @Composable
-private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
+/**
+ * The unfolded navigation (Round 4, superseding #86's full-height
+ * 88dp rail): a FLOATING vertical side pill modeled after Koda's
+ * pill — a margined, vertically centered island, NOT a full-height
+ * bar. Same tabs, selection, and goTop behavior as the folded
+ * pill. Ripple and active highlight live strictly inside the
+ * 56x32dp icon oval: the item box itself is indication-null
+ * (label taps still select), and only the icon oval carries a
+ * default ripple clipped to CircleShape.
+ */
+@Composable
+private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
     val reduceMotion = LocalReduceMotion.current
     val haptics = LocalHapticFeedback.current
     val currentIndex = selectedIndex ?: -1
-    // Rail enter: spring in from the left edge on mount (the rail
-    // remounts whenever the window crosses the wide threshold, so
-    // this is also the fold/unfold transition). Snapped under
-    // reduce-motion, like every other spring in this round.
-    val railEnter = remember { Animatable(if (reduceMotion) 1f else 0f) }
+    // Side-pill enter: spring in from the left edge on mount (the
+    // pill remounts whenever the window crosses the wide
+    // threshold, so this is also the fold/unfold transition).
+    // Snapped under reduce-motion, like every other spring.
+    val pillEnter = remember { Animatable(if (reduceMotion) 1f else 0f) }
     LaunchedEffect(Unit) {
-        if (!reduceMotion) railEnter.animateTo(1f, springSpatial())
+        if (!reduceMotion) pillEnter.animateTo(1f, springSpatial())
     }
-    // Measured icon positions, in window coordinates: the rail
+    // Measured icon positions, in window coordinates: the pill
     // origin is subtracted, so the indicator stays correct while
     // the column scrolls. The indicator anchors to the ICON rect,
-    // not the whole item row (2026-11-01 round 1): a fixed
-    // 56dp x 32dp horizontal pill around the icon only, so the
-    // highlight never stretches into a tall vertical capsule and
-    // never changes shape across tabs.
-    var railOrigin by remember { mutableStateOf(0f) }
+    // not the whole item row: a fixed 56dp x 32dp pill around the
+    // icon only, so the highlight never stretches into a tall
+    // vertical capsule and never changes shape across tabs.
+    var pillOrigin by remember { mutableStateOf(0f) }
     var iconRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
     val targetIconRect = iconRects[currentIndex]
     val density = LocalDensity.current
@@ -2452,82 +2487,102 @@ private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (S
     // Icon is 24dp tall, pill is 32dp: center the pill on the icon
     // (4dp overhang top and bottom).
     val indicatorTop by animateFloatAsState(
-        targetIconRect?.let { it.top - railOrigin - with(density) { 4.dp.toPx() } } ?: 0f,
+        targetIconRect?.let { it.top - pillOrigin - with(density) { 4.dp.toPx() } } ?: 0f,
         animationSpec = indicatorSpec,
-        label = "railTop",
+        label = "sidePillTop",
     )
     Box(
         modifier
             .width(88.dp)
             .fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .padding(start = 12.dp, top = 24.dp, bottom = 24.dp)
             .graphicsLayer {
-                alpha = railEnter.value
-                translationX = -16.dp.toPx() * (1f - railEnter.value)
+                alpha = pillEnter.value
+                translationX = -16.dp.toPx() * (1f - pillEnter.value)
             },
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier.fillMaxSize()
-                .onGloballyPositioned { railOrigin = it.boundsInWindow().top },
+        Surface(
+            shape = FloatingCorner,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+            tonalElevation = 8.dp,
+            shadowElevation = 16.dp,
         ) {
-            // The indicator: one fixed 56dp x 32dp horizontal pill
-            // around the selected icon, behind the items. It never
-            // sizes to the item row, so it cannot become the tall
-            // vertical capsule the old item-height indicator was.
-            if (targetIconRect != null) {
-                Box(
-                    Modifier.align(Alignment.TopCenter)
-                        .offset { IntOffset(0, indicatorTop.roundToInt()) }
-                        .size(56.dp, 32.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
-                )
-            }
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
+            Box(
+                Modifier.onGloballyPositioned { pillOrigin = it.boundsInWindow().top },
             ) {
-                for ((index, item) in items.withIndex()) {
-                    val highlighted = index == currentIndex
-                    // Rail labels are ALWAYS shown below the icon
-                    // (2026-11-01 round 1): the pill's selected-only
-                    // / 10-char rule does not apply here — the rail
-                    // has room for every destination's label, and
-                    // icon-only destinations (Garage Door, Living
-                    // Room lights) were unreadable. Folded pill bar
-                    // behavior is unchanged.
-                    val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                // The indicator: one fixed 56dp x 32dp pill around
+                // the selected icon, behind the items.
+                if (targetIconRect != null) {
                     Box(
-                        modifier = Modifier.width(80.dp).height(72.dp)
-                            .clickable {
-                                if (index != currentIndex) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    onSelect(item.screen)
+                        Modifier.align(Alignment.TopCenter)
+                            .offset { IntOffset(0, indicatorTop.roundToInt()) }
+                            .size(56.dp, 32.dp)
+                            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                    )
+                }
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    for ((index, item) in items.withIndex()) {
+                        val highlighted = index == currentIndex
+                        // Side-pill labels are ALWAYS shown below
+                        // the icon: the pill's selected-only / 10-char
+                        // rule does not apply here — the side pill
+                        // has room for every destination's label, and
+                        // icon-only destinations (Garage Door, Living
+                        // Room lights) were unreadable.
+                        val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        Box(
+                            modifier = Modifier.width(80.dp).height(72.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) {
+                                    if (index != currentIndex) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                        onSelect(item.screen)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                // Ripple lives ONLY on the 56x32dp
+                                // icon oval (clipped to CircleShape);
+                                // the label above/below it taps
+                                // through the indication-null box.
+                                Box(
+                                    Modifier.size(56.dp, 32.dp).clip(CircleShape)
+                                        .clickable {
+                                            if (index != currentIndex) {
+                                                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                                onSelect(item.screen)
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        if (highlighted) item.icon else item.outlinedIcon,
+                                        contentDescription = item.label,
+                                        tint = contentColor,
+                                        modifier = Modifier.size(24.dp)
+                                            .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
+                                    )
                                 }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                if (highlighted) item.icon else item.outlinedIcon,
-                                contentDescription = item.label,
-                                tint = contentColor,
-                                modifier = Modifier.size(24.dp)
-                                    .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                item.label,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = contentColor,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    item.label,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = contentColor,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
@@ -2569,23 +2624,25 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
     )
     // Measured tab positions, in window coordinates: the bar origin is
     // subtracted, so the indicator stays correct while the row scrolls.
+    // Round 4: the indicator is a FIXED 56x32dp oval centered on the
+    // selected/scrub-hovered tab's ICON rect — never the full square
+    // text bounding box (the old whole-item rect + 8dp padding made
+    // a 48dp-tall capsule that swallowed the label). Icon rects are
+    // recorded on the icon boxes below; the item rect is only the
+    // first-frame fallback before any icon has reported.
     var barOrigin by remember { mutableStateOf(0f) }
     var itemRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
+    var iconRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
     val targetIndex = scrub.hoveredTab ?: currentIndex
-    val targetRect = itemRects[targetIndex]
+    val targetRect = iconRects[targetIndex] ?: itemRects[targetIndex]
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
         else spring(dampingRatio = 0.74f, stiffness = 380f)
-    val indicatorLeft by animateFloatAsState(
-        targetRect?.let { it.left - barOrigin } ?: 0f,
-        animationSpec = indicatorSpec,
-        label = "pillLeft",
-    )
-    val indicatorRight by animateFloatAsState(
-        targetRect?.let { it.right - barOrigin } ?: 0f,
-        animationSpec = indicatorSpec,
-        label = "pillRight",
-    )
     val density = LocalDensity.current
+    val indicatorCenterX by animateFloatAsState(
+        targetRect?.let { (it.left + it.right) / 2f - barOrigin } ?: 0f,
+        animationSpec = indicatorSpec,
+        label = "pillCenterX",
+    )
     // Auto-width floating island (production-upgrade round): the bar
     // is only as wide as its items, centered, capped at the screen
     // width (beyond which the row scrolls exactly as before). Raised
@@ -2605,22 +2662,17 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                     Modifier.wrapContentWidth()
                         .onGloballyPositioned { barOrigin = it.boundsInWindow().left },
                 ) {
-            // The morphing indicator, behind the items. It is padded
-            // 8dp beyond the measured item rect on each side: item
-            // width snaps instantly at selection while the indicator
-            // glides (the #51 trade), so during the glide a label can
-            // briefly extend past an exactly-sized indicator and read
-            // as text overflowing its shape background. The padding
-            // absorbs that transient overflow (2026-10-29 verdict:
-            // "the text overlaps [the] — this expressive shape
-            // background should be larger").
+            // The morphing indicator, behind the items: a fixed
+            // 56x32dp oval centered on the target icon (Round 4 —
+            // the old whole-item capsule is gone). Vertically
+            // centered in the bar; only its horizontal center
+            // animates, so the highlight glides tab to tab without
+            // ever resizing into the label's bounding box.
             if (targetRect != null) {
-                val indicatorPad = with(density) { 8.dp.toPx() }
                 Box(
                     Modifier.align(Alignment.CenterStart)
-                        .offset { IntOffset((indicatorLeft - indicatorPad).roundToInt(), 0) }
-                        .width(with(density) { (indicatorRight - indicatorLeft + indicatorPad * 2).toDp() })
-                        .height(48.dp)
+                        .offset { IntOffset((indicatorCenterX - with(density) { 28.dp.toPx() }).roundToInt(), 0) }
+                        .size(56.dp, 32.dp)
                         .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
                 )
             }
@@ -2660,7 +2712,10 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                         modifier = Modifier.height(48.dp)
                             .onGloballyPositioned { itemRects = itemRects + (index to it.boundsInWindow()) }
                             .pillScrubItem(scrub, index)
-                            .clickable {
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) {
                                 if (index != currentIndex) {
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     onSelect(item.screen)
@@ -2668,12 +2723,29 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                             },
                         contentAlignment = Alignment.Center,
                     ) {
+                        // Round 4: ripple lives ONLY on the 56x32dp
+                        // icon oval (clipped to CircleShape); the
+                        // label taps through the indication-null
+                        // item box, so no ripple or highlight ever
+                        // covers the full text bounding box.
+                        val onIconTap = {
+                            if (index != currentIndex) {
+                                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                onSelect(item.screen)
+                            }
+                        }
                         if (showLabel) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(item.icon, contentDescription = item.label, tint = contentColor, modifier = Modifier.size(24.dp))
+                                Box(
+                                    Modifier.size(56.dp, 32.dp).clip(CircleShape).clickable(onClick = onIconTap),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(item.icon, contentDescription = item.label, tint = contentColor, modifier = Modifier.size(24.dp)
+                                        .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) })
+                                }
                                 Spacer(Modifier.width(6.dp))
                                 Text(
                                     item.label,
@@ -2686,12 +2758,16 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                                 )
                             }
                         } else {
-                            Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                            Box(
+                                Modifier.size(56.dp, 32.dp).clip(CircleShape).clickable(onClick = onIconTap),
+                                contentAlignment = Alignment.Center,
+                            ) {
                                 Icon(
                                     if (highlighted) item.icon else item.outlinedIcon,
                                     contentDescription = item.label,
                                     tint = contentColor,
-                                    modifier = Modifier.size(24.dp),
+                                    modifier = Modifier.size(24.dp)
+                                        .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
                                 )
                             }
                         }
@@ -2810,7 +2886,10 @@ fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            DialogTitleText(displayCameraName(entity), Modifier.fillMaxWidth())
+            DialogTitleText(
+                if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
+                Modifier.fillMaxWidth(),
+            )
             Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

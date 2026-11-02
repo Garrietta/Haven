@@ -6,9 +6,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,6 +43,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -129,6 +132,7 @@ import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.ServiceSlider
 import com.garrietta.haven.ui.controls.stateText
+import com.garrietta.haven.data.humanizeOptionLabel
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -187,6 +191,51 @@ private fun ToggleRow(label: String, sub: String?, checked: Boolean, enabled: Bo
     }
 }
 
+/**
+ * Grouped card for Round 4 panel redesigns (Security, vacuum):
+ * surfaceContainerLow, extraLarge shape, 16dp padding. Sections
+ * that were plain columns become cards; service calls, button
+ * ids, and behaviors inside are byte-identical.
+ */
+@Composable
+private fun PanelCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp), content = content)
+    }
+    Spacer(Modifier.height(16.dp))
+}
+
+/**
+ * Expressive action pill for Round 4 panel redesigns: a
+ * PressablePillButton that reads selected (primaryContainer) vs
+ * unselected (secondaryContainer). Labels are humanized by the
+ * caller where they come from HA enums.
+ */
+@Composable
+private fun PanelPill(label: String, selected: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    PressablePillButton(
+        onClick = onClick,
+        containerColor = if (selected) scheme.primaryContainer else scheme.secondaryContainer,
+        contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSecondaryContainer,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+    ) {
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * Humanize only strings that look like raw HA tokens (contain an
+ * underscore or hyphen); already-friendly text ("Motion detected")
+ * passes through untouched, so no existing wording changes case.
+ */
+private fun humanizeIfRaw(raw: String): String =
+    if ('_' in raw || '-' in raw) humanizeOptionLabel(raw) else raw
+
 /** Segmented option chips for a select entity; falls back to plain current-value text when the live options list is empty. */
 @Composable
 private fun SelectChips(entity: HaEntity, vm: HavenViewModel, label: String) {
@@ -194,19 +243,24 @@ private fun SelectChips(entity: HaEntity, vm: HavenViewModel, label: String) {
     Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     Spacer(Modifier.height(4.dp))
     if (options.isEmpty()) {
-        PanelBodyText("Current: ${entity.stateText()}")
+        // Round 4: the fallback current-value line is humanized
+        // too ("Boost_IQ" never renders as "Boost Iq" or raw).
+        PanelBodyText("Current: ${humanizeIfRaw(entity.state)}")
     } else {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             for (option in options) {
-                FilterChip(
+                // Round 4: expressive pill treatment + humanized
+                // label; the service call (raw option string) is
+                // byte-identical — only the display text changes.
+                PanelPill(
+                    label = humanizeOptionLabel(option),
                     selected = entity.state == option,
                     onClick = {
                         vm.callService("select", "select_option", entity.entityId, JSONObject().put("option", option))
                     },
-                    label = { Text(option) },
                 )
             }
         }
@@ -657,8 +711,8 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
         if (dockStatus != null || taskStatus != null) {
             PanelBodyText(
                 listOfNotNull(
-                    dockStatus?.let { "Dock: $it" },
-                    taskStatus?.let { "Task: $it" },
+                    dockStatus?.let { "Dock: ${humanizeIfRaw(it)}" },
+                    taskStatus?.let { "Task: ${humanizeIfRaw(it)}" },
                 ).joinToString(" · "),
             )
             Spacer(Modifier.height(16.dp))
@@ -687,13 +741,15 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             }
         }
         Spacer(Modifier.height(16.dp))
+        PanelCard {
         PanelSectionTitle("Transport")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PillAction("Start") { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
             PillAction("Pause") { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
             PillAction("Return to Base") { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
         }
-        Spacer(Modifier.height(16.dp))
+        }
+        PanelCard {
         PanelSectionTitle("Dock actions")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PillAction("Empty Dust Bin") { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
@@ -704,7 +760,8 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             PillAction("Dry Mop") { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
             PillAction("Stop Dry Mop") { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
         }
-        Spacer(Modifier.height(16.dp))
+        }
+        PanelCard {
         PanelSectionTitle("Cleaning setup")
         for ((id, label) in listOf(
             VACUUM_CLEANING_MODE_ID to "Cleaning mode",
@@ -716,6 +773,8 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             val select = states[id]
             if (select != null) SelectChips(select, vm, label)
         }
+        }
+        PanelCard {
         PanelSectionTitle("Consumables")
         for (consumable in VACUUM_CONSUMABLES) {
             val sensor = states[consumable.sensorId]
@@ -742,6 +801,8 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
         }
+        }
+        PanelCard {
         PanelSectionTitle("Options")
         for ((id, label) in listOf(
             VACUUM_AUTO_EMPTY_ID to "Auto-empty",
@@ -760,6 +821,8 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             Text("Do not disturb: $dnd", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
         }
+        }
+        PanelCard {
         PanelSectionTitle("Lifetime")
         val area = states[VACUUM_TOTAL_AREA_ID]?.state?.toDoubleOrNull()
         val count = states[VACUUM_TOTAL_COUNT_ID]?.state?.toIntOrNull()
@@ -769,6 +832,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
         if (time != null) PanelBodyText("Total cleaning time: ${"%.1f".format(time)} h")
         if (area == null && count == null && time == null) {
             PanelBodyText("Lifetime stats are not available right now.")
+        }
         }
         Spacer(Modifier.height(16.dp))
     }
@@ -1002,23 +1066,27 @@ fun SecurityPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
         Spacer(Modifier.height(4.dp))
         PanelBodyText("Arming changes state immediately on tap — nothing arms on its own.")
         Spacer(Modifier.height(16.dp))
-        PanelSectionTitle("Arm")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (mode in ALARM_ARM_MODES) {
-                FilterChip(
-                    selected = alarm.state == "armed_$mode",
-                    onClick = { vm.callService("alarm_control_panel", alarmArmService(mode), ALARM_ID, codeData) },
-                    label = { Text(alarmModeLabel(mode)) },
+        // Round 4: grouped card + expressive pills; arm service
+        // calls and labels are byte-identical.
+        PanelCard {
+            PanelSectionTitle("Arm")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (mode in ALARM_ARM_MODES) {
+                    PanelPill(
+                        label = alarmModeLabel(mode),
+                        selected = alarm.state == "armed_$mode",
+                        onClick = { vm.callService("alarm_control_panel", alarmArmService(mode), ALARM_ID, codeData) },
+                    )
+                }
+                PanelPill(
+                    label = "Disarm",
+                    selected = alarm.state == "disarmed",
+                    onClick = { vm.callService("alarm_control_panel", "alarm_disarm", ALARM_ID, codeData) },
                 )
             }
-            FilterChip(
-                selected = alarm.state == "disarmed",
-                onClick = { vm.callService("alarm_control_panel", "alarm_disarm", ALARM_ID, codeData) },
-                label = { Text("Disarm") },
-            )
         }
-        Spacer(Modifier.height(16.dp))
         if (codeFormat != null) {
+            PanelCard {
             PanelSectionTitle("PIN")
             Text(
                 "Code: ${"•".repeat(code.length)}",
@@ -1044,31 +1112,34 @@ fun SecurityPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
             }
+            } // PIN PanelCard
         } else {
             PanelBodyText("This alarm panel does not ask for a PIN, so no keypad is shown.")
             Spacer(Modifier.height(8.dp))
         }
-        PanelSectionTitle("Doors & motion")
-        val rows = securityChecklist(states.values.filter { it.domain == "binary_sensor" })
-        if (rows.isEmpty()) {
-            PanelBodyText("No door or motion sensors to show.")
-        }
-        for (row in rows) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(row.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(row.statusText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(
-                    if (row.active) "●" else "○",
-                    fontSize = 16.sp,
-                    color = if (row.active) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        PanelCard {
+            PanelSectionTitle("Doors & motion")
+            val rows = securityChecklist(states.values.filter { it.domain == "binary_sensor" })
+            if (rows.isEmpty()) {
+                PanelBodyText("No door or motion sensors to show.")
             }
-            Spacer(Modifier.height(8.dp))
+            for (row in rows) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(row.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(row.statusText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(
+                        if (row.active) "●" else "○",
+                        fontSize = 16.sp,
+                        color = if (row.active) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
         }
-        Spacer(Modifier.height(8.dp))
         if (siren != null) {
+            PanelCard {
             PanelSectionTitle("Emergency siren")
             if (siren.state == "on") {
                 PillAction("Stop siren") { vm.callService("siren", "turn_off", SIREN_ID) }
@@ -1085,6 +1156,7 @@ fun SecurityPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(8.dp))
             PanelBodyText("The siren only sounds after the confirm tap.")
+            } // siren PanelCard
         }
         Spacer(Modifier.height(16.dp))
     }

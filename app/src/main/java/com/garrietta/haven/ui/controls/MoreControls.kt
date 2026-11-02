@@ -75,6 +75,7 @@ import com.garrietta.haven.ui.components.reportArcBounds
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.theme.ExpressiveKind
+import com.garrietta.haven.ui.theme.FloatingCorner
 import com.garrietta.haven.ui.theme.polygonShape
 import org.json.JSONArray
 import org.json.JSONObject
@@ -706,6 +707,75 @@ fun AlarmControl(entity: HaEntity, vm: HavenViewModel) {
             Button(onClick = { vm.callService("alarm_control_panel", "alarm_arm_home", entity.entityId, codeData) }) { Text("Arm home") }
             Button(onClick = { vm.callService("alarm_control_panel", "alarm_arm_away", entity.entityId, codeData) }) { Text("Arm away") }
             OutlinedButton(onClick = { vm.callService("alarm_control_panel", "alarm_disarm", entity.entityId, codeData) }) { Text("Disarm") }
+        }
+    }
+}
+
+/**
+ * Expressive weather hero card (Round 4): replaces the static
+ * non-functional grey semicircle gauge on the Forecast Home panel.
+ * Condition-tinted box (the same 0.16-alpha treatment the panel
+ * already used), a condition-colored polygon badge with a white
+ * condition icon, the big current temperature, the formatted
+ * condition, a high/low row from the first forecast entry, and a
+ * humidity row — no Dial anywhere in this card. A row renders
+ * only when its data exists (empty forecast = no high/low row,
+ * no humidity attribute = no humidity row), never a placeholder.
+ */
+@Composable
+fun WeatherHeroCard(entity: HaEntity, vm: HavenViewModel) {
+    val conditionColor = weatherConditionColor(entity.state)
+    val temp = entity.attrDouble("temperature")
+    val humidity = entity.attrDouble("humidity")
+    val forecast = rememberForecast(entity, vm, enabled = true)
+    val first = forecast.firstOrNull()
+    val high = (first?.get("temperature") as? Number)?.toDouble()
+    val low = (first?.get("templow") as? Number)?.toDouble()
+    Box(
+        Modifier.fillMaxWidth().background(conditionColor.copy(alpha = 0.16f), FloatingCorner).padding(20.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(56.dp).background(conditionColor, polygonShape(forecastChipKind(entity.state))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        conditionIcon(entity.state),
+                        contentDescription = entity.state,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    if (temp != null) {
+                        Text(
+                            temp.formatTemp(),
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Text(
+                        formatCondition(entity.state),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (high != null || low != null) {
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (high != null) Text("High ${high.formatTemp()}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                    if (low != null) Text("Low ${low.formatTemp()}", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            if (humidity != null) {
+                Spacer(Modifier.height(4.dp))
+                Text("Humidity ${humidity.toInt()}%", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

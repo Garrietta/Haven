@@ -301,4 +301,26 @@ class MorphMathTest {
     fun badgeRectInRow_rowShorterThanBadgeFloorsAtRowTop() {
         assertEquals(Rect(0f, 0f, 48f, 48f), badgeRectInRow(Rect(0f, 0f, 100f, 40f), 48f))
     }
+
+    // Round 4 exit flash: the card is hidden exactly while panel
+    // content is visible (progress > 0.85) and fades in smoothly
+    // over [0.85 -> 0] — no blank slot, no one-frame pop.
+    @Test
+    fun morphExitCardAlpha_endpoints() {
+        assertEquals(0f, morphExitCardAlpha(1f), 0.001f)
+        assertEquals(1f, morphExitCardAlpha(0f), 0.001f)
+    }
+
+    @Test
+    fun morphExitCardAlpha_hiddenThroughContentWindow() {
+        assertEquals(0f, morphExitCardAlpha(0.95f), 0.001f)
+        assertEquals(0f, morphExitCardAlpha(0.85f), 0.001f)
+    }
+
+    @Test
+    fun morphExitCardAlpha_risesMonotonically() {
+        val mid = morphExitCardAlpha(0.5f)
+        assertTrue(mid > 0f && mid < 1f)
+        assertTrue(morphExitCardAlpha(0.25f) > mid)
+    }
 }

@@ -15,6 +15,28 @@ package com.garrietta.haven.data
  * not the singular form.
  */
 
+/**
+ * Humanizes a raw HA enum/option/state token for display (Round 4):
+ * underscores and hyphens become spaces, camelCase splits, every
+ * word title-cases — except short all-caps acronyms, which stay
+ * upper-case ("Boost_IQ" -> "Boost IQ", never "Boost Iq"; a
+ * lowercase "iq" token maps to the same acronym). Pure, so panel
+ * labels can never show a raw token again.
+ */
+fun humanizeOptionLabel(raw: String): String {
+    if (raw.isBlank()) return raw
+    val acronyms = mapOf("iq" to "IQ", "led" to "LED")
+    val spaced = raw.replace('_', ' ').replace('-', ' ')
+        .replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
+    return spaced.split(' ').filter { it.isNotEmpty() }.joinToString(" ") { word ->
+        when {
+            word.length <= 4 && word.all { it.isUpperCase() || it.isDigit() } -> word
+            acronyms.containsKey(word.lowercase()) -> acronyms[word.lowercase()]!!
+            else -> word.lowercase().replaceFirstChar { it.uppercase() }
+        }
+    }
+}
+
 // ---- Vacuum (eufy AE C10) ----
 
 const val VACUUM_ID = "vacuum.t2292"

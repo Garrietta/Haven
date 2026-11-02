@@ -326,4 +326,34 @@ class ThermostatLogicTest {
         val mid = offsetFor(needed + ramp / 2f)
         assertTrue(mid > 0f && mid < 31.5f)
     }
+
+    // Round 4: the dial maps 55-85F by default, so 67/69 thumbs
+    // separate; HA ranges outside it fall back untouched, and
+    // setpoint values are never rewritten (only the display range).
+    @Test
+    fun thermostatDisplayRange_narrowsTo55_85() {
+        assertEquals(55f..85f, thermostatDisplayRange(50f, 90f))
+        assertEquals(60f..80f, thermostatDisplayRange(60f, 80f))
+    }
+
+    @Test
+    fun thermostatDisplayRange_fallsBackWhenNoOverlap() {
+        // A Celsius thermostat (e.g. 10-30C) has no overlap with
+        // 55-85, so the HA range is used as-is.
+        assertEquals(10f..30f, thermostatDisplayRange(10f, 30f))
+    }
+
+    @Test
+    fun thermostatDisplayRange_degenerate() {
+        assertEquals(70f..70f, thermostatDisplayRange(70f, 70f))
+    }
+
+    @Test
+    fun dial240AngleForValue_clampsOutOfRange() {
+        val range = 55f..85f
+        assertEquals(dial240AngleForValue(55f, range), dial240AngleForValue(40f, range), 0.001f)
+        assertEquals(dial240AngleForValue(85f, range), dial240AngleForValue(100f, range), 0.001f)
+        // In-range round-trip still holds.
+        assertTrue(dial240AngleForValue(67f, range) < dial240AngleForValue(69f, range))
+    }
 }

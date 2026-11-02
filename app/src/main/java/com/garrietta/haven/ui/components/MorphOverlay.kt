@@ -559,6 +559,23 @@ fun morphCloseContentAlpha(progress: Float): Float =
     smoothstep(0.85f, 1.0f, progress)
 
 /**
+ * Source-card alpha on a morphing surface CLOSE at [progress]
+ * (1 = panel at rest, 0 = landed back on the card) — the Round 4
+ * exit-flash fix. The old exit rule hid the card outright until
+ * progress reached 0.02, while the panel content was already fully
+ * gone at 0.85 ([morphCloseContentAlpha]): the slot sat blank for
+ * most of the close, then the card popped back in one frame —
+ * the blank-then-redraw flash. This curve keeps the card hidden
+ * exactly while panel content is still visible (progress above
+ * 0.85), then fades the card in smoothly over [0.85, 0] — no
+ * frame has both at full opacity (no doubling), and no frame
+ * has neither (no blank slot, no pop). Progress is clamped
+ * first, like every other morph curve here.
+ */
+fun morphExitCardAlpha(progress: Float): Float =
+    1f - smoothstep(0f, 0.85f, progress)
+
+/**
  * Surface-background alpha for a morphing surface at [progress]:
  * transparent at the card, opaque once the surface has grown a
  * little (smoothstep over [0, 0.35]). Together with

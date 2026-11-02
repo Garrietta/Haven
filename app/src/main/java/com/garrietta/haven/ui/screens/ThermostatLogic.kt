@@ -156,6 +156,24 @@ fun dial240ValueFromAngle(deg: Float, range: ClosedFloatingPointRange<Float>): F
     return range.start + (rel / DIAL240_SWEEP_DEG) * (range.endInclusive - range.start)
 }
 
+/**
+ * The dial's DISPLAY range (Round 4): the HA min/max narrowed to
+ * 55–85°F, so setpoints 2° apart (67°/69°) get clear arc
+ * separation instead of crowding on a wide range. This narrows
+ * only the drawn arc: setpoint values themselves are never
+ * rewritten — a value outside the display range still clamps to
+ * the arc end for drawing (see dial240AngleForValue) and the
+ * caller flags it. When the HA range does not overlap 55–85 at
+ * all (e.g. a Celsius thermostat), the HA range is used as-is,
+ * never an empty or inverted range.
+ */
+fun thermostatDisplayRange(min: Float, max: Float): ClosedFloatingPointRange<Float> {
+    if (max <= min) return min..max
+    val lo = maxOf(55f, min)
+    val hi = minOf(85f, max)
+    return if (lo < hi) lo..hi else min..max
+}
+
 /** The screen angle for a dial value on the 240-degree sweep. */
 fun dial240AngleForValue(value: Float, range: ClosedFloatingPointRange<Float>): Float {
     val fraction = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)

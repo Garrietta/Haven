@@ -274,4 +274,34 @@ class DesignTokensTest {
         assertEquals(17.sp, dialogNameSize("Thermostat Current Humidity"))
         assertEquals(15.sp, dialogNameSize("Thermostat Current Temperature"))
     }
+
+    // Round 4: sensor semantics — synchronous kind resolution and
+    // semantic badge colors (never async, so no flash).
+    @Test
+    fun sensorKind_ecobeePair() {
+        assertEquals(SensorKind.TEMPERATURE, sensorKind("sensor.thermostat_current_temperature", "temperature", "Thermostat Current Temperature"))
+        assertEquals(SensorKind.HUMIDITY, sensorKind("sensor.thermostat_current_humidity", "humidity", "Thermostat Current Humidity"))
+    }
+
+    @Test
+    fun sensorKind_byIdDeviceClassAndName() {
+        assertEquals(SensorKind.BATTERY, sensorKind("sensor.robovac_battery", null, "Robovac Battery"))
+        assertEquals(SensorKind.POWER, sensorKind("sensor.plug_power", "power", "Plug Power"))
+        assertEquals(SensorKind.LIGHT, sensorKind("sensor.office_illuminance", "illuminance", "Office Illuminance"))
+        assertEquals(SensorKind.OTHER, sensorKind("sensor.mystery", null, "Mystery"))
+    }
+
+    @Test
+    fun sensorBadgeColors_semanticPairs() {
+        assertEquals(Color(0xFFEF5350) to Color.White, sensorBadgeColors(SensorKind.TEMPERATURE))
+        assertEquals(Color(0xFF29B6F6) to Color(0xFF01579B), sensorBadgeColors(SensorKind.HUMIDITY))
+        assertEquals(null, sensorBadgeColors(SensorKind.OTHER))
+    }
+
+    @Test
+    fun sensorCardTint_semanticOrNull() {
+        assertEquals(Color(0xFFEF5350), sensorCardTint(SensorKind.TEMPERATURE))
+        assertEquals(Color(0xFF29B6F6), sensorCardTint(SensorKind.HUMIDITY))
+        assertEquals(null, sensorCardTint(SensorKind.OTHER))
+    }
 }

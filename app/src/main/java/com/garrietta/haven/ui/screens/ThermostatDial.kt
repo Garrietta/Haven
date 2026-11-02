@@ -442,7 +442,18 @@ fun ThermostatDial(
                 currentLabel,
                 TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant),
             )
-            drawText(layout, topLeft = Offset(cx - layout.size.width / 2f, cy - trackRadius + 28.dp.toPx()))
+            // Round 4: the label lives at the BOTTOM of the ring
+            // interior, inside the 120° bottom gap where no thumb
+            // can ever travel (gap-proofing) — the old top-of-ring
+            // slot collided with the 67°/69° thumbs, whose arc
+            // positions sit near the top of a 55–85° display range.
+            drawText(
+                layout,
+                topLeft = Offset(
+                    cx - layout.size.width / 2f,
+                    cy + trackRadius - 28.dp.toPx() - layout.size.height,
+                ),
+            )
         }
         // Pill thumbs on the track. When the setpoints are close,
         // the thumbs stagger radially (see dualThumbRadii) instead

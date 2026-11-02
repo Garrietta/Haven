@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Home
@@ -92,7 +95,10 @@ import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.SensorKind
 import com.garrietta.haven.ui.components.climateModeColor
+import com.garrietta.haven.ui.components.sensorCardTint
+import com.garrietta.haven.ui.components.sensorKind
 import com.garrietta.haven.ui.components.lightColorTempTint
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.hideBodyWhenMorphSource
@@ -148,6 +154,23 @@ fun HaEntity.dialogHeaderState(): String {
     return if (temp != null) "${formatCondition(state)} · $temp" else stateText()
 }
 
+/**
+ * Sensor card titles (Round 4): HA names the Ecobee pair
+ * "Thermostat Current Temperature" / "Thermostat Current
+ * Humidity", which truncates on cards. The redundant prefix
+ * strips, so titles read "Temperature" and "Humidity" in full.
+ * Every other entity keeps its friendly name byte-identical.
+ */
+fun sensorDisplayName(entity: HaEntity): String {
+    if (entity.domain != "sensor") return entity.friendlyName
+    val prefix = "Thermostat Current "
+    return if (entity.friendlyName.startsWith(prefix)) {
+        entity.friendlyName.removePrefix(prefix)
+    } else {
+        entity.friendlyName
+    }
+}
+
 fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
     "light" -> Icons.Filled.Lightbulb
     "switch", "input_boolean" -> Icons.Filled.Power
@@ -159,7 +182,17 @@ fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
     "lock" -> if (entity.state == "locked") Icons.Filled.Lock else Icons.Filled.LockOpen
     "camera" -> Icons.Filled.Videocam
     "weather" -> Icons.Filled.WbSunny
-    "sensor" -> Icons.Filled.Info
+    // Sensors never get the generic "i" badge where a domain
+    // icon exists (Round 4): temperature gets the thermometer,
+    // humidity the droplet, battery/power/light their icons.
+    "sensor" -> when (sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName)) {
+        SensorKind.TEMPERATURE -> Icons.Filled.Thermostat
+        SensorKind.HUMIDITY -> Icons.Filled.WaterDrop
+        SensorKind.BATTERY -> Icons.Filled.BatteryFull
+        SensorKind.POWER -> Icons.Filled.Bolt
+        SensorKind.LIGHT -> Icons.Filled.WbSunny
+        SensorKind.OTHER -> Icons.Filled.Info
+    }
     "binary_sensor" -> Icons.Filled.Visibility
     "scene", "script" -> Icons.Filled.PlayArrow
     "automation" -> Icons.Filled.Build
@@ -355,6 +388,14 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 climateModeColor(display.state, display.attrString("hvac_action")),
                 0.15f,
             )
+            // Sensor cards carry their semantic tint at low alpha
+            // (Round 4, same language as climate/weather cards):
+            // coral for temperature, sky for humidity.
+            else if (display.domain == "sensor") {
+                val tint = sensorCardTint(sensorKind(display.entityId, display.attrString("device_class"), display.friendlyName))
+                if (tint != null) lerp(MaterialTheme.colorScheme.surfaceContainer, tint, 0.15f)
+                else MaterialTheme.colorScheme.surfaceContainer
+            }
             else MaterialTheme.colorScheme.surfaceContainer,
         ),
         modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).hideWhenMorphSource(entity.entityId) else Modifier),
@@ -379,6 +420,15 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 // a shape action the whole header is one detail target,
                 // exactly as before.
                 val shapeAction = if (headerClickable) shapeTapAction(vm, entity) else null
+                // Climate cards route to the primary scalloped
+                // dial panel (Round 4), never the sheet: tap or
+                // long-press on the Ecobee card opens the pop-out.
+                // Every other domain keeps the caller's detail
+                // routing (sheet on Boards/Areas/Search).
+                val detailAction: () -> Unit = {
+                    if (entity.domain == "climate") vm.openClimatePopout(entity.entityId)
+                    else onDetail(entity.entityId)
+                }
                 val badgeClick = when {
                     shapeAction != null -> Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -392,7 +442,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     headerClickable -> Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                    ) { onDetail(entity.entityId) }
+                    ) { detailAction() }
                     else -> Modifier
                 }
                 // No ripple, same frozen-ripple reason as above:
@@ -400,7 +450,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 val detailClick = if (headerClickable) Modifier.clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                ) { onDetail(entity.entityId) } else Modifier
+                ) { detailAction() } else Modifier
                 // Traveling header (2026-10-29 pop-up round): the
                 // header row reports its root rect and hides the
                 // moment its morph opens, so the overlay's single
@@ -427,7 +477,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(display.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(sensorDisplayName(display), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(display.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)

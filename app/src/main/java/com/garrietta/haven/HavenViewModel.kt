@@ -57,8 +57,6 @@ sealed class Screen {
     /** Rooms & areas manager (Settings): create/rename/delete HA areas and assign entities to them. */
     data object RoomManager : Screen()
     data class EntityDetail(val entityId: String) : Screen()
-    /** Full-page thermostat experience (hero dial, range bar, pills). */
-    data class Thermostat(val entityId: String) : Screen()
     /** Round 3 morph panels: full-screen panels on both postures, reusing the PanelOverlay morph machinery. */
     data object VacuumPanel : Screen()
     data class MediaPanel(val entityId: String) : Screen()

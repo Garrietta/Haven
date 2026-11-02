@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalShapePrefs
@@ -76,6 +77,7 @@ import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
+import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.polygonShape
@@ -199,7 +201,11 @@ private fun tileStatus(entity: HaEntity): String = when (entity.domain) {
 private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)?) {
     when (entity.domain) {
         "climate" -> vm.openClimatePopout(entity.entityId)
-        "camera" -> vm.openCameraFullscreen(entity.entityId)
+        // Round 4 Front Door unification: the Cameras-tab tile for
+        // the front door opens the SAME #93 panel (Live View /
+        // Event History toggle) as the Home hero — not the legacy
+        // fullscreen viewer. Every other camera keeps fullscreen.
+        "camera" -> if (entity.entityId == FRONT_DOOR_LIVE_VIEW_ID) vm.openCameraDialog(entity.entityId) else vm.openCameraFullscreen(entity.entityId)
         else -> if (navigate != null) navigate(Screen.EntityDetail(entity.entityId)) else vm.openPopup(entity.entityId)
     }
 }
@@ -288,6 +294,11 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // still the fallback.
                 onLongClick = {
                     if (entity.domain == "camera" && navigate != null) navigate(Screen.CameraClips(entity.entityId))
+                    // Round 4: climate long-press opens the primary
+                    // dial panel, same as tap (the secondary Details
+                    // page is deleted); light long-press opens its
+                    // panel; every other domain keeps the sheet.
+                    else if (entity.domain == "climate") vm.openClimatePopout(entity.entityId)
                     else if (entity.domain == "light") openPage(vm, entity, navigate)
                     else vm.openPopup(entity.entityId)
                 },
@@ -346,6 +357,23 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // rotation never touch the name (2026-10-29 verdict:
                 // "the text overlaps [the] — this expressive shape
                 // background should be larger").
+                // Round 4 split zone (light/switch tiles, mirroring
+                // HomeRoomCard): the badge area wears a subtle
+                // pill/squircle underlay and toggles inline on tap;
+                // the name/status zone below opens the panel.
+                val tileIsBinary = entity.domain in setOf("light", "switch", "input_boolean", "fan")
+                val tileZoneInteraction = remember { MutableInteractionSource() }
+                Box(
+                    if (tileIsBinary) Modifier.fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(24.dp))
+                        .combinedClickable(
+                            interactionSource = tileZoneInteraction,
+                            indication = null,
+                            onClick = { vm.toggle(entity.entityId) },
+                            onLongClick = { openPage(vm, entity, navigate) },
+                        )
+                        .padding(8.dp) else Modifier,
+                ) {
                 Box(
                     Modifier.size(64.dp).background(
                         badgeBg,
@@ -379,15 +407,36 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                         modifier = Modifier.size(26.dp),
                     )
                 }
+                } // badge-zone Box
             }
             Spacer(Modifier.height(16.dp))
+            // Round 4 split zone, lower half: tapping the name or
+            // status opens the panel (binary tiles); long-press
+            // anywhere does the same. Non-binary tiles keep their
+            // surface-level routing; this zone targets openPage
+            // for all of them, which matches tap routing except
+            // cameras (fullscreen) — camera tiles are excluded
+            // here because their visual branch above already owns
+            // the tap path.
+            val tileTextZoneInteraction = remember { MutableInteractionSource() }
+            Column(
+                Modifier.fillMaxWidth().then(
+                    if (entity.domain != "camera") Modifier.combinedClickable(
+                        interactionSource = tileTextZoneInteraction,
+                        indication = null,
+                        onClick = { openPage(vm, entity, navigate) },
+                        onLongClick = { openPage(vm, entity, navigate) },
+                    ) else Modifier,
+                ),
+            ) {
             Text(
                 // Display name: the Ring camera's HA name is
                 // "Front Door Live view" — the tile title from the
                 // unfolded video. displayCameraName strips that
-                // suffix for Ring only; every other entity is
-                // byte-identical.
-                displayCameraName(display),
+                // suffix for Ring only; sensor names strip the
+                // "Thermostat Current " prefix; every other entity
+                // is byte-identical.
+                if (entity.domain == "sensor") sensorDisplayName(display) else displayCameraName(display),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -412,6 +461,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     modifier = if (entity.domain != "camera") Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier,
                 )
             }
+            } // text-zone Column
         }
     }
 }

@@ -111,15 +111,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import com.garrietta.haven.ui.components.LocalShapePrefs
-import com.garrietta.haven.ui.components.LocalWindowSizeClass
-import com.garrietta.haven.ui.components.WindowSizeClass
 import com.garrietta.haven.ui.components.badgeColors
+import com.garrietta.haven.ui.components.sensorCardTint
+import com.garrietta.haven.ui.components.sensorKind
 import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.ensureContrast
 import com.garrietta.haven.ui.components.hideBodyWhenMorphSource
 import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.controls.formatTemp
+import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.shapeTapAction
 import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.theme.polygonShape
@@ -415,67 +416,24 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
             add((if (id == null) RoomFilter.Unassigned else RoomFilter.Area(id)) to name)
         }
     }
-    // Grid columns per room section: 2 on phones and the Fold8
-    // (mockup folded = 2 columns), 3 on EXPANDED windows, matching
-    // the existing behavior map (WindowSize: EXPANDED adds a column).
-    val roomGridColumns = if (LocalWindowSizeClass.current == WindowSizeClass.EXPANDED) 3 else 2
+    // Grid columns per room section (Round 4): 2 folded, 4
+    // unfolded — every Home section spans the full width on both
+    // postures, so the grid widens instead of splitting into
+    // independent columns.
+    val roomGridColumns = if (LocalWideLayout.current) 4 else 2
 
-    if (LocalWideLayout.current) {
-        // Unfolded, two columns (Gemini mockup round, 2026-11-01;
-        // independent scrolling since the 2026-11-01 panels round):
-        // left = greeting + chips + camera hero (weather and
-        // who's-home under it); right = room grids. Each column is
-        // its OWN scrollable region (its own rememberScrollState),
-        // replacing #85's single unified verticalScroll page: a drag
-        // on the left scrolls the left column only, and a drag on
-        // the right scrolls the room grids only, so a long room list
-        // never pushes the hero off-screen and vice versa. The
-        // 1200dp cap + centering from the old wide layout is kept.
-        // No pill clearance: unfolded chrome is the left-edge rail,
-        // not the floating pill, so the old pill spacer would only
-        // leave dead space — each column ends with 16dp of
-        // breathing room instead, so nothing clips at the bottom.
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            Row(
-                Modifier.widthIn(max = 1200.dp).fillMaxWidth().fillMaxHeight()
-                    .statusBarsPadding().padding(horizontal = 16.dp),
-            ) {
-                Column(
-                    Modifier.weight(1f).padding(end = 8.dp).fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    // Greeting FIRST, then the hero (2026-10-30 verdict):
-                    // the hero is no longer the first element on Home.
-                    GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
-                    RoomFilterChips(roomChips, roomFilter) { roomFilter = it }
-                    Spacer(Modifier.height(12.dp))
-                    if (showSection("cameras")) {
-                        CameraQuadrantHero(vm, navigate, states)
-                    }
-                    if (showSection("weather") && weather != null) {
-                        WeatherBlock(weather, vm, navigate)
-                    }
-                    if (showSection("home") && homeTrackers.isNotEmpty()) {
-                        PresenceBlock(homeTrackers, states)
-                    }
-                    Round3HomeBlocks(vm, states, navigate)
-                    Spacer(Modifier.height(16.dp))
-                }
-                Column(
-                    Modifier.weight(1f).padding(start = 8.dp).fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    for ((_, name, members) in visibleRooms) {
-                        RoomSectionGrid(name, members, vm, roomGridColumns)
-                    }
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-        }
-    } else {
+    // Round 4 unified Home: ONE full-width LazyColumn on both
+    // postures (centered, 1200dp cap) — #86's unfolded two-column
+    // Row with independent scrolling is REMOVED, so the stranded
+    // "No room" empty right column is gone by construction.
+    // Room-filter chips actively narrow visibleRooms below (the
+    // #85 chip filtering, preserved through the unification);
+    // greeting, hero, weather, and who's-home always stay.
+    val wide = LocalWideLayout.current
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
-            Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+            Modifier.widthIn(max = 1200.dp).fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = if (wide) 16.dp else pillClearanceBottom()),
         ) {
             // Greeting FIRST, then the hero (2026-10-30 verdict):
             // the hero is no longer the first element on Home.
@@ -490,7 +448,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
                 // Stable section keys (2026-11-01 round 1): a panel
                 // return must never recompose a room section into a
                 // sibling's slot — keys pin each section to its area.
-                item(key = "room:${areaId ?: "unassigned"}") { RoomSectionGrid(name, members, vm, roomGridColumns) }
+                item(key = "room:${areaId ?: "unassigned"}") { RoomSectionGrid(name, members, vm, roomGridColumns, navigate) }
             }
             item { Spacer(Modifier.height(16.dp)) }
         }
@@ -574,11 +532,16 @@ private fun WeatherBlock(weather: HaEntity, vm: HavenViewModel, navigate: (Scree
  * missing cells with spacers so cards keep their grid width.
  */
 @Composable
+/**
+ * One room section: heading + a [columns]-column card grid
+ * (Round 4: 2 folded, 4 unfolded, full width on both postures).
+ */
 private fun RoomSectionGrid(
     name: String,
     members: List<HaEntity>,
     vm: HavenViewModel,
     columns: Int,
+    navigate: (Screen) -> Unit,
 ) {
     Column {
         Text(name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -586,7 +549,7 @@ private fun RoomSectionGrid(
         for (row in members.chunked(columns)) {
             Row {
                 for (member in row) {
-                    Box(Modifier.weight(1f)) { HomeRoomCard(vm, member) }
+                    Box(Modifier.weight(1f)) { HomeRoomCard(vm, member, navigate) }
                     if (member != row.last()) Spacer(Modifier.width(12.dp))
                 }
                 repeat(columns - row.size) {
@@ -660,7 +623,7 @@ private fun homeCardStatus(entity: HaEntity): String = when (entity.domain) {
  * video's Living Room lights tab cannot recur here.
  */
 @Composable
-private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
+private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity, navigate: (Screen) -> Unit) {
     val accent = accentFor(entity.entityId)
     // Snapshot-held visuals, same rule as tiles and cards: while this
     // card's morph is open, badge/name/state/container resolve from
@@ -669,6 +632,16 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
     val snap = vm.travelSnapshots[entity.entityId]
     val display = snap ?: entity
     val scheme = MaterialTheme.colorScheme
+    val isBinary = display.domain in setOf("light", "switch", "input_boolean", "fan")
+    // Round 4: light panels open via navigate (detail panel with
+    // vertical pill + status cards); every other domain keeps the
+    // sheet/popup path. Climate opens the primary dial panel on
+    // BOTH tap and long-press.
+    val openPanel: () -> Unit = {
+        if (display.domain == "climate") vm.openClimatePopout(entity.entityId)
+        else if (isBinary) navigate(Screen.EntityDetail(entity.entityId))
+        else vm.openPopup(entity.entityId)
+    }
     val container = when {
         display.domain == "light" && display.state == "on" ->
             lightBrightnessContainer(
@@ -683,6 +656,13 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
                 climateModeColor(display.state, display.attrString("hvac_action")),
                 0.15f,
             )
+        // Round 4: sensor cards tint toward their semantic color
+        // (same 0.15 lerp as climate/weather), so temperature reads
+        // warm and humidity reads sky-blue, never grey.
+        display.domain == "sensor" -> {
+            val tint = sensorCardTint(sensorKind(display.entityId, display.attrString("device_class"), display.friendlyName))
+            if (tint != null) lerp(scheme.surfaceContainerLow, tint, 0.15f) else scheme.surfaceContainerLow
+        }
         else -> scheme.surfaceContainerLow
     }
     val nameColor = ensureContrast(scheme.onSurface, container, 4.5f)
@@ -719,20 +699,36 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
-                // Lights toggle inline on tap (the same vm.toggle
-                // path the trailing Switch and the badge shape
-                // action use, optimistic guard included); every
-                // other domain opens its panel. Long-press always
-                // opens the panel, so a light's panel (brightness,
-                // color, shape picker) is one long-press away.
-                onClick = {
-                    if (entity.domain == "light") vm.toggle(entity.entityId)
-                    else vm.openPopup(entity.entityId)
-                },
-                onLongClick = { vm.openPopup(entity.entityId) },
+                // Round 4 split zones (binary cards): the badge row
+                // below owns tap-to-toggle, the text zone below owns
+                // tap-to-panel, and long-press ANYWHERE opens the
+                // panel — so this surface-level tap is the panel
+                // fallback for taps on card padding only. Climate
+                // opens the dial panel on both tap and long-press.
+                // (The old tap-anywhere-toggles model for lights is
+                // deliberately replaced by the zone split.)
+                onClick = { openPanel() },
+                onLongClick = { openPanel() },
             ),
     ) {
         Column(Modifier.padding(16.dp)) {
+            // Round 4 split zone (binary cards only): the upper
+            // badge zone wears a subtle pill/squircle underlay and
+            // toggles inline on tap; long-press opens the panel.
+            // Non-binary cards get a plain Box (no zone split).
+            val zoneInteraction = remember { MutableInteractionSource() }
+            val zoneModifier = if (isBinary) {
+                Modifier.fillMaxWidth()
+                    .background(scheme.surfaceContainerHighest, RoundedCornerShape(24.dp))
+                    .combinedClickable(
+                        interactionSource = zoneInteraction,
+                        indication = null,
+                        onClick = { vm.toggle(entity.entityId) },
+                        onLongClick = { openPanel() },
+                    )
+                    .padding(8.dp)
+            } else Modifier
+            Box(zoneModifier) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(56.dp).background(
@@ -753,7 +749,7 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
                             interactionSource = badgeInteraction,
                             indication = null,
                             onClick = shapeAction,
-                            onLongClick = { vm.openPopup(entity.entityId) },
+                            onLongClick = { openPanel() },
                         ) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -784,9 +780,24 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
                     }
                 }
             }
+            } // badge-zone Box
             Spacer(Modifier.height(16.dp))
+            // Round 4 split zone, lower half: tapping the name or
+            // status text opens the expanded panel (binary cards);
+            // long-press anywhere does the same. Non-binary cards
+            // keep their surface-level routing; this zone is
+            // harmless there (same openPanel target).
+            val textZoneInteraction = remember { MutableInteractionSource() }
+            Column(
+                Modifier.fillMaxWidth().combinedClickable(
+                    interactionSource = textZoneInteraction,
+                    indication = null,
+                    onClick = { openPanel() },
+                    onLongClick = { openPanel() },
+                ),
+            ) {
             Text(
-                display.friendlyName,
+                sensorDisplayName(display),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 color = nameColor,
@@ -806,6 +817,7 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.hideHeroWhenMorphSource(entity.entityId),
             )
+            } // text-zone Column
         }
     }
 }

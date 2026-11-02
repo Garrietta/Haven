@@ -5,7 +5,6 @@ import com.garrietta.haven.ui.components.CoolBlue
 import com.garrietta.haven.ui.components.HeatOrange
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,38 +15,25 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,12 +41,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,128 +51,53 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.garrietta.haven.DetailPopupHeader
-import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.DialogTitleText
+import com.garrietta.haven.ui.components.ShimmerBox
+import com.garrietta.haven.ui.components.Sparkline
+import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.LocalHeroTarget
-import com.garrietta.haven.ui.components.LocalWideLayout
-import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.coolSetpointContainer
 import com.garrietta.haven.ui.components.coolSetpointOnContainer
 import com.garrietta.haven.ui.components.heatSetpointContainer
 import com.garrietta.haven.ui.components.heatSetpointOnContainer
 import com.garrietta.haven.ui.theme.StateShape
-import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.theme.stateShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.dialogHeaderState
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
+import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
-import org.json.JSONObject
 
 
 /**
- * The thermostat as a full page, not a sheet, laid out the way Google
- * Home lays its thermostat out: a hero dial showing BOTH setpoints
- * together (heat left in warm orange, cool right in cool blue, the
- * active selector at full strength and the inactive one muted) with
- * −/+ steppers below the numbers inside the dial, heat + cool markers
- * and a current-temperature indicator on the ring, then a gradient
- * heat/cool range bar with the live operating state, then Google-style
- * rows (Mode, Comfort, Fan) and Indoor/Outdoor rows below. Every row
- * reads only what Home Assistant exposes — a row with no backing state
- * hides instead of inventing one.
- *
- * The dial still edits one setpoint at a time, in whole degrees: in
- * heat/cool mode an inside tap toggles the active selector between the
- * heating and cooling setpoints (the highlighted number IS the indicator
- * now — no separate chip); only grabbing the radial handle and dragging
- * it moves the value, clamped so the setpoints cannot cross and the
- * bottom gap is ignored. Google Home's drag-anywhere-on-ring is NOT
- * adopted: handle-grab-only stays. Fahrenheit throughout, and onFinished
- * still reports the actually-set value.
+ * The centered expressive thermostat pop-out (Round 4: the
+ * PRIMARY and only thermostat panel — tap and long-press on the
+ * Ecobee card both land here; the old secondary Details page
+ * is deleted): the radial dial on a mode-colored scallop disc
+ * up top, Mode/Fan pills underneath, then 24-hour
+ * temperature/humidity history charts. Back and the panel's back
+ * arrow dismiss; there is no Details route anymore. The
+ * thermostat's shape IS its control surface (the dial changes
+ * temp, the pills change mode/fan); there is no single binary
+ * actuation for it, so the shape-tap = actuate rule applies to
+ * its inner controls, not to the card shape as a whole. The dial
+ * keeps every standing rule (1° snap, handle-grab-only 32dp
+ * nearest-wins, inside-tap toggle, clamps, gap-proofing,
+ * widen-on-grab, pulsing bloom, dual numbers) — the redesign is
+ * shapes/spacing/layout, not interaction. The disc is a square
+ * box, so the min-dimension polygon scale fits exactly: content
+ * fills the mask, never inset, no white crescents.
  */
 @Composable
-fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, inDialog: Boolean = false) {
-    val states by vm.states.collectAsState()
-    val entity = states[entityId]
-    val min = entity?.attrDouble("min_temp")?.toFloat() ?: 10f
-    val max = entity?.attrDouble("max_temp")?.toFloat() ?: 30f
-    // In a dialog the panel owns insets + sizing + scroll, so
-    // the page root is a plain column (2026-10-30 round); as a full
-    // page it keeps its own fill + status-bars padding + scrolls.
-    Column(
-        Modifier
-            .then(if (inDialog) Modifier else Modifier.fillMaxSize().statusBarsPadding())
-            .padding(horizontal = 16.dp),
-    ) {
-        if (entity != null) DetailPopupHeader(entity, onBack) else DetailPopupTitleHeader("Unavailable")
-        if (entity == null) {
-            Text(
-                "This entity is no longer available.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else if (LocalWideLayout.current) {
-            Row(Modifier.then(if (inDialog) Modifier.fillMaxWidth() else Modifier.fillMaxSize())) {
-                Column(
-                    Modifier.weight(1f)
-                        .then(if (inDialog) Modifier else Modifier.verticalScroll(rememberScrollState()))
-                        .padding(end = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    ThermostatHeroDisc(entity, vm, min, max)
-                    Spacer(Modifier.height(16.dp))
-                    HeatCoolRangeBar(entity, min, max)
-                }
-                Column(
-                    Modifier.weight(1f)
-                        .then(if (inDialog) Modifier else Modifier.verticalScroll(rememberScrollState()))
-                        .padding(start = 8.dp),
-                ) {
-                    ThermostatCards(entity, vm, states)
-                }
-            }
-        } else {
-            Column(
-                Modifier.then(if (inDialog) Modifier else Modifier.fillMaxSize().verticalScroll(rememberScrollState())),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                ThermostatHeroDisc(entity, vm, min, max)
-                Spacer(Modifier.height(16.dp))
-                HeatCoolRangeBar(entity, min, max)
-                Spacer(Modifier.height(16.dp))
-                ThermostatCards(entity, vm, states)
-                Spacer(Modifier.height(16.dp))
-            }
-        }
-    }
-}
-
-/**
- * The centered expressive thermostat pop-out: tap a thermostat card's
- * background and it expands to the middle of the screen as a large
- * scalloped shape — the radial dial on a mode-colored scallop disc up
- * top, Mode/Fan pills underneath, tight 8–12dp spacing, Details routing
- * to the full page (Hold/Sensors/Indoor/history) and Close. The
- * thermostat's shape IS its control surface (the dial changes temp,
- * the pills change mode/fan); there is no single binary actuation for
- * it, so the shape-tap = actuate rule applies to its inner controls,
- * not to the card shape as a whole. The dial keeps every standing
- * rule (1° snap, handle-grab-only 32dp nearest-wins, inside-tap
- * toggle, clamps, gap-proofing, widen-on-grab, pulsing bloom, dual
- * numbers) — the redesign is shapes/spacing/layout, not interaction.
- * The disc is a square box, so the min-dimension polygon scale fits
- * exactly: content fills the mask, never inset, no white crescents.
- */
-@Composable
-fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit, onClose: () -> Unit) {
+fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) {
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
@@ -298,10 +206,12 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
             }
             Spacer(Modifier.height(12.dp))
         }
-        // Details is the only bottom action now (2026-11-01 round 1
-        // panel chrome): the redundant bottom Close button is gone
-        // — the panel's back arrow + BackHandler dismiss.
-        OutlinedButton(onClick = onDetails, modifier = Modifier.fillMaxWidth()) { Text("Details") }
+        // No bottom action (Round 4): the old Details button
+        // routed to the deleted secondary page — the panel's back
+        // arrow + BackHandler are the dismiss paths, and the
+        // history charts below carry what Details used to hold.
+        val states by vm.states.collectAsState()
+        ThermostatHistorySection(entity, vm, states)
     }
 }
 
@@ -374,34 +284,6 @@ private fun orderedHvacModes(modes: List<String>): List<String> {
 private fun orderedFanModes(modes: List<String>): List<String> {
     val canonical = listOf("auto", "on")
     return canonical.filter { it in modes } + modes.filter { it !in canonical }
-}
-
-/**
- * The thermostat page hero on its mode-colored scallop disc — the
- * same disc language as the pop-out, larger (340dp disc, 300dp dial).
- * The mode color is unmissable on the page, not just in the dial
- * accents: heat orange, cool blue, neutral when off/idle.
- */
-@Composable
-private fun ThermostatHeroDisc(entity: HaEntity, vm: HavenViewModel, min: Float, max: Float) {
-    val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
-    Box(
-        // 360dp disc, 280dp dial (hotfix, was 300dp): same
-        // scallop-dip clearance as the pop-out — the old outer
-        // bloom reached 164dp against the 180dp disc radius, and
-        // the top scallop dip swallowed the margin when setpoints
-        // were close. At 280dp the outer bloom reaches 154dp.
-        Modifier.size(360.dp).background(modeColor.copy(alpha = 0.18f), stateShape(StateShape.SCALLOP12)),
-        contentAlignment = Alignment.Center,
-    ) {
-        ThermostatHero(
-            entity, vm, min, max, diameter = 280.dp,
-            numberBackdrop = compositeOver(
-                modeColor.copy(alpha = 0.18f),
-                MaterialTheme.colorScheme.background,
-            ),
-        )
-    }
 }
 
 /** Hero dial: Google Home's dual numbers + inside steppers + ring marks.
@@ -481,6 +363,24 @@ fun ThermostatHero(
         }
         applyClimateSetpoint(vm, entity, selector, next.toDouble())
     }
+    // Round 4 display range: the arc maps 55–85°F (see
+    // thermostatDisplayRange), so 67°/69° thumbs get clear
+    // separation instead of crowding on the HA range. Values
+    // outside it are NOT rewritten — their thumbs clamp to the
+    // arc end for drawing and the flag below says so.
+    val displayRange = thermostatDisplayRange(min, max)
+    val outOfRangeNote: String? = when {
+        heatCool && (heat < displayRange.start || heat > displayRange.endInclusive) ->
+            "Heat ${heat.toDouble().formatTemp()} is outside the dial range " +
+                "(${displayRange.start.toDouble().formatTemp()}–${displayRange.endInclusive.toDouble().formatTemp()}) — shown at the arc end"
+        heatCool && (cool < displayRange.start || cool > displayRange.endInclusive) ->
+            "Cool ${cool.toDouble().formatTemp()} is outside the dial range " +
+                "(${displayRange.start.toDouble().formatTemp()}–${displayRange.endInclusive.toDouble().formatTemp()}) — shown at the arc end"
+        !heatCool && (single < displayRange.start || single > displayRange.endInclusive) ->
+            "Setpoint ${single.toDouble().formatTemp()} is outside the dial range " +
+                "(${displayRange.start.toDouble().formatTemp()}–${displayRange.endInclusive.toDouble().formatTemp()}) — shown at the arc end"
+        else -> null
+    }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         // The spec's dial: 240-degree sweep, dual pill thumbs, mode arcs.
         // The center content overlays the dial face, as run #38 had it.
@@ -492,7 +392,7 @@ fun ThermostatHero(
                 dual = heatCool,
                 current = current?.toFloat(),
                 currentLabel = current?.let { it.formatTemp() },
-                range = min..max,
+                range = displayRange,
                 mode = entity.state,
                 selector = selector,
                 onHeatChange = { heat = it },
@@ -545,8 +445,18 @@ fun ThermostatHero(
         // side (heat container / cool container) — the dial law
         // itself is untouched: inside-tap still toggles, handles
         // are still grab-only, clamps still hold.
+        if (outOfRangeNote != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                outOfRangeNote,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (heatCool) {
-            Spacer(Modifier.height(12.dp))
+            // Round 4: a full 24dp of daylight above the pill so
+            // it never overlaps the dial's bottom edge.
+            Spacer(Modifier.height(24.dp))
             val scheme = MaterialTheme.colorScheme
             SegmentedOptionBar(
                 options = listOf(
@@ -620,268 +530,59 @@ private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSiz
 }
 
 /**
- * Gradient heat ↔ cool bar with setpoint markers, a current-temperature
- * marker, and the live operating state. Single-setpoint thermostats get a
- * neutral track with one setpoint marker instead of a heat/cool gradient.
+ * 24-hour temperature/humidity history charts for the thermostat
+ * pop-out (Round 4): the Ecobee's linked sensors (see
+ * findLinkedSensors — the seeded sensor.thermostat_current_*
+ * pair first), each with its own sparkline + Min/Current/Max.
+ * A chart renders only when its sensor exists in live state;
+ * a sensor with no cached history yet shows the shimmer, never
+ * an invented series. Placed below the Mode and Fan bars in the
+ * pop-out, inside the panel's scroll wrapper.
  */
 @Composable
-private fun HeatCoolRangeBar(entity: HaEntity, min: Float, max: Float) {
-    val low = entity.attrDouble("target_temp_low")
-    val high = entity.attrDouble("target_temp_high")
-    val single = entity.attrDouble("temperature")
-    val current = entity.attrDouble("current_temperature")
-    val stateLabel = hvacActionLabel(entity.attrString("hvac_action")) ?: entity.stateText()
-    val heatCool = low != null && high != null
-    val minD = min.toDouble()
-    val maxD = max.toDouble()
+private fun ThermostatHistorySection(entity: HaEntity, vm: HavenViewModel, states: Map<String, HaEntity>) {
+    val sensors = findLinkedSensors(states, entity)
+    val temp = sensors.firstOrNull { it.entityId.contains("temperature") }
+    val hum = sensors.firstOrNull { it.entityId.contains("humidity") }
+    if (temp == null && hum == null) return
+    Spacer(Modifier.height(12.dp))
+    Text("Last 24 hours", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(8.dp))
+    if (temp != null) ThermostatSensorHistory(temp, vm)
+    if (hum != null) ThermostatSensorHistory(hum, vm)
+}
+
+@Composable
+private fun ThermostatSensorHistory(sensor: HaEntity, vm: HavenViewModel) {
+    val cached = vm.historyFor(sensor.entityId)
+    LaunchedEffect(sensor.entityId) { vm.refreshHistory(sensor.entityId) }
+    val unit = sensor.attrString("unit_of_measurement")
     Column(Modifier.fillMaxWidth()) {
-        val barBackground = if (heatCool) {
-            Modifier.background(Brush.horizontalGradient(listOf(HeatOrange, CoolBlue)))
-        } else {
-            Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
-        }
-        BoxWithConstraints(
-            Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(50)).then(barBackground),
-        ) {
-            if (low != null) RangeMarker(rangeFraction(low, minD, maxD), HeatOrange, maxWidth)
-            if (high != null) RangeMarker(rangeFraction(high, minD, maxD), CoolBlue, maxWidth)
-            if (single != null) RangeMarker(rangeFraction(single, minD, maxD), CoolBlue, maxWidth)
-            if (current != null) RangeMarker(rangeFraction(current, minD, maxD), Color.White, maxWidth)
-        }
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(
-                if (low != null) "Heat ${low.formatTemp()}"
-                else if (single != null) "Set ${single.formatTemp()}" else "",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(stateLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-            Text(
-                if (high != null) "Cool ${high.formatTemp()}" else "",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** A dot on the range bar at [fraction] of the bar width (positive padding only). */
-@Composable
-private fun RangeMarker(fraction: Float, color: Color, barWidth: Dp) {
-    val x = (barWidth * fraction - 6.dp).coerceAtLeast(0.dp)
-    Box(
-        Modifier.padding(start = x, top = 8.dp).size(12.dp)
-            .background(color, RoundedCornerShape(50)),
-    )
-}
-
-@Composable
-private fun ThermostatCard(label: String, content: @Composable () -> Unit) {
-    Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(label, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            content()
-        }
-    }
-}
-
-@Composable
-private fun ChipRow(options: List<String>, selected: String?, onSelect: (String) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        for (option in options) {
-            FilterChip(
-                selected = selected == option,
-                onClick = { onSelect(option) },
-                label = {
-                    Text(option.replace('_', ' ').replaceFirstChar { it.uppercase() })
-                },
-            )
-        }
-    }
-}
-
-/**
- * A Google Home-style row pill: small label above the value, with a
- * chevron that flips when expanded. The pill only toggles [expanded];
- * the caller renders the expanded chips below it. The toggle is the
- * last parameter so call sites can pass it as a trailing lambda.
- */
-@Composable
-private fun GooglePill(
-    label: String,
-    value: String,
-    expanded: Boolean,
-    modifier: Modifier = Modifier,
-    onToggle: () -> Unit,
-) {
-    // The chevron animates instead of snapping: it was an instant flip,
-    // one of the rigid transitions in the audit.
-    val chevronRotation by animateFloatAsState(
-        if (expanded) 180f else 0f,
-        animationSpec = springMorph(),
-        label = "chevron",
-    )
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        onClick = onToggle,
-        modifier = modifier,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            }
-            Icon(
-                Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp).graphicsLayer {
-                    rotationZ = chevronRotation
-                },
-            )
-        }
-    }
-}
-
-/** One label/value row for the Indoor/Outdoor card. */
-@Composable
-private fun TempRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, fontSize = 14.sp)
-        Text(value, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun ThermostatCards(entity: HaEntity, vm: HavenViewModel, states: Map<String, HaEntity>) {
-    // Expanded states live here, unconditionally, so the pills below can
-    // appear or disappear with their backing state without breaking the
-    // remember order.
-    var comfortExpanded by remember { mutableStateOf(false) }
-    val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
-    if (modes.isNotEmpty()) {
-        // Mode as a segmented pill bar (2026-11-01 round 1), same
-        // bar as the pop-out — no dropdown, every reported mode
-        // visible in the brief's order.
-        ThermostatCard("Mode") {
-            SegmentedOptionBar(
-                options = orderedHvacModes(modes).map { it to formatHvacMode(it) },
-                selected = entity.state,
-                onSelect = { vm.setClimateHvacMode(entity.entityId, it) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-    }
-    val preset = findPreset(states, entity)
-    val presetModes = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
-    if (preset != null || presetModes.isNotEmpty()) {
-        // The old Schedule card's content lives here now: the current
-        // preset as the pill value (HA exposes no next-schedule
-        // transition, so nothing invented), its modes as the chips.
-        GooglePill(
-            "Comfort",
-            preset?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Choose",
-            comfortExpanded,
-        ) { comfortExpanded = !comfortExpanded }
-        if (comfortExpanded && presetModes.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            ChipRow(presetModes, entity.attrString("preset_mode")) {
-                vm.callService(
-                    "climate",
-                    "set_preset_mode",
-                    entity.entityId,
-                    JSONObject().put("preset_mode", it),
+        Text(sensorDisplayName(sensor), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+        Text(sensor.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+        if (cached == null) {
+            ShimmerBox(Modifier.fillMaxWidth().height(120.dp))
+        } else if (cached.size >= 2) {
+            Sparkline(cached, accentFor(sensor.entityId), Modifier.fillMaxWidth().height(120.dp))
+            val mm = sparklineMinCurrentMax(cached)
+            if (mm != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Min ${fmtThermostatHistory(mm.first, unit)} · Current ${fmtThermostatHistory(mm.second, unit)} · Max ${fmtThermostatHistory(mm.third, unit)}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        } else {
+            Text("No history yet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
     }
-    val fanModes = entity.attrList("fan_modes")?.mapNotNull { it as? String } ?: emptyList()
-    if (fanModes.isNotEmpty()) {
-        val fanMode = entity.attrString("fan_mode")
-        // Fan as a segmented pill bar (2026-11-01 round 1), same
-        // bar as the pop-out — no dropdown.
-        ThermostatCard("Fan") {
-            SegmentedOptionBar(
-                options = orderedFanModes(fanModes).map {
-                    it to it.replace('_', ' ').replaceFirstChar { c -> c.uppercase() }
-                },
-                selected = fanMode,
-                onSelect = { vm.setClimateFanMode(entity.entityId, it) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-    }
-    val clearHold = findClearHoldButton(states, entity)
-    if (clearHold != null) {
-        ThermostatCard("Hold") {
-            Text(
-                "Manual changes hold until the next scheduled change.",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { vm.callService("button", "press", clearHold.entityId) }) {
-                Text("Resume schedule")
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-    }
-    val sensors = findLinkedSensors(states, entity)
-    if (sensors.isNotEmpty()) {
-        ThermostatCard("Sensors") {
-            for (sensor in sensors) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(sensor.friendlyName, fontSize = 14.sp)
-                    Text(
-                        sensor.stateText(),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-    }
-    val current = entity.attrDouble("current_temperature")
-    val humidity = entity.attrDouble("humidity")
-    val outdoor = findOutdoorTemperature(states, entity)
-    if (current != null || humidity != null || outdoor != null) {
-        // Google Home's temperature rows: no card label, just the rows —
-        // and the Outdoor row only when a real source backs it.
-        Surface(
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                if (current != null) {
-                    TempRow("Indoor temperature", current.formatTemp())
-                }
-                if (outdoor != null) {
-                    if (current != null) Spacer(Modifier.height(8.dp))
-                    TempRow("Outdoor temperature", outdoor.formatTemp())
-                }
-                if (humidity != null) {
-                    if (current != null || outdoor != null) Spacer(Modifier.height(8.dp))
-                    TempRow("Humidity", "${humidity.toInt()}%")
-                }
-            }
-        }
-    }
+}
+
+/** Whole numbers print whole; the rest get one decimal; unit suffix when present. */
+private fun fmtThermostatHistory(v: Double, unit: String?): String {
+    val num = if (v == v.toInt().toDouble()) v.toInt().toString() else String.format(java.util.Locale.US, "%.1f", v)
+    return if (unit != null) "$num $unit" else num
 }
