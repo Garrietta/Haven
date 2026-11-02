@@ -162,7 +162,7 @@ fun securityChecklist(binarySensors: List<HaEntity>): List<SecurityCheckRow> {
                 sensor.entityId.contains("front_door") ||
                 sensor.entityId.contains("garage")
         }
-        .sortedBy { it.friendlyName }
+        .sortedBy { it.friendlyName.lowercase() }
         .map { sensor ->
             val on = sensor.state == "on"
             val status = when (sensor.attrString("device_class")) {
@@ -310,9 +310,9 @@ fun groupPresence(homeTrackers: List<HaEntity>): List<PresenceGroup> {
         }
     }
     return buildList {
-        if (garrett.isNotEmpty()) add(PresenceGroup("Garrett", "G", false, garrett.sortedBy { it.friendlyName }))
-        if (haley.isNotEmpty()) add(PresenceGroup("Haley", "H", false, haley.sortedBy { it.friendlyName }))
-        if (other.isNotEmpty()) add(PresenceGroup("Other", "?", true, other.sortedBy { it.friendlyName }))
+        if (garrett.isNotEmpty()) add(PresenceGroup("Garrett", "G", false, garrett.sortedBy { it.friendlyName.lowercase() }))
+        if (haley.isNotEmpty()) add(PresenceGroup("Haley", "H", false, haley.sortedBy { it.friendlyName.lowercase() }))
+        if (other.isNotEmpty()) add(PresenceGroup("Other", "?", true, other.sortedBy { it.friendlyName.lowercase() }))
     }
 }
 
@@ -320,7 +320,7 @@ fun groupPresence(homeTrackers: List<HaEntity>): List<PresenceGroup> {
 fun groupAllTrackers(group: PresenceGroup, states: Map<String, HaEntity>): List<HaEntity> {
     val ids = group.members.map { it.entityId }.toSet()
     return states.values.filter { it.domain == "device_tracker" && it.entityId in ids }
-        .sortedBy { it.friendlyName }
+        .sortedBy { it.friendlyName.lowercase() }
 }
 
 /**
@@ -332,7 +332,7 @@ fun groupAllTrackers(group: PresenceGroup, states: Map<String, HaEntity>): List<
 fun unmappedTrackers(states: Map<String, HaEntity>, groups: List<PresenceGroup>): List<HaEntity> {
     val owned = groups.filter { !it.isOther }.flatMap { it.members.map { member -> member.entityId } }.toSet()
     return states.values.filter { it.domain == "device_tracker" && it.entityId !in owned }
-        .sortedBy { it.friendlyName }
+        .sortedBy { it.friendlyName.lowercase() }
 }
 
 /** Battery percent for a tracker, from the sensor whose id embeds the tracker's object id. Null when absent or non-numeric. */
