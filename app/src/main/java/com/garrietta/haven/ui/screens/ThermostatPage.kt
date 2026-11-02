@@ -35,13 +35,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,6 +79,10 @@ import com.garrietta.haven.ui.components.LocalHeroTarget
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.climateModeColor
+import com.garrietta.haven.ui.components.coolSetpointContainer
+import com.garrietta.haven.ui.components.coolSetpointOnContainer
+import com.garrietta.haven.ui.components.heatSetpointContainer
+import com.garrietta.haven.ui.components.heatSetpointOnContainer
 import com.garrietta.haven.ui.theme.StateShape
 import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.theme.stateShape
@@ -183,11 +190,9 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
  */
 @Composable
 fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit, onClose: () -> Unit) {
-    val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
-    val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
-    val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
-    var modeExpanded by remember { mutableStateOf(false) }
-    var fanExpanded by remember { mutableStateOf(false) }
+    val modeColor = climateModeColor(entity.state, entity.attrString(\"hvac_action\"))
+    val min = entity.attrDouble(\"min_temp\")?.toFloat() ?: 10f
+    val max = entity.attrDouble(\"max_temp\")?.toFloat() ?: 30f
     // Traveling header target (2026-10-29 pop-up round): the title
     // row reports its root rect into the measurement frame's hero
     // target, so the overlay's traveling header lands exactly here.
@@ -207,11 +212,13 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
             // #68's deliberate pop-out exception): the traveling
             // badge dissolves into this 48dp header badge exactly
             // like every other pop-up header, and tapping it
-            // dismisses. The top-right X stays. Badge only hides
-            // while traveling (2026-11-01 polish round): the
-            // name/state text stays visible from the panel's first
-            // frame — hiding the whole row held the title back
-            // until the final 2% handoff window.
+            // dismisses. Badge only hides while traveling
+            // (2026-11-01 polish round): the name/state text stays
+            // visible from the panel's first frame — hiding the
+            // whole row held the title back until the final 2%
+            // handoff window. No top-right X (2026-11-01 round 1
+            // panel chrome): the panel's back arrow + BackHandler
+            // are the dismiss paths.
             DomainBadge(
                 entity,
                 domainIcon(entity),
@@ -227,9 +234,6 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
             Column(Modifier.weight(1f)) {
                 DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
                 Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, contentDescription = "Close")
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -253,34 +257,104 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit
             )
         }
         Spacer(Modifier.height(12.dp))
+        // Mode + Fan as M3 segmented pill bars (2026-11-01 round 1):
+        // the dropdown pills are gone — every option is visible at
+        // once, in the brief's order, filtered to what HA reports.
         val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
         if (modes.isNotEmpty()) {
-            GooglePill("Mode", formatHvacMode(entity.state), modeExpanded) { modeExpanded = !modeExpanded }
-            if (modeExpanded) {
-                Spacer(Modifier.height(8.dp))
-                ChipRow(modes, entity.state) { vm.setClimateHvacMode(entity.entityId, it) }
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                Text("Mode", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                SegmentedOptionBar(
+                    options = orderedHvacModes(modes).map { it to formatHvacMode(it) },
+                    selected = entity.state,
+                    onSelect = { vm.setClimateHvacMode(entity.entityId, it) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
         }
         val fanModes = entity.attrList("fan_modes")?.mapNotNull { it as? String } ?: emptyList()
         if (fanModes.isNotEmpty()) {
             val fanMode = entity.attrString("fan_mode")
-            GooglePill(
-                "Fan",
-                fanMode?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Choose",
-                fanExpanded,
-            ) { fanExpanded = !fanExpanded }
-            if (fanExpanded) {
-                Spacer(Modifier.height(8.dp))
-                ChipRow(fanModes, fanMode) { vm.setClimateFanMode(entity.entityId, it) }
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                Text("Fan", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                SegmentedOptionBar(
+                    options = orderedFanModes(fanModes).map {
+                        it to it.replace('_', ' ').replaceFirstChar { c -> c.uppercase() }
+                    },
+                    selected = fanMode,
+                    onSelect = { vm.setClimateFanMode(entity.entityId, it) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onDetails, modifier = Modifier.weight(1f)) { Text("Details") }
-            OutlinedButton(onClick = onClose, modifier = Modifier.weight(1f)) { Text("Close") }
+        // Details is the only bottom action now (2026-11-01 round 1
+        // panel chrome): the redundant bottom Close button is gone
+        // — the panel's back arrow + BackHandler dismiss.
+        OutlinedButton(onClick = onDetails, modifier = Modifier.fillMaxWidth()) { Text("Details") }
+    }
+}
+
+/**
+ * One M3 segmented pill bar (2026-11-01 round 1): the replacement
+ * for the Mode/Fan dropdown pills and for the setpoint selector.
+ * [options] are (value, label) pairs in display order; [selected]
+ * is the current value; [activeColors] optionally tints a
+ * segment's active container/content (the Heat/Cool selector bar
+ * passes the heat/cool setpoint tokens so each side reads in its
+ * own color — otherwise the scheme defaults apply). Options the
+ * thermostat does not report never render: callers filter to the
+ * entity's hvac_modes / fan_modes first, so a segment can never
+ * send a mode HA would reject.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SegmentedOptionBar(
+    options: List<Pair<String, String>>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    activeColors: ((String) -> Pair<Color, Color>?)? = null,
+) {
+    if (options.isEmpty()) return
+    SingleChoiceSegmentedButtonRow(modifier) {
+        for ((index, option) in options.withIndex()) {
+            val (value, label) = option
+            val active = activeColors?.invoke(value)
+            SegmentedButton(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                colors = if (active != null) {
+                    SegmentedButtonDefaults.colors(
+                        activeContainerColor = active.first,
+                        activeContentColor = active.second,
+                    )
+                } else {
+                    SegmentedButtonDefaults.colors()
+                },
+                label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            )
         }
     }
+}
+
+/** Canonical mode order for the segmented Mode bar: Off / Heat /
+ * Cool / Heat·Cool first (the brief's order), then any further
+ * modes the thermostat reports, in reported order. */
+private fun orderedHvacModes(modes: List<String>): List<String> {
+    val canonical = listOf("off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only")
+    return canonical.filter { it in modes } + modes.filter { it !in canonical }
+}
+
+/** Canonical fan order for the segmented Fan bar: Auto / On first,
+ * then any further fan modes in reported order. */
+private fun orderedFanModes(modes: List<String>): List<String> {
+    val canonical = listOf("auto", "on")
+    return canonical.filter { it in modes } + modes.filter { it !in canonical }
 }
 
 /**
@@ -440,6 +514,34 @@ fun ThermostatHero(
                     ExpressiveStepper("+", onClick = { stepActive(1f) })
                 }
             }
+        }
+        // Setpoint selector, OUTSIDE the dial face (2026-11-01
+        // round 1): the Heat/Cool selector used to live as chips
+        // colliding with the scalloped dial border and the dual
+        // 68°/69° numbers. It now sits in its own segmented pill
+        // bar below the dial, in heat/cool mode only, tinted per
+        // side (heat container / cool container) — the dial law
+        // itself is untouched: inside-tap still toggles, handles
+        // are still grab-only, clamps still hold.
+        if (heatCool) {
+            Spacer(Modifier.height(12.dp))
+            val scheme = MaterialTheme.colorScheme
+            SegmentedOptionBar(
+                options = listOf(
+                    SetpointSelector.HEATING.name to "Heat ${heat.toDouble().formatTemp()}",
+                    SetpointSelector.COOLING.name to "Cool ${cool.toDouble().formatTemp()}",
+                ),
+                selected = selector.name,
+                onSelect = { selector = SetpointSelector.valueOf(it) },
+                modifier = Modifier.fillMaxWidth(),
+                activeColors = { value ->
+                    if (value == SetpointSelector.HEATING.name) {
+                        heatSetpointContainer(scheme, false) to heatSetpointOnContainer(scheme, false)
+                    } else {
+                        coolSetpointContainer(scheme) to coolSetpointOnContainer(scheme)
+                    }
+                },
+            )
         }
     }
 }
@@ -646,15 +748,19 @@ private fun ThermostatCards(entity: HaEntity, vm: HavenViewModel, states: Map<St
     // Expanded states live here, unconditionally, so the pills below can
     // appear or disappear with their backing state without breaking the
     // remember order.
-    var modeExpanded by remember { mutableStateOf(false) }
     var comfortExpanded by remember { mutableStateOf(false) }
-    var fanExpanded by remember { mutableStateOf(false) }
     val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
     if (modes.isNotEmpty()) {
-        GooglePill("Mode", formatHvacMode(entity.state), modeExpanded) { modeExpanded = !modeExpanded }
-        if (modeExpanded) {
-            Spacer(Modifier.height(8.dp))
-            ChipRow(modes, entity.state) { vm.setClimateHvacMode(entity.entityId, it) }
+        // Mode as a segmented pill bar (2026-11-01 round 1), same
+        // bar as the pop-out — no dropdown, every reported mode
+        // visible in the brief's order.
+        ThermostatCard("Mode") {
+            SegmentedOptionBar(
+                options = orderedHvacModes(modes).map { it to formatHvacMode(it) },
+                selected = entity.state,
+                onSelect = { vm.setClimateHvacMode(entity.entityId, it) },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         Spacer(Modifier.height(12.dp))
     }
@@ -685,14 +791,17 @@ private fun ThermostatCards(entity: HaEntity, vm: HavenViewModel, states: Map<St
     val fanModes = entity.attrList("fan_modes")?.mapNotNull { it as? String } ?: emptyList()
     if (fanModes.isNotEmpty()) {
         val fanMode = entity.attrString("fan_mode")
-        GooglePill(
-            "Fan",
-            fanMode?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Choose",
-            fanExpanded,
-        ) { fanExpanded = !fanExpanded }
-        if (fanExpanded) {
-            Spacer(Modifier.height(8.dp))
-            ChipRow(fanModes, fanMode) { vm.setClimateFanMode(entity.entityId, it) }
+        // Fan as a segmented pill bar (2026-11-01 round 1), same
+        // bar as the pop-out — no dropdown.
+        ThermostatCard("Fan") {
+            SegmentedOptionBar(
+                options = orderedFanModes(fanModes).map {
+                    it to it.replace('_', ' ').replaceFirstChar { c -> c.uppercase() }
+                },
+                selected = fanMode,
+                onSelect = { vm.setClimateFanMode(entity.entityId, it) },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         Spacer(Modifier.height(12.dp))
     }

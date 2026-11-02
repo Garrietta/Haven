@@ -471,8 +471,11 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
             if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
             weatherSection()
             homeSection()
-            for ((_, name, members) in visibleRooms) {
-                item { RoomSectionGrid(name, members, vm, roomGridColumns) }
+            for ((areaId, name, members) in visibleRooms) {
+                // Stable section keys (2026-11-01 round 1): a panel
+                // return must never recompose a room section into a
+                // sibling's slot — keys pin each section to its area.
+                item(key = "room:${areaId ?: "unassigned"}") { RoomSectionGrid(name, members, vm, roomGridColumns) }
             }
             item { Spacer(Modifier.height(16.dp)) }
         }
@@ -782,7 +785,11 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity) {
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 color = nameColor,
-                maxLines = 2,
+                // Single line, always (2026-11-01 round 1): a
+                // wrapping title reflowed mid-morph-return and
+                // read as clipped text ("obee Thermostat"); the
+                // full name is one ellipsis away, never sliced.
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.hideHeroWhenMorphSource(entity.entityId),
             )
@@ -1230,6 +1237,16 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
     Box(
         modifier.padding(1.dp).clip(corners)
             .background(MaterialTheme.colorScheme.surfaceContainer)
+            // Morph source (2026-11-01 round 1): the quadrant
+            // reports its root rect so the camera panel morphs
+            // from — and, crucially, back to — this exact
+            // quadrant on both postures. Before this, no quadrant
+            // ever reported, so the panel fell back to the
+            // full-width shifted rect and its close landed near
+            // the top of the screen instead of on the quadrant.
+            // It also hides while its panel is open, so the
+            // snapshot never doubles the video.
+            .then(if (cameraId != null) Modifier.reportCardBounds(cameraId).hideWhenMorphSource(cameraId) else Modifier)
             .then(if (cameraId != null) Modifier.clickable { vm.openCameraDialog(cameraId) } else Modifier),
         contentAlignment = Alignment.Center,
     ) {

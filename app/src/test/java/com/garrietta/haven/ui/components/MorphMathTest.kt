@@ -71,7 +71,22 @@ class MorphMathTest {
     }
 
     @Test
-    fun fallbackFromRect_morphStaysInTargetAtEnd() {
+    fun morphCloseContentAlpha_fadesOutEarlyOnClose() {
+        // At rest the panel content is fully visible; it is gone by
+        // progress 0.85, while the container is still most of the way
+        // to the card — so no expanded content ever shrinks over the
+        // grid at full opacity.
+        assertEquals(1f, morphCloseContentAlpha(1f), 0.001f)
+        assertEquals(0f, morphCloseContentAlpha(0.85f), 0.001f)
+        assertEquals(0f, morphCloseContentAlpha(0f), 0.001f)
+    }
+
+    @Test
+    fun morphCloseContentAlpha_clamps() {
+        assertEquals(1f, morphCloseContentAlpha(2f), 0.001f)
+        assertEquals(0f, morphCloseContentAlpha(-0.5f), 0.001f)
+    }
+
         // Lerping from the fallback to the target ends exactly on the
         // target at every edge, so no snap on arrival.
         val target = Rect(10f, 20f, 1090f, 2420f)

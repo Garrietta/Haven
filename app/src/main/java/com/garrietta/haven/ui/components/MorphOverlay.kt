@@ -541,6 +541,24 @@ fun morphCardAlpha(progress: Float): Float =
     1f - smoothstep(0f, 0.4f, progress)
 
 /**
+ * Content alpha for a morphing surface CLOSE at [progress] (1 = panel
+ * at rest, 0 = landed back on the card). The expanded panel's inner
+ * content fades out over the FIRST part of the close — fully gone by
+ * progress 0.85 (smoothstep over [0.85, 1.0]) — while the surface
+ * container itself keeps lerping back to the card rect. Without this,
+ * the close showed the expanded content (e.g. the thermostat's
+ * scalloped dial and large dual readout) at full opacity while
+ * shrinking over the already-visible grid tiles — the dial
+ * bleed-through of the 2026-11-01 verdict round. The enter direction
+ * deliberately does NOT use this curve (PanelOverlay passes 1f on
+ * enter, so content is present from the panel's first frame, per the
+ * panels round); only the close fades early. Progress is clamped
+ * first, so spring overshoot can never push the alpha out of range.
+ */
+fun morphCloseContentAlpha(progress: Float): Float =
+    smoothstep(0.85f, 1.0f, progress)
+
+/**
  * Surface-background alpha for a morphing surface at [progress]:
  * transparent at the card, opaque once the surface has grown a
  * little (smoothstep over [0, 0.35]). Together with

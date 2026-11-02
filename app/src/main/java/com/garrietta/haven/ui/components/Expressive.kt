@@ -57,7 +57,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -366,20 +365,26 @@ fun badgeColors(
     return when (domain) {
         "light" -> {
             val on = state == "on"
-            val bg = lightContainerColor(scheme, kelvin, on)
-            // Lit-light glyph floor (2026-11-01 polish round): on a
-            // dynamic palette the on-container lerp can land too
-            // close to its container (on device the bulb rendered
-            // invisible against the lit tile), so the glyph is
-            // floored to 4.5:1 against its own badge background.
-            // A no-op when the pair already contrasts; other domains
-            // are untouched.
-            bg to if (on) ensureContrast(
-                lerp(scheme.onSecondaryContainer, scheme.onTertiaryContainer, lightTempBlendFraction(kelvin)),
-                bg,
-                4.5f,
-            ) else scheme.onSurfaceVariant
+            val bg = if (on) {
+                // Inverted tokens (2026-11-01 round 1): a lit light
+                // keeps its expressive polygon badge — a saturated
+                // primary badge with an onPrimaryContainer glyph —
+                // instead of washing out to a pale container whose
+                // glyph reads as a bare dark icon.
+                scheme.primary
+            } else {
+                lightContainerColor(scheme, kelvin, on)
+            }
+            bg to if (on) scheme.onPrimaryContainer else scheme.onSurfaceVariant
         }
+        // Read-only sensors are inactive by construction: their
+        // badges resolve to the muted scheme pair synchronously
+        // from scheme + domain + state alone — never from the raw
+        // per-entity accent — so no first recomposition frame can
+        // flash a full-saturation accent glyph before settling
+        // muted (the thermostat-sensor sibling flash on panel
+        // return). The value text still carries the reading.
+        "sensor" -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         "climate" -> when {
             state == "off" -> climateIdleContainer(scheme) to scheme.onSurfaceVariant
             hvacAction == "cooling" || state == "cool" ->
@@ -778,10 +783,13 @@ fun Dial(
                 Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(centerText, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                // Verdict 2026-10-30: the condition subtitle
-                // ("Clear-night") washed out at onSurfaceVariant on
-                // the tinted dial panel — full onSurface here.
+                // Explicit onSurface (2026-11-01 round 1): a bare
+                // Text outside a Surface resolves its color to
+                // black, which is invisible in dark-theme panels —
+                // the weather panel's missing temperature readout
+                // (the dial arc and grey box rendered, the number
+                // did not). The subtitle already carried onSurface.
+                Text(centerText, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(centerSub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
             }
         }
@@ -868,6 +876,49 @@ fun PillToggle(
                 .padding(start = 6.dp + 40.dp * progress, top = 6.dp)
                 .size(44.dp)
                 .background(Color.White, RoundedCornerShape(50)), // switch thumb: white by M3 switch spec (50 = 50% pill, not dp)
+        )
+    }
+}
+
+/**
+ * A large VERTICAL pill toggle (2026-11-01 round 1): the light
+ * detail panel's primary on/off control, replacing the Turn on /
+ * Turn off / Toggle text buttons. Same language as [PillToggle] —
+ * a sliding knob on the house spring, white thumb by the M3 switch
+ * spec — rotated 90°: 64dp wide, 144dp tall, knob up = on (a wall
+ * switch), knob down = off. Snapped under reduce-motion, like
+ * every other spring in this round.
+ */
+@Composable
+fun VerticalPillToggle(
+    checked: Boolean,
+    onToggle: () -> Unit,
+    onColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val reduceMotion = LocalReduceMotion.current
+    val animatedProgress by animateFloatAsState(
+        if (checked) 1f else 0f,
+        animationSpec = havenSpring(),
+        label = "verticalPill",
+    )
+    val progress = if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress
+    val track = if (checked) onColor else MaterialTheme.colorScheme.surfaceVariant
+    Box(
+        modifier
+            .size(width = 64.dp, height = 144.dp)
+            .clip(RoundedCornerShape(50))
+            .background(track)
+            .clickable { onToggle() },
+    ) {
+        // Knob travel: 4dp inset top and bottom, so the 52dp knob
+        // slides 84dp between on (top) and off (bottom).
+        Box(
+            Modifier
+                .padding(top = 4.dp + 84.dp * (1f - progress))
+                .size(52.dp)
+                .align(Alignment.TopCenter)
+                .background(Color.White, RoundedCornerShape(50)),
         )
     }
 }

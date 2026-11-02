@@ -2,6 +2,7 @@ package com.garrietta.haven.ui.controls
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import com.garrietta.haven.ui.components.formatCondition
 
 import android.os.Handler
@@ -354,7 +355,11 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
     val forecast = rememberForecast(entity, vm, true).take(24)
     if (forecast.isEmpty()) return
     LazyRow(
-        Modifier.fillMaxWidth(),
+        // Explicit clip (2026-11-01 round 1): while this row
+        // scrolls horizontally, its nodes must never draw past
+        // the row's bounds and slice the "Hourly forecast"
+        // header text above it.
+        Modifier.fillMaxWidth().clipToBounds(),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         contentPadding = PaddingValues(start = 12.dp, end = 20.dp),
     ) {

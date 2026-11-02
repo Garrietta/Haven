@@ -59,6 +59,7 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.badgeColors
 import com.garrietta.haven.ui.components.climateModeColor
@@ -104,7 +105,7 @@ fun TabTileGrid(
     fallbackCard: @Composable (String) -> Unit,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 160.dp),
+        columns = if (LocalWideLayout.current) GridCells.Adaptive(minSize = 180.dp) else GridCells.Adaptive(minSize = 160.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = pillClearanceBottom()),
@@ -123,12 +124,19 @@ fun TabTileGrid(
                 cardEntityIds(parsed)
             }
             if (ids.isEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) { fallbackCard(yaml) }
+                // Non-entity cards have no stable entity id; key by
+                // their YAML so they still never swap slots with a
+                // neighbor on a panel return.
+                item(key = "card:$yaml", span = { GridItemSpan(maxLineSpan) }) { fallbackCard(yaml) }
             } else {
                 for (id in ids) {
                     val entity = states[id]
                     if (entity != null) {
-                        item {
+                        // Stable entity_id keys (2026-11-01 round 1):
+                        // unkeyed items recomposed into siblings'
+                        // slots on a panel return, which read as
+                        // clipped titles and one-frame badge flashes.
+                        item(key = id) {
                             EntityTile(
                                 vm,
                                 entity,
@@ -136,7 +144,7 @@ fun TabTileGrid(
                             )
                         }
                     } else {
-                        item { MissingEntityTile(id) }
+                        item(key = "missing:$id") { MissingEntityTile(id) }
                     }
                 }
             }
@@ -383,7 +391,10 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
+                // Single line, always (2026-11-01 round 1): see
+                // HomeRoomCard — wrapping titles reflowed on panel
+                // return and read as clipped text.
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 // Traveling header: the tile's name hides with its
                 // badge while the morph is open, so the overlay's

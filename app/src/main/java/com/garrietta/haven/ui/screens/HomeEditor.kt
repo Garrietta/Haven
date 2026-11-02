@@ -2,6 +2,8 @@ package com.garrietta.haven.ui.screens
 import androidx.compose.foundation.layout.PaddingValues
 import com.garrietta.haven.ui.components.pillClearanceBottom
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -23,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -91,18 +95,34 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
             Text("Sections", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
         }
-        for ((key, label) in HOME_SECTIONS) {
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                    Switch(
-                        checked = key !in hidden,
-                        onCheckedChange = { shown ->
-                            hidden = if (shown) hidden - key else hidden + key
-                            vm.settingsStore.homeHiddenSections = hidden
-                            vm.bumpHomePrefs()
-                        },
-                    )
+        item {
+            // Grouped M3 surface container (2026-11-01 round 1):
+            // the section toggle rows sit in one surfaceContainerLow
+            // container (24dp outer corners, 16dp internal horizontal
+            // padding, each row clipped to 4dp) instead of floating
+            // uncontained on the raw background.
+            Box(
+                Modifier.fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(24.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Column {
+                    for ((key, label) in HOME_SECTIONS) {
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = key !in hidden,
+                                onCheckedChange = { shown ->
+                                    hidden = if (shown) hidden - key else hidden + key
+                                    vm.settingsStore.homeHiddenSections = hidden
+                                    vm.bumpHomePrefs()
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -117,19 +137,31 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
         }
-        for (area in areas) {
-            item {
-                val key = "room:${area.id}"
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(area.name, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                    Switch(
-                        checked = key !in hidden,
-                        onCheckedChange = { shown ->
-                            hidden = if (shown) hidden - key else hidden + key
-                            vm.settingsStore.homeHiddenSections = hidden
-                            vm.bumpHomePrefs()
-                        },
-                    )
+        item {
+            // Same grouped container as the sections above.
+            Box(
+                Modifier.fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(24.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Column {
+                    for (area in areas) {
+                        val key = "room:${area.id}"
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(area.name, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = key !in hidden,
+                                onCheckedChange = { shown ->
+                                    hidden = if (shown) hidden - key else hidden + key
+                                    vm.settingsStore.homeHiddenSections = hidden
+                                    vm.bumpHomePrefs()
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -153,29 +185,39 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 )
                 Spacer(Modifier.height(16.dp))
             }
-        }
-        for (light in lights) {
+        } else {
             item {
-                val shown = isLightShownOnHome(light, overrides)
-                val defaultExcluded = light.entityId !in overrides && isIndicatorLight(light)
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(light.friendlyName, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = shown,
-                            onCheckedChange = { on ->
-                                vm.settingsStore.setHomeLightOverride(light.entityId, on)
-                                overrides = vm.settingsStore.homeLightOverrides()
-                                vm.bumpHomePrefs()
-                            },
-                        )
-                    }
-                    if (defaultExcluded) {
-                        Text(
-                            "Hidden by default (indicator light)",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                // Same grouped container as the sections above.
+                Box(
+                    Modifier.fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(24.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Column {
+                        for (light in lights) {
+                            val shown = isLightShownOnHome(light, overrides)
+                            val defaultExcluded = light.entityId !in overrides && isIndicatorLight(light)
+                            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(light.friendlyName, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                                    Switch(
+                                        checked = shown,
+                                        onCheckedChange = { on ->
+                                            vm.settingsStore.setHomeLightOverride(light.entityId, on)
+                                            overrides = vm.settingsStore.homeLightOverrides()
+                                            vm.bumpHomePrefs()
+                                        },
+                                    )
+                                }
+                                if (defaultExcluded) {
+                                    Text(
+                                        "Hidden by default (indicator light)",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

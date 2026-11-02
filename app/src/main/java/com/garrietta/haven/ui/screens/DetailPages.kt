@@ -77,6 +77,7 @@ import com.garrietta.haven.data.displayCameraName
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.garrietta.haven.ui.components.DomainBadge
+import com.garrietta.haven.ui.components.VerticalPillToggle
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import com.garrietta.haven.ui.components.ShimmerBox
@@ -240,7 +241,32 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     }
     val control: @Composable () -> Unit = {
         when (entity.domain) {
-            "light" -> LightControl(entity, vm)
+            // Light detail panel (2026-11-01 round 1): the primary
+            // control is a large vertical pill toggle — the Turn
+            // on / Turn off / Toggle text buttons below are
+            // suppressed for lights, and LightControl hides its
+            // bulb row here so the header badge is the panel's
+            // only bulb icon. Brightness / color sliders stay.
+            // Auto-off timer controls are NOT rendered: no lamp
+            // in this codebase's entity model exposes an auto-off
+            // entity or attribute to bind them to, and inventing
+            // a binding would actuate nothing real — flagged in
+            // the round report instead.
+            "light" -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                VerticalPillToggle(
+                    checked = entity.state == "on",
+                    onToggle = { vm.toggle(entity.entityId) },
+                    onColor = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (entity.state == "on") "On" else "Off",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(16.dp))
+                LightControl(entity, vm, showBulb = false)
+            }
             "switch", "input_boolean" -> SwitchControl(entity, vm)
             "cover" -> CoverPageControl(entity, vm)
             "lock" -> LockControl(entity, vm)
@@ -259,7 +285,9 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
         Spacer(Modifier.height(16.dp))
         // Generic on/off actions, only where they make sense: an entity
         // whose state is on/off and which is not a read-only domain.
-        if (entity.state in listOf("on", "off") &&
+        // Lights are excluded (2026-11-01 round 1): their panel's
+        // vertical pill toggle replaces these text buttons.
+        if (entity.state in listOf("on", "off") && entity.domain != "light" &&
             entity.domain !in listOf("binary_sensor", "sensor", "weather", "camera", "person", "device_tracker")
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -344,7 +372,7 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
     val accent = accentFor(entity.entityId)
     val isGarage = entity.attrString("device_class") == "garage"
     if (isGarage) {
-        GarageDoorMenu(entity, vm, position, accent)
+        GarageDoorMenu(entity, vm, position)
         return
     }
     Column {
@@ -366,75 +394,48 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
 }
 
 /**
- * Garage door expressive menu (2026-10-29 verdict: "some kind of
- * expressive UI menu — I don't know how you can incorporate
- * expressive shapes to kind of represent a garage door, but that
- * would be nice"). The expressive element IS a garage door: a
- * segmented door-panel shape in a frame, filled from the top by
- * exactly the closed fraction — closed fills the frame, open empties
- * it from the bottom (the door slides up), partial positions fill
- * partway, and the fill animates as the door moves. Segment divider
- * lines sit at the quarter heights of the frame wherever the fill
- * covers them, so the door reads as panels, not a flat block. Open /
- * Close / Stop are pill controls in the #49 pill language, and the
- * position slider stays where a position is reported. Attributes stay
- * reachable below this control (the page's attributes section is
- * untouched) — the menu replaces only the plain control row.
+ * Garage door position control (2026-11-01 round 1): the old
+ * expressive menu is gone — its neon accent fill and quarter
+ * dividers read as a four-slat orange graphic, and the accent
+ * house badge duplicated the page header's badge. What remains is
+ * a clean M3 position control: a scheme-colored open-fraction
+ * track (position is ground truth; without one, open/closed map
+ * to the ends and in-between states to mid-travel via
+ * [garageDoorFillFraction], never an invented position), the
+ * Open / Stop / Close pills, and the position slider where a
+ * position is reported. Close is disabled and muted while the
+ * door already reports closed (state closed or position 0), so a
+ * no-op close can never be sent. Open/Stop/Close actuation and
+ * state reporting are unchanged. No camera feed here — a PiP
+ * camera feed is a later round, explicitly not added.
  */
 @Composable
-private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?, accent: Color) {
-    val fill = garageDoorFillFraction(position, entity.state)
-    // Fluid container transformation (design-system sprint): the door
-    // fill rides the house spring, not a 600ms tween, and the animated
-    // value is clamped at both use sites — a spring overshoot past 1
-    // must never draw the door taller than its frame.
+private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?) {
+    // Open fraction: 1 - closed fraction (see garageDoorFillFraction).
+    val openFraction = 1f - garageDoorFillFraction(position, entity.state)
     val reduceMotion = LocalReduceMotion.current
-    val animatedFill by animateFloatAsState(fill, havenMotion(reduceMotion), label = "garageDoorFill")
-    val fillClamped = animatedFill.coerceIn(0f, 1f)
-    val frameHeight = 200.dp
-    val panelBg = MaterialTheme.colorScheme.surfaceContainer
+    val animatedOpen by animateFloatAsState(openFraction.coerceIn(0f, 1f), havenMotion(reduceMotion), label = "garageDoorOpen")
+    val openClamped = animatedOpen.coerceIn(0f, 1f)
+    val isClosed = entity.state == "closed" || position == 0
     Column {
         Text("Garage door · ${entity.stateText()}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (position != null) {
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+        // Position track: open fraction filled in primary on a
+        // surfaceContainerHighest track — the door's position at a
+        // glance, with no pictorial door graphic to misread.
         Box(
-            Modifier.fillMaxWidth().height(frameHeight)
-                .background(panelBg, MaterialTheme.shapes.large),
+            Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         ) {
-            // The door itself: top-aligned fill, height = closed
-            // fraction of the frame. Rounded top corners only — the
-            // bottom edge is the door's own straight edge.
             Box(
-                Modifier.fillMaxWidth()
-                    .height(frameHeight * fillClamped)
-                    .align(Alignment.TopCenter)
-                    .background(
-                        accent,
-                        LargeTopShape,
-                    ),
+                Modifier.fillMaxWidth(openClamped).height(28.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(50)),
             )
-            // Segment dividers at the quarter heights, only where
-            // the fill reaches them.
-            for (quarter in 1..3) {
-                val dividerY = frameHeight * (quarter / 4f)
-                if (fillClamped * frameHeight.value > dividerY.value) {
-                    Box(
-                        Modifier.fillMaxWidth()
-                            .height(2.dp)
-                            .align(Alignment.TopCenter)
-                            .offset(y = dividerY - 1.dp)
-                            .background(panelBg),
-                    )
-                }
-            }
         }
         Spacer(Modifier.height(12.dp))
-        // Pills with generous internal padding and spacing (see
-        // PressablePillButton.contentPadding): the door shape above
-        // is untouched — only these controls change, from
-        // tightly-spaced text to proper spaced pills.
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             PressablePillButton(
                 onClick = { vm.callService("cover", "open_cover", entity.entityId) },
@@ -446,8 +447,9 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
             }
             PressablePillButton(
                 onClick = { vm.callService("cover", "close_cover", entity.entityId) },
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                enabled = !isClosed,
+                containerColor = if (isClosed) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = if (isClosed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Close", fontWeight = FontWeight.SemiBold)
@@ -463,7 +465,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
         }
         if (position != null) {
             Spacer(Modifier.height(8.dp))
-            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent, formatValue = { "${it.toInt()}%" })
+            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, MaterialTheme.colorScheme.primary, formatValue = { "${it.toInt()}%" })
         }
     }
 }

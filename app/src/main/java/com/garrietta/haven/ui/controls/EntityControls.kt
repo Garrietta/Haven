@@ -221,6 +221,10 @@ fun PressablePillButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     height: Dp = 48.dp,
+    // Disabled pills (2026-11-01 round 1: the garage Close pill
+    // while the door already reports closed) render muted and
+    // take no taps; every existing caller defaults to enabled.
+    enabled: Boolean = true,
     containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
     contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer,
     // Internal padding around the content. Zero by default (steppers
@@ -247,7 +251,7 @@ fun PressablePillButton(
             .graphicsLayer(scaleX = scale, scaleY = scale)
             .clip(RoundedCornerShape(50))
             .background(containerColor)
-            .clickable(interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick),
+            .clickable(interactionSource = interactionSource, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -446,7 +450,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
 }
 
 @Composable
-fun LightControl(entity: HaEntity, vm: HavenViewModel) {
+fun LightControl(entity: HaEntity, vm: HavenViewModel, showBulb: Boolean = true) {
     val isOn = entity.state == "on"
     // Bulb color follows color temperature (secondary -> tertiary blend
     // family, as a warm-amber to cool-white glyph tint); unknown kelvin
@@ -475,10 +479,13 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
         animationSpec = bulbSpec,
         label = "bulbScale",
     )
+    // The bulb row is the card/sheet toggle affordance. The light
+    // detail panel hides it (showBulb = false, 2026-11-01 round 1):
+    // the panel header already carries the bulb badge, so the bulb
+    // row would duplicate that icon — the panel's toggle is the
+    // large vertical pill instead. Sliders below are unaffected.
+    if (showBulb) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(76.dp).graphicsLayer(scaleX = bulbScale, scaleY = bulbScale)
-                .clickable { vm.toggle(entity.entityId) },
             contentAlignment = Alignment.Center,
         ) {
             MorphShape(
@@ -504,6 +511,7 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel) {
                 Text("Tap the bulb to switch off", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
             }
         }
+    }
     }
     if (modes.contains("brightness") || entity.attributes.containsKey("brightness")) {
         Spacer(Modifier.height(8.dp))

@@ -157,6 +157,7 @@ import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.components.morphBackgroundAlpha
 import com.garrietta.haven.ui.components.morphCardAlpha
+import com.garrietta.haven.ui.components.morphCloseContentAlpha
 import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.ScrollVisibilityState
@@ -633,6 +634,17 @@ fun HavenApp(vm: HavenViewModel) {
         // animated exit on the bounds spring, then the id clears.
         var cameraDialogExiting by remember { mutableStateOf(false) }
         val cameraDialogProgress = remember { Animatable(0f) }
+        // The camera panel's source rect, captured at open (2026-11-01
+        // round 1): the quadrant hero never reported card bounds
+        // before, so the panel fell back to the full-width shifted
+        // rect and its close landed near the top of the screen
+        // instead of on the tapped quadrant. The quadrant now
+        // reports (see CameraQuadrant) and this snapshot freezes
+        // that rect at open, so a Home recompose or scroll while
+        // the panel is up can never move the landing rect — the
+        // close lands on the measured quadrant rect on both
+        // postures, in root coordinates like every other morph.
+        var cameraDialogSource by remember { mutableStateOf<Rect?>(null) }
         val cameraId = vm.fullscreenCameraId
         LaunchedEffect(cameraId) {
             if (cameraId != null && !cameraExiting) {
@@ -684,6 +696,7 @@ fun HavenApp(vm: HavenViewModel) {
         LaunchedEffect(vm.cameraDialogId) {
             val id = vm.cameraDialogId
             if (id != null && !cameraDialogExiting) {
+                cameraDialogSource = cardBounds[id]
                 if (reduceMotion) cameraDialogProgress.snapTo(1f)
                 else {
                     cameraDialogProgress.snapTo(0f)
@@ -747,7 +760,11 @@ fun HavenApp(vm: HavenViewModel) {
             )
             CompositionLocalProvider(
                 LocalCardBounds provides cardBounds,
-                LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
+                // The camera panel's quadrant is a morph source too:
+                // it hides while its panel is open (see
+                // CameraQuadrant), exactly like sheet/detail/pop-out
+                // sources, so the snapshot never doubles the video.
+                LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id ?: vm.cameraDialogId),
                 LocalHeroBounds provides heroBounds,
                 LocalArcBounds provides arcBounds,
                 LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
@@ -763,18 +780,27 @@ fun HavenApp(vm: HavenViewModel) {
                 // Progress-driven source-card alpha (container
                 // transform): the active morph's progress drives the
                 // card fade-out on enter, so the card and the surface
-                // read as one element. On EXIT the card is fully
-                // opaque throughout (2026-11-01 polish round): the
-                // old exit fade-back-in composited the translucent
-                // card over the dark panel remnants, which read
-                // as a darker, more saturated icon flash, and left a
-                // window where neither panel nor card text was
-                // visible. With the card at full alpha under the
-                // leaving panel, exit is a reveal — the panel fades
-                // and shrinks away over an already-present page —
-                // so text never disappears and icons never shift
-                // color mid-exit. No morph -> fully visible.
-                LocalMorphCardAlpha provides if (sheetExiting || detailExiting || popoutExiting) 1f else morphCardAlpha(
+                // read as one element. On EXIT the source card stays
+                // HIDDEN until the morph lands (2026-11-01 round 1):
+                // the 2026-11-01 polish round's fully-opaque-under-
+                // panel exit composited the card over the leaving
+                // panel's remnants, which read as the thermostat
+                // dial bleeding through over already-visible grid
+                // tiles — and, with the close content fade in
+                // PanelOverlay, an early card return would double
+                // against the still-shrinking surface. The card
+                // reappears only once progress reaches ~0, the same
+                // frame the panel clears, so the landing is exact.
+                // No morph -> fully visible.
+                LocalMorphCardAlpha provides if (sheetExiting || detailExiting || popoutExiting) {
+                    val exitP = when {
+                        sheetAnim != null -> sheetProgress.value
+                        detailAnim != null -> detailProgress.value
+                        popoutAnim != null -> popoutProgress.value
+                        else -> 1f
+                    }.coerceIn(0f, 1f)
+                    if (exitP <= 0.02f) 1f else 0f
+                } else morphCardAlpha(
                     when {
                         sheetAnim != null -> sheetProgress.value
                         detailAnim != null -> detailProgress.value
@@ -945,7 +971,6 @@ fun HavenApp(vm: HavenViewModel) {
                         ) {
                             EntityPopupSheetContent(
                                 vm, navigate, anim.id, panelBounds = sheetPanelBounds,
-                                onClose = { dismissSheet() },
                                 onDetails = { dismissSheetInstant() },
                             )
                         }
@@ -957,11 +982,11 @@ fun HavenApp(vm: HavenViewModel) {
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     onDismiss = { dismissSheet() },
+                    isClosing = sheetExiting,
                     onPanelPlaced = { sheetPanelBounds = it },
                 ) {
                     EntityPopupSheetContent(
                         vm, navigate, anim.id, panelBounds = sheetPanelBounds,
-                        onClose = { dismissSheet() },
                         onDetails = { dismissSheetInstant() },
                     )
                 }
@@ -1012,6 +1037,7 @@ fun HavenApp(vm: HavenViewModel) {
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     onDismiss = { dismissDetail() },
+                    isClosing = detailExiting,
                 ) {
                     content(anim.screen)
                 }
@@ -1063,6 +1089,7 @@ fun HavenApp(vm: HavenViewModel) {
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     onDismiss = { dismissPopout() },
+                    isClosing = popoutExiting,
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
@@ -1103,12 +1130,16 @@ fun HavenApp(vm: HavenViewModel) {
                 val camEntity = camStates[camId]
                 PanelOverlay(
                     progress = camP,
-                    source = cardBounds[camId],
+                    // Captured-at-open quadrant rect (live map as
+                    // first-frame fallback): never the sourceless
+                    // fallback, so the close lands on the quadrant.
+                    source = cameraDialogSource ?: cardBounds[camId],
                     overlayOrigin = overlayOrigin,
                     panelBackground = Color.Black,
                     onDismiss = { dismissCameraDialog() },
                     showBackBar = false,
                     scrollContent = false,
+                    isClosing = cameraDialogExiting,
                 ) {
                     Box(Modifier.fillMaxSize().background(Color.Black)) {
                         // The hero panel's MJPEG body is a recording
@@ -1120,6 +1151,13 @@ fun HavenApp(vm: HavenViewModel) {
                             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // Single top-left back button (2026-11-01
+                            // round 1 panel chrome): the top-right X
+                            // is gone — BackHandler + this arrow are
+                            // the dismiss paths, like every panel.
+                            IconButton(onClick = { dismissCameraDialog() }) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                            }
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     camEntity?.let { displayCameraName(it) } ?: "Camera",
@@ -1143,9 +1181,6 @@ fun HavenApp(vm: HavenViewModel) {
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                            }
-                            IconButton(onClick = { dismissCameraDialog() }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
                             }
                         }
                     }
@@ -1252,11 +1287,11 @@ private fun ThermostatPopoutContent(
  * the column laid out inside it at the panel's intrinsic size. Kept
  * separate so the same content serves the one-frame measurement pass
  * and the live panel. [panelBounds] is the panel's window
- * rect for the camera rise origin on Details. [onClose] runs the
- * smooth animated exit (see dismissSheet); [onDetails] dismisses
+ * rect for the camera rise origin on Details. [onDetails] dismisses
  * instantly for the sheet -> detail handoff (the detail panel
  * starts from the same card, so the card never flashes back in
- * between).
+ * between); the panel's back arrow + BackHandler are the dismiss
+ * paths (2026-11-01 round 1 panel chrome — no Close button here).
  */
 @Composable
 private fun EntityPopupSheetContent(
@@ -1264,7 +1299,6 @@ private fun EntityPopupSheetContent(
     navigate: (Screen) -> Unit,
     popupId: String,
     panelBounds: androidx.compose.ui.geometry.Rect?,
-    onClose: () -> Unit,
     onDetails: () -> Unit,
 ) {
     val states by vm.states.collectAsState()
@@ -1332,13 +1366,8 @@ private fun EntityPopupSheetContent(
                                 else -> navigate(Screen.EntityDetail(popupId))
                             }
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(
-                        onClick = onClose,
-                        shape = RoundedCornerShape(50),
-                    ) { Text("Close") }
                 }
                 // Shape picker (2026-10-30): per-entity overrides,
                 // reachable from every entity's sheet (long-press
@@ -1426,6 +1455,12 @@ private fun PanelOverlay(
     onDismiss: () -> Unit,
     showBackBar: Boolean = true,
     scrollContent: Boolean = true,
+    // True while this panel is animating closed: the surface
+    // container still lerps back to the card rect, but the inner
+    // content fades out in the first stretch of the close (see
+    // morphCloseContentAlpha) instead of shrinking at full opacity
+    // over the grid — the thermostat dial bleed-through fix.
+    isClosing: Boolean = false,
     onPanelPlaced: ((Rect) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -1462,6 +1497,12 @@ private fun PanelOverlay(
                 cornerAll = morphCornerTop(p),
                 background = panelBackground,
                 backgroundAlpha = morphBackgroundAlpha(p),
+                // Enter: content present from the first frame (the
+                // panels round's rule). Close: content fades out
+                // early via morphCloseContentAlpha so the shrinking
+                // surface never carries full-opacity panel content
+                // over the grid tiles.
+                contentAlpha = if (isClosing) morphCloseContentAlpha(p) else 1f,
                 progress = p,
             ) {
                 if (scrollContent) {
@@ -1938,15 +1979,13 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
  * The unfolded vertical navigation rail (2026-11-01 panels round):
  * the pill bar's unfolded form — same items ([pillBarItems]),
  * same selection ([selectedNavIndex]), same goTop destination
- * behavior, on the left edge at full height. The pill's rules
- * carry over: a single indicator morphs between tabs by animating
- * its measured top/bottom bounds on the pill spring
- * ([springSpatial], snapped under reduce-motion); labels follow
- * the committed selection only, with no animation, under the same
- * [pillLabelVisible] rule as the pill (selected + at most 10
- * characters, else icon only). Differences, all deliberate: items
- * stack icon-over-label in 72dp rows (touch targets at least as
- * large as the pill's 48dp rows); the rail never scrolls away
+ * behavior, on the left edge at full height. Differences, all
+ * deliberate: items stack icon-over-label in 72dp rows (touch targets at least as
+ * large as the pill's 48dp rows); every destination shows its text
+ * label below its icon (2026-11-01 round 1 — the pill's
+ * selected-only / 10-char label rule does NOT apply to the rail);
+ * the active indicator is a fixed 56dp x 32dp pill around the icon
+ * only, never the item-height capsule; the rail never scrolls away
  * (it is nav chrome, and an open panel covers it anyway); and it
  * enters on the pill spring from a 16dp left offset instead of
  * appearing instantly. The column scrolls vertically once tabs
@@ -1965,23 +2004,24 @@ private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (S
     LaunchedEffect(Unit) {
         if (!reduceMotion) railEnter.animateTo(1f, springSpatial())
     }
-    // Measured item positions, in window coordinates: the rail
+    // Measured icon positions, in window coordinates: the rail
     // origin is subtracted, so the indicator stays correct while
-    // the column scrolls.
+    // the column scrolls. The indicator anchors to the ICON rect,
+    // not the whole item row (2026-11-01 round 1): a fixed
+    // 56dp x 32dp horizontal pill around the icon only, so the
+    // highlight never stretches into a tall vertical capsule and
+    // never changes shape across tabs.
     var railOrigin by remember { mutableStateOf(0f) }
-    var itemRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
-    val targetRect = itemRects[currentIndex]
+    var iconRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
+    val targetIconRect = iconRects[currentIndex]
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
         else springSpatial()
+    // Icon is 24dp tall, pill is 32dp: center the pill on the icon
+    // (4dp overhang top and bottom).
     val indicatorTop by animateFloatAsState(
-        targetRect?.let { it.top - railOrigin } ?: 0f,
+        targetIconRect?.let { it.top - railOrigin - with(density) { 4.dp.toPx() } } ?: 0f,
         animationSpec = indicatorSpec,
         label = "railTop",
-    )
-    val indicatorBottom by animateFloatAsState(
-        targetRect?.let { it.bottom - railOrigin } ?: 0f,
-        animationSpec = indicatorSpec,
-        label = "railBottom",
     )
     val density = LocalDensity.current
     Box(
@@ -2000,20 +2040,15 @@ private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (S
             Modifier.fillMaxSize()
                 .onGloballyPositioned { railOrigin = it.boundsInWindow().top },
         ) {
-            // The morphing indicator, behind the items, padded 6dp
-            // beyond the measured item rect on each side (the pill's
-            // 8dp rule, tightened for the rail's narrower items):
-            // item height snaps instantly at selection while the
-            // indicator glides, so the padding absorbs transient
-            // overflow exactly as it does on the pill.
-            if (targetRect != null) {
-                val indicatorPad = with(density) { 6.dp.toPx() }
+            // The indicator: one fixed 56dp x 32dp horizontal pill
+            // around the selected icon, behind the items. It never
+            // sizes to the item row, so it cannot become the tall
+            // vertical capsule the old item-height indicator was.
+            if (targetIconRect != null) {
                 Box(
                     Modifier.align(Alignment.TopCenter)
-                        .offset { IntOffset(0, (indicatorTop - indicatorPad).roundToInt()) }
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
-                        .height(with(density) { (indicatorBottom - indicatorTop + indicatorPad * 2).toDp() })
+                        .offset { IntOffset(0, indicatorTop.roundToInt()) }
+                        .size(56.dp, 32.dp)
                         .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
                 )
             }
@@ -2024,12 +2059,17 @@ private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (S
             ) {
                 for ((index, item) in items.withIndex()) {
                     val highlighted = index == currentIndex
-                    val showLabel = pillLabelVisible(item.label, index == currentIndex)
+                    // Rail labels are ALWAYS shown below the icon
+                    // (2026-11-01 round 1): the pill's selected-only
+                    // / 10-char rule does not apply here — the rail
+                    // has room for every destination's label, and
+                    // icon-only destinations (Garage Door, Living
+                    // Room lights) were unreadable. Folded pill bar
+                    // behavior is unchanged.
                     val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     Box(
                         modifier = Modifier.width(80.dp).height(72.dp)
-                            .onGloballyPositioned { itemRects = itemRects + (index to it.boundsInWindow()) }
                             .clickable {
                                 if (index != currentIndex) {
                                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
@@ -2043,20 +2083,19 @@ private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (S
                                 if (highlighted) item.icon else item.outlinedIcon,
                                 contentDescription = item.label,
                                 tint = contentColor,
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(24.dp)
+                                    .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
                             )
-                            if (showLabel) {
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    item.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = contentColor,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                item.label,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = contentColor,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
