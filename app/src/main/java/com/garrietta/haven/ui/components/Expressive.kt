@@ -852,6 +852,42 @@ fun Sparkline(points: List<HistoryPoint>, color: Color, modifier: Modifier = Mod
 }
 
 /**
+ * Knob-travel geometry for the pill toggles, as pure functions so
+ * the travel math is unit-testable without composition (Round 4
+ * lamp-crash fix, confirmed by the 2026-11-02 07:45 trace:
+ * "Padding must be non-negative" at
+ * VerticalPillToggle-cf5BqRc, Expressive.kt:927 — the #96 code
+ * fed the raw spring value straight into
+ * `4.dp + 84.dp * (1f - progress)`).
+ *
+ * Two layers, deliberately, so neither masks the other:
+ * (a) TRAVEL CORRECTION — the spring value is an animation, not a
+ * position, so it is bounded to the travel range [0, 1] BEFORE the
+ * travel math runs. An underdamped overshoot past either end can
+ * therefore never move the knob past either inset: the knob stays
+ * inside its track by construction, not by clamping after the fact.
+ * (b) PADDING CLAMP — the resulting padding is itself clamped to
+ * the track's legal range, so the value handed to layout can never
+ * go negative (or past the far inset) even if the geometry above
+ * ever changes. Call sites clamp once more with coerceAtLeast(0.dp).
+ *
+ * Vertical geometry: 144dp track, 52dp knob, 4dp inset top and
+ * bottom, so 84dp of travel: on = 4dp top padding, off = 88dp.
+ * Horizontal geometry: 96dp track, 44dp knob, 6dp inset each side,
+ * so 40dp of travel: off = 6dp start padding, on = 46dp.
+ */
+fun verticalPillKnobTopPadding(progress: Float): Dp {
+    val p = progress.coerceIn(0f, 1f)
+    val raw = 4f + 84f * (1f - p)
+    return raw.coerceIn(0f, 88f).dp
+}
+
+fun pillKnobStartPadding(progress: Float): Dp {
+    val p = progress.coerceIn(0f, 1f)
+    return (6f + 40f * p).coerceIn(0f, 46f).dp
+}
+
+/**
  * A big pill toggle: a sliding knob on a spring, with a morphing shape behind it.
  * Used for switches and input_booleans where a plain Switch would look like a web form.
  */
@@ -868,13 +904,13 @@ fun PillToggle(
         animationSpec = havenSpring(),
         label = "pill",
     )
-    // Clamped BEFORE any padding math (Round 4 crash fix): the
-    // house spring (380/0.62) overshoots its target, so an
-    // unclamped progress feeds negative padding into the knob
-    // layout — IllegalArgumentException ("Padding must be
-    // non-negative") on the overshoot frame. The same clamp
-    // covers VerticalPillToggle below.
+    // Round 4 crash fix (see verticalPillKnobTopPadding): the
+    // progress is bounded before use, and the knob padding comes
+    // from pillKnobStartPadding with a call-site >= 0 clamp — the
+    // house spring's overshoot can never feed a negative padding
+    // into layout again.
     val progress = (if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress).coerceIn(0f, 1f)
+    val knobStartPadding = pillKnobStartPadding(progress).coerceAtLeast(0.dp)
     val track = if (checked) onColor else MaterialTheme.colorScheme.surfaceVariant
     Box(
         modifier
@@ -893,7 +929,7 @@ fun PillToggle(
         )
         Box(
             Modifier
-                .padding(start = 6.dp + 40.dp * progress, top = 6.dp)
+                .padding(start = knobStartPadding, top = 6.dp)
                 .size(44.dp)
                 .background(Color.White, RoundedCornerShape(50)), // switch thumb: white by M3 switch spec (50 = 50% pill, not dp)
         )
@@ -922,12 +958,16 @@ fun VerticalPillToggle(
         animationSpec = havenSpring(),
         label = "verticalPill",
     )
-    // Same overshoot clamp as PillToggle above: without it the
-    // ON swing overshoots past 1 and the knob's top padding goes
-    // negative (fatal); the OFF swing overshoots below 0 and the
-    // knob travels past the track's bottom edge (clipped, not
-    // fatal, but wrong). Clamped, the knob stays inside [4, 88]dp.
-    val progress = (if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress).coerceIn(0f, 1f)
+    // Round 4 crash fix for the traced line (was: unclamped
+    // `4.dp + 84.dp * (1f - progress)` — any frame with the spring
+    // past 1 makes the padding negative and throws). The helper
+    // bounds the raw spring value to the travel range BEFORE the
+    // travel math (so overshoot past either end cannot move the
+    // knob past its insets), clamps the padding value itself, and
+    // this call site clamps >= 0 once more. The knob stays inside
+    // [4, 88]dp on every frame of either swing.
+    val rawProgress = if (reduceMotion) (if (checked) 1f else 0f) else animatedProgress
+    val knobTopPadding = verticalPillKnobTopPadding(rawProgress).coerceAtLeast(0.dp)
     val track = if (checked) onColor else MaterialTheme.colorScheme.surfaceVariant
     Box(
         modifier
@@ -940,7 +980,7 @@ fun VerticalPillToggle(
         // slides 84dp between on (top) and off (bottom).
         Box(
             Modifier
-                .padding(top = 4.dp + 84.dp * (1f - progress))
+                .padding(top = knobTopPadding)
                 .size(52.dp)
                 .align(Alignment.TopCenter)
                 .background(Color.White, RoundedCornerShape(50)),
