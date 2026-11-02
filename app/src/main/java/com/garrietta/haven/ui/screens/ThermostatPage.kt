@@ -190,9 +190,9 @@ fun ThermostatPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Uni
  */
 @Composable
 fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onDetails: () -> Unit, onClose: () -> Unit) {
-    val modeColor = climateModeColor(entity.state, entity.attrString(\"hvac_action\"))
-    val min = entity.attrDouble(\"min_temp\")?.toFloat() ?: 10f
-    val max = entity.attrDouble(\"max_temp\")?.toFloat() ?: 30f
+    val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
+    val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
+    val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
     // Traveling header target (2026-10-29 pop-up round): the title
     // row reports its root rect into the measurement frame's hero
     // target, so the overlay's traveling header lands exactly here.

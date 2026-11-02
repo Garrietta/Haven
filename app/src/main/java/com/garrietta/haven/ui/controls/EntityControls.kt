@@ -486,6 +486,9 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel, showBulb: Boolean = true)
     // large vertical pill instead. Sliders below are unaffected.
     if (showBulb) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(76.dp).graphicsLayer(scaleX = bulbScale, scaleY = bulbScale)
+                .clickable { vm.toggle(entity.entityId) },
             contentAlignment = Alignment.Center,
         ) {
             MorphShape(

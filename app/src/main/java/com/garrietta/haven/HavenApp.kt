@@ -2014,6 +2014,7 @@ private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (S
     var railOrigin by remember { mutableStateOf(0f) }
     var iconRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
     val targetIconRect = iconRects[currentIndex]
+    val density = LocalDensity.current
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
         else springSpatial()
     // Icon is 24dp tall, pill is 32dp: center the pill on the icon
@@ -2023,7 +2024,6 @@ private fun VerticalRail(items: List<NavItem>, selectedIndex: Int?, onSelect: (S
         animationSpec = indicatorSpec,
         label = "railTop",
     )
-    val density = LocalDensity.current
     Box(
         modifier
             .width(88.dp)
