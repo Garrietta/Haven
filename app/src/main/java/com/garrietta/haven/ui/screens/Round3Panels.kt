@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -572,6 +573,7 @@ private fun PresenceChip(label: String, initial: String, accentId: String, onCli
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PersonSheet(
     group: PresenceGroup,
