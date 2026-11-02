@@ -87,6 +87,8 @@ class MorphMathTest {
         assertEquals(0f, morphCloseContentAlpha(-0.5f), 0.001f)
     }
 
+    @Test
+    fun fallbackFromRect_morphStaysInTargetAtEnd() {
         // Lerping from the fallback to the target ends exactly on the
         // target at every edge, so no snap on arrival.
         val target = Rect(10f, 20f, 1090f, 2420f)
