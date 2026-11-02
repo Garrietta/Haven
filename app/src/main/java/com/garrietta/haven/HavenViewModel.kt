@@ -59,6 +59,12 @@ sealed class Screen {
     data class EntityDetail(val entityId: String) : Screen()
     /** Full-page thermostat experience (hero dial, range bar, pills). */
     data class Thermostat(val entityId: String) : Screen()
+    /** Round 3 morph panels: full-screen panels on both postures, reusing the PanelOverlay morph machinery. */
+    data object VacuumPanel : Screen()
+    data class MediaPanel(val entityId: String) : Screen()
+    data object SecurityPanel : Screen()
+    data object GreenhousePanel : Screen()
+    data object UpdatesPanel : Screen()
     /** Scrollable recorded-clips timeline for a camera (long-press on its tile). */
     data class CameraClips(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()

@@ -75,7 +75,9 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Wifi
+import com.garrietta.haven.data.updatesSummary
 import com.garrietta.haven.ui.components.KodaMenuDivider
 import com.garrietta.haven.ui.components.KodaMenuGroup
 import com.garrietta.haven.ui.components.KodaMenuRow
@@ -326,7 +328,10 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
     val showSection: (String) -> Boolean = { it !in hiddenSections }
     val entities = states.values.sortedBy { it.friendlyName }
     val weather = entities.firstOrNull { it.domain == "weather" }
-    val homePeople = entities.filter { (it.domain == "person" || it.domain == "device_tracker") && it.state == "home" }
+    val homeTrackers = entities.filter { it.domain == "device_tracker" && it.state == "home" }
+    // Person entities are not devices: person.home (literally
+    // named "Home") is excluded from Who's-home by design — the
+    // chips group real device trackers by person instead.
     // Home shows only the lights the user (or the default rule) allows:
     // indicator lights are excluded unless explicitly re-added.
     val lightOverrides = vm.settingsStore.homeLightOverrides()
@@ -354,7 +359,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
     // layouts render it ABOVE the camera hero: the 2026-10-30 verdict
     // puts the greeting first on Home, then the hero, then weather,
     // then who's-home, then rooms. Weather and who's-home are plain
-    // composables too (WeatherBlock, HomeBlock), shared by the folded
+    // composables too (WeatherBlock, PresenceBlock), shared by the folded
     // LazyColumn and the unfolded scrolling Column.
     val greetingSection: LazyListScope.() -> Unit = {
         item {
@@ -367,9 +372,15 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
         }
     }
     val homeSection: LazyListScope.() -> Unit = {
-        if (showSection("home") && homePeople.isNotEmpty()) {
-            item { HomeBlock(homePeople) }
+        if (showSection("home") && homeTrackers.isNotEmpty()) {
+            item { PresenceBlock(homeTrackers, states) }
         }
+    }
+    // Round 3 dashboard blocks (security banner, vacuum tile,
+    // media tiles, greenhouse card): always after who's-home,
+    // rendering only the domains that exist in live state.
+    val round3Section: LazyListScope.() -> Unit = {
+        item { Round3HomeBlocks(vm, states, navigate) }
     }
     // Visible room sections, in HA order, after the hidden-section
     // filter: one (areaId, heading, members) triple per room, with a
@@ -444,9 +455,10 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
                     if (showSection("weather") && weather != null) {
                         WeatherBlock(weather, vm, navigate)
                     }
-                    if (showSection("home") && homePeople.isNotEmpty()) {
-                        HomeBlock(homePeople)
+                    if (showSection("home") && homeTrackers.isNotEmpty()) {
+                        PresenceBlock(homeTrackers, states)
                     }
+                    Round3HomeBlocks(vm, states, navigate)
                     Spacer(Modifier.height(16.dp))
                 }
                 Column(
@@ -473,6 +485,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
             if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
             weatherSection()
             homeSection()
+            round3Section()
             for ((areaId, name, members) in visibleRooms) {
                 // Stable section keys (2026-11-01 round 1): a panel
                 // return must never recompose a room section into a
@@ -554,17 +567,7 @@ private fun WeatherBlock(weather: HaEntity, vm: HavenViewModel, navigate: (Scree
     Spacer(Modifier.height(16.dp))
 }
 
-/** Who's-home block, shared by the folded list and the unfolded left column. */
-@Composable
-private fun HomeBlock(homePeople: List<HaEntity>) {
-    Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-    Spacer(Modifier.height(4.dp))
-    Text(homePeople.joinToString(", ") { it.friendlyName }, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-    Spacer(Modifier.height(16.dp))
-}
-
-/**
- * One room section as a mockup-language grid: heading + rows of
+/** One room section as a mockup-language grid: heading + rows of
  * [columns] cards (2 folded / Fold8, 3 on EXPANDED). A plain Column,
  * so it slots into both the folded LazyColumn (as one item per room)
  * and the unfolded left/right columns. A short final row pads its
@@ -969,6 +972,8 @@ fun SettingsScreen(
     navigate: (Screen) -> Unit,
 ) {
     val connection by vm.connection.collectAsState()
+    val updateStates by vm.states.collectAsState()
+    val updateSummary = updatesSummary(updateStates)
     // Koda Settings menu DNA: dark rounded rows with shaped icon badges,
     // ALL-CAPS muted section headers, and bold title + muted subtitle
     // rows with chevrons — on Haven's dynamic colors, not Koda's palette.
@@ -1168,6 +1173,23 @@ fun SettingsScreen(
                     title = "Helper",
                     subtitle = "Input booleans, numbers, timers, and more",
                     onClick = { navigate(Screen.HelperBuilder) },
+                    flat = true,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("System")
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "system-updates",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.SystemUpdate,
+                    title = "System Updates",
+                    subtitle = if (updateSummary.available == 0) {
+                        "Everything is up to date (${updateSummary.total} sources tracked)"
+                    } else {
+                        "${updateSummary.available} update${if (updateSummary.available == 1) "" else "s"} available"
+                    },
+                    onClick = { navigate(Screen.UpdatesPanel) },
                     flat = true,
                 )
             }

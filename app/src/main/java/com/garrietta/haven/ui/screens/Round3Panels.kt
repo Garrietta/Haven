@@ -1,0 +1,1258 @@
+package com.garrietta.haven.ui.screens
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Spa
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.garrietta.haven.DetailPopupTitleHeader
+import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.Screen
+import com.garrietta.haven.data.ALARM_ARM_MODES
+import com.garrietta.haven.data.ALARM_ID
+import com.garrietta.haven.data.GREENHOUSE_AUTOMATION_IDS
+import com.garrietta.haven.data.GREENHOUSE_TIMER_IDS
+import com.garrietta.haven.data.GREENHOUSE_WATER_DUE_ID
+import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.MEDIA_PLAYER_IDS
+import com.garrietta.haven.data.PresenceGroup
+import com.garrietta.haven.data.REMOTE_TV_ID
+import com.garrietta.haven.data.SIREN_ID
+import com.garrietta.haven.data.SPRINKLER_BATTERY_ID
+import com.garrietta.haven.data.SPRINKLER_DURATION_ID
+import com.garrietta.haven.data.SPRINKLER_SWITCH_ID
+import com.garrietta.haven.data.TvCommand
+import com.garrietta.haven.data.VACUUM_AUTO_EMPTY_ID
+import com.garrietta.haven.data.VACUUM_AUTO_WASH_ID
+import com.garrietta.haven.data.VACUUM_BATTERY_ID
+import com.garrietta.haven.data.VACUUM_CHILD_LOCK_ID
+import com.garrietta.haven.data.VACUUM_CLEANING_MODE_ID
+import com.garrietta.haven.data.VACUUM_CLEAN_ROOM_ID
+import com.garrietta.haven.data.VACUUM_CONSUMABLES
+import com.garrietta.haven.data.VACUUM_DND_END_ID
+import com.garrietta.haven.data.VACUUM_DND_START_ID
+import com.garrietta.haven.data.VACUUM_DOCK_BUTTON_ID
+import com.garrietta.haven.data.VACUUM_DOCK_STATUS_ID
+import com.garrietta.haven.data.VACUUM_DRY_MOP_BUTTON_ID
+import com.garrietta.haven.data.VACUUM_EMPTY_BIN_BUTTON_ID
+import com.garrietta.haven.data.VACUUM_FIND_ROBOT_ID
+import com.garrietta.haven.data.VACUUM_ID
+import com.garrietta.haven.data.VACUUM_MAP_CAMERA_ID
+import com.garrietta.haven.data.VACUUM_MOP_INTENSITY_ID
+import com.garrietta.haven.data.VACUUM_PAUSE_BUTTON_ID
+import com.garrietta.haven.data.VACUUM_START_BUTTON_ID
+import com.garrietta.haven.data.VACUUM_STOP_DRY_MOP_BUTTON_ID
+import com.garrietta.haven.data.VACUUM_SUCTION_ID
+import com.garrietta.haven.data.VACUUM_TASK_STATUS_ID
+import com.garrietta.haven.data.VACUUM_TOTAL_AREA_ID
+import com.garrietta.haven.data.VACUUM_TOTAL_COUNT_ID
+import com.garrietta.haven.data.VACUUM_TOTAL_TIME_ID
+import com.garrietta.haven.data.VACUUM_WASH_MOP_BUTTON_ID
+import com.garrietta.haven.data.VACUUM_WATER_LEVEL_ID
+import com.garrietta.haven.data.alarmArmService
+import com.garrietta.haven.data.alarmModeLabel
+import com.garrietta.haven.data.batteryForTracker
+import com.garrietta.haven.data.consumableFraction
+import com.garrietta.haven.data.dndRange
+import com.garrietta.haven.data.formatCountdown
+import com.garrietta.haven.data.groupAllTrackers
+import com.garrietta.haven.data.groupPresence
+import com.garrietta.haven.data.lastTriggeredLine
+import com.garrietta.haven.data.locationForTracker
+import com.garrietta.haven.data.parseHaDuration
+import com.garrietta.haven.data.prettifyIdName
+import com.garrietta.haven.data.securityChecklist
+import com.garrietta.haven.data.timerFraction
+import com.garrietta.haven.data.unmappedTrackers
+import com.garrietta.haven.data.updateDisplayName
+import com.garrietta.haven.data.updatesSummary
+import com.garrietta.haven.data.vacuumTileLine
+import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.hideWhenMorphSource
+import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.controls.PressablePillButton
+import com.garrietta.haven.ui.controls.ServiceSlider
+import com.garrietta.haven.ui.controls.stateText
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * Round 3 surfaces (2026-11-02): vacuum, media, security, greenhouse,
+ * presence, and system updates. All full-screen panels render as
+ * plain columns with horizontal padding — the PanelOverlay morph
+ * container owns the scroll wrapper, the back bar, and the
+ * status-bar padding, exactly like the existing detail pages —
+ * so no panel here owns its own scroll or fills the screen.
+ * No surface shows a raw entity id or a raw ISO timestamp.
+ * Nothing arms, disarms, installs, or sounds a siren without an
+ * explicit tap; there is no automatic arming or installing
+ * anywhere in this file.
+ */
+
+// ---- Shared small pieces ----
+
+@Composable
+private fun Round3SectionTitle(title: String) {
+    Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun PanelSectionTitle(title: String) {
+    Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun PanelBodyText(text: String) {
+    Text(text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** A small pill button that never looks enabled when it is not. */
+@Composable
+private fun PillAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, enabled = enabled) { Text(label) }
+}
+
+/** One labeled on/off row (vacuum toggles, greenhouse automations). */
+@Composable
+private fun ToggleRow(label: String, sub: String?, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            if (sub != null) {
+                Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Switch(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
+    }
+}
+
+/** Segmented option chips for a select entity; falls back to plain current-value text when the live options list is empty. */
+@Composable
+private fun SelectChips(entity: HaEntity, vm: HavenViewModel, label: String) {
+    val options = entity.attrList("options")?.mapNotNull { it as? String } ?: emptyList()
+    Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+    Spacer(Modifier.height(4.dp))
+    if (options.isEmpty()) {
+        PanelBodyText("Current: ${entity.stateText()}")
+    } else {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (option in options) {
+                FilterChip(
+                    selected = entity.state == option,
+                    onClick = {
+                        vm.callService("select", "select_option", entity.entityId, JSONObject().put("option", option))
+                    },
+                    label = { Text(option) },
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+}
+
+// ---- Home dashboard blocks (tile -> morph panel) ----
+
+/**
+ * Round 3 Home blocks, in order: security banner, vacuum tile,
+ * media tiles, greenhouse summary card. Each block renders only
+ * when its entities exist in the live state map; a missing
+ * domain leaves no empty shell behind. Shared by the folded
+ * LazyColumn (as one item) and the unfolded left column.
+ */
+@Composable
+fun Round3HomeBlocks(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
+    val alarm = states[ALARM_ID]
+    if (alarm != null) {
+        SecurityBannerSection(alarm, vm) { navigate(Screen.SecurityPanel) }
+        Spacer(Modifier.height(16.dp))
+    }
+    val vacuum = states[VACUUM_ID]
+    if (vacuum != null) {
+        VacuumTileSection(vacuum, states, vm) { navigate(Screen.VacuumPanel) }
+        Spacer(Modifier.height(16.dp))
+    }
+    val media = MEDIA_PLAYER_IDS.mapNotNull { states[it] }
+    if (media.isNotEmpty()) {
+        MediaRowSection(media, vm) { entity -> navigate(Screen.MediaPanel(entity.entityId)) }
+        Spacer(Modifier.height(16.dp))
+    }
+    val greenhousePresent = (GREENHOUSE_AUTOMATION_IDS + GREENHOUSE_TIMER_IDS +
+        listOf(GREENHOUSE_WATER_DUE_ID, SPRINKLER_SWITCH_ID)).any { states.containsKey(it) }
+    if (greenhousePresent) {
+        GreenhouseSummaryCard(states) { navigate(Screen.GreenhousePanel) }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun SecurityBannerSection(alarm: HaEntity, vm: HavenViewModel, onOpen: () -> Unit) {
+    Round3SectionTitle("Security")
+    Box(
+        Modifier.fillMaxWidth()
+            .reportCardBounds(ALARM_ID)
+            .hideWhenMorphSource(ALARM_ID)
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable { onOpen() }
+            .padding(16.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Security, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Security · ${alarmModeLabel(alarm.state)}",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tap for the full panel, or arm right here.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (mode in ALARM_ARM_MODES) {
+                    FilterChip(
+                        selected = alarm.state == "armed_$mode",
+                        onClick = { vm.callService("alarm_control_panel", alarmArmService(mode), ALARM_ID) },
+                        label = { Text(alarmModeLabel(mode)) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VacuumTileSection(
+    vacuum: HaEntity,
+    states: Map<String, HaEntity>,
+    vm: HavenViewModel,
+    onOpen: () -> Unit,
+) {
+    Round3SectionTitle("Robot vacuum")
+    val battery = states[VACUUM_BATTERY_ID]?.state?.toIntOrNull()?.toString()
+    Box(
+        Modifier.fillMaxWidth()
+            .reportCardBounds(VACUUM_ID)
+            .hideWhenMorphSource(VACUUM_ID)
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable { onOpen() }
+            .padding(16.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.CleaningServices, contentDescription = null, tint = accentFor(VACUUM_ID))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    vacuum.friendlyName,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                vacuumTileLine(vacuum.state, battery),
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillAction("Clean") { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
+                PillAction("Dock") { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaRowSection(
+    media: List<HaEntity>,
+    vm: HavenViewModel,
+    onOpen: (HaEntity) -> Unit,
+) {
+    Round3SectionTitle("TV & media")
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        for (entity in media) {
+            MediaTile(entity, vm) { onOpen(entity) }
+        }
+    }
+}
+
+@Composable
+private fun MediaTile(entity: HaEntity, vm: HavenViewModel, onOpen: () -> Unit) {
+    val unavailable = entity.state == "unavailable"
+    val off = entity.state == "off"
+    val title = entity.attrString("media_title")
+    val app = entity.attrString("app_name")
+    val accent = accentFor(entity.entityId)
+    Box(
+        Modifier.width(172.dp)
+            .reportCardBounds(entity.entityId)
+            .hideWhenMorphSource(entity.entityId)
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable { onOpen() }
+            .padding(16.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Tv,
+                    contentDescription = null,
+                    tint = if (unavailable || off) MaterialTheme.colorScheme.onSurfaceVariant else accent,
+                )
+                Spacer(Modifier.weight(1f))
+                // Quick power toggle badge: its tap toggles power only,
+                // it never opens the panel (the badge consumes the tap).
+                IconButton(
+                    onClick = {
+                        if (entity.state == "on" || entity.state == "playing" || entity.state == "paused" || entity.state == "idle") {
+                            vm.turnOff(entity.entityId)
+                        } else if (!unavailable) {
+                            vm.turnOn(entity.entityId)
+                        }
+                    },
+                    enabled = !unavailable,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.PowerSettingsNew,
+                        contentDescription = "Power",
+                        tint = if (unavailable) MaterialTheme.colorScheme.onSurfaceVariant
+                        else if (off) MaterialTheme.colorScheme.onSurfaceVariant else accent,
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                entity.friendlyName,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                when {
+                    unavailable -> "Unavailable"
+                    off -> "Off"
+                    title != null -> title
+                    app != null -> app
+                    else -> entity.stateText()
+                },
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GreenhouseSummaryCard(states: Map<String, HaEntity>, onOpen: () -> Unit) {
+    Round3SectionTitle("Greenhouse & irrigation")
+    val automationsOn = GREENHOUSE_AUTOMATION_IDS.count { states[it]?.state == "on" }
+    val automationsTotal = GREENHOUSE_AUTOMATION_IDS.count { states.containsKey(it) }
+    val waterDue = states[GREENHOUSE_WATER_DUE_ID]?.state
+    val sprinkler = states[SPRINKLER_SWITCH_ID]
+    Box(
+        Modifier.fillMaxWidth()
+            .reportCardBounds(GREENHOUSE_AUTOMATION_IDS.first())
+            .hideWhenMorphSource(GREENHOUSE_AUTOMATION_IDS.first())
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable { onOpen() }
+            .padding(16.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Spa, contentDescription = null, tint = accentFor(GREENHOUSE_AUTOMATION_IDS.first()))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Greenhouse & irrigation",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            if (automationsTotal > 0) {
+                Text(
+                    "$automationsOn of $automationsTotal automations on",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (waterDue != null) {
+                Text(
+                    "Water due: $waterDue",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (sprinkler != null) {
+                Text(
+                    if (sprinkler.state == "unavailable") "Sprinklers: unavailable" else "Sprinklers: ${sprinkler.stateText()}",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text("Tap for automations, timers, and watering.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+// ---- Presence (Who's home): avatar chips + person sheet ----
+
+/**
+ * Who's-home, replacing the old raw comma-separated string:
+ * Material 3 avatar chips grouped by person (Garrett, Haley),
+ * with unmapped trackers under a clearly labeled Other row.
+ * Tapping a chip opens a bottom sheet with that group's devices,
+ * battery levels, and geocoded locations from the real sensors.
+ * Person entities are not devices and are excluded: the caller
+ * passes device trackers that are currently home only.
+ */
+@Composable
+fun PresenceBlock(homeTrackers: List<HaEntity>, states: Map<String, HaEntity>) {
+    val groups = groupPresence(homeTrackers)
+    var selected by remember { mutableStateOf<PresenceGroup?>(null) }
+    Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(8.dp))
+    if (groups.isEmpty()) {
+        Text("Nobody home", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+    } else {
+        for (group in groups) {
+            if (group.isOther) {
+                // Other row: one chip per unmapped device, under a
+                // clearly labeled "Other" heading — never folded
+                // into a person's chip.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Other",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(56.dp),
+                    )
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        for (member in group.members) {
+                            PresenceChip(label = member.friendlyName, initial = "?", accentId = member.entityId) {
+                                selected = group
+                            }
+                        }
+                    }
+                }
+            } else {
+                // One chip per person, regardless of device count.
+                PresenceChip(
+                    label = group.label,
+                    initial = group.initials,
+                    accentId = group.members.first().entityId,
+                ) { selected = group }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    val open = selected
+    if (open != null) {
+        PersonSheet(
+            group = open,
+            devices = if (open.isOther) unmappedTrackers(states, groups) else groupAllTrackers(open, states),
+            states = states,
+            onDismiss = { selected = null },
+        )
+    }
+}
+
+@Composable
+private fun PresenceChip(label: String, initial: String, accentId: String, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(28.dp).clip(CircleShape)
+                .background(accentFor(accentId)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                initial,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun PersonSheet(
+    group: PresenceGroup,
+    devices: List<HaEntity>,
+    states: Map<String, HaEntity>,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 32.dp)) {
+            Text(
+                if (group.isOther) "Other devices" else group.label,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (group.isOther) "Devices not mapped to a person — never attributed to the wrong person."
+                else "Devices for ${group.label}, with battery and location from the real sensors.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            if (devices.isEmpty()) {
+                PanelBodyText("No devices to show.")
+            }
+            for (device in devices) {
+                val battery = batteryForTracker(device, states)
+                val location = locationForTracker(device, states)
+                Column {
+                    Text(device.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        device.stateText(),
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (battery != null) {
+                        Text("Battery $battery%", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (location != null) {
+                        Text(location, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+// ---- Full-screen panels (PanelOverlay owns scroll + back bar) ----
+
+/** Vacuum panel: lidar map snapshot, transport, dock actions, selectors, consumables, toggles, DND, lifetime stats. */
+@Composable
+fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
+    val states by vm.states.collectAsState()
+    val vacuum = states[VACUUM_ID]
+    if (vacuum == null) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            DetailPopupTitleHeader("Robot vacuum")
+            PanelBodyText("The vacuum is no longer available.")
+        }
+        return
+    }
+    // Lidar map: the map camera's latest snapshot, cache-first like
+    // the camera hero — a snapshot, never claimed as a live render.
+    LaunchedEffect(VACUUM_MAP_CAMERA_ID) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
+    val mapBitmap = vm.snapshotFor(VACUUM_MAP_CAMERA_ID)
+    val battery = states[VACUUM_BATTERY_ID]?.state?.toIntOrNull()
+    val dockStatus = states[VACUUM_DOCK_STATUS_ID]?.state
+    val taskStatus = states[VACUUM_TASK_STATUS_ID]?.state
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        DetailPopupTitleHeader(vacuum.friendlyName)
+        Text(
+            vacuumTileLine(vacuum.state, battery?.toString()),
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        if (dockStatus != null || taskStatus != null) {
+            PanelBodyText(
+                listOfNotNull(
+                    dockStatus?.let { "Dock: $it" },
+                    taskStatus?.let { "Task: $it" },
+                ).joinToString(" · "),
+            )
+            Spacer(Modifier.height(16.dp))
+        } else {
+            Spacer(Modifier.height(12.dp))
+        }
+        PanelSectionTitle("Lidar map")
+        if (mapBitmap != null) {
+            Image(
+                bitmap = mapBitmap.asImageBitmap(),
+                contentDescription = "Vacuum lidar map snapshot",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(24.dp)),
+            )
+        } else {
+            Box(
+                Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    PanelBodyText("Map snapshot not available yet.")
+                    Spacer(Modifier.height(8.dp))
+                    PillAction("Refresh map") { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        PanelSectionTitle("Transport")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PillAction("Start") { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
+            PillAction("Pause") { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
+            PillAction("Return to Base") { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
+        }
+        Spacer(Modifier.height(16.dp))
+        PanelSectionTitle("Dock actions")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PillAction("Empty Dust Bin") { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
+            PillAction("Wash Mop") { vm.callService("button", "press", VACUUM_WASH_MOP_BUTTON_ID) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PillAction("Dry Mop") { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
+            PillAction("Stop Dry Mop") { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
+        }
+        Spacer(Modifier.height(16.dp))
+        PanelSectionTitle("Cleaning setup")
+        for ((id, label) in listOf(
+            VACUUM_CLEANING_MODE_ID to "Cleaning mode",
+            VACUUM_SUCTION_ID to "Suction level",
+            VACUUM_MOP_INTENSITY_ID to "Mop intensity",
+            VACUUM_WATER_LEVEL_ID to "Water level",
+            VACUUM_CLEAN_ROOM_ID to "Clean room",
+        )) {
+            val select = states[id]
+            if (select != null) SelectChips(select, vm, label)
+        }
+        PanelSectionTitle("Consumables")
+        for (consumable in VACUUM_CONSUMABLES) {
+            val sensor = states[consumable.sensorId]
+            val remaining = sensor?.state?.toDoubleOrNull()
+            val fraction = consumableFraction(remaining, consumable.fullLifeHours)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(consumable.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        if (remaining != null) "${remaining.toInt()} h remaining" else "Remaining unknown",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    if (fraction != null) {
+                        LinearProgressIndicator(
+                            progress = { fraction.toFloat() },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                PillAction("Reset") { vm.callService("button", "press", consumable.resetButtonId) }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        PanelSectionTitle("Options")
+        for ((id, label) in listOf(
+            VACUUM_AUTO_EMPTY_ID to "Auto-empty",
+            VACUUM_AUTO_WASH_ID to "Auto-wash",
+            VACUUM_CHILD_LOCK_ID to "Child lock",
+            VACUUM_FIND_ROBOT_ID to "Find robot",
+        )) {
+            val toggle = states[id]
+            if (toggle != null) {
+                ToggleRow(label, null, toggle.state == "on") { vm.toggle(id) }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+        val dnd = dndRange(states[VACUUM_DND_START_ID]?.state, states[VACUUM_DND_END_ID]?.state)
+        if (dnd != null) {
+            Text("Do not disturb: $dnd", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(8.dp))
+        }
+        PanelSectionTitle("Lifetime")
+        val area = states[VACUUM_TOTAL_AREA_ID]?.state?.toDoubleOrNull()
+        val count = states[VACUUM_TOTAL_COUNT_ID]?.state?.toIntOrNull()
+        val time = states[VACUUM_TOTAL_TIME_ID]?.state?.toDoubleOrNull()
+        if (area != null) PanelBodyText("Total cleaning area: ${"%,.0f".format(area)}")
+        if (count != null) PanelBodyText("Total cleans: $count")
+        if (time != null) PanelBodyText("Total cleaning time: ${"%.1f".format(time)} h")
+        if (area == null && count == null && time == null) {
+            PanelBodyText("Lifetime stats are not available right now.")
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+/** Media panel: Google TV-style D-pad over remote.tv, power, mute, volume, source, transport. Unavailable players render disabled, never controllable. */
+@Composable
+fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
+    val states by vm.states.collectAsState()
+    val entity = states[entityId]
+    if (entity == null) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            DetailPopupTitleHeader("TV & media")
+            PanelBodyText("This player is no longer available.")
+        }
+        return
+    }
+    val unavailable = entity.state == "unavailable"
+    val off = entity.state == "off"
+    val playing = entity.state == "playing"
+    val title = entity.attrString("media_title")
+    val artist = entity.attrString("media_artist")
+    val app = entity.attrString("app_name")
+    val source = entity.attrString("source")
+    val sources = entity.attrList("source_list")?.mapNotNull { it as? String } ?: emptyList()
+    val volume = entity.attrDouble("volume_level") ?: 0.5
+    val muted = entity.attrBool("is_volume_muted") ?: false
+    val remote = states[REMOTE_TV_ID]
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        DetailPopupTitleHeader(entity.friendlyName)
+        if (unavailable) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.width(8.dp))
+                Text("Unavailable", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(8.dp))
+            PanelBodyText("This player is not reachable right now, so no controls are offered for it.")
+            Spacer(Modifier.height(16.dp))
+            return@Column
+        }
+        Text(
+            when {
+                off -> "Off"
+                title != null -> title
+                app != null -> app
+                else -> entity.stateText()
+            },
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (artist != null || source != null) {
+            Spacer(Modifier.height(4.dp))
+            PanelBodyText(listOfNotNull(artist, source?.let { "Source: $it" }).joinToString(" · "))
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            PillAction(if (off) "Turn on" else "Turn off") {
+                if (off) vm.turnOn(entityId) else vm.turnOff(entityId)
+            }
+            Text(
+                if (playing) "Playing" else entity.stateText(),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        PanelSectionTitle("Remote")
+        if (remote == null) {
+            PanelBodyText("No TV remote was found, so the D-pad is not shown.")
+        } else if (remote.state == "unavailable") {
+            PanelBodyText("TV remote unavailable — the D-pad is disabled until it comes back.")
+        } else {
+            if (remote.state == "off") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PanelBodyText("Remote is off. ")
+                    Text(
+                        "Turn remote on",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { vm.turnOn(REMOTE_TV_ID) },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            DpadGrid { command ->
+                vm.callService(
+                    "remote", "send_command", REMOTE_TV_ID,
+                    JSONObject().put("command", JSONArray().put(command)),
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        PanelSectionTitle("Volume")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = {
+                vm.callService(
+                    "media_player", "volume_mute", entityId,
+                    JSONObject().put("is_volume_muted", !muted),
+                )
+            }) {
+                Icon(
+                    if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                    contentDescription = if (muted) "Unmute" else "Mute",
+                )
+            }
+            Box(Modifier.weight(1f)) {
+                ServiceSlider(
+                    (volume * 100).toFloat(), 0f..100f,
+                    { vm.callService("media_player", "volume_set", entityId, JSONObject().put("volume_level", it / 100f)) },
+                    accentFor(entityId),
+                    formatValue = { "${it.toInt()}%" },
+                )
+            }
+        }
+        if (sources.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            PanelSectionTitle("Input source")
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (item in sources) {
+                    FilterChip(
+                        selected = source == item,
+                        onClick = {
+                            vm.callService("media_player", "select_source", entityId, JSONObject().put("source", item))
+                        },
+                        label = { Text(item) },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        PanelSectionTitle("Transport")
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PressablePillButton(
+                onClick = { vm.callService("media_player", "media_previous_track", entityId) },
+                modifier = Modifier.width(56.dp),
+            ) { Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous") }
+            PressablePillButton(
+                onClick = { vm.callService("media_player", "media_play_pause", entityId) },
+                modifier = Modifier.width(88.dp),
+                height = 56.dp,
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Icon(
+                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (playing) "Pause" else "Play", fontWeight = FontWeight.SemiBold)
+            }
+            PressablePillButton(
+                onClick = { vm.callService("media_player", "media_next_track", entityId) },
+                modifier = Modifier.width(56.dp),
+            ) { Icon(Icons.Filled.SkipNext, contentDescription = "Next") }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+/** 3x3 Google TV-style D-pad: Back / Up / Home, Left / OK / Right, Mute / Down / (spacer). */
+@Composable
+private fun DpadGrid(onCommand: (String) -> Unit) {
+    val rows: List<List<Pair<String, String>?>> = listOf(
+        listOf("Back" to TvCommand.BACK, "↑" to TvCommand.UP, "Home" to TvCommand.HOME),
+        listOf("←" to TvCommand.LEFT, "OK" to TvCommand.CENTER, "→" to TvCommand.RIGHT),
+        listOf("Mute" to TvCommand.MUTE, "↓" to TvCommand.DOWN, null),
+    )
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        for (row in rows) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (cell in row) {
+                    if (cell == null) {
+                        Spacer(Modifier.width(88.dp))
+                    } else {
+                        PressablePillButton(
+                            onClick = { onCommand(cell.second) },
+                            modifier = Modifier.width(88.dp),
+                            height = 56.dp,
+                            containerColor = if (cell.first == "OK") MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = if (cell.first == "OK") MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSecondaryContainer,
+                        ) { Text(cell.first, fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/**
+ * Security panel: large arming selector, PIN pad ONLY when the
+ * alarm entity reports a code format, open door / motion
+ * checklist from real binary sensors, and a two-step emergency
+ * siren trigger. Every arm/disarm/siren action is an explicit
+ * tap — nothing here arms automatically.
+ */
+@Composable
+fun SecurityPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
+    val states by vm.states.collectAsState()
+    val alarm = states[ALARM_ID]
+    if (alarm == null) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            DetailPopupTitleHeader("Security")
+            PanelBodyText("The alarm panel is no longer available.")
+        }
+        return
+    }
+    var code by remember { mutableStateOf("") }
+    var sirenConfirm by remember { mutableStateOf(false) }
+    val codeFormat = alarm.attrString("code_format")
+    val codeData = if (code.isNotEmpty()) JSONObject().put("code", code) else null
+    val siren = states[SIREN_ID]
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        DetailPopupTitleHeader("Security")
+        Text(
+            alarmModeLabel(alarm.state),
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        PanelBodyText("Arming changes state immediately on tap — nothing arms on its own.")
+        Spacer(Modifier.height(16.dp))
+        PanelSectionTitle("Arm")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (mode in ALARM_ARM_MODES) {
+                FilterChip(
+                    selected = alarm.state == "armed_$mode",
+                    onClick = { vm.callService("alarm_control_panel", alarmArmService(mode), ALARM_ID, codeData) },
+                    label = { Text(alarmModeLabel(mode)) },
+                )
+            }
+            FilterChip(
+                selected = alarm.state == "disarmed",
+                onClick = { vm.callService("alarm_control_panel", "alarm_disarm", ALARM_ID, codeData) },
+                label = { Text("Disarm") },
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        if (codeFormat != null) {
+            PanelSectionTitle("PIN")
+            Text(
+                "Code: ${"•".repeat(code.length)}",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            val digits = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫")
+            for (row in digits.chunked(3)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (digit in row) {
+                        OutlinedButton(
+                            onClick = {
+                                when (digit) {
+                                    "C" -> code = ""
+                                    "⌫" -> code = code.dropLast(1)
+                                    else -> code += digit
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text(digit) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        } else {
+            PanelBodyText("This alarm panel does not ask for a PIN, so no keypad is shown.")
+            Spacer(Modifier.height(8.dp))
+        }
+        PanelSectionTitle("Doors & motion")
+        val rows = securityChecklist(states.values.filter { it.domain == "binary_sensor" })
+        if (rows.isEmpty()) {
+            PanelBodyText("No door or motion sensors to show.")
+        }
+        for (row in rows) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(row.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(row.statusText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(
+                    if (row.active) "●" else "○",
+                    fontSize = 16.sp,
+                    color = if (row.active) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        if (siren != null) {
+            PanelSectionTitle("Emergency siren")
+            if (siren.state == "on") {
+                PillAction("Stop siren") { vm.callService("siren", "turn_off", SIREN_ID) }
+            } else if (!sirenConfirm) {
+                Button(onClick = { sirenConfirm = true }) { Text("Sound outdoor siren") }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        sirenConfirm = false
+                        vm.callService("siren", "turn_on", SIREN_ID)
+                    }) { Text("Confirm — sound siren") }
+                    OutlinedButton(onClick = { sirenConfirm = false }) { Text("Cancel") }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            PanelBodyText("The siren only sounds after the confirm tap.")
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+/** Greenhouse & irrigation panel: automation toggle cards, timer countdown rings, water-due counter, sprinklers in their real state. */
+@Composable
+fun GreenhousePanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
+    val states by vm.states.collectAsState()
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        DetailPopupTitleHeader("Greenhouse & irrigation")
+        PanelSectionTitle("Automations")
+        var anyAutomation = false
+        for (id in GREENHOUSE_AUTOMATION_IDS) {
+            val auto = states[id]
+            if (auto == null) continue
+            anyAutomation = true
+            ToggleRow(auto.friendlyName, lastTriggeredLine(auto), auto.state == "on") { vm.toggle(id) }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (!anyAutomation) PanelBodyText("No greenhouse automations found.")
+        Spacer(Modifier.height(8.dp))
+        PanelSectionTitle("Timers")
+        var anyTimer = false
+        for (id in GREENHOUSE_TIMER_IDS) {
+            val timer = states[id]
+            if (timer == null) continue
+            anyTimer = true
+            TimerRingRow(timer)
+            Spacer(Modifier.height(12.dp))
+        }
+        if (!anyTimer) PanelBodyText("No greenhouse timers found.")
+        Spacer(Modifier.height(8.dp))
+        PanelSectionTitle("Watering")
+        val counter = states[GREENHOUSE_WATER_DUE_ID]
+        if (counter != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Water due", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.weight(1f))
+                Text(counter.state, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                OutlinedButton(onClick = { vm.callService("counter", "decrement", GREENHOUSE_WATER_DUE_ID) }) { Text("−") }
+                OutlinedButton(onClick = { vm.callService("counter", "increment", GREENHOUSE_WATER_DUE_ID) }) { Text("+") }
+                OutlinedButton(onClick = { vm.callService("counter", "reset", GREENHOUSE_WATER_DUE_ID) }) { Text("Reset") }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        val sprinkler = states[SPRINKLER_SWITCH_ID]
+        if (sprinkler != null) {
+            ToggleRow(
+                label = sprinkler.friendlyName,
+                sub = if (sprinkler.state == "unavailable") "Unavailable — shown as-is, never as working" else sprinkler.stateText(),
+                checked = sprinkler.state == "on",
+                enabled = sprinkler.state != "unavailable",
+            ) { vm.toggle(SPRINKLER_SWITCH_ID) }
+            Spacer(Modifier.height(8.dp))
+        }
+        val duration = states[SPRINKLER_DURATION_ID]
+        if (duration != null) {
+            Text(
+                if (duration.state == "unavailable") "Watering duration: unavailable" else "Watering duration: ${duration.stateText()}",
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        val battery = states[SPRINKLER_BATTERY_ID]
+        if (battery != null) {
+            Text(
+                "Sprinkler battery: ${battery.stateText()}",
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun TimerRingRow(timer: HaEntity) {
+    val fraction = timerFraction(timer)
+    val remaining = parseHaDuration(timer.attrString("remaining"))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+            if (fraction != null) {
+                CircularProgressIndicator(
+                    progress = { fraction.toFloat() },
+                    modifier = Modifier.size(64.dp),
+                    strokeWidth = 6.dp,
+                )
+            } else {
+                CircularProgressIndicator(
+                    progress = { 0f },
+                    modifier = Modifier.size(64.dp),
+                    strokeWidth = 6.dp,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            }
+            Text(
+                if (remaining != null) formatCountdown(remaining) else timer.stateText(),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(prettifyIdName(timer), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text(timer.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/**
+ * System updates panel: every update.* entity in one place, with
+ * a badge count of the ones actually showing an update, release
+ * notes where the entity provides them, and one-tap install per
+ * update. Installs happen ONLY on the button tap — never
+ * automatically, never on panel open.
+ */
+@Composable
+fun UpdatesPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
+    val states by vm.states.collectAsState()
+    val summary = updatesSummary(states)
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        DetailPopupTitleHeader("System Updates")
+        Text(
+            if (summary.available == 0) "Everything is up to date"
+            else if (summary.available == 1) "1 update available" else "${summary.available} updates available",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        PanelBodyText("${summary.total} update sources tracked. Nothing installs without your tap.")
+        Spacer(Modifier.height(16.dp))
+        if (summary.updates.isEmpty()) {
+            PanelBodyText("No update entities found.")
+        }
+        for (update in summary.updates) {
+            val available = update.state == "on"
+            val installed = update.attrString("installed_version")
+            val latest = update.attrString("latest_version")
+            val notes = update.attrString("release_summary")
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(updateDisplayName(update), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        if (installed != null || latest != null) {
+                            Text(
+                                listOfNotNull(
+                                    installed?.let { "Installed $it" },
+                                    latest?.let { "Latest $it" },
+                                ).joinToString(" → "),
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (available) {
+                        Button(onClick = { vm.callService("update", "install", update.entityId) }) { Text("Install") }
+                    } else {
+                        Text("Up to date", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (notes != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(notes, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}

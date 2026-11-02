@@ -201,6 +201,11 @@ import com.garrietta.haven.ui.screens.TabManagerScreen
 import com.garrietta.haven.ui.screens.ThermostatPageScreen
 import com.garrietta.haven.ui.screens.ThermostatPopout
 import com.garrietta.haven.ui.screens.TodayScreen
+import com.garrietta.haven.ui.screens.GreenhousePanelScreen
+import com.garrietta.haven.ui.screens.MediaPanelScreen
+import com.garrietta.haven.ui.screens.SecurityPanelScreen
+import com.garrietta.haven.ui.screens.UpdatesPanelScreen
+import com.garrietta.haven.ui.screens.VacuumPanelScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
 
@@ -285,10 +290,14 @@ private fun selectedNavIndex(
     else -> null
 }
 
-/** Entity id a detail screen belongs to (the shared card key it morphs from). */
+/** Entity id a detail screen belongs to (the shared card key it morphs from). Round 3 panels morph from their source card where one exists on Home; the updates panel has no Home card, so it uses the graceful fallback rect. */
 private fun detailEntityId(screen: Screen): String = when (screen) {
     is Screen.Thermostat -> screen.entityId
     is Screen.EntityDetail -> screen.entityId
+    is Screen.MediaPanel -> screen.entityId
+    is Screen.VacuumPanel -> "vacuum.t2292"
+    is Screen.SecurityPanel -> "alarm_control_panel.bloomington_mode"
+    is Screen.GreenhousePanel -> "automation.greenhouse_brain"
     else -> ""
 }
 
@@ -355,7 +364,13 @@ fun HavenApp(vm: HavenViewModel) {
         // never both visible. The camera fullscreen keeps its own
         // rise, and vm.pageOrigin is still set by tile taps and
         // panel Details because the camera path needs it.
-        val detailScreen = current as? Screen.Thermostat ?: current as? Screen.EntityDetail
+        val detailScreen = when (current) {
+            is Screen.Thermostat, is Screen.EntityDetail,
+            is Screen.VacuumPanel, is Screen.MediaPanel,
+            is Screen.SecurityPanel, is Screen.GreenhousePanel,
+            is Screen.UpdatesPanel -> current
+            else -> null
+        }
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
         // Traveling-header state (2026-10-29 pop-up round): cards
         // report header rects here, measurement frames report their
@@ -941,7 +956,10 @@ fun HavenApp(vm: HavenViewModel) {
                 // the overlay below (above all chrome). Every other
                 // destination renders normally.
                 val base = when (current) {
-                    is Screen.Thermostat, is Screen.EntityDetail ->
+                    is Screen.Thermostat, is Screen.EntityDetail,
+                    is Screen.VacuumPanel, is Screen.MediaPanel,
+                    is Screen.SecurityPanel, is Screen.GreenhousePanel,
+                    is Screen.UpdatesPanel ->
                         backstack.getOrNull(backstack.lastIndex - 1) ?: Screen.Today
                     else -> current
                 }
@@ -1295,6 +1313,12 @@ private fun ScreenContent(
         // pages (climate still routes to its thermostat page inside).
         is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack)
         is Screen.Thermostat -> ThermostatPageScreen(vm, screen.entityId, goBack)
+        // Round 3 panels: full-screen morph panels, same machinery.
+        is Screen.VacuumPanel -> VacuumPanelScreen(vm, goBack)
+        is Screen.MediaPanel -> MediaPanelScreen(vm, screen.entityId, goBack)
+        is Screen.SecurityPanel -> SecurityPanelScreen(vm, goBack)
+        is Screen.GreenhousePanel -> GreenhousePanelScreen(vm, goBack)
+        is Screen.UpdatesPanel -> UpdatesPanelScreen(vm, goBack)
         is Screen.CameraClips -> CameraClipsScreen(vm, screen.entityId, goBack)
         is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
         Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)
