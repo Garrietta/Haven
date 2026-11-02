@@ -993,9 +993,10 @@ fun HavenApp(vm: HavenViewModel) {
                     AnimatedContent(
                         targetState = base,
                         transitionSpec = {
-                            (slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn()) togetherWith
-                                (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut())
-                        }.using(SizeTransform(clip = false)),
+                            ((slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn()) togetherWith
+                                (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut()))
+                                .using(SizeTransform(clip = false))
+                        },
                         label = "topLevelScreen",
                     ) { screen -> content(screen) }
                 }
@@ -2432,23 +2433,6 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
     }
 }
 
-/**
- * The unfolded vertical navigation rail (2026-11-01 panels round):
- * the pill bar's unfolded form — same items ([pillBarItems]),
- * same selection ([selectedNavIndex]), same goTop destination
- * behavior, on the left edge at full height. Differences, all
- * deliberate: items stack icon-over-label in 72dp rows (touch targets at least as
- * large as the pill's 48dp rows); every destination shows its text
- * label below its icon (2026-11-01 round 1 — the pill's
- * selected-only / 10-char label rule does NOT apply to the rail);
- * the active indicator is a fixed 56dp x 32dp pill around the icon
- * only, never the item-height capsule; the rail never scrolls away
- * (it is nav chrome, and an open panel covers it anyway); and it
- * enters on the pill spring from a 16dp left offset instead of
- * appearing instantly. The column scrolls vertically once tabs
- * overflow the viewport height.
- */
-@Composable
 /**
  * The unfolded navigation (Round 4, superseding #86's full-height
  * 88dp rail): a FLOATING vertical side pill modeled after Koda's
