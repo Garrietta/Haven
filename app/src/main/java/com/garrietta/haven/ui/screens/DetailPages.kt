@@ -93,6 +93,7 @@ import com.garrietta.haven.data.customIconKeyFor
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
 import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.data.detailBadgeOverride
 import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.lightBrightnessContainer
@@ -146,6 +147,16 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         }
         return
     }
+    // Feedback round 4, item 2: the preset badge pair for this
+    // entity (or null) — every badge and toggle on this page
+    // carries the card's exact theme instead of reverting to
+    // the default green. (Climate renders ThermostatPopout,
+    // which resolves its own pair internally.)
+    val detailCustom = rememberCardCustom(vm)
+    val detailBadge = detailBadgeOverride(
+        detailCustom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+    )
     // Climate safety net (Round 4): any path still landing on an
     // EntityDetail for climate renders the primary dial panel
     // directly — the secondary thermostat page is deleted.
@@ -161,7 +172,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     }
     if (entity.domain == "camera") {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = detailBadge)
             Spacer(Modifier.height(16.dp))
             Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
             Spacer(Modifier.height(16.dp))
@@ -177,7 +188,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         }
         return
     }
-    DetailPageContent(vm, entity, onBack)
+    DetailPageContent(vm, entity, onBack, badgeOverride = detailBadge)
 }
 
 /**
@@ -192,10 +203,17 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
 private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -> Unit) {
     // Dialog-owned sizing/scroll: plain column, no fillMaxSize,
     // no status-bars padding, no own scroll (2026-10-30 round).
+    // Feedback round 4, item 2: same preset pair as the generic
+    // detail page, resolved locally (this page takes vm + entity).
+    val weatherCustom = rememberCardCustom(vm)
+    val weatherBadge = detailBadgeOverride(
+        weatherCustom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+    )
     Column(
         Modifier.padding(horizontal = 16.dp),
     ) {
-        DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
+        DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = weatherBadge)
         Spacer(Modifier.height(16.dp))
         // Round 4: the static non-functional grey semicircle gauge
         // (WeatherControl's display-only Dial) is GONE from this
@@ -216,7 +234,15 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
 }
 
 @Composable
-private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -> Unit) {
+private fun DetailPageContent(
+    vm: HavenViewModel,
+    entity: HaEntity,
+    onBack: () -> Unit,
+    // Feedback round 4, item 2: the preset badge pair (or null),
+    // resolved by DetailPageScreen from the same store maps the
+    // card reads.
+    badgeOverride: Pair<Color, Color>? = null,
+) {
     val accent = accentFor(entity.entityId)
     val hero: @Composable () -> Unit = {
         // Lights get a brightness-tinted hero panel (kelvin + brightness
@@ -229,6 +255,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                     domainIcon(entity),
                     accent,
                     modifier = Modifier.size(52.dp),
+                    badgeOverride = badgeOverride,
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -275,7 +302,11 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                 VerticalPillToggle(
                     checked = entity.state == "on",
                     onToggle = { vm.toggle(entity.entityId) },
-                    onColor = MaterialTheme.colorScheme.primary,
+                    // Feedback round 4, item 2: the toggle track is
+                    // the preset badge bg (dark tonal ink) when a
+                    // preset is active — the card's switch track —
+                    // else the default primary, as before.
+                    onColor = badgeOverride?.first ?: MaterialTheme.colorScheme.primary,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -352,7 +383,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     // columns — no fillMaxSize, no status-bars padding, no own scroll.
     if (LocalWideLayout.current) {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
             Row(Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f).padding(end = 8.dp)) {
                     if (entity.domain !in noHeroDomains) hero()
@@ -365,7 +396,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
         }
     } else {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
             if (entity.domain !in noHeroDomains) hero()
             control()
             history()

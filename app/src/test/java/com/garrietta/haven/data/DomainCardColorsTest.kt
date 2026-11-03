@@ -142,12 +142,45 @@ class DomainCardColorsTest {
         // Active dark glyphs are tonal ink, not white.
         assertEquals(Color(0xFF111D52), domainCardColors(entity("lock.a", "unlocked"), true)!!.badgeGlyph)
         assertEquals(Color(0xFF0A2005), domainCardColors(entity("vacuum.a", "cleaning"), true)!!.badgeGlyph)
-        // Active light glyphs are white.
-        assertEquals(Color.White, domainCardColors(entity("lock.a", "unlocked"), false)!!.badgeGlyph)
+        // Feedback round 4, item 3 (SUPERSEDES the rewrite's white
+        // rule): active light glyphs are the pastel container.
+        assertEquals(Color(0xFFFFDAD6), domainCardColors(entity("lock.a", "unlocked"), false)!!.badgeGlyph)
+        assertEquals(Color(0xFFC8F5A6), domainCardColors(entity("light.a", "on"), false)!!.badgeGlyph)
         // Climate keeps its climate rows even for greenhouse names.
         assertEquals(Color(0xFFFFDBD0), domainCardColors(entity("climate.greenhouse", "heat"), false)!!.container)
         // Idle climate keeps the Heating row (previous CLIMATE family).
         assertEquals(Color(0xFFFFDBD0), domainCardColors(entity("climate.a", "heat", mapOf("hvac_action" to "idle")), false)!!.container)
+    }
+
+    // Feedback round 4, item 3: in the light theme, every ACTIVE
+    // row's badge glyph is exactly its pastel container (the
+    // switch thumb color), while the badge polygon stays deep
+    // tonal ink. Inactive rows keep their white/gray glyphs.
+    @Test
+    fun lightThemeActiveGlyphEqualsContainer() {
+        val active = listOf(
+            entity("light.a", "on"),
+            entity("switch.a", "on"),
+            entity("switch.plug", "on", mapOf("current_power_w" to 320.0)),
+            entity("climate.a", "heat"),
+            entity("climate.a", "cool", mapOf("hvac_action" to "cooling")),
+            entity("climate.a", "heat_cool", mapOf("hvac_action" to "idle")),
+            entity("lock.a", "locked"),
+            entity("lock.a", "unlocked"),
+            entity("cover.a", "open"),
+            entity("cover.a", "closed"),
+            entity("alarm_control_panel.a", "disarmed"),
+            entity("alarm_control_panel.a", "armed_away"),
+            entity("media_player.a", "playing"),
+            entity("vacuum.a", "cleaning"),
+            entity("weather.a", "sunny"),
+            entity("automation.greenhouse_brain", "on"),
+            entity("sensor.power", "320", mapOf("device_class" to "power")),
+        )
+        for (e in active) {
+            val colors = domainCardColors(e, false)!!
+            assertEquals("${e.entityId} ${e.state} light glyph", colors.container, colors.badgeGlyph)
+        }
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.garrietta.haven
 import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.LocalSuppressTraveler
 import com.garrietta.haven.ui.components.PopupSideAnchor
 import com.garrietta.haven.ui.components.centeredPopupEnter
 import com.garrietta.haven.ui.components.popupSideAnchor
@@ -157,6 +158,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import android.view.SurfaceView
 import com.garrietta.haven.data.cameraSupportsStream
+import com.garrietta.haven.data.detailBadgeOverride
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
@@ -911,21 +913,25 @@ fun HavenApp(vm: HavenViewModel) {
             // on scroll, and an open panel (a later sibling of
             // this Row) covers it exactly as today's pill-exit rule
             // covers the pill.
-            // Pill-bar directive (visual-fidelity round): the Row
-            // paints the scheme background across its whole width,
-            // INCLUDING the rail zone. The rail zone sits outside
-            // the Scaffold (which paints its own background only
-            // over its weight(1f) area), so without this the zone
-            // showed the activity window's white background — the
-            // full-height white strip behind the side pill in dark
-            // mode on unfolded (the activity theme is a Light
-            // parent). Painting the Row removes the rectangle as a
-            // visible element: rail zone and content are one
-            // continuous background, and the pill floats over it
+            // Feedback round 4, item 1: the unfolded root is a
+            // full-screen Box, NOT a Row. Round 3's zIndex-only
+            // fix was insufficient: the Scaffold itself sat beside
+            // the rail in the Row, so its content area ended at
+            // the rail boundary and sliding pages vanished at that
+            // line instead of reaching the physical bezel. Now the
+            // Scaffold spans the FULL width (with 84dp start
+            // content padding — rest position unchanged) and the
+            // rail floats on top at CenterStart, so transitions
+            // slide all the way to the bezel underneath the rail,
+            // with only the rail's own shape obscuring them.
+            // The Box paints the scheme background across its
+            // whole width, so rail zone and content stay one
+            // continuous background (the visual-fidelity round's
+            // white-strip fix, unchanged): the pill floats over it
             // on its own container + shadow, Koda-style. This is
             // not a recolor of the pill: the pill keeps its
             // surfaceContainerHigh container in both themes.
-            Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             // Round 6 posture key boundary: the rail is keyed on
             // the wide flag, so a fold/unfold switch unmounts the
             // old navigation chrome completely before the new
@@ -984,12 +990,20 @@ fun HavenApp(vm: HavenViewModel) {
                         selectedIndex = railSelectedIndex,
                         onSelect = goTop,
                         badgedScreens = badged,
-                        modifier = Modifier.zIndex(1f),
+                        // Feedback round 4, item 1: the rail floats
+                        // on top of the full-width Scaffold at
+                        // CenterStart (zIndex keeps it above the
+                        // sliding pages, as in round 3).
+                        modifier = Modifier.align(Alignment.CenterStart).zIndex(1f).statusBarsPadding().navigationBarsPadding(),
                     )
                 }
             }
             Scaffold(
-                modifier = if (LocalWideLayout.current) Modifier.weight(1f) else Modifier,
+                // Feedback round 4, item 1: full width on both
+                // postures — the 84dp rail zone is start content
+                // padding now (see contentPadding below), not a
+                // Row weight splitting the root.
+                modifier = Modifier.fillMaxSize(),
             // Pill-bar directive (visual-fidelity round): the
             // container is the scheme background, NOT transparent.
             // Stage C went transparent to kill the old default
@@ -1057,7 +1071,13 @@ fun HavenApp(vm: HavenViewModel) {
             val foldedNavClearance =
                 if (!LocalWideLayout.current && isTopLevel(current)) navBottom else 0.dp
             val contentPadding = PaddingValues(
-                start = padding.calculateStartPadding(layoutDirection),
+                // Feedback round 4, item 1: on unfolded, the
+                // full-width Scaffold reserves the 84dp rail zone
+                // as start padding — resting content still sits
+                // right of the rail, exactly as before; only the
+                // transition container now spans the bezel.
+                start = padding.calculateStartPadding(layoutDirection) +
+                    if (LocalWideLayout.current) 84.dp else 0.dp,
                 top = padding.calculateTopPadding(),
                 end = padding.calculateEndPadding(layoutDirection),
                 bottom = padding.calculateBottomPadding() + unfoldedBottomClearance + foldedNavClearance,
@@ -1134,10 +1154,21 @@ fun HavenApp(vm: HavenViewModel) {
                 val railTransitionPx = with(LocalDensity.current) {
                     if (LocalWideLayout.current) 84.dp.roundToPx() else 0
                 }
-                if (reduceMotionTop) {
+                // Feedback round 4, item 4: while a detail/panel
+                // overlay is open, the underlying page renders
+                // instantly with no AnimatedContent slide/fade —
+                // the intermediate panel stays opaque and
+                // stationary underneath the top-most morph instead
+                // of sliding/fading in over Home (the bleed/flash
+                // mechanism: the base change Home<->panel used to
+                // animate beneath the morph). Tab switches always
+                // run with detailAnim null (goTop clears overlays
+                // atomically first), so they keep the slide.
+                if (reduceMotionTop || detailAnim != null) {
                     content(base)
                 } else {
                     AnimatedContent(
+                        modifier = Modifier.fillMaxSize(),
                         targetState = base,
                         transitionSpec = {
                             val barScreens = pillBarItems().map { it.screen }
@@ -1163,7 +1194,7 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
-            } // Row: side pill + scaffold (unfolded) / scaffold alone (folded)
+            } // Box: full-width scaffold + floating side pill (unfolded) / scaffold alone (folded)
             // Folded pill overlay (expressive-menus round, item 1):
             // the pill floats OVER full-height content — it is not
             // a Scaffold bottomBar and reserves no zone. The
@@ -1301,18 +1332,47 @@ fun HavenApp(vm: HavenViewModel) {
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 BackHandler { dismissDetail() }
+                // Feedback round 4, item 4: when this detail opened
+                // from a sub-panel or another detail, the previous
+                // backstack entry is an overlay screen — the source
+                // card lives in the overlay this detail replaces,
+                // not on the root dashboard, so its map rects are
+                // the outgoing overlay's (or the base page's once
+                // it lays out), never the tapped card's. No
+                // traveler flies in that case: it would land on a
+                // position matching no visible card (the stray
+                // badge on Home), and the destination header badge
+                // renders from frame 0 instead (LocalSuppressTraveler).
+                // Details from tabs and ordinary pages keep the
+                // traveler: their source card stays laid out in the
+                // base at the same rect.
+                val detailPrev = backstack.getOrNull(backstack.lastIndex - 1)
+                val detailFromPanel = detailPrev is Screen.EntityDetail ||
+                    detailPrev is Screen.VacuumPanel || detailPrev is Screen.MediaPanel ||
+                    detailPrev is Screen.SecurityPanel || detailPrev is Screen.GreenhousePanel ||
+                    detailPrev is Screen.UpdatesPanel || detailPrev is Screen.HomeStatusPanel
+                // The morph source is the rect captured at open,
+                // NOT the live map: once the base page lays out
+                // (item 4's instant base below), its cards
+                // overwrite the map with base-page rects, and a
+                // live read would jump the morph origin mid-flight.
+                // The live map stays the fallback for cards that
+                // never reported bounds.
+                val detailSource = anim.source ?: cardBounds[anim.entityId]
                 // Feedback round, item 3: unfolded gets the
                 // centered popup; folded keeps the full-screen
                 // morph + traveler below, byte for byte.
                 if (LocalWideLayout.current) {
                     CenteredPopup(
                         progress = { detailProgress.value },
-                        source = cardBounds[anim.entityId] ?: anim.source,
+                        source = detailSource,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissDetail() },
                     ) {
-                        content(anim.screen)
+                        CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
+                            content(anim.screen)
+                        }
                     }
                 } else {
                 // Round 4: the thermostat detail special-case is
@@ -1325,7 +1385,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // block); progress is a lambda.
                 PanelOverlay(
                     progress = { detailProgress.value },
-                    source = cardBounds[anim.entityId] ?: anim.source,
+                    source = detailSource,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -1334,15 +1394,23 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
                 ) {
-                    content(anim.screen)
+                    CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
+                        content(anim.screen)
+                    }
                 }
-                TravelingHeader(
-                    vm, anim.entityId, heroBounds[anim.entityId],
-                    heroTarget?.takeIf { it.first == anim.entityId }?.second,
-                    progress = { detailProgress.value }, overlayOrigin,
-                    onDismiss = { dismissDetail() },
-                    isClosing = detailExiting,
-                )
+                // Feedback round 4, item 4: suppressed for
+                // sub-panel sources (see the gate above); the arc
+                // is weather-only and weather cards never sit in a
+                // sub-panel, so it keeps its existing rule.
+                if (!detailFromPanel) {
+                    TravelingHeader(
+                        vm, anim.entityId, heroBounds[anim.entityId],
+                        heroTarget?.takeIf { it.first == anim.entityId }?.second,
+                        progress = { detailProgress.value }, overlayOrigin,
+                        onDismiss = { dismissDetail() },
+                        isClosing = detailExiting,
+                    )
+                }
                 TravelingArc(
                     vm, anim.entityId, arcBounds[anim.entityId],
                     arcTarget?.takeIf { it.first == anim.entityId }?.second,
@@ -1661,6 +1729,12 @@ private fun EntityPopupSheetContent(
                 val sheetIcon = com.garrietta.haven.ui.components.cardIconForKey(
                     com.garrietta.haven.data.customIconKeyFor(sheetCustom.iconKeys, entity.entityId, com.garrietta.haven.ui.components.CARD_ICON_KEYS),
                 ) ?: domainIcon(entity)
+                // Feedback round 4, item 2: the sheet header badge
+                // carries the card's preset pair, like every card.
+                val sheetBadgeOverride = detailBadgeOverride(
+                    sheetCustom.tilePresets, entity,
+                    isDarkBackdrop(MaterialTheme.colorScheme.background),
+                )
                 Row(
                     Modifier.fillMaxWidth()
                         .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
@@ -1674,6 +1748,7 @@ private fun EntityPopupSheetContent(
                         sheetIcon,
                         accent,
                         modifier = Modifier.size(48.dp).hideWhileTraveling(),
+                        badgeOverride = sheetBadgeOverride,
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
@@ -2161,6 +2236,16 @@ private fun TravelingHeader(
         else badgeRectInRow(effectiveSource, with(density) { 56.dp.toPx() })
     val targetBadge = badgeRectInRow(targetRect, with(density) { 48.dp.toPx() })
     val accent = accentFor(entity.entityId)
+    // Feedback round 4, item 2: the traveler carries the preset
+    // pair when one is active for this entity (resolved against
+    // the open-time snapshot, like every other traveler color),
+    // so it matches the destination header badge exactly and
+    // cannot jump at the 2% handoff.
+    val travelerCustom = rememberCardCustom(vm)
+    val travelerBadgeOverride = detailBadgeOverride(
+        travelerCustom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+    )
     // Badge only (2026-11-01 polish round): the name/state text
     // used to ride beside the badge here, but the destination
     // header now shows its own text from frame 0 — keeping the
@@ -2207,6 +2292,7 @@ private fun TravelingHeader(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) { onDismiss() },
+            badgeOverride = travelerBadgeOverride,
         )
     }
 }
@@ -3747,9 +3833,16 @@ fun DetailPopupHeader(
     displayTitle: String? = null,
     displayIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     onEdit: (() -> Unit)? = null,
+    // Feedback round 4, item 2: the preset badge pair for this
+    // entity (detailBadgeOverride), or null to keep badgeColors.
+    badgeOverride: Pair<Color, Color>? = null,
 ) {
     val heroTarget = LocalHeroTarget.current
     val accent = accentFor(entity.entityId)
+    // Feedback round 4, item 4: with the traveler suppressed
+    // (detail from a sub-panel), the badge renders from frame 0
+    // instead of hiding for a traveler that never flies.
+    val suppressTraveler = LocalSuppressTraveler.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
             .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
@@ -3763,10 +3856,11 @@ fun DetailPopupHeader(
             entity,
             displayIcon ?: domainIcon(entity),
             accent,
-            modifier = Modifier.size(48.dp).hideWhileTraveling().clickable(
+            modifier = Modifier.size(48.dp).then(if (suppressTraveler) Modifier else Modifier.hideWhileTraveling()).clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) { onDismiss() },
+            badgeOverride = badgeOverride,
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

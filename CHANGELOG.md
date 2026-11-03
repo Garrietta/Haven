@@ -1,5 +1,151 @@
 # Haven Changelog
 
+## Feedback round 4 (2026-11-03, videos df1 + df2)
+
+Two narrated videos against the feedback-round-3 build
+(`da9364a8`, CI Build APKs run #110 green). 336 unit tests, 0
+failures (334 baseline + 2 new: a light-theme glyph-equals-
+container case and a detail-override gating case). Local APK:
+`haven-feedback-round4-debug.apk`.
+
+### Item 1 — unfolded root restructure: the rail clipping ledge (video df1)
+
+Round 3's zIndex-only fix was insufficient, and this round
+names why: zIndex changes draw order, not size. The Scaffold
+itself sat beside the rail in a horizontal Row, so its content
+area ended at the rail boundary and sliding pages vanished at
+that line instead of reaching the physical bezel. The root is
+now a single full-screen `Box` (`HavenApp.kt`): the Scaffold
+spans the full width (`Modifier.fillMaxSize()`) with 84dp start
+content padding, and the `VerticalSidePill` floats on top at
+`Alignment.CenterStart` (`zIndex(1f)` + status/nav-bars
+padding). At rest, content still sits right of the rail — the
+padding defines where tab content draws, and resting geometry
+is otherwise unchanged. During tab transitions, pages slide
+all the way to the physical bezel underneath the floating
+rail, with only the rail's own shape obscuring them. The
+`AnimatedContent` transition container is explicitly
+full-size, and the round-3 tab travel (full off-screen both
+directions, +84dp rail over-travel on unfolded leftward) is
+unchanged. Folded is untouched (single full-size Scaffold, no
+rail).
+
+### Item 2 — custom tile presets into detail surfaces (video df2)
+
+A Lamp card set to warm amber/yellow rendered #FFE082 +
+bronze badge/switch on the card, but its detail panel reverted
+the top-left header polygon badge and the large
+`VerticalPillToggle` to default forest green (#1B3708). This
+round explicitly overrides round 2's decision to leave
+detail/sheet header badges untouched (that exclusion was
+based on morph-traveler color-jump risk; since card, traveler,
+and header now share one preset resolution, there is no jump
+to risk — the traveler computes the same pair internally from
+the open-time snapshot). New pure helper
+`detailBadgeOverride` (`data/CardCustomization.kt`): preset
+pair via `presetBadgeColors`, gated by the round-2
+`presetAppliesForState` active rules (inactive gray otherwise;
+null when no preset is set). Wired into `DomainBadge` and
+`TravelingBadge` as an optional `badgeOverride` pair
+(`ui/components/Expressive.kt`), and into every detail
+surface: `DetailPageScreen`/`DetailPageContent` (header badge,
+52dp hero badge, and the light toggle, whose track is now the
+preset badge bg — the card's switch track — with the white
+knob unchanged), `EntityPopupSheetContent` (sheet header
+badge), and `ThermostatPopout` (climate header badge, covering
+both the detail-climate path and the popout path). The
+traveler (`TravelingHeader`) resolves the same pair from the
+snapshot, so traveler and destination header coincide exactly
+at the 2% handoff.
+
+### Item 3 — badge glyph + switch thumb = pastel container on active cards (video df2)
+
+SUPERSEDES the rewrite matrix's active-light #FFFFFF glyph
+rule for active states. On active cards the lightbulb inside
+the dark polygon badge rendered pure white; it is now the
+card's pastel container color — #C8F5A6 for green, #FFE082
+for yellow, the same color as the switch thumb — while the
+badge polygon background and switch track stay deep tonal ink
+(#1B3708 / #261900). Changes: `MatrixRow.toCardColors`
+(`data/SemanticColors.kt`) — light active glyph =
+`lightContainer` (dark unchanged: a dark container glyph
+would fail on the light badge); `presetBadgeColors`
+(`data/CardCustomization.kt`) — light glyph = the preset's
+pastel container (dark keeps the 0.72-lightness bright tint,
+for the same reason). The switch thumb already used the card
+color (`domainSwitchColors` checked thumb = container;
+`presetSwitchColors` checked thumb = container) — verified,
+not changed; only the glyph moved. Every affected pair still
+clears 4.5:1 (pastel on deep ink, roughly 12–14:1), pinned by
+`DomainCardColorsTest` (new glyph-equals-container case) and
+`CardCustomizationTest` (updated preset-badge case). Scope
+note: the dynamic-scheme `badgeColors` path (non-preset detail
+headers/heroes, which use scheme.primary tokens rather than
+the matrix) is a separate token system and is untouched; item
+3 governs the matrix + preset systems (cards everywhere, and
+preset details via item 2's override).
+
+### Item 4 — nested-panel ghosting + exit flash (video df2)
+
+Opening/closing Lamp or Standing Lamp from the Lights-on
+sub-panel bled the Home dashboard through semi-transparent
+morph layers, left a stray green badge floating on Home, and
+flashed one frame landing back on the Lights grid. The
+mechanism, verified in code (not assumed): (a) the panel
+itself renders as a morph overlay on top of Home, so when a
+detail opens from it, the base page switches Home → panel
+page — and that base change used to animate (slide + fade)
+UNDERNEATH the detail morph, letting Home show at the edges
+through the semi-transparent morph; (b) the base page's cards
+overwrite the shared card/hero bounds maps with base-page
+rects, so the detail morph's live-read source and the
+traveler's origin tracked the base page, not the tapped panel
+card — the traveler landed on a position matching no visible
+card. Fixes (`HavenApp.kt`): while any detail/panel overlay is
+open, the base page renders instantly with no
+`AnimatedContent` transition — the intermediate panel stays
+opaque and stationary underneath the top-most morph (tab
+switches always run with no overlay open, since `goTop`
+clears overlays atomically first, so they keep the slide);
+the detail morph source is the rect captured at open, not the
+live map (the map stays the fallback for never-reported
+cards); and `TravelingHeader` is suppressed when the detail
+opened from a sub-panel or another detail (previous backstack
+entry is an overlay screen), with the destination header badge
+rendering from frame 0 via a new `LocalSuppressTraveler`
+composition local (read by `DetailPopupHeader` and the
+thermostat header badge) instead of hiding for a traveler
+that never flies. The sheet traveler is unchanged: sheets
+don't move the backstack, so a sheet from a panel card flies
+from the correct panel position. Known residual, stated
+plainly: the panel popup still plays its own enter morph on
+return from a detail (from its sourceless fallback, since
+panels carry no source card) — but it now plays over an
+identical opaque panel page, so no Home bleed and no flash;
+only the settle animation itself remains.
+
+### Item 5 — morphs locked to RenderThread
+
+Audit of `MorphSurface` (`ui/components/MorphOverlay.kt`),
+`TravelingHeader`, and `TravelingArc` (`HavenApp.kt`), plus
+`PanelOverlay` and `CenteredPopup`: all three morph
+components were already clean (Round 6's graphicsLayer-only
+rule held — nothing regressed since). `MorphSurface` lays out
+once at the fixed target size and moves only via
+`graphicsLayer` (translation/scale/shape/clip) plus a
+`drawBehind` background blend; `TravelingHeader` and
+`TravelingArc` lay out once at the static target rect and move
+only via `graphicsLayer` from the progress lambda; `PanelOverlay`
+and `CenteredPopup` measure once from fixed constraints and
+enter via `graphicsLayer` only (scrim alpha also
+`graphicsLayer`). No layout/size/padding animation exists on
+any morph path, so no code changed here. One observation,
+out of scope (a control animation, not a morph): the
+`VerticalPillToggle` knob still travels via clamped padding
+(the recurring crash site, already bounded to ≥0dp); moving
+it to `graphicsLayer` translation would change a pressable
+control's behavior and was not attempted in this round.
+
 ## Follow-up round (2026-11-03, videos 71 + 63 — folded into the feedback round)
 
 Two narrated follow-up videos arrived minutes after the feedback

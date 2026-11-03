@@ -174,6 +174,20 @@ val LocalMorphProgress = staticCompositionLocalOf<(() -> Float)?> { null }
 val LocalMorphClosing = staticCompositionLocalOf { false }
 
 /**
+ * Feedback round 4, item 4: whether the traveling header is
+ * suppressed for this detail — true when the detail opened from
+ * a sub-panel (Lights grid, Updates, vacuum/media/security/
+ * greenhouse panels) or another detail, i.e. when the source
+ * card lives in an overlay that is replaced by this detail,
+ * not on the root dashboard. Destination header badges read
+ * this: with no traveler in flight, the badge must render from
+ * frame 0 (no hideWhileTraveling) instead of waiting for a
+ * traveler that never comes. Defaults to false (dashboard and
+ * ordinary-page sources keep the traveler).
+ */
+val LocalSuppressTraveler = staticCompositionLocalOf { false }
+
+/**
  * Alpha for the active morph source card (see
  * [hideWhenMorphSource]). Round 5: the overlay root provides 1f
  * always — the card never fades; the opaque panel surface covers

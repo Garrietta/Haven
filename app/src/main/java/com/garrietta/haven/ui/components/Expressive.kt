@@ -273,7 +273,18 @@ fun DialogTitleText(name: String, modifier: Modifier = Modifier) {
  * tertiary); domains with no token mapping keep the accent wash.
  */
 @Composable
-fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color, modifier: Modifier = Modifier) {
+fun DomainBadge(
+    entity: HaEntity,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    // Feedback round 4, item 2: when a custom tile preset is
+    // active for this entity, the badge pair comes from the
+    // preset (detailBadgeOverride) instead of badgeColors — so
+    // detail headers, heroes, and sheets carry the card's exact
+    // theme instead of reverting to the default green.
+    badgeOverride: Pair<Color, Color>? = null,
+) {
     val reduceMotion = LocalReduceMotion.current
     val scheme = MaterialTheme.colorScheme
     val domain = entity.domain
@@ -309,7 +320,7 @@ fun DomainBadge(entity: HaEntity, icon: androidx.compose.ui.graphics.vector.Imag
     )
     val idle = stateShapePolygon(badgeIdleShape(domain))
     val active = stateShapePolygon(badgeActiveShape(domain, if (domain == "weather") state else null))
-    val (bg, iconTint) = badgeColors(scheme, entity, accent)
+    val (bg, iconTint) = badgeOverride ?: badgeColors(scheme, entity, accent)
     // Shape-picker override (2026-10-30): a picked shape replaces
     // the idle/active morph pair with that one static shape, in
     // the badge's exact colors — the picker's shape IS the badge.
@@ -449,9 +460,13 @@ fun TravelingBadge(
     progress: () -> Float,
     tileSource: Boolean,
     modifier: Modifier = Modifier,
+    // Feedback round 4, item 2: same preset pair as DomainBadge —
+    // the traveler must carry the destination header's exact
+    // colors, or it jumps at the 2% handoff.
+    badgeOverride: Pair<Color, Color>? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val (bg, iconTint) = badgeColors(scheme, entity, accent)
+    val (bg, iconTint) = badgeOverride ?: badgeColors(scheme, entity, accent)
     val domain = entity.domain
     val state = entity.state
     // Shape-picker override (2026-10-30): the traveler morphs

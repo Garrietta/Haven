@@ -1,5 +1,8 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.data.detailBadgeOverride
+import com.garrietta.haven.ui.components.LocalSuppressTraveler
 import com.garrietta.haven.ui.components.compositeOver
+import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.ensureContrast
 import com.garrietta.haven.ui.components.CoolBlue
 import com.garrietta.haven.ui.components.HeatOrange
@@ -99,6 +102,16 @@ import com.garrietta.haven.ui.controls.stateText
  */
 @Composable
 fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) {
+    // Feedback round 4, item 2: the header badge carries the
+    // card's preset pair, like every other detail header.
+    val popoutCustom = rememberCardCustom(vm)
+    val popoutBadge = detailBadgeOverride(
+        popoutCustom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+    )
+    // Feedback round 4, item 4: with the traveler suppressed
+    // (detail from a sub-panel), the badge renders from frame 0.
+    val suppressTraveler = LocalSuppressTraveler.current
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
@@ -153,10 +166,11 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
                 entity,
                 domainIcon(entity),
                 accentFor(entity.entityId),
-                modifier = Modifier.size(48.dp).hideWhileTraveling().clickable(
+                modifier = Modifier.size(48.dp).then(if (suppressTraveler) Modifier else Modifier.hideWhileTraveling()).clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) { onClose() },
+                badgeOverride = popoutBadge,
             )
             Spacer(Modifier.width(12.dp))
             // Standard dialog header (2026-10-30): name + state

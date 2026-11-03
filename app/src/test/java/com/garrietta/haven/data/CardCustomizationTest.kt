@@ -44,11 +44,14 @@ class CardCustomizationTest {
         assertTrue(TILE_PRESETS.all { it.light != it.dark })
     }
 
-    // Feedback round, item 5: preset-driven badge tints — dark
-    // near-black badge + bright tint glyph, hue preserved,
-    // contrast held for every preset in both themes.
+    // Feedback round, item 5 + feedback round 4, item 3:
+    // preset-driven badge tints — dark near-black badge, hue
+    // preserved, contrast held for every preset in both themes.
+    // Light glyph = the preset's pastel container (matching the
+    // switch thumb); dark glyph keeps the bright 0.72-lightness
+    // tint (a dark container glyph would fail on the badge).
     @Test
-    fun presetBadgeIsDarkTintWithBrightGlyphAndHuePreserved() {
+    fun presetBadgeIsDarkTintWithPastelGlyphLightAndBrightGlyphDark() {
         for (preset in TILE_PRESETS) {
             for (isDark in listOf(false, true)) {
                 val base = if (isDark) preset.dark else preset.light
@@ -57,7 +60,11 @@ class CardCustomizationTest {
                 val (gh, gs, gl) = rgbToHsl(glyph.red, glyph.green, glyph.blue)
                 val (ph, _, _) = rgbToHsv(base.red, base.green, base.blue)
                 assertTrue("badge dark for ${preset.key} dark=$isDark, v=$bv", bv <= 0.2f)
-                assertTrue("glyph bright tint for ${preset.key} dark=$isDark, s=$gs l=$gl", gs >= 0.9f && gl in 0.65f..0.8f)
+                if (isDark) {
+                    assertTrue("glyph bright tint for ${preset.key} dark, s=$gs l=$gl", gs >= 0.9f && gl in 0.65f..0.8f)
+                } else {
+                    assertEquals("glyph is the pastel container for ${preset.key} light", base, glyph)
+                }
                 assertTrue(
                     "glyph contrast for ${preset.key} dark=$isDark",
                     contrastRatio(glyph, bg) >= 4.5,
@@ -66,6 +73,25 @@ class CardCustomizationTest {
                 assertTrue("glyph hue preserved for ${preset.key}", hueDistance(gh, ph) <= 12f)
             }
         }
+    }
+
+    // Feedback round 4, item 2: detail/sheet/traveler badges use
+    // the card's preset pair only while the entity is active;
+    // otherwise null (callers keep matrix/default colors, exactly
+    // as an inactive card renders inactive gray).
+    @Test
+    fun detailBadgeOverrideGatesOnPresetAndActiveState() {
+        val presets = mapOf("light.lamp" to "amber", "light.off" to "amber")
+        val on = HaEntity("light.lamp", "on", emptyMap())
+        val off = HaEntity("light.off", "off", emptyMap())
+        val unset = HaEntity("light.plain", "on", emptyMap())
+        val amber = TILE_PRESETS.first { it.key == "amber" }
+        assertEquals(presetBadgeColors(amber, false), detailBadgeOverride(presets, on, false))
+        assertEquals(presetBadgeColors(amber, true), detailBadgeOverride(presets, on, true))
+        assertNull(detailBadgeOverride(presets, off, false))
+        assertNull(detailBadgeOverride(presets, unset, false))
+        assertNull(detailBadgeOverride(mapOf("light.lamp" to "nope"), on, false))
+        assertNull(detailBadgeOverride(presets, HaEntity("light.lamp", "unavailable", emptyMap()), false))
     }
 
     @Test

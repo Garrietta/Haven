@@ -85,8 +85,11 @@ fun tilePresetColor(preset: TilePreset?, isDark: Boolean): Color? =
  * - badgeBg: the preset's theme color darkened to a near-black
  *   tint (HSV value 0.13, saturation kept high) — a yellow tile
  *   gives a yellow-tinted almost-black badge, never matrix green.
- * - badgeGlyph: the preset hue at full saturation and 0.72 HSL
- *   lightness — the BRIGHT tint of the assigned color, which for
+ * - badgeGlyph: light theme — the preset's pastel container
+ *   itself (feedback round 4, item 3: the icon matches the
+ *   background color, as green/amber as the switch thumb); dark
+ *   theme — the preset hue at full saturation and 0.72 HSL
+ *   lightness, the BRIGHT tint of the assigned color, which for
  *   the yellow preset reads amber/gold, exactly as he described.
  *   (A pure vivid HSV glyph was tried first and REJECTED: vivid
  *   blue/purple are perceptually dark and fail 4.5:1 on a
@@ -100,8 +103,36 @@ fun presetBadgeColors(preset: TilePreset, isDark: Boolean): Pair<Color, Color> {
     val base = if (isDark) preset.dark else preset.light
     val (h, s, _) = rgbToHsv(base.red, base.green, base.blue)
     val badgeBg = hsvToColor(h, s.coerceAtLeast(0.55f), 0.13f)
-    val badgeGlyph = hslToColor(h, 1.0f, 0.72f)
+    // Feedback round 4, item 3 (light theme only): the glyph is the
+    // preset's pastel container — the same color as the switch
+    // thumb (presetSwitchColors checked thumb = container) — not
+    // the 0.72-lightness bright tint. A pastel on the near-black
+    // badge still clears 4.5:1 for every preset (pinned by
+    // CardCustomizationTest). Dark keeps the bright tint: a dark
+    // container glyph would fail on the near-black badge.
+    val badgeGlyph = if (isDark) hslToColor(h, 1.0f, 0.72f) else base
     return badgeBg to badgeGlyph
+}
+
+/**
+ * Feedback round 4, item 2: the detail/sheet/traveler badge pair
+ * for an entity with a custom tile preset — the SAME pair the
+ * dashboard card renders (presetBadgeColors), gated by the
+ * round-2 active rules, so a detail panel, long-press sheet, or
+ * traveling badge never reverts to the matrix/default green
+ * while the card shows the assigned color. Null when no preset
+ * is set or the entity is not in its active state (callers then
+ * keep their existing matrix/default colors, exactly as an
+ * inactive card renders inactive gray).
+ */
+fun detailBadgeOverride(
+    presets: Map<String, String>,
+    entity: HaEntity,
+    isDark: Boolean,
+): Pair<Color, Color>? {
+    val preset = tilePresetFor(presets, entity.entityId) ?: return null
+    if (!presetAppliesForState(entity.domain, entity.state)) return null
+    return presetBadgeColors(preset, isDark)
 }
 
 /**

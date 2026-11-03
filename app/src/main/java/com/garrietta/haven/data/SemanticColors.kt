@@ -281,7 +281,16 @@ private fun MatrixRow.toCardColors(isDark: Boolean): DomainCardColors {
     } else if (isDark) {
         darkInk
     } else {
-        Color.White
+        // Feedback round 4, item 3 — SUPERSEDES the rewrite matrix's
+        // active-light #FFFFFF glyph rule: the badge glyph is the
+        // card's pastel container color ("as green as the switch"
+        // — the switch thumb already uses the container, see
+        // domainSwitchColors/presetSwitchColors), while the badge
+        // polygon stays deep tonal ink. Every light active pair
+        // still clears 4.5:1 (pastel on deep ink), pinned by
+        // DomainCardColorsTest. Dark is untouched: a dark container
+        // glyph would fail on the light badge.
+        lightContainer
     }
     return DomainCardColors(if (isDark) darkContainer else lightContainer, badgeBg, glyph)
 }
