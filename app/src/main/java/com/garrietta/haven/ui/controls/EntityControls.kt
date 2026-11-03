@@ -380,12 +380,16 @@ fun shapeTapAction(vm: HavenViewModel, entity: HaEntity): (() -> Unit)? = when (
 }
 
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit,
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true,
     // Feedback round 5, item 4: the page accent funnel. The assigned tile color (preset
     // container, or null) and badge pair (or null) thread from the detail page / sheet into
     // every domain control below, so one resolution themes the whole surface. Default null
     // keeps every existing caller (home tiles, boards, areas, search) byte-identical.
-    pageAccent: Color? = null, pageBadge: Pair<Color, Color>? = null) {
+    // onDetail stays LAST: Browse/Dashboards pass it as a trailing lambda, and params
+    // appended after a lambda parameter break those call sites (round-5 CI #112 lesson,
+    // same class as the PillAction reorder).
+    pageAccent: Color? = null, pageBadge: Pair<Color, Color>? = null,
+    onDetail: (String) -> Unit) {
     val accent = accentFor(entity.entityId)
     // Snapshot-held visuals (2026-10-30 verdict round): when this
     // card is the active morph source, its badge, name, state, and

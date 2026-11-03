@@ -5,7 +5,13 @@
 Three narrated videos against the feedback-round-4 build
 (`6cebaa52`, CI Build APKs run #111 green). 339 unit tests, 0
 failures (336 baseline + 3 new: two dual-number-gap cases and
-one popup-accent gating case). NOTE: no local APK this round
+one popup-accent gating case). Fix-up: CI #112 failed to
+compile — the new `pageAccent` / `pageBadge` parameters had
+been appended after `EntityControlCard`'s `onDetail` lambda,
+breaking Browse/Dashboards trailing-lambda call sites (same
+class as the round's `PillAction` reorder); `onDetail` moved
+last and all other round-5 signatures were audited for the
+same pattern (only `EntityControlCard` was affected). NOTE: no local APK this round
 — the sandbox's Gradle daemon IPC broke after the baseline
 (a fresh Gradle user home and a trivial `help` task fail the
 same way: the client cannot read a valid message from its own
