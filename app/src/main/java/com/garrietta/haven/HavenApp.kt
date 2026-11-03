@@ -11,6 +11,8 @@ import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.shapeLabel
 import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.data.alertDotColor
+import com.garrietta.haven.data.ControlDeepLinkTarget
+import com.garrietta.haven.data.controlDeepLinkTarget
 import com.garrietta.haven.data.hasImportantAlert
 import com.garrietta.haven.ui.components.NavItem
 import com.garrietta.haven.ui.components.NavPillGeometry
@@ -18,6 +20,7 @@ import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.navPillGeometry
 import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.tabSlideDirection
+import com.garrietta.haven.ui.components.tabSlideOffsets
 import com.garrietta.haven.ui.components.selectedNavIndex
 import com.garrietta.haven.ui.theme.FloatingCorner
 
@@ -133,6 +136,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -400,6 +404,13 @@ fun HavenApp(vm: HavenViewModel) {
             ScrollVisibilityState(with(scrollDensity) { 8.dp.toPx() })
         }
         val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
+        // Feedback round 3, item 6: Device Controls deep links.
+        // The provider's app intent carries the tapped entity id
+        // (see appIntentFor); MainActivity stores it on the VM.
+        // The router below consumes it once the entity's state has
+        // loaded and jumps to that entity's surface — it renders
+        // nothing, so its states collection cannot recompose UI.
+        ControlDeepLinkRouter(vm, current, navigate)
         val goTop: (Screen) -> Unit = {
             morphGeneration++
             vm.pageOrigin = null
@@ -959,11 +970,21 @@ fun HavenApp(vm: HavenViewModel) {
                     } else {
                         onTabIndex
                     }
+                    // Feedback round 3, item 1: the rail draws
+                    // AFTER (on top of) the Scaffold content, so
+                    // tab pages sliding left pass UNDER the pill
+                    // instead of over it — the pill's own shape is
+                    // the only thing obscuring the transition.
+                    // zIndex changes draw order only: resting
+                    // layout (84dp rail + weight(1f) Scaffold) is
+                    // byte-identical, and the rail keeps its
+                    // enter slide and scrub behavior.
                     VerticalSidePill(
                         items = barItems,
                         selectedIndex = railSelectedIndex,
                         onSelect = goTop,
                         badgedScreens = badged,
+                        modifier = Modifier.zIndex(1f),
                     )
                 }
             }
@@ -1079,12 +1100,19 @@ fun HavenApp(vm: HavenViewModel) {
                 // order (Home, Scenes, Energy, Settings — Koda's
                 // visualTabOrder rule, Haven's bar order). When
                 // BOTH the outgoing and incoming screens are tabs,
-                // the slide direction follows the rank delta:
-                // forward (target rank higher) — the new page
-                // enters full-width from the right while the old
-                // leaves one-third to the left; backward — the new
-                // page enters one-third from the left while the old
-                // leaves full-width to the right. Any switch
+                // the slide direction follows the rank delta.
+                // Feedback round 3, item 1 (video ba): the travel
+                // is FULL in both directions — the outgoing page
+                // slides ALL the way off-screen (not Koda's
+                // one-third), and on unfolded the leftward travel
+                // adds the 84dp rail width so the page clears the
+                // left edge too. The rail draws on top (zIndex,
+                // see the VerticalSidePill call site), so sliding
+                // pages pass UNDER the pill: the pill's own shape
+                // is the only thing obscuring the transition, and
+                // there is no clip line at the content boundary.
+                // Resting page positioning is unchanged (content
+                // still starts right of the rail). Any switch
                 // involving a non-tab screen keeps Round 4's fixed
                 // slide (enter one-third from the right, exit
                 // one-third to the left). Koda passes no explicit
@@ -1098,6 +1126,14 @@ fun HavenApp(vm: HavenViewModel) {
                 // (unfolded centered popup, folded full-screen
                 // morph); this spec touches tab switches only.
                 val reduceMotionTop = LocalReduceMotion.current
+                // Feedback round 3, item 1: leftward tab travel on
+                // unfolded must clear the 84dp rail as well as the
+                // content width, so the page slides fully off the
+                // left screen edge (not just out of the content
+                // area). Folded has no rail, so the clearance is 0.
+                val railTransitionPx = with(LocalDensity.current) {
+                    if (LocalWideLayout.current) 84.dp.roundToPx() else 0
+                }
                 if (reduceMotionTop) {
                     content(base)
                 } else {
@@ -1105,11 +1141,9 @@ fun HavenApp(vm: HavenViewModel) {
                         targetState = base,
                         transitionSpec = {
                             val barScreens = pillBarItems().map { it.screen }
-                            when (tabSlideDirection(barScreens, initialState, targetState)) {
-                                1 -> ((slideInHorizontally(initialOffsetX = { it }) + fadeIn()) togetherWith
-                                    (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut()))
-                                -1 -> ((slideInHorizontally(initialOffsetX = { -it / 3 }) + fadeIn()) togetherWith
-                                    (slideOutHorizontally(targetOffsetX = { it }) + fadeOut()))
+                            when (val direction = tabSlideDirection(barScreens, initialState, targetState)) {
+                                1, -1 -> ((slideInHorizontally(initialOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).first }) + fadeIn()) togetherWith
+                                    (slideOutHorizontally(targetOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).second }) + fadeOut()))
                                 else -> ((slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn()) togetherWith
                                     (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut()))
                             }.using(SizeTransform(clip = false))
@@ -3172,6 +3206,48 @@ fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: 
         CameraHeader(entity?.let { displayCameraName(it) } ?: "Camera", badgeText = "Recording", onClose = onClose)
     }
 }
+/**
+ * Feedback round 3, item 6 (video 6d): routes Samsung Device
+ * Controls taps into the app. The Controls provider's app intent
+ * carries the tapped entity id (see appIntentFor); MainActivity
+ * stores it on the VM as [HavenViewModel.controlDeepLinkEntityId].
+ * This router consumes it once the entity's state has loaded —
+ * cold start: states arrive after connect, so the effect re-runs
+ * per emission until the entity appears — then jumps to that
+ * entity's surface and clears the slot:
+ * - climate → the thermostat popout/page (vm.openClimatePopout,
+ *   the same machinery a thermostat card tap uses);
+ * - everything else → EntityDetail, exactly as a home-page card
+ *   tap does (popup on unfolded, detail as home cards do).
+ * Unknown ids (the sign-in control's "haven_open_app", deleted
+ * entities) clear without routing once states are non-empty, so a
+ * stale link never hangs the slot. A duplicate detail — already
+ * viewing that entity — is skipped. Renders nothing: its states
+ * collection recomposes only this router, never UI.
+ */
+@Composable
+private fun ControlDeepLinkRouter(vm: HavenViewModel, current: Screen, navigate: (Screen) -> Unit) {
+    val pendingDeepLink = vm.controlDeepLinkEntityId
+    val deepLinkStates by vm.states.collectAsState()
+    LaunchedEffect(pendingDeepLink, deepLinkStates) {
+        val id = pendingDeepLink ?: return@LaunchedEffect
+        val entity = deepLinkStates[id]
+        if (entity == null) {
+            if (deepLinkStates.isNotEmpty()) vm.clearControlDeepLink()
+            return@LaunchedEffect
+        }
+        when (controlDeepLinkTarget(id, entity.domain)) {
+            is ControlDeepLinkTarget.ThermostatPopout -> vm.openClimatePopout(id)
+            is ControlDeepLinkTarget.Detail -> {
+                if (current !is Screen.EntityDetail || current.entityId != id) {
+                    navigate(Screen.EntityDetail(id))
+                }
+            }
+        }
+        vm.clearControlDeepLink()
+    }
+}
+
 /** Dismissible banner for the last service-call failure. */
 @Composable
 private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
@@ -3299,17 +3375,16 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     ) {
         Surface(
             shape = FloatingCorner,
-            // Feedback round 2, item 5: NO background bar behind
-            // the pill — transparent container, no elevations, so
-            // content visibly scrolls underneath during
-            // transitions. The selected capsule (#9BF67C, opaque)
-            // + icons are the only visible chrome; unselected
-            // glyphs go theme-aware (see pillUnselectedGlyph) so
-            // they stay legible on light content with no dark
-            // container behind them.
-            color = Color.Transparent,
+            // Feedback round 3, item 1 (video ba): the pill
+            // background is RESTORED — opaque #161D17 container
+            // in both themes, exactly as #108 had it. Round 2
+            // item 5 removed it (a misread: the user wanted the
+            // transition clip box gone, not the pill). The
+            // shadow restores the floating-bar look the #108
+            // pill had (container + shadow, Koda-style).
+            color = PillBarContainer,
             tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            shadowElevation = 6.dp,
         ) {
             Box(
                 Modifier.onGloballyPositioned { pillOrigin = it.boundsInWindow().top },
@@ -3417,10 +3492,10 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
  * colors cross-fade on tween 200, all on the expressive fast
  * spatial spring (see the item block).
  * Unselected destinations are a 22dp outlined icon, no label. The
- * bar has NO background container (feedback round 2, item 5): it
- * floats transparently over content, so unselected glyphs are
- * theme-aware (light sage on dark, dark charcoal on light — see
- * pillUnselectedGlyph); no blue anywhere. The old measured sliding
+ * bar keeps its opaque #161D17 container in both themes
+ * (feedback round 3, item 1, restoring #108 after round 2 item 5
+ * removed it on a misread); unselected glyphs are #D7E2D4 in both
+ * themes (see pillUnselectedGlyph). No blue anywhere. The old measured sliding
  * indicator is gone (there is no indicator to glide — the capsule
  * IS the item), so no rect tracking and no animation state.
  * Dragging along the bar still scrubs the highlight (haptic tick
@@ -3452,13 +3527,16 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             Surface(
                 modifier = Modifier.wrapContentWidth().widthIn(max = maxWidth),
                 shape = RoundedCornerShape(geometry.cornerRadius),
-                // Feedback round 2, item 5: NO background bar —
-                // transparent container, no elevations (see the
-                // rail's Surface for the same treatment and the
-                // reason the unselected glyph goes theme-aware).
-                color = Color.Transparent,
+                // Feedback round 3, item 1 (video ba): the pill
+                // background is RESTORED — opaque #161D17
+                // container in both themes, exactly as #108 had
+                // it. Round 2 item 5 removed it (a misread: the
+                // user wanted the transition clip box gone, not
+                // the pill). The shadow restores the floating-bar
+                // look the #108 pill had.
+                color = PillBarContainer,
                 tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
+                shadowElevation = 6.dp,
             ) {
                 Row(
                     modifier = Modifier.wrapContentWidth().horizontalScroll(rememberScrollState()).padding(horizontal = geometry.rowHorizontalPadding, vertical = geometry.rowVerticalPadding).pillScrub(scrub),

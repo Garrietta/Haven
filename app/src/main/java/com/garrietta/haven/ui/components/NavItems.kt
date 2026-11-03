@@ -83,6 +83,28 @@ fun tabSlideDirection(barScreens: List<Screen>, from: Screen, to: Screen): Int? 
     return if (toRank > fromRank) 1 else -1
 }
 
+/**
+ * Feedback round 3, item 1 (video ba): full-travel tab-slide
+ * offsets, pure so they are unit-testable. Returns (enter, exit)
+ * pixel offsets for a page of [contentWidthPx], given the tab
+ * [direction] from [tabSlideDirection] and the [railWidthPx] the
+ * outgoing page must also clear on unfolded (84dp; 0 folded).
+ * Forward (direction 1): the new page enters from the right edge
+ * (fully off-screen at start) while the old page exits fully past
+ * the left edge — content width PLUS rail width, so on unfolded it
+ * clears the left screen edge, not just the content boundary.
+ * Backward (direction -1): mirrored. Any other direction value
+ * (including null's caller-side fallback) behaves as forward.
+ * The fade and the non-tab fixed slide are untouched; this helper
+ * covers the tab branches only.
+ */
+fun tabSlideOffsets(direction: Int?, contentWidthPx: Int, railWidthPx: Int): Pair<Int, Int> {
+    return when (direction) {
+        -1 -> (-(contentWidthPx + railWidthPx)) to contentWidthPx
+        else -> contentWidthPx to (-(contentWidthPx + railWidthPx))
+    }
+}
+
 /** One choosable pill icon: key (stored), label (picker), icon pair. */
  data class TabIconOption(
     val key: String,

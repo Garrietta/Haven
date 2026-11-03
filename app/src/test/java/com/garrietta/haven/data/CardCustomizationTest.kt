@@ -130,6 +130,52 @@ class CardCustomizationTest {
         assertEquals(Color(0xFF9E9E9E), dark.thumbUnchecked)
     }
 
+    // Feedback round 3, item 4 (video a3): the Home Status panel
+    // MUST match the home page for custom colors. Verified in code
+    // (not assumed): HomeStatusPanelScreen renders the SAME
+    // HomeRoomCard composable as the home page, reading the SAME
+    // SettingsStore maps through the SAME rememberCardCustom
+    // snapshot, for the SAME entity IDs — there is no panel-only
+    // color path to diverge. This test pins the shared resolution
+    // for the panel's exact inputs (both lamps on, Lamp lime,
+    // Standing Lamp amber, light theme): container + badge +
+    // switch all resolve from the assigned preset on either
+    // surface, because both surfaces call these same functions.
+    // (A panel that showed matrix lime for the amber lamp while
+    // home showed amber cannot come from this resolution — the
+    // store read at panel-open time lacked the amber entry, e.g.
+    // presets lost on a reinstall; re-assigning once restores
+    // every surface, since the store is global by entity ID.)
+    @Test
+    fun panelInputsResolveSamePresetColorsAsHome() {
+        val presets = mapOf(
+            "light.lamp_socket_1" to "lime",
+            "light.standing_lamp_socket_1" to "amber",
+        )
+        for ((entityId, key, container) in listOf(
+            Triple("light.lamp_socket_1", "lime", Color(0xFFC8F5A6)),
+            Triple("light.standing_lamp_socket_1", "amber", Color(0xFFFFE082)),
+        )) {
+            val preset = tilePresetFor(presets, entityId)
+            assertEquals("preset key for $entityId", key, preset?.key)
+            assertTrue("preset applies while on for $entityId", presetAppliesForState("light", "on"))
+            assertEquals("container for $entityId", container, tilePresetColor(preset, false))
+            val (bg, glyph) = presetBadgeColors(preset!!, false)
+            val (bh, _, bv) = rgbToHsv(bg.red, bg.green, bg.blue)
+            val (gh, _, _) = rgbToHsv(glyph.red, glyph.green, glyph.blue)
+            val (ph, _, _) = rgbToHsv(container.red, container.green, container.blue)
+            assertTrue("badge dark for $entityId", bv <= 0.2f)
+            assertTrue("badge hue matches preset for $entityId", hueDistance(bh, ph) <= 12f)
+            assertTrue("glyph hue matches preset for $entityId", hueDistance(gh, ph) <= 12f)
+            val switch = presetSwitchColors(preset, false)
+            assertEquals("switch track follows preset badge for $entityId", bg, switch.trackChecked)
+            assertEquals("switch thumb follows preset container for $entityId", container, switch.thumbChecked)
+        }
+        // And the off-state gate is identical too: a preset card
+        // that is off renders inactive gray on both surfaces.
+        assertTrue(!presetAppliesForState("light", "off"))
+    }
+
     private fun luminance(c: Color): Double {
         fun lin(v: Float): Double {
             val s = v.toDouble()

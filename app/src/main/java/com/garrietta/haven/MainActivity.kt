@@ -25,6 +25,10 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.TRANSPARENT
         super.onCreate(savedInstanceState)
         vm.handleOAuthIntent(intent)
+        // Feedback round 3, item 6: a Device Controls tap carries
+        // its entity id; the router jumps to that entity's surface
+        // once its state has loaded (cold start included).
+        vm.handleControlDeepLink(intent.getStringExtra(EXTRA_CONTROL_ENTITY_ID))
         setContent {
             HavenApp(vm)
         }
@@ -45,5 +49,6 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         vm.handleOAuthIntent(intent)
+        vm.handleControlDeepLink(intent.getStringExtra(EXTRA_CONTROL_ENTITY_ID))
     }
 }

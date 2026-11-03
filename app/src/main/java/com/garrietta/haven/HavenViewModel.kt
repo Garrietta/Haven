@@ -222,6 +222,23 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun openClimatePopout(entityId: String) { climatePopoutId = entityId }
     fun closeClimatePopout() { climatePopoutId = null }
 
+    /**
+     * Feedback round 3, item 6: the entity id from a Samsung
+     * Device Controls tap, stored by MainActivity from the
+     * provider's app intent (see appIntentFor). ControlDeepLinkRouter
+     * in HavenApp consumes it once the entity's state has loaded
+     * and routes to that entity's surface, then clears it. Null
+     * means no pending deep link.
+     */
+    var controlDeepLinkEntityId by mutableStateOf<String?>(null)
+        private set
+
+    fun handleControlDeepLink(entityId: String?) {
+        if (!entityId.isNullOrBlank()) controlDeepLinkEntityId = entityId
+    }
+
+    fun clearControlDeepLink() { controlDeepLinkEntityId = null }
+
     /** Camera id shown in the centered live-feed dialog (Home quadrant hero), if any. */
     var cameraDialogId by mutableStateOf<String?>(null)
         private set

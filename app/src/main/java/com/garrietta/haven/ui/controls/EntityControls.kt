@@ -100,6 +100,7 @@ import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
 import com.garrietta.haven.ui.screens.rememberCardCustom
+import com.garrietta.haven.ui.screens.thermostatDisplayRange
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.data.domainCardColors
@@ -723,6 +724,20 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
     val heatCool = high != null && low != null
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
+    // Feedback round 3, item 5: the sheet dial uses the SAME dynamic
+    // display window as the popout (round 2 item 4) — a 10°F bracket
+    // around the current setpoints, clamped [40, 100] — NOT the full
+    // HA min..max. The popout already had this; the sheet was the
+    // surface that still showed the full range, so its bar stayed
+    // compressed and its thumbs crowded. State coercion stays in
+    // HA range exactly like the popout (out-of-window values pin
+    // at the ends); only the drawn bar + slider window change.
+    val displaySetpoints = if (heatCool) {
+        listOfNotNull(low?.toFloat(), high?.toFloat())
+    } else {
+        listOfNotNull(entity.attrDouble("temperature")?.toFloat())
+    }
+    val displayRange = thermostatDisplayRange(min, max, displaySetpoints)
     var heat by remember(low) { mutableStateOf(low?.toFloat()?.coerceIn(min, max) ?: min) }
     var cool by remember(high) { mutableStateOf(high?.toFloat()?.coerceIn(min, max) ?: max) }
     var single by remember(entity.attrDouble("temperature")) {
@@ -751,7 +766,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Dial(
             value = active,
-            range = min..max,
+            range = displayRange,
             onValueChange = setActive,
             onFinished = { applyClimateSetpoint(vm, entity, selector, it.toDouble()) },
             centerText = active.toDouble().formatTemp(),
@@ -770,11 +785,12 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
                 null
             },
             snapToWhole = true,
+            showRangeEnds = true,
         )
         // The slider moves the same active setpoint and snaps to whole
         // degrees on release, so every path changes temperature in 1°
-        // intervals.
-        ServiceSlider(active, min..max, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, accent, formatValue = { "${snapToDegree(it.toDouble()).toInt()}°" })
+        // intervals. Its window matches the dial's dynamic window.
+        ServiceSlider(active, displayRange, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, accent, formatValue = { "${snapToDegree(it.toDouble()).toInt()}°" })
         if (modes.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),

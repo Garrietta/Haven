@@ -242,24 +242,44 @@ fun HomeStatusPanelScreen(
         // (not a lazy grid): the panel content already scrolls
         // in PanelOverlay's wrapper, and a lazy grid inside it
         // cannot measure.
+        // Feedback round 3, item 2 (video a3): the rows live in a
+        // Column inside the BoxWithConstraints — NOT as direct
+        // Box children. A Box stacks its children (it does not
+        // flow them vertically), so the old loop rendered every
+        // row on top of the first and the trailing Spacer added
+        // no height: the popup measured one row tall, the second
+        // card overlapped the first, and the cards ended flush
+        // with the popup's bottom edge (zero daylight below them
+        // — reading as clipping). The Column stacks the rows,
+        // keeps the 12dp gaps, and adds 16dp of daylight below
+        // the last card, so the popup sizes to its content and
+        // both cards are fully visible. This also fixes the
+        // latent >2-entity case, where rows 3+ would all pile
+        // onto row 1. The 62%/75% CenteredPopup caps still apply
+        // — scroll only when content genuinely exceeds the
+        // screen — but the caps now yield to real content height
+        // instead of a mis-measured single row.
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val cardWidth = (maxWidth - 12.dp) / 2
-            for ((rowIndex, pair) in item.entities.chunked(2).withIndex()) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    for ((colIndex, entity) in pair.withIndex()) {
-                        Box(Modifier.width(cardWidth)) {
-                            HomeRoomCard(
-                                vm,
-                                entity.entityId,
-                                navigate,
-                                rowIndex * 2 + colIndex,
-                            ) { navigate(Screen.EntityDetail(entity.entityId)) }
+            Column {
+                for ((rowIndex, pair) in item.entities.chunked(2).withIndex()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        for ((colIndex, entity) in pair.withIndex()) {
+                            Box(Modifier.width(cardWidth)) {
+                                HomeRoomCard(
+                                    vm,
+                                    entity.entityId,
+                                    navigate,
+                                    rowIndex * 2 + colIndex,
+                                ) { navigate(Screen.EntityDetail(entity.entityId)) }
+                            }
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(4.dp))
             }
         }
     }

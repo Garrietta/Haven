@@ -64,6 +64,17 @@ import java.util.concurrent.Flow
  * NOT reimplemented here (HaClient has no refresh path); the
  * sign-in control is the graceful state.
  */
+
+/**
+ * Feedback round 3, item 6: the app-intent extra carrying the
+ * tapped control's entity id, so a Device Controls tap deep-links
+ * to that entity's surface instead of landing on Home. MainActivity
+ * reads it and stores it on the VM; ControlDeepLinkRouter consumes
+ * it. The sign-in control carries "haven_open_app", which matches
+ * no entity and clears without routing.
+ */
+const val EXTRA_CONTROL_ENTITY_ID = "com.garrietta.haven.CONTROL_ENTITY_ID"
+
 @RequiresApi(Build.VERSION_CODES.R)
 class HavenControlsService : ControlsProviderService() {
 
@@ -88,6 +99,15 @@ class HavenControlsService : ControlsProviderService() {
 
     private fun appIntentFor(entityId: String): PendingIntent {
         val intent = Intent(applicationContext, MainActivity::class.java)
+        // Feedback round 3, item 6: carry the tapped entity so the
+        // app can deep-link to its surface (previously the intent
+        // carried nothing, so every control tap landed on Home).
+        // Per-entity requestCode (already) keeps each control's
+        // intent distinct under FLAG_UPDATE_CURRENT. SINGLE_TOP
+        // routes a tap into the running single-activity instance
+        // via onNewIntent instead of stacking a second MainActivity.
+        intent.putExtra(EXTRA_CONTROL_ENTITY_ID, entityId)
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         return PendingIntent.getActivity(
             applicationContext,
             entityId.hashCode(),

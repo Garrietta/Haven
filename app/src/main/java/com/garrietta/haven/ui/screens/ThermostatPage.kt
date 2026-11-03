@@ -469,6 +469,13 @@ private fun ThermostatDialBlock(
     numberBackdrop: Color,
 ) {
     val current = entity.attrDouble("current_temperature")
+    // Feedback round 3, item 5: the dial sits in a Column with its
+    // range-end legend row below it (min at the bar's left end,
+    // max at its right end, spread to the dial width) — the popout
+    // dial used the dynamic range since round 2 but never SHOWED
+    // the window's ends. The inner Box (dial + centered overlay)
+    // is unchanged; only the legend row is added beneath it.
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
     Box(contentAlignment = Alignment.Center) {
         ThermostatDial(
             heat = state.heat.value,
@@ -542,6 +549,15 @@ private fun ThermostatDialBlock(
                 ExpressiveStepper("−", onClick = { state.stepActive(-1f) })
                 ExpressiveStepper("+", onClick = { state.stepActive(1f) })
             }
+        }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.width(diameter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(displayRange.start.toDouble().formatTemp(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(displayRange.endInclusive.toDouble().formatTemp(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

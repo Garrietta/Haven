@@ -530,14 +530,14 @@ fun selectedPillFill(scheme: ColorScheme, isDark: Boolean): Color = PillBarActiv
 fun selectedPillGlyph(scheme: ColorScheme, isDark: Boolean): Color = PillBarActiveGlyph
 
 fun pillUnselectedGlyph(scheme: ColorScheme, isDark: Boolean): Color =
-    // Feedback round 2, item 5: with NO container behind the pill
-    // (the bar floats transparently over content), the old
-    // both-themes light-sage unselected glyph (#D7E2D4) would be
-    // nearly invisible over light content — its precondition (a
-    // dark container) is gone by the user's own directive. So the
-    // unselected glyph is theme-aware: light sage on dark, dark
-    // charcoal (#161D17, the old container value) on light.
-    if (isDark) PillBarUnselectedGlyph else PillBarContainer
+    // Feedback round 3, item 1 (video ba): CORRECTION of round 2
+    // item 5. Round 2 removed the pill background and made the
+    // unselected glyph theme-aware — but the user wants the pill
+    // AND its background kept; only the transition clip box goes.
+    // With the opaque #161D17 container restored, the round-2
+    // glyph change's precondition (no dark container) is gone, so
+    // the #108 law returns: pale sage #D7E2D4 in BOTH themes.
+    PillBarUnselectedGlyph
 
 // ---------------------------------------------------------------------------
 // Stage B token slots for Stage E (semantic colors).

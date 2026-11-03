@@ -19,6 +19,24 @@ package com.garrietta.haven.data
 enum class ControlKind { TOGGLE, RANGE, TOGGLE_RANGE, TEMPERATURE }
 
 /**
+ * Feedback round 3, item 6 (video 6d): what a Device Controls tap
+ * opens in the app. Climate controls jump to the thermostat
+ * popout/page; every other control type opens that entity's
+ * EntityDetail — the same surface a home-page card tap opens
+ * (popup on unfolded, detail as home cards do). Unknown domains
+ * fall through to Detail, never to a dead end: the router only
+ * routes ids whose state actually loaded.
+ */
+sealed interface ControlDeepLinkTarget {
+    data class ThermostatPopout(val entityId: String) : ControlDeepLinkTarget
+    data class Detail(val entityId: String) : ControlDeepLinkTarget
+}
+
+fun controlDeepLinkTarget(entityId: String, domain: String): ControlDeepLinkTarget =
+    if (domain == "climate") ControlDeepLinkTarget.ThermostatPopout(entityId)
+    else ControlDeepLinkTarget.Detail(entityId)
+
+/**
  * Device-type codes, verified against SDK 35 android.jar
  * (javap -constants android.service.controls.DeviceTypes):
  * LIGHT 13, THERMOSTAT 49, OUTLET 15, SWITCH 21, FAN 8,

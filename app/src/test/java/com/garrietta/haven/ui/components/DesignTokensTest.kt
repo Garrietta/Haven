@@ -19,13 +19,11 @@ class DesignTokensTest {
         // UI rewrite round: theme-independent chrome — the same
         // container, lime capsule, ink glyph, and pale-sage
         // unselected icons in BOTH themes (never blue on dark).
-        // Feedback round 2, item 5, SUPERSEDES the unselected-glyph
-        // half of that law: with NO container behind the pill (the
-        // bar floats transparently over content), a light-sage
-        // unselected glyph would be nearly invisible over light
-        // content — so the unselected glyph is theme-aware (light
-        // sage on dark, dark charcoal on light), while the capsule
-        // and active glyph stay theme-independent.
+        // Feedback round 2, item 5, briefly made the unselected
+        // glyph theme-aware (no container behind the pill); round
+        // 3, item 1, REVERTS that (video ba: the user wants the
+        // pill AND its background kept) — the #108 law below is
+        // the standing law again.
         assertEquals(Color(0xFF161D17), PillBarContainer)
         assertEquals(Color(0xFF9BF67C), PillBarActiveCapsule)
         assertEquals(Color(0xFF0A2005), PillBarActiveGlyph)
@@ -35,14 +33,12 @@ class DesignTokensTest {
         assertEquals(PillBarActiveCapsule, selectedPillFill(dark, true))
         assertEquals(PillBarActiveGlyph, selectedPillGlyph(scheme, false))
         assertEquals(PillBarActiveGlyph, selectedPillGlyph(dark, true))
-        assertEquals(PillBarContainer, pillUnselectedGlyph(scheme, false))
+        assertEquals(PillBarUnselectedGlyph, pillUnselectedGlyph(scheme, false))
         assertEquals(PillBarUnselectedGlyph, pillUnselectedGlyph(dark, true))
         // Active glyph on capsule, and unselected sage on the
-        // near-black container, both clear 4.5:1; the light-theme
-        // unselected charcoal clears 4.5:1 on a light background.
+        // near-black container, both clear 4.5:1.
         assertTrue(contrastRatio(PillBarActiveGlyph, PillBarActiveCapsule) >= 4.5f)
         assertTrue(contrastRatio(PillBarUnselectedGlyph, PillBarContainer) >= 4.5f)
-        assertTrue(contrastRatio(PillBarContainer, Color.White) >= 4.5f)
     }
 
     @Test

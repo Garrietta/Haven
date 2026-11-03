@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -69,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.HistoryPoint
+import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.screens.DialTapZone
 import com.garrietta.haven.ui.screens.dialTapZone
 import com.garrietta.haven.ui.screens.dialValueFromAngle
@@ -664,6 +667,13 @@ fun Dial(
     onInsideTap: (() -> Unit)? = null,
     // Snap drag values to whole units (thermostat degrees).
     snapToWhole: Boolean = false,
+    // Feedback round 3, item 5: when true, the dial's range ends
+    // render as a legend row below the dial, spread to the dial
+    // width (min at the bar's left end, max at its right end) —
+    // so a dynamic window reads as its own ends. Off by default:
+    // other Dial users (weather, etc.) keep their exact layout;
+    // the thermostat sheet opts in.
+    showRangeEnds: Boolean = false,
     // Display-only dots on the ring (the thermostat's heat + cool
     // setpoints). Empty means no markers.
     markers: List<DialMarker> = emptyList(),
@@ -819,13 +829,26 @@ fun Dial(
             ) {
                 // Explicit onSurface (2026-11-01 round 1): a bare
                 // Text outside a Surface resolves its color to
-                // black, which is invisible in dark-theme panels —
-                // the weather panel's missing temperature readout
+                // black, which is invisible in dark-theme panels —\n                // the weather panel's missing temperature readout
                 // (the dial arc and grey box rendered, the number
                 // did not). The subtitle already carried onSurface.
                 Text(centerText, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text(centerSub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
             }
+        }
+    }
+    // Feedback round 3, item 5: the range-end legend row (see the
+    // showRangeEnds param). Emitted as a sibling below the dial
+    // box, so callers that do not opt in see no layout change at
+    // all — the box above is byte-identical either way.
+    if (showRangeEnds) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.width(diameter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(range.start.toDouble().formatTemp(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(range.endInclusive.toDouble().formatTemp(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

@@ -99,4 +99,38 @@ class ControlsMappingTest {
         )!!
         assertNull(idle.climateActiveMode)
     }
+
+    // Feedback round 3, item 6: Device Controls deep-link targets.
+    @Test
+    fun climateControlDeepLinksToThermostatPopout() {
+        assertEquals(
+            ControlDeepLinkTarget.ThermostatPopout("climate.thermostat"),
+            controlDeepLinkTarget("climate.thermostat", "climate"),
+        )
+    }
+
+    @Test
+    fun otherControlsDeepLinkToTheirDetail() {
+        assertEquals(
+            ControlDeepLinkTarget.Detail("light.lamp_socket_1"),
+            controlDeepLinkTarget("light.lamp_socket_1", "light"),
+        )
+        assertEquals(
+            ControlDeepLinkTarget.Detail("switch.standing_lamp_socket_1"),
+            controlDeepLinkTarget("switch.standing_lamp_socket_1", "switch"),
+        )
+        assertEquals(
+            ControlDeepLinkTarget.Detail("cover.smart_garage_door_24090408838301610702c4e7ae0ae280_garage"),
+            controlDeepLinkTarget("cover.smart_garage_door_24090408838301610702c4e7ae0ae280_garage", "cover"),
+        )
+        assertEquals(
+            ControlDeepLinkTarget.Detail("fan.office"),
+            controlDeepLinkTarget("fan.office", "fan"),
+        )
+        // Unknown domains fall through to Detail, never a dead end.
+        assertEquals(
+            ControlDeepLinkTarget.Detail("sensor.x"),
+            controlDeepLinkTarget("sensor.x", "sensor"),
+        )
+    }
 }

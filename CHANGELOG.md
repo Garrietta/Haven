@@ -586,3 +586,158 @@ status" at the bottom.
 9. **Device Controls transient loading (88).** Three app-side causes found and fixed: (1) NO eager connect — the panel binds the service before asking for controls, so a cold open paid full WS-connect + state-dump latency inside SystemUI's publish window; `onCreate` now connects eagerly. (2) The one-shot `started` flag never re-read the token/URL, so a sign-out/in or token rotation kept the stale session forever; `ensureStarted` now tracks the (url, token) pair and disconnects + reconnects when it changes (and disconnects on sign-out). (3) The one-shot publisher emitted the SIGN-IN tile when logged in but states timed out — misleading for a signed-in user, and it lingered as the panel's only Haven tile; it now completes empty in that case (the sign-in tile is kept only for the actually-logged-out branch), and the panel re-queries on its next open. Residual uncertainty, stated honestly: Samsung's panel may cache control lists across opens, so if the transient persists after this build it is a panel caching quirk, not an app-side publish failure — the video-88 frames already show the service basically works (Lamp toggled in-panel).
 
 Not in this round (kept, no action): TV Material You buttons; faster camera live view. The video-26 recording-button musing stays inconclusive ("I don't know") — nothing changed, awaiting his clarification. Garage-door actuation untouched (he will not open it to test). Front-door wave test still open (his device action).
+
+## Feedback round 3 (videos ba / a3 / 6d, against #109)
+
+Baseline proven green before any change: clean assembleDebug +
+testDebugUnitTest BUILD SUCCESSFUL, 327 tests, 0 failures. This
+round: 334 tests, 0 failures (327 + 7 new). Local APK:
+`haven-feedback-round3-debug.apk` (67,092,697 bytes).
+
+1. **Pill correction — round 2 item 5 was a MISREAD, reverted (ba).**
+   His words decide it: "I want the pill to be here still. I want
+   the pill and the pill background... what I was saying to remove
+   is the box that is clipping the pages as they transition." TWO
+   halves, both shipped: (a) RESTORED — both pill containers
+   (folded PillNav, unfolded VerticalSidePill) are opaque #161D17
+   again in both themes, exactly as #108 had them, with the
+   floating-bar shadow restored (6dp); the round-2 theme-aware
+   glyph change is reverted along with the transparency, since its
+   precondition (no dark container) is gone by his own correction
+   — unselected glyphs are #D7E2D4 in both themes again, and
+   `pillTokensMatchRewriteDirective` is reverted to the #108 law
+   (charcoal-on-white assertion removed with it). (b) The actual
+   complaint fixed — tab transitions now DRAW FULL-SCREEN: the
+   rail draws after (on top of) Scaffold content via zIndex(1f)
+   at the VerticalSidePill call site, so sliding pages pass UNDER
+   the pill and only the pill's own shape obscures them; leftward
+   travel adds the 84dp rail width (pure `tabSlideOffsets`,
+   unit-tested: forward unfolded 1000px content exits -1084px,
+   backward mirrored, folded exits exactly -1000px), so pages
+   slide ALL the way off-screen in both directions — Koda's
+   one-third distances are superseded for the tab branches by his
+   latest words. Resting page positioning is UNCHANGED (84dp rail
+   + weight(1f) Scaffold, byte-identical layout; zIndex changes
+   draw order only). JUDGMENT CALL: the rail stays in the Row
+   rather than moving after the Scaffold in a Box — same draw
+   result, zero resting-geometry change. The non-tab fixed slide
+   (1/3 both ways) is deliberately UNCHANGED: he complained about
+   tab slides, and scoping corrections exactly is the rule; the
+   Box restructure would not have changed its distances either.
+   Distinct from the video-71 panel rule (panels never move the
+   page) — not conflated.
+2. **Lights panel popup sizing (a3).** ROOT CAUSE, verified in
+   code: `HomeStatusPanelScreen` emitted its card Rows + Spacers
+   as DIRECT children of a BoxWithConstraints — a Box stacks
+   children, it does not flow them vertically — so every row
+   rendered on top of the first, the trailing Spacer added no
+   height, and the popup measured one row tall: the second card
+   overlapped the first and the cards ended flush with the
+   popup's bottom edge (zero daylight below them — reading as
+   clipping). Fix: the rows live in a Column inside the
+   BoxWithConstraints (same card width math, 12dp gaps kept) plus
+   16dp of daylight below the last card, so the popup sizes to
+   its content and both cards are fully visible. This also fixes
+   the latent >2-entity case, where rows 3+ would all pile onto
+   row 1. The 62%/75% CenteredPopup caps still apply — scroll
+   only when content genuinely exceeds the screen — but the caps
+   now yield to real content height instead of a mis-measured
+   single row.
+3. **Panel-card tap route (a3) — VERIFIED, no change needed.**
+   His words: "when I click on one it opens up the full menu all
+   lights." Checked both the code and his own video: the panel
+   passes an `onOpenPanel` override of
+   `navigate(Screen.EntityDetail(entityId))` to HomeRoomCard, and
+   the a3 video's 20s frame shows exactly that — a tap opens the
+   Standing Lamp detail popup (title, On toggle, Power / Last
+   changed / Socket rows) over the still-open Lights panel. The
+   home-page card tap for a light routes identically
+   (binary → EntityDetail). Before = that lamp's own detail
+   popup; after = the same — there is no all-lights-panel route
+   on card tap to remove. If he wants a different tap behavior
+   (e.g. toggle on tap), that is a new directive, not assumed
+   here.
+4. **Panel custom colors (a3) — VERIFIED identical path, locked
+   by test.** His words: the panel's cards "still not matching
+   the yellow that I've assigned" while home matches. Pixel
+   evidence confirms the symptom (home Standing Lamp card
+   #FFE082 amber; panel Standing Lamp card lime #CCFDAB) — but
+   the code path is PROVABLY shared, not divergent:
+   HomeStatusPanelScreen renders the same HomeRoomCard
+   composable as home, reading the same SettingsStore maps
+   through the same `rememberCardCustom` snapshot (version-keyed
+   on `cardCustomVersion`, bumped on every save), for the same
+   entity IDs, through the same pure resolution (`tilePresetFor`
+   → `presetAppliesForState` → `tilePresetColor` /
+   `presetBadgeColors` / `presetSwitchColors`); the store reads
+   SharedPreferences fresh on every call (no in-memory cache to
+   go stale), and a lime panel card with a preset set is
+   impossible from this resolution (preset + on → preset color;
+   preset + off → inactive gray, never matrix lime). The only
+   way the panel reads lime while home reads amber is a store
+   read that lacked the amber entry at panel-open time — e.g.
+   presets lost on a reinstall (a key-mismatch uninstall wipes
+   SharedPreferences; the store is global by entity ID, so
+   re-assigning once restores every surface). No color code was
+   changed on a guess. New contract test
+   `panelInputsResolveSamePresetColorsAsHome` pins the shared
+   resolution for the panel's exact inputs (both lamps on, Lamp
+   lime, Standing Lamp amber: container + badge + switch all
+   resolve from the assigned preset). DEVICE CHECK OWED: on the
+   new build, does home still show amber? If home shows amber
+   but the panel does not on the SAME build, that reproduction
+   isolates a real panel bug and reopens this item.
+5. **Thermostat dynamic scale on EVERY surface (a3).** The popout
+   already had the round-2 dynamic window (10°F margin, clamped
+   [40, 100]) and the expanded bar — but it never SHOWED the
+   window's ends, and the sheet dial still used the full HA
+   min..max. All three surfaces now: (a) SHEET — ClimateControl's
+   Dial and slider move from min..max to
+   `thermostatDisplayRange(min, max, setpoints)`, exactly like
+   the popout (state coercion stays in HA range, as the popout
+   does; out-of-window values pin at the ends). (b) LABELS — both
+   dials gain range-end legends spread to the dial width: the
+   generic Dial gains opt-in `showRangeEnds` (min at the bar's
+   left end, max at its right end; off by default so the weather
+   and other Dial users keep their exact layout), and
+   ThermostatDialBlock gains the same row below the popout dial
+   (the detail page renders ThermostatPopout, so it inherits
+   both the window and the labels). 67/69 now reads 57°/79° at
+   the bar ends on every surface, with the thumbs spread across
+   more of the bar. 1°F steps, handle-grab-only, and
+   never-rewrite-setpoints hold everywhere. KNOWN LIMIT (same as
+   the popout's): sheet drags/sliders map through the display
+   window; the full range stays reachable via the popout's
+   steppers.
+6. **Device Controls deep links (6d).** He ACCEPTS app-launch for
+   now (the in-panel popup aspiration is parked — Samsung's
+   panel launches the app for the Ecobee tile despite round 2).
+   The gap was real: `appIntentFor` carried NO entity extra, so
+   every control tap landed on Home. Now: the provider's app
+   intent carries `EXTRA_CONTROL_ENTITY_ID` (per-entity
+   requestCode already kept intents distinct; SINGLE_TOP added
+   so a tap routes into the running single-activity instance via
+   onNewIntent instead of stacking a second MainActivity);
+   MainActivity stores it on the VM from onCreate AND onNewIntent
+   (`handleControlDeepLink`, blank-safe); a render-nothing
+   `ControlDeepLinkRouter` in HavenApp consumes it once the
+   entity's state has loaded (cold start: the effect re-runs per
+   states emission until the entity appears) and jumps to that
+   entity's surface — climate → `openClimatePopout` (thermostat
+   page, the same machinery a thermostat card tap uses),
+   everything else → EntityDetail, exactly as a home-page card
+   tap does (popup on unfolded, detail as home cards do).
+   Unknown ids (the sign-in control's "haven_open_app", deleted
+   entities) clear without routing once states are non-empty, so
+   a stale link never hangs the slot; a duplicate detail (already
+   viewing that entity) is skipped. Pure routing helper
+   `controlDeepLinkTarget` in ControlsMapping, unit-tested
+   (climate → ThermostatPopout; light/switch/cover/fan → Detail;
+   unknown domain → Detail). The router's states collection
+   recomposes only itself, never UI.
+
+Not in this round (kept, no action): the still-unanswered
+"trigger button" identification; the inconclusive video-26
+recording-button musing; garage-door actuation (he will not open
+it to test); the front-door wave test (his device action, still
+open). WebRTC stays gated off (`webrtcEnabled = false`).
