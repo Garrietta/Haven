@@ -105,7 +105,7 @@ fun stateShape(kind: StateShape): Shape = object : Shape {
  * change (see StateShapeBadge). Idle shapes are calm and closed; active
  * shapes bloom, spike, or wave.
  */
-enum class StateShape { HEXAGON, SCALLOP12, SQUIRCLE, ARC_WAVE, SHIELD, NOTCHED_DIAMOND, STAR8, OCTAGON, SUNBURST, CLOUD_POLY }
+enum class StateShape { HEXAGON, SCALLOP12, THERMOSTAT_SCALLOP, SQUIRCLE, ARC_WAVE, SHIELD, NOTCHED_DIAMOND, STAR8, OCTAGON, SUNBURST, CLOUD_POLY }
 
 fun stateShapePolygon(shape: StateShape): RoundedPolygon = when (shape) {
     // Smooth hexagon, corner radius 0.35 (lights off, etc.).
@@ -116,6 +116,17 @@ fun stateShapePolygon(shape: StateShape): RoundedPolygon = when (shape) {
     // 12-lobed scallop (lights on, blooming).
     StateShape.SCALLOP12 -> RoundedPolygon(
         polygonVertices(48) { _, a -> 0.86f + 0.14f * cos(12 * a) },
+        rounding = CornerRounding(0.30f, 0.6f),
+    )
+    // UI rewrite round §6: the thermostat disc's scallop — same 12
+    // lobes and rounding as SCALLOP12, but shallower (0.94 + 0.06):
+    // its valleys sit at 0.88 x radius (140.8dp on the 320dp disc)
+    // instead of 0.72 x radius (115.2dp), so the dial's track (outer
+    // 107dp), pill thumbs (outer 120dp), and bloom (134dp idle,
+    // 138dp pulsing) all sit COMPLETELY inside the border. SCALLOP12
+    // itself is untouched (light badges still use it).
+    StateShape.THERMOSTAT_SCALLOP -> RoundedPolygon(
+        polygonVertices(48) { _, a -> 0.94f + 0.06f * cos(12 * a) },
         rounding = CornerRounding(0.30f, 0.6f),
     )
     // Squircle: a rounded square, corners at 45 degrees, 32% rounding.

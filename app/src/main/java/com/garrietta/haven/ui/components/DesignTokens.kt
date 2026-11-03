@@ -1,9 +1,11 @@
 package com.garrietta.haven.ui.components
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.unit.dp
 import kotlin.math.pow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
@@ -25,23 +27,36 @@ import com.garrietta.haven.ui.theme.StateShape
  * idle = surfaceContainerHighest) everywhere. No artwork path was invented.
  */
 
-// ---------------------------------------------------------------------------
-// Pill bar labels (spec item 3b, superseded Round 5)
-// ---------------------------------------------------------------------------
-
 /**
- * Round 5: the folded bottom PillNav is icon-only — labels NEVER
- * show there, so the bar's width is constant across every tab
- * switch (the old selected-only / 10-character rule made the
- * selected item wider than its siblings, so the whole bar
- * stretched and jumped on every switch). The parameters are kept
- * so call sites are untouched; both are ignored. Round 8: the
- * unfolded side pill is icon-only too (see VerticalSidePill) —
- * neither chrome variant shows labels anymore, so truncation is
- * gone by construction on both postures.
+ * The general card shape (expressive-menus round, item 6): three
+ * 28dp corners + one 12dp corner, the 12dp corner rotating by grid
+ * index — the UI rewrite's card rule, now the app-wide default for
+ * card shells. A per-entity or global shape-picker override still
+ * beats it everywhere (the picker is the user's explicit choice);
+ * this is only the fallback. Single (non-grid) cards use index 0.
+ * Pure, so the rule itself is unit-testable via its callers' tests.
  */
-fun pillLabelVisible(label: String, isSelected: Boolean): Boolean = false
+/**
+ * Customization round, item 1: EIGHT card-corner variants, cycling by
+ * grid index so a grid never reads as identical tiles. Variants 0-3
+ * are the expressive-menus rule (three 28dp + one 12dp, rotating);
+ * 4-7 add the sharper / softer / pillow / diagonal edges the user
+ * asked for. The center/badge language is untouched — only the
+ * outer edges vary. Per-entity corner picks (CARD_CORNER_OPTIONS
+ * keys "corners_0".."corners_7", via shapeForKey) beat this cycle.
+ */
+fun generalCardShape(index: Int): RoundedCornerShape = when ((index % 8 + 8) % 8) {
+    0 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomEnd = 12.dp, bottomStart = 28.dp)
+    1 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomEnd = 28.dp, bottomStart = 12.dp)
+    2 -> RoundedCornerShape(topStart = 28.dp, topEnd = 12.dp, bottomEnd = 28.dp, bottomStart = 28.dp)
+    3 -> RoundedCornerShape(topStart = 12.dp, topEnd = 28.dp, bottomEnd = 28.dp, bottomStart = 28.dp)
+    4 -> RoundedCornerShape(8.dp)
+    5 -> RoundedCornerShape(28.dp)
+    6 -> RoundedCornerShape(36.dp)
+    else -> RoundedCornerShape(topStart = 28.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 28.dp)
+}
 
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Light color temperature (spec item 2: secondary -> tertiary by kelvin)
 // ---------------------------------------------------------------------------
@@ -486,18 +501,92 @@ fun legibleSecondary(scheme: ColorScheme): Color =
 /**
  * Selected-pill fill and glyph, shared by the folded PillNav and
  * the unfolded VerticalSidePill so the two chrome variants can
- * never disagree. Light: secondaryContainer / onSecondaryContainer
- * (unchanged). Dark: Haven's ACCENTS blue (0xFF3B82F6 — the same
- * value as the blue entry in Expressive.kt's ACCENTS list, and
- * the Koda selected-pill blue reference), because dynamic-dark
- * secondaryContainer is a dim desaturated tone that reads as a
- * grey blob on black. The dark glyph is white: 4.2:1 against the
- * blue fill, above the 3:1 large-glyph floor. Pure, unit-tested.
+ * never disagree. Light: the directive's lime #97F676 (visual-
+ * fidelity round §2, replacing Stage B's #BEE986) — a fixed Haven
+ * identity token, NOT scheme.secondaryContainer, so the selected
+ * pill stays lime whether dynamic color is on or off. Dark:
+ * Haven's ACCENTS blue (0xFF3B82F6 — the same value as the blue
+ * entry in Expressive.kt's ACCENTS list, and the Koda selected-
+ * pill blue reference), because dynamic-dark secondaryContainer is
+ * a dim desaturated tone that reads as a grey blob on black.
+ * Glyphs: near-black #0A2005 on lime (≈11:1), white on blue
+ * (3.68:1, above the 3:1 large-glyph floor). Pure, unit-tested.
  */
-val SelectedPillBlue = Color(0xFF3B82F6)
+/**
+ * UI rewrite round (2026-11-03): the navigation chrome is theme-independent —
+ * the same near-black container, lime capsule, ink glyph, and pale-sage
+ * unselected icons in BOTH light and dark themes. This supersedes Round 8's
+ * split tokens (Koda-blue dark pill, secondaryContainer light pill), which
+ * produced the flagged blue-highlight bug on the unfolded dark rail. The
+ * scheme/isDark parameters stay so call sites need no signature change.
+ */
+val PillBarContainer = Color(0xFF161D17)
+val PillBarActiveCapsule = Color(0xFF9BF67C)
+val PillBarActiveGlyph = Color(0xFF0A2005)
+val PillBarUnselectedGlyph = Color(0xFFD7E2D4)
 
-fun selectedPillFill(scheme: ColorScheme, isDark: Boolean): Color =
-    if (isDark) SelectedPillBlue else scheme.secondaryContainer
+fun selectedPillFill(scheme: ColorScheme, isDark: Boolean): Color = PillBarActiveCapsule
 
-fun selectedPillGlyph(scheme: ColorScheme, isDark: Boolean): Color =
-    if (isDark) Color.White else scheme.onSecondaryContainer
+fun selectedPillGlyph(scheme: ColorScheme, isDark: Boolean): Color = PillBarActiveGlyph
+
+fun pillUnselectedGlyph(scheme: ColorScheme, isDark: Boolean): Color = PillBarUnselectedGlyph
+
+// ---------------------------------------------------------------------------
+// Stage B token slots for Stage E (semantic colors).
+// ---------------------------------------------------------------------------
+/**
+ * Stage B ONLY defines these slots. The full domain+state → visual
+ * mapping (with deliberate light+dark variants, reused across Home,
+ * rooms, badges, and summaries) is Stage E's work in a new
+ * SemanticColors.kt — do NOT resolve colors from this enum here,
+ * and do NOT half-build the mapping in this file in a way Stage E
+ * must rip out. Each slot names the brief §7 semantic state and
+ * its intended meaning; Stage E assigns the actual colors.
+ *
+ * Palette vs state, kept sharp (Stage B rule): the fixed sage/lime
+ * palette above is the DESIGN SYSTEM (surfaces, chrome, text). The
+ * slots below are DEVICE-STATE colors, always automatic from real
+ * HA states, never manual overrides and never wallpaper-derived.
+ */
+enum class SemanticState {
+    /** Light/switch on: warm yellow/lime. */
+    DeviceOn,
+    /** Light/switch off: muted neutral. */
+    DeviceOff,
+    /** Lock securely locked: blue. */
+    LockLocked,
+    /** Lock unlocked: amber. */
+    LockUnlocked,
+    /** Lock fault/alert: red. Never a reassuring state when unknown. */
+    LockFault,
+    /** Door/window open: coral/warm red. */
+    OpenAlert,
+    /** Door/window closed: muted neutral. */
+    ClosedNeutral,
+    /** Motion detected: amber. Distinct from an alarm. */
+    MotionActive,
+    /** Motion clear: neutral. */
+    MotionClear,
+    /** Heating active: coral/warm. */
+    HeatingActive,
+    /** Cooling active: blue. */
+    CoolingActive,
+    /** Climate idle: neutral. */
+    ClimateIdle,
+    /** Media playing: lavender. */
+    MediaPlaying,
+    /** Media paused/idle: muted neutral. */
+    MediaIdle,
+    /** Energy low: restrained yellow/green. */
+    EnergyLow,
+    /** Energy high: progressively warmer yellow/orange. */
+    EnergyHigh,
+    /** Energy critical/warning threshold: red. */
+    EnergyCritical,
+    /** Entity unavailable: muted grey. */
+    Unavailable,
+    /** Entity unknown: neutral with an explicit unknown indication. */
+    Unknown,
+    /** Alarm/fault condition: red. */
+    AlarmFault,
+}

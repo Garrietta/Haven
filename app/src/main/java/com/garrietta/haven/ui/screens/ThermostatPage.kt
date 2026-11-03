@@ -33,6 +33,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -109,6 +110,10 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     // this range as a parameter, so the popout surface cannot
     // silently fall back to a different range.
     val displayRange = thermostatDisplayRange(min, max)
+    // UI rewrite round §6: the dial state is hoisted here so the
+    // popout renders the dial INSIDE the scallop disc and the
+    // Heat/Cool bar BELOW it (see rememberThermostatDialState).
+    val dialState = rememberThermostatDialState(entity, vm, min, max, displayRange)
     // Traveling header target (2026-10-29 pop-up round): the title
     // row reports its root rect into the measurement frame's hero
     // target, so the overlay's traveling header lands exactly here.
@@ -154,23 +159,28 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
         }
         Spacer(Modifier.height(8.dp))
         // Scalloped disc + radial dial: the disc is the pop-out's
-        // expressive shape, mode-colored; the dial sits centered on it.
+        // expressive shape, mode-colored; the dial sits centered on
+        // it, and the Heat/Cool bar sits BELOW it (never inside it).
+        // UI rewrite round §6 geometry (CORRECTING the old comment,
+        // which compared the bloom against the 160dp disc radius
+        // instead of the scallop valley): SCALLOP12's valleys sit at
+        // 0.72 x radius = 115.2dp, but the 240dp dial's outer bloom
+        // reaches 134dp — so bloom crossed the border at the top,
+        // where 67/69 thumbs sit near the valleys. THERMOSTAT_SCALLOP
+        // valleys sit at 0.88 x radius = 140.8dp, so everything
+        // clears: track outer 107dp (33.8 margin), pill outer 120dp
+        // (20.8), idle bloom 134dp (6.8), pulse bloom 138dp (2.8).
+        // The brief's alternative — shrinking the track 24dp — was
+        // NOT taken: it would push the ring's inner edge to 80dp,
+        // inside the 169dp dual-number row (84.5dp half-width), a
+        // constant 4.5dp overlap (17dp at kinetic peak scale) — a
+        // regression. Thumb sizes and grab targets are untouched.
         Box(
-            // 320dp disc, 240dp dial (hotfix, was 260dp): the old
-            // dial's outer (cool) thumb bloom reached 144dp from
-            // center against the 160dp disc radius, and the
-            // SCALLOP12 edge dips inward past that at the top —
-            // which is where both thumbs sit when setpoints are
-            // close (67/69) — so the thumbs crowded the scallop
-            // border. At 240dp the outer bloom reaches 134dp,
-            // clearing the deepest scallop dip with room to spare.
-            // Grab targets use the same radii, so taps still land
-            // on the thumb they see.
-            Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.SCALLOP12)),
+            Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.THERMOSTAT_SCALLOP)),
             contentAlignment = Alignment.Center,
         ) {
-            ThermostatHero(
-                entity, vm, min, max, displayRange = displayRange, diameter = 240.dp,
+            ThermostatDialBlock(
+                dialState, entity, vm, displayRange, diameter = 240.dp,
                 // Numbers sit on the scallop disc: floor them against
                 // the disc color itself (2026-10-30 dial-clash fix).
                 numberBackdrop = compositeOver(
@@ -179,6 +189,11 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
                 ),
             )
         }
+        // The Heat/Cool bar + out-of-range note live BELOW the disc
+        // with 28dp of daylight (the bar used to live inside the
+        // disc, where its square corners crossed the scallop's
+        // curved bottom edge — the flagged overlap).
+        ThermostatBelowDial(dialState)
         Spacer(Modifier.height(12.dp))
         // Mode + Fan as M3 segmented pill bars (2026-11-01 round 1):
         // the dropdown pills are gone — every option is visible at
@@ -323,31 +338,68 @@ fun ThermostatHero(
     /** Color directly behind the dial numbers (the scallop disc). */
     numberBackdrop: Color,
 ) {
-    val current = entity.attrDouble("current_temperature")
+    val state = rememberThermostatDialState(entity, vm, min, max, displayRange)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        ThermostatDialBlock(state, entity, vm, displayRange, diameter, numberBackdrop)
+        ThermostatBelowDial(state)
+    }
+}
+
+
+/**
+ * UI rewrite round §6: the thermostat dial's state, hoisted out of
+ * [ThermostatHero] so the popout can render the dial INSIDE the
+ * scalloped disc and the Heat/Cool bar BELOW it (the bar used to
+ * live inside the disc, where its square corners crossed the
+ * scallop's curved bottom edge). The MutableStates are remembered
+ * here with the same keys Hero used (setpoints re-initialize
+ * whenever HA reports a new setpoint; the selector follows the hvac
+ * mode and survives setpoint updates within a mode); the derived
+ * values (pulseSelector, dialAccent, outOfRangeNote) are recomputed
+ * on every composition from the current state values, so they never
+ * go stale. Setpoint law is untouched: 1°F snap, handle-grab-only,
+ * clamps/gap-proofing, values never rewritten (out-of-range thumbs
+ * clamp to the arc end for drawing and the note says so).
+ */
+private class ThermostatDialState(
+    val heat: MutableState<Float>,
+    val cool: MutableState<Float>,
+    val single: MutableState<Float>,
+    val selector: MutableState<SetpointSelector>,
+    val heatCool: Boolean,
+    val pulseSelector: SetpointSelector?,
+    val dialAccent: Color,
+    val stepActive: (Float) -> Unit,
+    val outOfRangeNote: String?,
+)
+
+@Composable
+private fun rememberThermostatDialState(
+    entity: HaEntity,
+    vm: HavenViewModel,
+    min: Float,
+    max: Float,
+    displayRange: ClosedFloatingPointRange<Float>,
+): ThermostatDialState {
     val accent = accentFor(entity.entityId)
     val lowInit = entity.attrDouble("target_temp_low")
     val highInit = entity.attrDouble("target_temp_high")
     val singleInit = entity.attrDouble("temperature")
     val heatCool = lowInit != null && highInit != null
-    // Setpoint state re-initializes whenever HA reports a new setpoint,
-    // same as the old midpoint dial did.
-    var heat by remember(lowInit) { mutableStateOf(lowInit?.toFloat()?.coerceIn(min, max) ?: min) }
-    var cool by remember(highInit) { mutableStateOf(highInit?.toFloat()?.coerceIn(min, max) ?: max) }
-    var single by remember(singleInit) { mutableStateOf(singleInit?.toFloat()?.coerceIn(min, max) ?: min) }
-    // The selector follows the hvac mode (cooling when the thermostat is
-    // cooling, otherwise heating) and survives setpoint updates within a
-    // mode; the user flips it with an inside tap.
-    var selector by remember(entity.entityId, entity.state) { mutableStateOf(defaultSelector(entity.state)) }
+    val heat = remember(lowInit) { mutableStateOf(lowInit?.toFloat()?.coerceIn(min, max) ?: min) }
+    val cool = remember(highInit) { mutableStateOf(highInit?.toFloat()?.coerceIn(min, max) ?: max) }
+    val single = remember(singleInit) { mutableStateOf(singleInit?.toFloat()?.coerceIn(min, max) ?: min) }
+    val selector = remember(entity.entityId, entity.state) { mutableStateOf(defaultSelector(entity.state)) }
     // Pulsing thumb: the dial's fluid indicator while the system is
-    // actively heating or cooling (hvac_action, not mode — a thermostat
-    // in heat mode that is idle does not pulse).
+    // actively heating or cooling (hvac_action, not mode — a
+    // thermostat in heat mode that is idle does not pulse).
     val pulseSelector = when (entity.attrString("hvac_action")) {
         "heating" -> SetpointSelector.HEATING
         "cooling" -> if (heatCool) SetpointSelector.COOLING else SetpointSelector.HEATING
         else -> null
     }
     val dialAccent: Color = if (heatCool) {
-        if (selector == SetpointSelector.HEATING) HeatOrange else CoolBlue
+        if (selector.value == SetpointSelector.HEATING) HeatOrange else CoolBlue
     } else {
         when (entity.state) {
             "heat" -> HeatOrange
@@ -357,155 +409,158 @@ fun ThermostatHero(
     }
     val stepActive: (Float) -> Unit = { delta ->
         val next = if (heatCool) {
-            if (selector == SetpointSelector.HEATING) {
-                clampHeatSetpoint((heat + delta).toDouble(), min.toDouble(), cool.toDouble()).toFloat()
+            if (selector.value == SetpointSelector.HEATING) {
+                clampHeatSetpoint((heat.value + delta).toDouble(), min.toDouble(), cool.value.toDouble()).toFloat()
             } else {
-                clampCoolSetpoint((cool + delta).toDouble(), heat.toDouble(), max.toDouble()).toFloat()
+                clampCoolSetpoint((cool.value + delta).toDouble(), heat.value.toDouble(), max.toDouble()).toFloat()
             }
         } else {
-            snapToDegree((single + delta).toDouble()).toFloat().coerceIn(min, max)
+            snapToDegree((single.value + delta).toDouble()).toFloat().coerceIn(min, max)
         }
         if (heatCool) {
-            if (selector == SetpointSelector.HEATING) heat = next else cool = next
+            if (selector.value == SetpointSelector.HEATING) heat.value = next else cool.value = next
         } else {
-            single = next
+            single.value = next
         }
-        applyClimateSetpoint(vm, entity, selector, next.toDouble())
+        applyClimateSetpoint(vm, entity, selector.value, next.toDouble())
     }
-    // Round 6: displayRange arrives from the caller (the popout
-    // passes thermostatDisplayRange(min, max) = 55-85F, so 67/69
-    // thumbs get clear separation instead of crowding on the HA
-    // range). Values outside it are NOT rewritten — their thumbs
-    // clamp to the arc end for drawing and the flag below says so.
-    // Thumb spacing for close setpoints is the radial stagger in
-    // dualThumbRadii (ThermostatDial): at 67/69 on a 240dp dial the
-    // 30x20dp pills sit on radii 24dp apart and clear each other
-    // (verified numerically — see the round report); only their
-    // translucent blooms overlap, by design.
+    // Values outside the display range are NOT rewritten — their
+    // thumbs clamp to the arc end for drawing and the flag says so.
     val outOfRangeNote: String? = when {
-        heatCool && (heat < displayRange.start || heat > displayRange.endInclusive) ->
-            "Heat ${heat.toDouble().formatTemp()} is outside the dial range " +
+        heatCool && (heat.value < displayRange.start || heat.value > displayRange.endInclusive) ->
+            "Heat ${heat.value.toDouble().formatTemp()} is outside the dial range " +
                 "(${displayRange.start.toDouble().formatTemp()}–${displayRange.endInclusive.toDouble().formatTemp()}) — shown at the arc end"
-        heatCool && (cool < displayRange.start || cool > displayRange.endInclusive) ->
-            "Cool ${cool.toDouble().formatTemp()} is outside the dial range " +
+        heatCool && (cool.value < displayRange.start || cool.value > displayRange.endInclusive) ->
+            "Cool ${cool.value.toDouble().formatTemp()} is outside the dial range " +
                 "(${displayRange.start.toDouble().formatTemp()}–${displayRange.endInclusive.toDouble().formatTemp()}) — shown at the arc end"
-        !heatCool && (single < displayRange.start || single > displayRange.endInclusive) ->
-            "Setpoint ${single.toDouble().formatTemp()} is outside the dial range " +
+        !heatCool && (single.value < displayRange.start || single.value > displayRange.endInclusive) ->
+            "Setpoint ${single.value.toDouble().formatTemp()} is outside the dial range " +
                 "(${displayRange.start.toDouble().formatTemp()}–${displayRange.endInclusive.toDouble().formatTemp()}) — shown at the arc end"
         else -> null
     }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        // The spec's dial: 240-degree sweep, dual pill thumbs, mode arcs.
-        // The center content overlays the dial face, as run #38 had it.
-        Box(contentAlignment = Alignment.Center) {
-            ThermostatDial(
-                heat = heat,
-                cool = cool,
-                single = single,
-                dual = heatCool,
-                current = current?.toFloat(),
-                // Round 6: the canvas label is retired — the indoor
-                // temperature now renders as a Compose Text above
-                // the steppers below (one label, not two), so it
-                // can never collide with the dial's bottom gap or
-                // duplicate the center numbers.
-                currentLabel = null,
-                range = displayRange,
-                mode = entity.state,
-                selector = selector,
-                onHeatChange = { heat = it },
-                onCoolChange = { cool = it },
-                onSingleChange = { single = it },
-                onFinished = { sel, v -> applyClimateSetpoint(vm, entity, sel, v.toDouble()) },
-                onInsideTap = if (heatCool) {
-                    { selector = toggleSelector(selector) }
-                } else {
-                    null
-                },
-                pulseSelector = pulseSelector,
-                diameter = diameter,
-            )
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (heatCool) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        KineticTempText(
-                            heat,
-                            HeatOrange,
-                            active = selector == SetpointSelector.HEATING,
-                            backdrop = numberBackdrop,
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        KineticTempText(
-                            cool,
-                            CoolBlue,
-                            active = selector == SetpointSelector.COOLING,
-                            backdrop = numberBackdrop,
-                        )
-                    }
-                } else {
-                    KineticTempText(single, dialAccent, active = true, fontSize = 72.sp, backdrop = numberBackdrop)
-                }
-                // Round 6: the indoor temperature label lives
-                // HERE, directly above the - / + buttons — never
-                // inside the dial canvas, never below the steppers.
-                if (current != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Indoor ${current.formatTemp()}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    return ThermostatDialState(heat, cool, single, selector, heatCool, pulseSelector, dialAccent, stepActive, outOfRangeNote)
+}
+
+/** The dial itself plus its center overlay (numbers, indoor label, steppers) — the part that sits ON the scallop disc. */
+@Composable
+private fun ThermostatDialBlock(
+    state: ThermostatDialState,
+    entity: HaEntity,
+    vm: HavenViewModel,
+    displayRange: ClosedFloatingPointRange<Float>,
+    diameter: Dp,
+    numberBackdrop: Color,
+) {
+    val current = entity.attrDouble("current_temperature")
+    Box(contentAlignment = Alignment.Center) {
+        ThermostatDial(
+            heat = state.heat.value,
+            cool = state.cool.value,
+            single = state.single.value,
+            dual = state.heatCool,
+            current = current?.toFloat(),
+            // Round 6: the canvas label is retired — the indoor
+            // temperature renders as a Compose Text above the
+            // steppers below (one label, not two), so it can never
+            // collide with the dial's bottom gap or duplicate the
+            // center numbers.
+            currentLabel = null,
+            range = displayRange,
+            mode = entity.state,
+            selector = state.selector.value,
+            onHeatChange = { state.heat.value = it },
+            onCoolChange = { state.cool.value = it },
+            onSingleChange = { state.single.value = it },
+            onFinished = { sel, v -> applyClimateSetpoint(vm, entity, sel, v.toDouble()) },
+            onInsideTap = if (state.heatCool) {
+                { state.selector.value = toggleSelector(state.selector.value) }
+            } else {
+                null
+            },
+            pulseSelector = state.pulseSelector,
+            diameter = diameter,
+        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (state.heatCool) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    KineticTempText(
+                        state.heat.value,
+                        HeatOrange,
+                        active = state.selector.value == SetpointSelector.HEATING,
+                        backdrop = numberBackdrop,
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    KineticTempText(
+                        state.cool.value,
+                        CoolBlue,
+                        active = state.selector.value == SetpointSelector.COOLING,
+                        backdrop = numberBackdrop,
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ExpressiveStepper("−", onClick = { stepActive(-1f) })
-                    ExpressiveStepper("+", onClick = { stepActive(1f) })
-                }
+            } else {
+                KineticTempText(state.single.value, state.dialAccent, active = true, fontSize = 72.sp, backdrop = numberBackdrop)
+            }
+            // Round 6: the indoor temperature label lives HERE,
+            // directly above the - / + buttons — never inside the
+            // dial canvas, never below the steppers.
+            if (current != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Indoor ${current.formatTemp()}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ExpressiveStepper("−", onClick = { state.stepActive(-1f) })
+                ExpressiveStepper("+", onClick = { state.stepActive(1f) })
             }
         }
-        // Setpoint selector, OUTSIDE the dial face (2026-11-01
-        // round 1): the Heat/Cool selector used to live as chips
-        // colliding with the scalloped dial border and the dual
-        // 68°/69° numbers. It now sits in its own segmented pill
-        // bar below the dial, in heat/cool mode only, tinted per
-        // side (heat container / cool container) — the dial law
-        // itself is untouched: inside-tap still toggles, handles
-        // are still grab-only, clamps still hold.
-        if (outOfRangeNote != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                outOfRangeNote,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (heatCool) {
-            // Round 6 confirms 24dp of daylight above the pill so
-            // it never overlaps the dial's bottom edge — 24dp is
-            // the latest figure and wins over any 20dp figure.
-            Spacer(Modifier.height(24.dp))
-            val scheme = MaterialTheme.colorScheme
-            SegmentedOptionBar(
-                options = listOf(
-                    SetpointSelector.HEATING.name to "Heat ${heat.toDouble().formatTemp()}",
-                    SetpointSelector.COOLING.name to "Cool ${cool.toDouble().formatTemp()}",
-                ),
-                selected = selector.name,
-                onSelect = { selector = SetpointSelector.valueOf(it) },
-                modifier = Modifier.fillMaxWidth(),
-                activeColors = { value ->
-                    if (value == SetpointSelector.HEATING.name) {
-                        heatSetpointContainer(scheme, false) to heatSetpointOnContainer(scheme, false)
-                    } else {
-                        coolSetpointContainer(scheme) to coolSetpointOnContainer(scheme)
-                    }
-                },
-            )
-        }
+    }
+}
+
+/**
+ * Everything that sits BELOW the scallop disc: the out-of-range
+ * note, then (heat/cool mode only) the Heat/Cool segmented bar with
+ * 28dp of daylight above it — never inside the disc, so the bar can
+ * never overlap the scallop's bottom edge. The dial law itself is
+ * untouched: inside-tap still toggles, handles are still grab-only,
+ * clamps still hold.
+ */
+@Composable
+private fun ThermostatBelowDial(state: ThermostatDialState) {
+    if (state.outOfRangeNote != null) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            state.outOfRangeNote,
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (state.heatCool) {
+        Spacer(Modifier.height(28.dp))
+        val scheme = MaterialTheme.colorScheme
+        SegmentedOptionBar(
+            options = listOf(
+                SetpointSelector.HEATING.name to "Heat ${state.heat.value.toDouble().formatTemp()}",
+                SetpointSelector.COOLING.name to "Cool ${state.cool.value.toDouble().formatTemp()}",
+            ),
+            selected = state.selector.value.name,
+            onSelect = { state.selector.value = SetpointSelector.valueOf(it) },
+            modifier = Modifier.fillMaxWidth(),
+            activeColors = { value ->
+                if (value == SetpointSelector.HEATING.name) {
+                    heatSetpointContainer(scheme, false) to heatSetpointOnContainer(scheme, false)
+                } else {
+                    coolSetpointContainer(scheme) to coolSetpointOnContainer(scheme)
+                }
+            },
+        )
     }
 }
 

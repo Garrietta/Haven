@@ -1,6 +1,9 @@
 package com.garrietta.haven.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +39,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.garrietta.haven.ui.controls.DialogActionButtons
+import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.NavStyle
+import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,7 +70,6 @@ import com.garrietta.haven.data.cardType
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.components.pillClearanceBottom
 import org.json.JSONObject
 
 /**
@@ -127,7 +133,7 @@ fun <T> AdaptiveCardList(items: List<T>, render: @Composable (T) -> Unit) {
             columns = GridCells.Adaptive(minSize = 220.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+            contentPadding = PaddingValues(bottom = 16.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             items(items.size) { i -> render(items[i]) }
@@ -135,7 +141,7 @@ fun <T> AdaptiveCardList(items: List<T>, render: @Composable (T) -> Unit) {
     } else {
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+            contentPadding = PaddingValues(bottom = 16.dp),
         ) {
             for (item in items) {
                 item {
@@ -162,7 +168,7 @@ private fun TabCardView(
     }
     if (card == null) {
         Card(
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = generalCardShape(0),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -190,6 +196,57 @@ private val TAB_CARD_TYPES = listOf(
 )
 
 @Composable
+/**
+ * UI rewrite round: the custom-tabs browse list (Settings -> Browse ->
+ * User Tabs). The bar shows only Home/Scenes/Energy/Settings, so user
+ * tabs live here: every VISIBLE tab as a row (title + card count),
+ * tap opens the tab. Hidden tabs stay in Manage Tabs with a Show
+ * button; the empty state points at Manage Tabs to create one.
+ */
+fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    val visibleTabs = vm.userTabs.filter { !it.hidden }
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(bottom = 96.dp),
+    ) {
+        item {
+            Text("User tabs", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(8.dp))
+            Text("Your custom tabs. Hidden tabs live in Manage tabs.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(16.dp))
+        }
+        if (visibleTabs.isEmpty()) {
+            item {
+                Text("No custom tabs yet.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+            }
+        } else {
+            items(visibleTabs) { tab ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { navigate(Screen.UserTab(tab.id)) }.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tab.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${tab.cards.size} card" + if (tab.cards.size == 1) "" else "s",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+        }
+    }
+}
+
+@Composable
 fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     var newTabTitle by remember { mutableStateOf("") }
@@ -197,16 +254,58 @@ fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
     var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
             DetailTopBar("Manage tabs", onBack)
             Text(
                 "Home is always first and Settings is always last — everything else here is yours. " +
-                    "Reorder tabs to move them along the pill bar.",
+                    "Reorder tabs to change their order in User Tabs.",
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(16.dp))
+            // Stage C: navigation customization lives here (not a new
+            // settings section — Stage G owns the settings IA reorg).
+            // Hidden tabs stay listed below with a Show button, so a
+            // hidden tab can always come back; Settings can never be
+            // hidden or removed, by construction in pillBarItems.
+            Text("Navigation", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Pill style", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                var styleExpanded by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedButton(onClick = { styleExpanded = true }) {
+                        Text(if (vm.navStyle == NavStyle.COMPACT) "Compact" else "Floating")
+                    }
+                    DropdownMenu(
+                        expanded = styleExpanded,
+                        onDismissRequest = { styleExpanded = false },
+                    ) {
+                        DropdownMenuItem(text = { Text("Floating") }, onClick = {
+                            styleExpanded = false
+                            vm.navStyle = NavStyle.FLOATING
+                        })
+                        DropdownMenuItem(text = { Text("Compact") }, onClick = {
+                            styleExpanded = false
+                            vm.navStyle = NavStyle.COMPACT
+                        })
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Reset navigation restores the floating pill, automatic icons, and shows all tabs. " +
+                        "Your tabs are never deleted by a reset.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { vm.resetNavigation() }) { Text("Reset") }
+            }
             Spacer(Modifier.height(16.dp))
         }
         for (tab in vm.userTabs) {
@@ -257,13 +356,17 @@ private fun TabEditorCard(
     states: Map<String, HaEntity>,
     onEditYaml: (Int, String) -> Unit,
 ) {
+    // Customization round, item 3: device names for the picker.
+    val pickerDevices by vm.entityDevices.collectAsState()
+    val pickerDeviceInfo by vm.deviceInfo.collectAsState()
+    val pickerDeviceNames = pickerDevices.mapValues { (_, deviceId) -> pickerDeviceInfo[deviceId]?.name ?: "" }
     var title by remember(tab.id, tab.title) { mutableStateOf(tab.title) }
     var newCardType by remember { mutableStateOf("tile") }
     var newCardTypeExpanded by remember { mutableStateOf(false) }
     var newCardEntity by remember { mutableStateOf("") }
     var typeMenuFor by remember { mutableStateOf<Int?>(null) }
     Card(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = generalCardShape(0),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -287,6 +390,44 @@ private fun TabEditorCard(
                 }
                 IconButton(onClick = { vm.deleteTab(tab.id) }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Delete tab")
+                }
+            }
+            // Stage C: per-tab icon choice + hide/show. The icon picker
+            // writes the stored key (null = automatic); the pill icon
+            // updates through the same bar model as everything else.
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                var iconExpanded by remember { mutableStateOf(false) }
+                Box {
+                    val currentLabel = TAB_ICON_OPTIONS.firstOrNull { it.key == tab.icon }?.label ?: "Automatic"
+                    OutlinedButton(onClick = { iconExpanded = true }) { Text("Icon: $currentLabel") }
+                    DropdownMenu(
+                        expanded = iconExpanded,
+                        onDismissRequest = { iconExpanded = false },
+                    ) {
+                        DropdownMenuItem(text = { Text("Automatic") }, onClick = {
+                            iconExpanded = false
+                            vm.setTabIcon(tab.id, null)
+                        })
+                        for (option in TAB_ICON_OPTIONS) {
+                            DropdownMenuItem(text = { Text(option.label) }, onClick = {
+                                iconExpanded = false
+                                vm.setTabIcon(tab.id, option.key)
+                            })
+                        }
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { vm.setTabHidden(tab.id, !tab.hidden) }) {
+                    Text(if (tab.hidden) "Show" else "Hide")
+                }
+                if (tab.hidden) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Hidden from User Tabs",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -366,6 +507,7 @@ private fun TabEditorCard(
                         value = newCardEntity,
                         onValueChange = { newCardEntity = it },
                         onSelect = { newCardEntity = it },
+                        deviceNames = pickerDeviceNames,
                     )
                 }
             }
@@ -398,15 +540,19 @@ private fun EntityPickerField(
     value: String,
     onValueChange: (String) -> Unit,
     onSelect: (String) -> Unit,
+    // Customization round, item 3: device names also match, so a
+    // device name in the picker finds its entities.
+    deviceNames: Map<String, String> = emptyMap(),
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val matches = remember(value) {
+    val matches = remember(value, deviceNames) {
         if (value.isBlank()) {
             emptyList()
         } else {
             states.values.filter {
                 it.entityId.contains(value, ignoreCase = true) ||
-                    it.friendlyName.contains(value, ignoreCase = true)
+                    it.friendlyName.contains(value, ignoreCase = true) ||
+                    (deviceNames[it.entityId]?.contains(value, ignoreCase = true) == true)
             }.take(8)
         }
     }
@@ -460,18 +606,22 @@ private fun CardYamlEditor(initialYaml: String, onDismiss: () -> Unit, onSave: (
                     Text(error!!, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
+                // Expressive-menus round: large 56dp pills (Cancel
+                // tonal, Save filled) — same taps, same save-first
+                // validation; broken YAML still never overwrites.
+                DialogActionButtons(
+                    onCancel = onDismiss,
+                    onConfirm = {
                         try {
                             parseCardYaml(text)
                             onSave(text)
                         } catch (e: Exception) {
                             error = e.message ?: "Couldn't read this YAML."
                         }
-                    }) { Text("Save") }
-                }
+                    },
+                    confirmLabel = "Save",
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -490,7 +640,7 @@ fun GaugeCard(card: JSONObject, entity: HaEntity) {
     val max = if (card.has("max")) card.optDouble("max") else entity.attrDouble("max") ?: 100.0
     val unit = card.optString("unit").ifEmpty { entity.attrString("unit_of_measurement") ?: "" }
     Card(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = generalCardShape(0),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = Modifier.fillMaxWidth(),
     ) {

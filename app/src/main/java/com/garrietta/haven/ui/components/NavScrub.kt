@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.components
 
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,19 @@ class PillScrubState {
 
     internal fun hover(tabId: Int?) {
         hoveredTab = tabId
+    }
+
+    /**
+     * Vertical twin of [tabAt], for the unfolded rail: the item whose
+     * centre is nearest [position] along the bar's vertical axis.
+     */
+    internal fun tabAtY(position: Float): Int? {
+        val bar = bar?.takeIf { it.isAttached } ?: return null
+        return tabIds.mapNotNull { id ->
+            val item = items[id]?.takeIf { it.isAttached } ?: return@mapNotNull null
+            val centre = bar.localBoundingBoxOf(item).center
+            id to abs(centre.y - position)
+        }.minByOrNull { it.second }?.first
     }
 }
 
@@ -144,6 +158,37 @@ fun Modifier.pillScrub(state: PillScrubState): Modifier = this
             onHorizontalDrag = { change, _ ->
                 change.consume()
                 val target = state.tabAt(change.position.x)
+                if (target != null && target != state.hoveredTab) {
+                    state.hover(target)
+                    state.onHoverChange()
+                }
+            },
+        )
+    }
+
+/**
+ * Vertical twin of [pillScrub], for the unfolded rail (expressive-
+ * menus round, item 5): drag along the rail to pick a tab, commit
+ * on release, same hover-highlight + haptic-tick + tap-untouched
+ * semantics as the folded bar. Same scroll trade-off as the folded
+ * bar (the detector claims vertical drags past slop, which is also
+ * what cancels the item's own press); the rail holds four items
+ * and rarely scrolls, so this costs almost nothing.
+ */
+fun Modifier.pillScrubVertical(state: PillScrubState): Modifier = this
+    .onGloballyPositioned { state.registerBar(it) }
+    .pointerInput(state) {
+        detectVerticalDragGestures(
+            onDragStart = { offset -> state.hover(state.tabAtY(offset.y)) },
+            onDragEnd = {
+                val target = state.hoveredTab
+                state.hover(null)
+                if (target != null) state.onCommit(target)
+            },
+            onDragCancel = { state.hover(null) },
+            onVerticalDrag = { change, _ ->
+                change.consume()
+                val target = state.tabAtY(change.position.y)
                 if (target != null && target != state.hoveredTab) {
                     state.hover(target)
                     state.onHoverChange()

@@ -1,6 +1,5 @@
 package com.garrietta.haven.ui.screens
 import androidx.compose.foundation.layout.PaddingValues
-import com.garrietta.haven.ui.components.pillClearanceBottom
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -65,7 +64,7 @@ fun AutomationBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
     var status by remember { mutableStateOf<String?>(null) }
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
             DetailTopBar("New automation", onBack)
@@ -211,7 +210,7 @@ fun SceneBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
         .sortedBy { it.friendlyName }
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
             DetailTopBar("New scene", onBack)
@@ -274,7 +273,7 @@ fun ScriptBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
     if (steps.isEmpty()) steps.add(Triple("", "", ""))
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
             DetailTopBar("New script", onBack)
@@ -345,7 +344,7 @@ fun HelperBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val types = listOf("input_boolean", "input_number", "input_select", "input_text", "input_datetime", "timer", "counter")
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
             DetailTopBar("New helper", onBack)

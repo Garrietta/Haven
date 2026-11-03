@@ -162,9 +162,14 @@ val SHAPE_OPTIONS: List<ShapeOption> = listOf(
 
 fun shapeLabel(key: String?): String? =
     SHAPE_OPTIONS.firstOrNull { it.key == key }?.label
+        ?: com.garrietta.haven.data.CARD_CORNER_OPTIONS.firstOrNull { it.key == key }?.label
 
 /** A pickable key as a Compose [Shape] (for backgrounds and clips), or null for an unknown key. */
 fun shapeForKey(key: String): Shape? = when (key) {
+    // Customization round, item 1: card-corner picks resolve to the
+    // general card shape at that variant index (unknown suffix -> null).
+    "corners_0", "corners_1", "corners_2", "corners_3", "corners_4", "corners_5", "corners_6", "corners_7" ->
+        generalCardShape(key.removePrefix("corners_").toIntOrNull() ?: 0)
     "sunny" -> polygonShape(ExpressiveKind.SUNNY)
     "flower" -> polygonShape(ExpressiveKind.FLOWER)
     "bun" -> polygonShape(ExpressiveKind.BUN)
@@ -528,13 +533,17 @@ fun KodaMenuRow(
         .fillMaxWidth()
         .then(if (flat) Modifier else Modifier.background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.large))
         .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-        .padding(horizontal = 12.dp, vertical = 12.dp)
+        .padding(horizontal = 12.dp, vertical = 16.dp)
     Row(row.then(modifier), verticalAlignment = Alignment.CenterVertically) {
+        // Expressive-menus round: the badge grows from an icon-sized
+        // blob to a 48dp expressive polygon with a 28dp icon, so menu
+        // rows (sheet Details / Badge shape / Card shape, Settings)
+        // read as large pressable shapes, not cramped rows.
         Box(
-            Modifier.background(accent.copy(alpha = 0.20f), polygonShape(badgeKind)),
+            Modifier.size(48.dp).background(accent.copy(alpha = 0.20f), polygonShape(badgeKind)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(26.dp))
+            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(28.dp))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -565,7 +574,7 @@ fun KodaMenuRow(
 fun KodaMenuGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Surface(
         modifier = modifier,
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = generalCardShape(0),
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Column(content = content)
@@ -574,10 +583,11 @@ fun KodaMenuGroup(modifier: Modifier = Modifier, content: @Composable ColumnScop
 
 /**
  * A 0.5dp divider indented to the text-start boundary: row padding 12dp
- * + badge 26dp + gap 12dp = 50dp from the card edge.
+ * + badge 48dp + gap 12dp = 72dp from the card edge (badge grew in
+ * the expressive-menus round; the indent follows it).
  */
 @Composable
-fun KodaMenuDivider(indent: Dp = 50.dp, modifier: Modifier = Modifier) {
+fun KodaMenuDivider(indent: Dp = 72.dp, modifier: Modifier = Modifier) {
     HorizontalDivider(
         modifier = modifier.padding(start = indent),
         thickness = 0.5.dp,
@@ -998,20 +1008,6 @@ fun VerticalPillToggle(
     }
 }
 
-/**
- * Bottom clearance for scrollable tab/Home screens: the pill bar is
- * 64dp tall, floats 20dp above the navigation-bars inset, and content
- * now scrolls full-height beneath it (the scaffold no longer reserves
- * the bottom-bar height — see HavenApp). Every scrollable top-level
- * screen pads its last item by this amount so nothing ends up
- * permanently hidden behind the pill.
- */
-@Composable
-fun pillClearanceBottom(): Dp {
-    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    // 64dp pill + 20dp float + 8dp shadow margin: the old exact-fit
-    // value let the last item visually touch the pill's shadow
-    // (2026-10-30 verdict: the pill "rests directly over" bottom
-    // items). The margin guarantees daylight between item and pill.
-    return 64.dp + 20.dp + 8.dp + navBottom
-}
+// Stage C: pillClearanceBottom() is gone. The scaffold now reserves the
+// pill zone in content padding (see HavenApp), so lists no longer pad
+// their own bottoms for the pill — every list end uses a plain 16dp.

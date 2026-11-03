@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.controls
 import com.garrietta.haven.ui.components.formatCondition
+import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.CoolBlue
 import com.garrietta.haven.ui.components.HeatOrange
 
@@ -31,7 +32,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.WaterDrop
@@ -95,6 +98,14 @@ import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.controls.GarageDoorVisual
+import com.garrietta.haven.ui.screens.rememberCardCustom
+import com.garrietta.haven.ui.components.cardIconForKey
+import com.garrietta.haven.ui.components.CARD_ICON_KEYS
+import com.garrietta.haven.data.domainCardColors
+import com.garrietta.haven.data.humanizeOptionLabel
+import com.garrietta.haven.data.customIconKeyFor
+import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.components.SensorKind
 import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.sensorCardTint
@@ -270,6 +281,11 @@ fun PressablePillButton(
     // they're not so tightly spaced — there should be a nice padding
     // around the text").
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    // Clip shape (expressive-menus round, 2026-11-03): the full pill
+    // by default, so every existing caller is byte-identical; media
+    // transports and D-pads pass the squircle for the big central
+    // button + flanking-button language of the reference player.
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50),
     content: @Composable RowScope.() -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -284,7 +300,7 @@ fun PressablePillButton(
         modifier
             .height(height)
             .graphicsLayer(scaleX = scale, scaleY = scale)
-            .clip(RoundedCornerShape(50))
+            .clip(shape)
             .background(containerColor)
             .clickable(interactionSource = interactionSource, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -368,7 +384,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
     // override beats the global default; without either, the
     // token extraLarge corners are unchanged.
     val cardShape = LocalShapePrefs.current.cardShape(entity.entityId)
-        ?: MaterialTheme.shapes.extraLarge
+        ?: generalCardShape(0)
     Card(
         shape = cardShape,
         // Hierarchy tokens: SurfaceContainer for root cards (Home, Boards,
@@ -475,14 +491,19 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     // rotation never touch the name (2026-10-29
                     // verdict: "the text overlaps [the] — this
                     // expressive shape background should be larger").
-                    DomainBadge(display, domainIcon(display), accent, Modifier.size(56.dp).then(if (morphSource) Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier).then(badgeClick))
+                    // Customization round, item 2: the card header
+                    // honors the same overrides as Home cards.
+                    val headerCustom = rememberCardCustom(vm)
+                    val headerIcon = cardIconForKey(customIconKeyFor(headerCustom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(display)
+                    val headerTitle = customTitleFor(headerCustom.titles, entity.entityId, sensorDisplayName(display))
+                    DomainBadge(display, headerIcon, accent, Modifier.size(56.dp).then(if (morphSource) Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier).then(badgeClick))
                     Spacer(Modifier.width(16.dp))
                     Row(
                         Modifier.weight(1f).then(detailClick),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(sensorDisplayName(display), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(headerTitle, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(display.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -656,18 +677,30 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
             val reportedPosition = entity.attrInt("current_position")
             val isClosed = entity.state == "closed" || reportedPosition == 0
             val isOpen = entity.state == "open" || reportedPosition == 100
+            // Customization round, item 5: same 56dp pills as
+            // the panel, same invalid-direction law.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(
+                PressablePillButton(
                     onClick = { vm.callService("cover", "open_cover", entity.entityId) },
                     modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
+                    height = 56.dp,
                     enabled = !isOpen,
-                ) { Text("Open") }
-                FilledTonalButton(
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                ) { Text("Open", fontWeight = FontWeight.SemiBold) }
+                PressablePillButton(
                     onClick = { vm.callService("cover", "close_cover", entity.entityId) },
                     modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
+                    height = 56.dp,
                     enabled = !isClosed,
-                ) { Text("Close") }
-                OutlinedButton(onClick = { vm.callService("cover", "stop_cover", entity.entityId) }) { Text("Stop") }
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                ) { Text("Close", fontWeight = FontWeight.SemiBold) }
+                PressablePillButton(
+                    onClick = { vm.callService("cover", "stop_cover", entity.entityId) },
+                    height = 56.dp,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                ) { Text("Stop", fontWeight = FontWeight.SemiBold) }
             }
         }
     }
@@ -801,25 +834,49 @@ fun applyClimateSetpoint(vm: HavenViewModel, entity: HaEntity, selector: Setpoin
 }
 
 @Composable
+/**
+ * Vacuum audit (customization round, item 6): the generic control
+ * was the weakest vacuum surface — small pre-expressive buttons
+ * and RAW fan-speed strings ("boost_iq"). Now: 56dp expressive
+ * pills for Start/Pause/Dock/Locate (same service calls), a
+ * humanized status line ("Docked" reads as Docked, not "docked"),
+ * battery with the same line, and humanized fan speeds
+ * ("Boost IQ") via the Round 3 humanizer. No capability is
+ * invented: only services HA's vacuum domain exposes are offered
+ * (start/pause/return_to_base/locate/set_fan_speed), and an
+ * error/unknown state shows its real state text, never a guess.
+ * The rich Round 3 panel for vacuum.t2292 is untouched; this
+ * generic control is what every OTHER vacuum entity (e.g. the
+ * HomeKit bridge vacuum_homekit of the same Eufy) gets.
+ */
 fun VacuumControl(entity: HaEntity, vm: HavenViewModel) {
     val battery = entity.attrInt("battery_level")
     val fanSpeed = entity.attrString("fan_speed")
     val speeds = entity.attrList("fan_speed_list")?.mapNotNull { it as? String } ?: emptyList()
-    Text("Status: ${entity.stateText()}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+    val humanStatus = humanizeOptionLabel(entity.state)
+    Text(
+        if (battery != null) "$humanStatus · $battery%" else "Status: $humanStatus",
+        fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface,
+    )
     if (battery != null) {
         Spacer(Modifier.height(8.dp))
-        Text("Battery $battery%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        LinearProgressIndicator(progress = { battery / 100f }, modifier = Modifier.fillMaxWidth())
+        LinearProgressIndicator(progress = { (battery / 100f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
     }
     Spacer(Modifier.height(12.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (entity.state == "cleaning") {
-            FilledTonalButton(onClick = { vm.callService("vacuum", "pause", entity.entityId) }) { Text("Pause") }
+            PressablePillButton(onClick = { vm.callService("vacuum", "pause", entity.entityId) }, height = 56.dp,
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Pause", fontWeight = FontWeight.SemiBold) }
         } else {
-            FilledTonalButton(onClick = { vm.callService("vacuum", "start", entity.entityId) }) { Text("Start") }
+            PressablePillButton(onClick = { vm.callService("vacuum", "start", entity.entityId) }, height = 56.dp,
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Start", fontWeight = FontWeight.SemiBold) }
         }
-        FilledTonalButton(onClick = { vm.callService("vacuum", "return_to_base", entity.entityId) }) { Text("Dock") }
-        OutlinedButton(onClick = { vm.callService("vacuum", "locate", entity.entityId) }) { Text("Locate") }
+        PressablePillButton(onClick = { vm.callService("vacuum", "return_to_base", entity.entityId) }, height = 56.dp,
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Dock", fontWeight = FontWeight.SemiBold) }
+        PressablePillButton(onClick = { vm.callService("vacuum", "locate", entity.entityId) }, height = 56.dp,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Locate", fontWeight = FontWeight.SemiBold) }
     }
     if (speeds.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
@@ -833,7 +890,7 @@ fun VacuumControl(entity: HaEntity, vm: HavenViewModel) {
                     onClick = {
                         vm.callService("vacuum", "set_fan_speed", entity.entityId, JSONObject().put("fan_speed", speed))
                     },
-                    label = { Text(speed) },
+                    label = { Text(humanizeOptionLabel(speed)) },
                 )
             }
         }
@@ -850,51 +907,63 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
         Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
         if (artist != null) Text(artist, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PressablePillButton(
-                onClick = { vm.callService("media_player", "media_previous_track", entity.entityId) },
-                modifier = Modifier.width(56.dp),
-            ) {
-                Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous")
-            }
-            PressablePillButton(
-                onClick = { vm.callService("media_player", "media_play_pause", entity.entityId) },
-                modifier = Modifier.width(88.dp),
-                height = 56.dp,
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-                Icon(
-                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (playing) "Pause" else "Play",
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(if (playing) "Pause" else "Play", fontWeight = FontWeight.SemiBold)
-            }
-            PressablePillButton(
-                onClick = { vm.callService("media_player", "media_next_track", entity.entityId) },
-                modifier = Modifier.width(56.dp),
-            ) {
-                Icon(Icons.Filled.SkipNext, contentDescription = "Next")
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        ServiceSlider(
-            (volume * 100).toFloat(), 0f..100f,
-            { vm.callService("media_player", "volume_set", entity.entityId, JSONObject().put("volume_level", it / 100f)) },
-            accentFor(entity.entityId),
-            formatValue = { "${it.toInt()}%" },
+        // Expressive-menus round: the reference-player transport
+        // (big central squircle + flanking squircles) replaces the
+        // 56dp pill row; service calls are identical.
+        MediaTransportRow(
+            playing = playing,
+            onPrevious = { vm.callService("media_player", "media_previous_track", entity.entityId) },
+            onPlayPause = { vm.callService("media_player", "media_play_pause", entity.entityId) },
+            onNext = { vm.callService("media_player", "media_next_track", entity.entityId) },
         )
+        Spacer(Modifier.height(12.dp))
+        val muted = entity.attrBool("is_volume_muted") ?: false
+        MediaVolumeRow(
+            muted = muted,
+            onToggleMute = {
+                vm.callService(
+                    "media_player", "volume_mute", entity.entityId,
+                    JSONObject().put("is_volume_muted", !muted),
+                )
+            },
+        ) {
+            // Customization round, item 8: media badge fill
+            // accent (very light purple #DAB9FF in dark mode),
+            // never the deep-ink glyph or the hashed identity accent.
+            val sheetMediaAccent = domainCardColors(entity, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
+                ?: accentFor(entity.entityId)
+            ServiceSlider(
+                (volume * 100).toFloat(), 0f..100f,
+                { vm.callService("media_player", "volume_set", entity.entityId, JSONObject().put("volume_level", it / 100f)) },
+                sheetMediaAccent,
+                formatValue = { "${it.toInt()}%" },
+            )
+        }
         val sources = entity.attrList("source_list")?.mapNotNull { it as? String } ?: emptyList()
         if (sources.isNotEmpty()) {
             var expanded by remember { mutableStateOf(false) }
             val currentSource = entity.attrString("source") ?: "Source"
+            Spacer(Modifier.height(12.dp))
             Box {
-                OutlinedButton(onClick = { expanded = true }) { Text(currentSource) }
+                // The source is the real output affordance (HA has no
+                // queue): a large 56dp pill trigger, not an outlined
+                // button, with large menu items below.
+                PressablePillButton(
+                    onClick = { expanded = true },
+                    height = 56.dp,
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(currentSource, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                }
                 androidx.compose.material3.DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     for (source in sources) {
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(source) },
+                            text = { Text(source, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+                            leadingIcon = if (source == currentSource) {
+                                { Icon(Icons.Filled.Check, contentDescription = null) }
+                            } else null,
                             onClick = {
                                 expanded = false
                                 vm.callService("media_player", "select_source", entity.entityId, JSONObject().put("source", source))
@@ -952,24 +1021,36 @@ fun LockControl(entity: HaEntity, vm: HavenViewModel) {
         Text(entity.stateText(), fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.weight(1f))
         if (entity.state == "locked") {
-            Button(onClick = { confirmUnlock = true }) { Text("Unlock") }
+            // Expressive-menus round: large 56dp pill, same tap.
+            PressablePillButton(
+                onClick = { confirmUnlock = true },
+                height = 56.dp,
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+            ) { Text("Unlock", fontWeight = FontWeight.SemiBold) }
         } else {
-            Button(onClick = { vm.callService("lock", "lock", entity.entityId) }) { Text("Lock") }
+            PressablePillButton(
+                onClick = { vm.callService("lock", "lock", entity.entityId) },
+                height = 56.dp,
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+            ) { Text("Lock", fontWeight = FontWeight.SemiBold) }
         }
     }
     if (confirmUnlock) {
+        // Unlock-confirmation preserved exactly; only the buttons
+        // grow into large expressive pills (confirm = filled).
         AlertDialog(
             onDismissRequest = { confirmUnlock = false },
             title = { Text("Unlock ${entity.friendlyName}?") },
             text = { Text("This removes the lock. Make sure that's what you want.") },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmUnlock = false
-                    vm.callService("lock", "unlock", entity.entityId)
-                }) { Text("Unlock") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmUnlock = false }) { Text("Cancel") }
+                DialogActionButtons(
+                    onCancel = { confirmUnlock = false },
+                    onConfirm = {
+                        confirmUnlock = false
+                        vm.callService("lock", "unlock", entity.entityId)
+                    },
+                    confirmLabel = "Unlock",
+                )
             },
         )
     }

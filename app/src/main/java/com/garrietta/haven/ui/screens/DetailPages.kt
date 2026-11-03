@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -85,11 +87,21 @@ import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.cardIconForKey
+import com.garrietta.haven.ui.components.CARD_ICON_KEYS
+import com.garrietta.haven.data.customIconKeyFor
+import com.garrietta.haven.data.customTitleFor
+import com.garrietta.haven.ui.controls.GarageDoorVisual
+import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.data.domainCardColors
+import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.lightBrightnessContainer
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.ForecastTimeline
+import com.garrietta.haven.ui.controls.MediaTransportRow
+import com.garrietta.haven.ui.controls.MediaVolumeRow
 import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.FanControl
 import com.garrietta.haven.ui.controls.LightControl
@@ -101,6 +113,7 @@ import com.garrietta.haven.ui.controls.WeatherControl
 import com.garrietta.haven.ui.controls.WeatherHeroCard
 import com.garrietta.haven.ui.controls.SensorTile
 import com.garrietta.haven.ui.controls.domainIcon
+import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
 import java.util.Locale
 import org.json.JSONObject
@@ -148,7 +161,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     }
     if (entity.domain == "camera") {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            DetailPopupHeader(entity, onBack)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
             Spacer(Modifier.height(16.dp))
             Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
             Spacer(Modifier.height(16.dp))
@@ -182,7 +195,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
     Column(
         Modifier.padding(horizontal = 16.dp),
     ) {
-        DetailPopupHeader(entity, onBack)
+        DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
         Spacer(Modifier.height(16.dp))
         // Round 4: the static non-functional grey semicircle gauge
         // (WeatherControl's display-only Dial) is GONE from this
@@ -232,7 +245,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
                         entity.attrInt("brightness")?.let { it * 100 / 255 },
                         entity.state == "on",
                     ),
-                    MaterialTheme.shapes.extraLarge,
+                    generalCardShape(0),
                 ).padding(16.dp),
             ) {
                 heroRow()
@@ -339,7 +352,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
     // columns — no fillMaxSize, no status-bars padding, no own scroll.
     if (LocalWideLayout.current) {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            DetailPopupHeader(entity, onBack)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
             Row(Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f).padding(end = 8.dp)) {
                     if (entity.domain !in noHeroDomains) hero()
@@ -352,7 +365,7 @@ private fun DetailPageContent(vm: HavenViewModel, entity: HaEntity, onBack: () -
         }
     } else {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            DetailPopupHeader(entity, onBack)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third)
             if (entity.domain !in noHeroDomains) hero()
             control()
             history()
@@ -451,18 +464,17 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(12.dp))
-        // Position track: open fraction filled in primary on a
-        // surfaceContainerHighest track — the door's position at a
-        // glance, with no pictorial door graphic to misread.
-        Box(
-            Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-        ) {
-            Box(
-                Modifier.fillMaxWidth(openClamped).height(28.dp)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(50)),
-            )
-        }
+        // Customization round, item 5: the door itself, not an
+        // abstract track — tapping it toggles, and the slatted
+        // panel translates UP as the door opens (reverse on close).
+        // The Open/Close/Stop pills and the position slider below
+        // are unchanged, with the same invalid-direction law.
+        GarageDoorVisual(
+            openFraction = openClamped,
+            onToggle = { vm.toggleCover(entity.entityId) },
+            width = 160.dp,
+            height = 180.dp,
+        )
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             // Invalid-direction actions are disabled AND dimmed to
@@ -475,6 +487,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
             PressablePillButton(
                 onClick = { vm.callService("cover", "open_cover", entity.entityId) },
                 modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
+                height = 56.dp,
                 enabled = !isOpen,
                 containerColor = if (isOpen) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = if (isOpen) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
@@ -485,6 +498,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
             PressablePillButton(
                 onClick = { vm.callService("cover", "close_cover", entity.entityId) },
                 modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
+                height = 56.dp,
                 enabled = !isClosed,
                 containerColor = if (isClosed) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = if (isClosed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
@@ -494,6 +508,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
             }
             PressablePillButton(
                 onClick = { vm.callService("cover", "stop_cover", entity.entityId) },
+                height = 56.dp,
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
@@ -506,6 +521,20 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
             ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, MaterialTheme.colorScheme.primary, formatValue = { "${it.toInt()}%" })
         }
     }
+}
+
+/**
+ * Customization round, item 2: the detail header's Card-settings
+ * values, computed once per page from the same store maps every
+ * surface reads (title + icon + pencil target).
+ */
+@Composable
+private fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit> {
+    val custom = rememberCardCustom(vm)
+    val base = if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity)
+    val title = customTitleFor(custom.titles, entity.entityId, base)
+    val icon = cardIconForKey(customIconKeyFor(custom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
+    return Triple(title, icon) { vm.openCardSettings(entity.entityId) }
 }
 
 /**
@@ -525,55 +554,62 @@ private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
         if (artist != null) Text(artist, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         Spacer(Modifier.height(8.dp))
         if (transportOk) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PressablePillButton(
-                    onClick = { vm.callService("media_player", "media_previous_track", entity.entityId) },
-                    modifier = Modifier.width(56.dp),
-                ) {
-                    Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous")
-                }
-                PressablePillButton(
-                    onClick = { vm.callService("media_player", "media_play_pause", entity.entityId) },
-                    modifier = Modifier.width(88.dp),
-                    height = 56.dp,
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ) {
-                    Icon(
-                        if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (playing) "Pause" else "Play",
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (playing) "Pause" else "Play", fontWeight = FontWeight.SemiBold)
-                }
-                PressablePillButton(
-                    onClick = { vm.callService("media_player", "media_next_track", entity.entityId) },
-                    modifier = Modifier.width(56.dp),
-                ) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = "Next")
-                }
-            }
-            Spacer(Modifier.height(4.dp))
+            // Expressive-menus round: reference-player transport.
+            MediaTransportRow(
+                playing = playing,
+                onPrevious = { vm.callService("media_player", "media_previous_track", entity.entityId) },
+                onPlayPause = { vm.callService("media_player", "media_play_pause", entity.entityId) },
+                onNext = { vm.callService("media_player", "media_next_track", entity.entityId) },
+            )
+            Spacer(Modifier.height(12.dp))
         }
         if (volume != null) {
             Text("Volume", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ServiceSlider(
-                (volume * 100).toFloat(), 0f..100f,
-                { vm.callService("media_player", "volume_set", entity.entityId, JSONObject().put("volume_level", it / 100f)) },
-                accentFor(entity.entityId),
-                formatValue = { "${it.toInt()}%" },
-            )
+            val muted = entity.attrBool("is_volume_muted") ?: false
+            MediaVolumeRow(
+                muted = muted,
+                onToggleMute = {
+                    vm.callService(
+                        "media_player", "volume_mute", entity.entityId,
+                        JSONObject().put("is_volume_muted", !muted),
+                    )
+                },
+            ) {
+                // Customization round, item 8: the slider accent
+                // is the media badge FILL (very light purple #DAB9FF
+                // in dark mode), never the deep-ink badge glyph.
+                val mediaSliderAccent = domainCardColors(entity, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
+                    ?: accentFor(entity.entityId)
+                ServiceSlider(
+                    (volume * 100).toFloat(), 0f..100f,
+                    { vm.callService("media_player", "volume_set", entity.entityId, JSONObject().put("volume_level", it / 100f)) },
+                    mediaSliderAccent,
+                    formatValue = { "${it.toInt()}%" },
+                )
+            }
         }
         val sources = entity.attrList("source_list")?.mapNotNull { it as? String } ?: emptyList()
         if (sources.isNotEmpty()) {
             var expanded by remember { mutableStateOf(false) }
             val currentSource = entity.attrString("source") ?: "Source"
+            Spacer(Modifier.height(12.dp))
             Box {
-                OutlinedButton(onClick = { expanded = true }) { Text(currentSource) }
+                PressablePillButton(
+                    onClick = { expanded = true },
+                    height = 56.dp,
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(currentSource, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     for (source in sources) {
                         DropdownMenuItem(
-                            text = { Text(source) },
+                            text = { Text(source, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+                            leadingIcon = if (source == currentSource) {
+                                { Icon(Icons.Filled.Check, contentDescription = null) }
+                            } else null,
                             onClick = {
                                 expanded = false
                                 vm.callService("media_player", "select_source", entity.entityId, JSONObject().put("source", source))
@@ -1002,7 +1038,7 @@ private fun LightStatusCard(entity: HaEntity, vm: HavenViewModel) {
     if (rows.isEmpty()) return
     Spacer(Modifier.height(16.dp))
     Surface(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = generalCardShape(0),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth(),
     ) {

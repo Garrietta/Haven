@@ -356,4 +356,48 @@ class ThermostatLogicTest {
         // In-range round-trip still holds.
         assertTrue(dial240AngleForValue(67f, range) < dial240AngleForValue(69f, range))
     }
+
+    @Test
+    fun separatedDualAngles_passesThroughWhenAlreadySeparated() {
+        val range = 55f..85f
+        val heat = dial240AngleForValue(60f, range)
+        val cool = dial240AngleForValue(75f, range)
+        assertEquals(heat to cool, separatedDualAngles(heat, cool))
+    }
+
+    @Test
+    fun separatedDualAngles_spreadsClosePairTo18Degrees() {
+        val range = 55f..85f
+        // 67/69 on the 240-degree dial: 16 degrees apart, under the
+        // 18-degree floor — the reported overlap case.
+        val heat = dial240AngleForValue(67f, range)
+        val cool = dial240AngleForValue(69f, range)
+        val (h, c) = separatedDualAngles(heat, cool)
+        assertEquals(18f, c - h, 0.001f)
+        // Symmetric about the pair midpoint, values untouched.
+        assertEquals((heat + cool) / 2f, (h + c) / 2f, 0.001f)
+        assertTrue(h < heat)
+        assertTrue(c > cool)
+    }
+
+    @Test
+    fun separatedDualAngles_clampsIntoArcAtTheEnds() {
+        // A pair hard against the arc start still ends separated
+        // and inside [150, 390].
+        val (h, c) = separatedDualAngles(150f, 152f)
+        assertEquals(18f, c - h, 0.001f)
+        assertTrue(h >= 150f)
+        assertTrue(c <= 390f)
+        val (h2, c2) = separatedDualAngles(388f, 390f)
+        assertEquals(18f, c2 - h2, 0.001f)
+        assertTrue(h2 >= 150f)
+        assertTrue(c2 <= 390f)
+    }
+
+    @Test
+    fun separatedDualAngles_identicalAnglesSpreadSymmetrically() {
+        val (h, c) = separatedDualAngles(300f, 300f)
+        assertEquals(18f, c - h, 0.001f)
+        assertEquals(300f, (h + c) / 2f, 0.001f)
+    }
 }

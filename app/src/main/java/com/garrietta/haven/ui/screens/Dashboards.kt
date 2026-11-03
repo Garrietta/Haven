@@ -1,6 +1,5 @@
 package com.garrietta.haven.ui.screens
 import androidx.compose.foundation.layout.PaddingValues
-import com.garrietta.haven.ui.components.pillClearanceBottom
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -50,6 +49,7 @@ import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.stateText
 import org.json.JSONArray
@@ -193,7 +193,7 @@ fun LovelaceCardView(
             val entity = cardEntity(card)?.let { states[it] }
             if (entity != null) {
                 Card(
-                    shape = MaterialTheme.shapes.extraLarge,
+                    shape = generalCardShape(0),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     modifier = Modifier.fillMaxWidth().clickable { vm.openPopup(entity.entityId) },
                 ) {
@@ -232,7 +232,7 @@ fun LovelaceCardView(
         }
         "glance" -> {
             Card(
-                shape = MaterialTheme.shapes.extraLarge,
+                shape = generalCardShape(0),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -258,7 +258,7 @@ fun LovelaceCardView(
             val area = areas.firstOrNull { it.id == areaId }
             val count = states.values.count { entityAreas[it.entityId] == areaId }
             Card(
-                shape = MaterialTheme.shapes.extraLarge,
+                shape = generalCardShape(0),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth().clickable { navigate(Screen.AreaDetail(areaId)) },
             ) {
@@ -313,7 +313,7 @@ fun LovelaceCardView(
         }
         "markdown" -> {
             Card(
-                shape = MaterialTheme.shapes.extraLarge,
+                shape = generalCardShape(0),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -322,7 +322,7 @@ fun LovelaceCardView(
         }
         else -> {
             Card(
-                shape = MaterialTheme.shapes.extraLarge,
+                shape = generalCardShape(0),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -401,7 +401,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
         val cards = views[safeSelected].optJSONArray("cards") ?: JSONArray()
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+            contentPadding = PaddingValues(bottom = 16.dp),
         ) {
             for (i in 0 until cards.length()) {
                 val card = cards.optJSONObject(i) ?: continue

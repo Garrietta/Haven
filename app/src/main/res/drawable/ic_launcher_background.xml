@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Customization round, item 4 (masking refinement): FULL-BLEED
+         background — a vertical lime gradient that runs to the mask
+         edge. There is deliberately NO dark frame layer and NO inner
+         tile behind the mark: the old charcoal background + smaller
+         lime squircle read as a frame under Samsung's squircle mask
+         and clipped into a visible border. With a full-bleed field,
+         circle, squircle, square, rectangle, and expressive masks
+         all show the same field edge-to-edge and the same mark
+         intact (the mark itself lives inside the 66dp safe zone).
+         Gradient in Haven tokens only: primaryContainer #C1E88A
+         at the top to capsule lime #9BF67C at the bottom — Google's
+         2026 gradient/no-container direction, in Haven's palette. -->
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <gradient
+            android:type="linear"
+            android:startX="54"
+            android:startY="0"
+            android:endX="54"
+            android:endY="108"
+            android:startColor="#C1E88A"
+            android:endColor="#9BF67C" />
+    </path>
+</vector>

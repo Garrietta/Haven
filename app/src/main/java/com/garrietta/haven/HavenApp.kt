@@ -7,6 +7,14 @@ import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.shapeLabel
 import com.garrietta.haven.ui.components.formatCondition
+import com.garrietta.haven.data.alertDotColor
+import com.garrietta.haven.data.hasImportantAlert
+import com.garrietta.haven.ui.components.NavItem
+import com.garrietta.haven.ui.components.NavPillGeometry
+import com.garrietta.haven.ui.components.NavStyle
+import com.garrietta.haven.ui.components.navPillGeometry
+import com.garrietta.haven.ui.components.pillBarItems
+import com.garrietta.haven.ui.components.selectedNavIndex
 import com.garrietta.haven.ui.theme.FloatingCorner
 
 import androidx.activity.compose.BackHandler
@@ -133,7 +141,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
 import com.garrietta.haven.data.CameraStreamState
-import com.garrietta.haven.data.FRONT_DOOR_BATTERY_SENSOR_ID
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_STREAM_SWITCH_ID
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
@@ -156,10 +163,15 @@ import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.components.pillLabelVisible
+import com.garrietta.haven.ui.components.PillBarActiveCapsule
+import com.garrietta.haven.ui.components.PillBarActiveGlyph
+import com.garrietta.haven.ui.components.PillBarContainer
+import com.garrietta.haven.ui.components.PillBarUnselectedGlyph
+import com.garrietta.haven.ui.components.pillUnselectedGlyph
 import com.garrietta.haven.ui.theme.sheetSpring
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
+import com.garrietta.haven.ui.components.pillScrubVertical
 import com.garrietta.haven.ui.components.rememberPillScrubState
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.geometry.Offset
@@ -173,6 +185,8 @@ import com.garrietta.haven.ui.components.LocalHeroTarget
 import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
+import com.garrietta.haven.ui.components.LocalMorphClosing
+import com.garrietta.haven.ui.components.LocalMorphProgress
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.controls.sensorDisplayName
@@ -195,9 +209,12 @@ import com.garrietta.haven.ui.screens.AutomationBuilderScreen
 import com.garrietta.haven.ui.screens.CameraClipsScreen
 import com.garrietta.haven.ui.screens.DashboardEditScreen
 import com.garrietta.haven.ui.screens.DashboardsScreen
+import com.garrietta.haven.ui.screens.EnergyScreen
+import com.garrietta.haven.ui.screens.ScenesScreen
 import com.garrietta.haven.ui.screens.DetailPageScreen
 import com.garrietta.haven.ui.screens.HelperBuilderScreen
 import com.garrietta.haven.ui.screens.HomeEditorScreen
+import com.garrietta.haven.ui.screens.HomeStatusPanelScreen
 import com.garrietta.haven.ui.screens.LoginScreen
 import com.garrietta.haven.ui.screens.SceneBuilderScreen
 import com.garrietta.haven.ui.screens.ScriptBuilderScreen
@@ -205,7 +222,11 @@ import com.garrietta.haven.ui.screens.SearchScreen
 import com.garrietta.haven.ui.screens.RoomManagerScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.ShapePickerDialog
+import com.garrietta.haven.ui.screens.CardSettingsSheet
+import com.garrietta.haven.ui.screens.CardSettingsPencil
+import com.garrietta.haven.ui.screens.rememberCardCustom
 import com.garrietta.haven.ui.screens.TabManagerScreen
+import com.garrietta.haven.ui.screens.UserTabsScreen
 import com.garrietta.haven.ui.screens.ThermostatPopout
 import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.GreenhousePanelScreen
@@ -215,87 +236,24 @@ import com.garrietta.haven.ui.screens.UpdatesPanelScreen
 import com.garrietta.haven.ui.screens.VacuumPanelScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
+import com.garrietta.haven.ui.theme.resolveHavenIsDark
 
-private data class NavItem(
-    val screen: Screen,
-    val label: String,
-    val icon: ImageVector,
-    val outlinedIcon: ImageVector,
-)
-
-/**
- * The pill bar IS the tab bar: Home always first, user tabs next, Settings
- * always last and always present. Boards/Areas/Search stay reachable from
- * Settings -> Browse; Home returned to the bar because a home with no tab
- * is a home you can't get back to. A legacy screen shows the bar with
- * nothing selected.
- */
-private fun pillBarItems(tabs: List<com.garrietta.haven.data.UserTab>): List<NavItem> {
-    val items = mutableListOf(
-        NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home)
-    )
-    for (tab in tabs) {
-        val (icon, outlinedIcon) = tabIcons(tab)
-        items.add(NavItem(Screen.UserTab(tab.id), tab.title, icon, outlinedIcon))
-    }
-    items.add(NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings))
-    return items
-}
-
-/**
- * Per-tab pill icons: the first card's entity domain wins (camera, climate,
- * light, cover); title keywords cover entity-less tabs; GridView is the
- * fallback. Only domains with a matching outlined variant get a pair, so
- * the selected pill can still fill its icon like Home and Settings do.
- */
-private fun tabIcons(tab: com.garrietta.haven.data.UserTab): Pair<ImageVector, ImageVector> {
-    val domain = tab.cards.firstNotNullOfOrNull { yaml ->
-        try {
-            parseCardYaml(yaml).optString("entity").ifEmpty { null }?.substringBefore(".")
-        } catch (e: Exception) {
-            null
-        }
-    } ?: when {
-        tab.title.contains("camera", ignoreCase = true) -> "camera"
-        tab.title.contains("thermostat", ignoreCase = true) ||
-            tab.title.contains("climate", ignoreCase = true) -> "climate"
-        tab.title.contains("garage", ignoreCase = true) -> "cover"
-        tab.title.contains("light", ignoreCase = true) ||
-            tab.title.contains("lamp", ignoreCase = true) -> "light"
-        else -> null
-    }
-    return when (domain) {
-        "camera" -> Icons.Filled.Videocam to Icons.Outlined.Videocam
-        "climate" -> Icons.Filled.Thermostat to Icons.Outlined.Thermostat
-        "light" -> Icons.Filled.Lightbulb to Icons.Outlined.Lightbulb
-        "cover" -> Icons.Filled.Home to Icons.Outlined.Home
-        else -> Icons.Filled.GridView to Icons.Outlined.GridView
-    }
-}
+// Stage C: the navigation model (NavItem, pillBarItems, tabIcons,
+// selectedNavIndex) moved to ui/components/NavItems.kt as pure,
+// unit-testable functions — same behavior, plus hidden-tab filtering
+// and picker icon overrides. See that file for the contract.
 
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
-    Screen.Today, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.Settings -> true
+    Screen.Today, Screen.Scenes, Screen.Energy, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs, Screen.Settings -> true
     is Screen.UserTab -> true
     else -> false
 }
 
-/**
- * Shared nav selection for the pill bar and the vertical rail:
- * Home is always index 0, user tabs follow in order, Settings is
- * always last. A legacy screen selects nothing. Both chrome
- * variants read this one function, so they can never disagree
- * about which tab is selected.
- */
-private fun selectedNavIndex(
-    current: Screen,
-    barItems: List<NavItem>,
-    userTabs: List<com.garrietta.haven.data.UserTab>,
-): Int? = when (current) {
-    Screen.Today -> 0
-    is Screen.UserTab -> userTabs.indexOfFirst { it.id == current.tabId }.takeIf { it >= 0 }?.plus(1)
-    Screen.Settings -> barItems.lastIndex
-    else -> null
-}
+// Stage F cleanup: the old private selectedNavIndex that lived here
+// (3-arg, userTabs-indexed) is DELETED — it was dead code left by
+// Stage C's move (both call sites already used the NavItems version),
+// and its userTabs math was wrong under hidden-tab filtering. The
+// live function is selectedNavIndex in ui/components/NavItems.kt.
 
 /** Entity id a detail screen belongs to (the shared card key it morphs from). Round 3 panels morph from their source card where one exists on Home; the updates panel has no Home card, so it uses the graceful fallback rect. */
 private fun detailEntityId(screen: Screen): String = when (screen) {
@@ -329,15 +287,15 @@ private class PopoutAnim(val id: String, val source: Rect?)
 fun HavenApp(vm: HavenViewModel) {
     var themeMode by remember { mutableStateOf(vm.settingsStore.themeMode) }
     var reduceMotion by remember { mutableStateOf(vm.settingsStore.reduceMotion) }
-    val darkTheme = when (themeMode) {
-        "light" -> false
-        "dark" -> true
-        else -> isSystemInDarkTheme()
-    }
+    // Stage B: dynamic (wallpaper) color, off by default. The fixed
+    // Haven palettes are the identity; this only ever applies when
+    // the user explicitly enables it in Settings → Appearance.
+    var dynamicColor by remember { mutableStateOf(vm.settingsStore.dynamicColor) }
+    val darkTheme = resolveHavenIsDark(themeMode, isSystemInDarkTheme())
     // Read so shape-picker saves recompose the provider below from the store.
     @Suppress("UNUSED_VARIABLE")
     val shapePrefsVersion = vm.shapePrefsVersion
-    HavenTheme(darkTheme = darkTheme) {
+    HavenTheme(darkTheme = darkTheme, dynamicColor = dynamicColor) {
         // Status-bar/navigation-bar icon colors follow the background's
         // luminance (Koda's approach): light background -> dark icons, dark
         // background -> light icons. The old theme hardcoded dark icons, which
@@ -369,7 +327,7 @@ fun HavenApp(vm: HavenViewModel) {
             is Screen.EntityDetail,
             is Screen.VacuumPanel, is Screen.MediaPanel,
             is Screen.SecurityPanel, is Screen.GreenhousePanel,
-            is Screen.UpdatesPanel -> current
+            is Screen.UpdatesPanel, is Screen.HomeStatusPanel -> current
             else -> null
         }
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -465,6 +423,21 @@ fun HavenApp(vm: HavenViewModel) {
         // MUST clear instantly, because the destination morph starts
         // from the same card and an animated sheet exit would
         // overlap the detail enter.
+        // Expressive-menus round, lamp-card fix (2026-11-03
+        // video verdict): every instant dismiss ALSO clears the
+        // entity's travel snapshot directly. The LaunchedEffect
+        // null-branches below were supposed to do this, but they
+        // require the anim to still be non-null when the trigger
+        // clears — and these functions null the trigger AND the
+        // anim in the same event, so the branch never fired and
+        // the snapshot leaked on every close. A leaked snapshot
+        // froze the source card at close-time state: later taps
+        // flipped the live state (the lamp audibly shut off) while
+        // the card kept showing the snapshot, until the next panel
+        // open re-captured it. Clearing here is exact: the panel
+        // is gone, so no flight needs the snapshot anymore, and a
+        // sheet->detail handoff re-captures fresh for the detail.
+        // The effect branches stay as backup.
         fun dismissDetailInstant() {
             val anim = detailAnim ?: return
             if (backstack.lastOrNull() == anim.screen && backstack.size > 1) {
@@ -473,6 +446,7 @@ fun HavenApp(vm: HavenViewModel) {
             if (detailAnim?.screen == anim.screen) {
                 detailAnim = null
             }
+            vm.clearTravelSnapshot(anim.entityId)
             // Fresh measurement on the next open: a stale target rect
             // (e.g. from before a rotation) would otherwise steer the
             // next morph's traveling header to the wrong place.
@@ -483,6 +457,7 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = sheetAnim ?: return
             if (vm.popupEntityId == anim.id) vm.closePopup()
             if (sheetAnim?.id == anim.id) sheetAnim = null
+            vm.clearTravelSnapshot(anim.id)
             heroTarget = null
             arcTarget = null
         }
@@ -490,6 +465,7 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = popoutAnim ?: return
             if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
             if (popoutAnim?.id == anim.id) popoutAnim = null
+            vm.clearTravelSnapshot(anim.id)
             heroTarget = null
             arcTarget = null
         }
@@ -765,6 +741,11 @@ fun HavenApp(vm: HavenViewModel) {
                         reduceMotion = it
                         vm.settingsStore.reduceMotion = it
                     },
+                    dynamicColor = dynamicColor,
+                    onDynamicColor = {
+                        dynamicColor = it
+                        vm.settingsStore.dynamicColor = it
+                    },
                     onSignOut = signOut,
                 )
             }
@@ -824,6 +805,25 @@ fun HavenApp(vm: HavenViewModel) {
                 // this, so hiding the badge cannot blank a card.
                 // At rest the id is null and every badge shows.
                 LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
+                // Visual-fidelity round §5: the closing flag and the
+                // active morph's progress, for the source cards'
+                // closing-aware badge crossfade (see
+                // hideHeroWhenMorphSource): panels keep their own
+                // inner LocalMorphProgress (MorphSurface provides
+                // it), which shadows this root one inside panel
+                // subtrees, so panel behavior is untouched. Cards
+                // read the root lambda only inside graphicsLayer,
+                // never during composition — no per-frame
+                // recomposition cost.
+                LocalMorphClosing provides (sheetExiting || detailExiting || popoutExiting),
+                LocalMorphProgress provides {
+                    when {
+                        sheetAnim != null -> sheetProgress.value
+                        detailAnim != null -> detailProgress.value
+                        popoutAnim != null -> popoutProgress.value
+                        else -> 1f
+                    }
+                },
                 // Shape picker state (2026-10-30): badges and card
                 // outlines resolve through this; re-read from the
                 // store whenever a picker save bumps the version.
@@ -871,7 +871,21 @@ fun HavenApp(vm: HavenViewModel) {
             // on scroll, and an open panel (a later sibling of
             // this Row) covers it exactly as today's pill-exit rule
             // covers the pill.
-            Row(Modifier.fillMaxSize()) {
+            // Pill-bar directive (visual-fidelity round): the Row
+            // paints the scheme background across its whole width,
+            // INCLUDING the rail zone. The rail zone sits outside
+            // the Scaffold (which paints its own background only
+            // over its weight(1f) area), so without this the zone
+            // showed the activity window's white background — the
+            // full-height white strip behind the side pill in dark
+            // mode on unfolded (the activity theme is a Light
+            // parent). Painting the Row removes the rectangle as a
+            // visible element: rail zone and content are one
+            // continuous background, and the pill floats over it
+            // on its own container + shadow, Koda-style. This is
+            // not a recolor of the pill: the pill keeps its
+            // surfaceContainerHigh container in both themes.
+            Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             // Round 6 posture key boundary: the rail is keyed on
             // the wide flag, so a fold/unfold switch unmounts the
             // old navigation chrome completely before the new
@@ -881,85 +895,85 @@ fun HavenApp(vm: HavenViewModel) {
             // screens keep scroll state across postures).
             key(LocalWideLayout.current) {
                 if (LocalWideLayout.current && isTopLevel(current)) {
-                    val barItems = pillBarItems(vm.userTabs)
+                    val barItems = pillBarItems()
+                    // Stage E §9: the Home dot lights only for a real
+                    // important alert (unlocked lock, open door/window,
+                    // triggered alarm) — never a count, never for
+                    // routine states. Collected here so only the rail
+                    // recomposes on state changes, not the whole app.
+                    val chromeStates by vm.states.collectAsState()
+                    val badged = if (vm.badgeNav && hasImportantAlert(chromeStates.values.toList())) setOf(Screen.Today) else emptySet()
                     VerticalSidePill(
                         items = barItems,
-                        selectedIndex = selectedNavIndex(current, barItems, vm.userTabs),
+                        selectedIndex = selectedNavIndex(current, barItems),
                         onSelect = goTop,
+                        badgedScreens = badged,
                     )
                 }
             }
             Scaffold(
                 modifier = if (LocalWideLayout.current) Modifier.weight(1f) else Modifier,
-            // Transparent container: the default background painted a
-            // full-width opaque band in the reserved bottom-bar zone —
-            // near-white in light mode, the "white box" that sliced
-            // scrolling content at its top edge. With a transparent
-            // scaffold AND content extending full-height (bottom
-            // padding zeroed below), lists scroll visibly beneath the
-            // floating pill, which carries its own shadow; no box edge
-            // ever cuts an element mid-scroll. Lists carry their own
-            // bottom clearance (pillClearanceBottom) so the last item
-            // still scrolls fully above the pill.
-            containerColor = Color.Transparent,
+            // Pill-bar directive (visual-fidelity round): the
+            // container is the scheme background, NOT transparent.
+            // Stage C went transparent to kill the old default
+            // band, but transparency left the bottom-bar zone
+            // showing the activity window's white background in
+            // dark mode — the same unpainted-zone defect as the
+            // rail strip (see the Row background above).
+            containerColor = MaterialTheme.colorScheme.background,
             // Screens consume the status-bar inset themselves
             // (statusBarsPadding on each root), so the Scaffold must not add
-            // it again — otherwise headers sit a full inset too low. The
-            // bottom-bar height is NOT reserved in content anymore (see
-            // the zeroed bottom padding below); lists carry their own
-            // clearance instead.
+            // it again — otherwise headers sit a full inset too low.
+            // NO bottomBar slot (expressive-menus round, item 1):
+            // the folded pill lives in the overlay below, floating
+            // over full-height content — never in a Scaffold slot
+            // with a reserved band behind it. See the overlay.
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            bottomBar = {
-                // Folded only: unfolded shows the rail instead, so
-                // no bottom bar is reserved or rendered there.
-                // Round 6: keyed like the rail above, so posture
-                // switches unmount the pill cleanly.
-                key(LocalWideLayout.current) {
-                if (!LocalWideLayout.current && isTopLevel(current)) {
-                    val barItems = pillBarItems(vm.userTabs)
-                    val selectedIndex = selectedNavIndex(current, barItems, vm.userTabs)
-                    PillNav(
-                        items = barItems,
-                        selectedIndex = selectedIndex,
-                        onSelect = goTop,
-                        // Floating island, auto-width and centered
-                        // (production-upgrade round, superseding #49's
-                        // full-width-minus-margins bar): the navigation
-                        // bars window inset, then 20dp bottom spacing
-                        // above the insets, never pinned edge-to-edge.
-                        modifier = Modifier.fillMaxWidth()
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(bottom = 20.dp)
-                            // Pill exit: during any modal, or while
-                            // scrolled away, the pill fades out and
-                            // slides 96dp down out of the viewport on
-                            // the pill spring; it returns when the
-                            // modal closes or the user scrolls back
-                            // up. The panel (fillMaxSize, above the
-                            // scaffold) already intercepts touches, so
-                            // the exiting pill is never tappable
-                            // mid-panel.
-                            .graphicsLayer {
-                                alpha = 1f - pillExit
-                                translationY = 96.dp.toPx() * pillExit
-                            },
-                    )
-                }
-                }
-            },
         ) { padding ->
-            // The scaffold's padding is only the bottom-bar height
-            // (contentWindowInsets are zeroed above); it is deliberately
-            // NOT applied at the bottom, so tab/Home lists extend
-            // full-height and scroll beneath the floating pill (see the
-            // transparent container above). Start/top/end are kept
-            // from the scaffold for correctness.
+            // Expressive-menus round, item 1 (2026-11-03 video
+            // verdict, SUPERSEDES Stage C's reservation): the
+            // folded pill must float over all elements, and when
+            // it disappears no band may remain. Stage C reserved
+            // the pill zone in content (bar + 8dp + 20dp + nav
+            // inset) so the pill never covered anything — but on
+            // device that reservation reads as a big white box
+            // behind the pill in light theme, and as a weird
+            // blank box cutting into the tiles once the pill
+            // scrolls away, because scaffold padding is static
+            // while the pill exits. The user's explicit verdict
+            // overrides Stage C's no-cover rule: content now runs
+            // full-height beneath the pill (the pill floats over
+            // it, Koda-style), and only the navigation-bars
+            // inset is kept as bottom clearance on folded
+            // top-level screens, so list ends clear the gesture
+            // bar. The pill still auto-hides on scroll-down, so
+            // content is fully readable while scrolling; at rest
+            // it may overlap the last row, exactly like any
+            // floating bar. The Stage C list-end sweep (plain
+            // 16dp ends) is untouched.
             val layoutDirection = LocalLayoutDirection.current
+            // Pill-bar directive (visual-fidelity round): the
+            // unfolded remnant of the backing rectangle is
+            // CLEARANCE, not a surface. Top-level unfolded
+            // screens keep a small invisible bottom reserve —
+            // 20dp daylight plus the navigation-bars inset,
+            // mirroring the folded pill's float — so list ends
+            // never sit under chrome. Folded keeps only the
+            // navigation-bars inset (see below): the pill
+            // itself floats over content, no zone reserved.
+            val density = LocalDensity.current
+            val navBottom = with(density) {
+                WindowInsets.navigationBars.getBottom(density).toDp()
+            }
+            val unfoldedBottomClearance =
+                if (LocalWideLayout.current && isTopLevel(current)) 20.dp + navBottom else 0.dp
+            val foldedNavClearance =
+                if (!LocalWideLayout.current && isTopLevel(current)) navBottom else 0.dp
             val contentPadding = PaddingValues(
                 start = padding.calculateStartPadding(layoutDirection),
                 top = padding.calculateTopPadding(),
                 end = padding.calculateEndPadding(layoutDirection),
-                bottom = 0.dp,
+                bottom = padding.calculateBottomPadding() + unfoldedBottomClearance + foldedNavClearance,
             )
             // Scroll-away lives here: nested scrolls from the tab/Home
             // lists reach this Box (sheet/detail overlays are siblings
@@ -985,7 +999,7 @@ fun HavenApp(vm: HavenViewModel) {
                     is Screen.EntityDetail,
                     is Screen.VacuumPanel, is Screen.MediaPanel,
                     is Screen.SecurityPanel, is Screen.GreenhousePanel,
-                    is Screen.UpdatesPanel ->
+                    is Screen.UpdatesPanel, is Screen.HomeStatusPanel ->
                         backstack.getOrNull(backstack.lastIndex - 1) ?: Screen.Today
                     else -> current
                 }
@@ -1021,6 +1035,55 @@ fun HavenApp(vm: HavenViewModel) {
             }
         }
             } // Row: side pill + scaffold (unfolded) / scaffold alone (folded)
+            // Folded pill overlay (expressive-menus round, item 1):
+            // the pill floats OVER full-height content — it is not
+            // a Scaffold bottomBar and reserves no zone. The
+            // wrapper carries the old bottomBar geometry (nav
+            // inset, 20dp float, 8dp daylight) and the pill-exit
+            // animation (fade + 96dp slide on scroll-away or
+            // modal); the pill itself is unchanged (same PillNav,
+            // same scrub, same selection). The wrapper paints
+            // nothing and takes no taps outside the pill, so
+            // touches fall through to content below. It sits
+            // BELOW the panel overlays that follow, so an open
+            // panel covers it exactly as before (and pillExit
+            // already hides it during any modal). Keyed on the
+            // wide flag like the rail, so posture switches
+            // unmount it cleanly.
+            key(LocalWideLayout.current) {
+                if (!LocalWideLayout.current && isTopLevel(current)) {
+                    val barItems = pillBarItems()
+                    val selectedIndex = selectedNavIndex(current, barItems)
+                    // Stage E §9: same Home dot as the rail.
+                    // Collected here so only the bar recomposes on
+                    // state changes, not the whole app.
+                    val chromeStates by vm.states.collectAsState()
+                    val badged = if (vm.badgeNav && hasImportantAlert(chromeStates.values.toList())) setOf(Screen.Today) else emptySet()
+                    Box(
+                        Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.BottomCenter,
+                    ) {
+                        Box(
+                            Modifier.fillMaxWidth()
+                                .windowInsetsPadding(WindowInsets.navigationBars)
+                                .padding(bottom = 20.dp, top = 8.dp)
+                                .graphicsLayer {
+                                    alpha = 1f - pillExit
+                                    translationY = 96.dp.toPx() * pillExit
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            PillNav(
+                                items = barItems,
+                                selectedIndex = selectedIndex,
+                                onSelect = goTop,
+                                geometry = navPillGeometry(vm.navStyle),
+                                badgedScreens = badged,
+                            )
+                        }
+                    }
+                }
+            }
             // Sheet panel overlay: FULL-SCREEN PANEL (2026-11-01
             // panels round) — SUPERSEDES the 2026-10-30 centered
             // dialog. The sheet's content is unchanged; only its
@@ -1272,6 +1335,11 @@ fun HavenApp(vm: HavenViewModel) {
             if (vm.shapePickerTarget != null) {
                 ShapePickerDialog(vm, vm.shapePickerTarget!!, onClose = { vm.closeShapePicker() })
             }
+            // Customization round, item 2: Card settings sheet,
+            // above every other overlay like the shape picker.
+            if (vm.cardSettingsTarget != null) {
+                CardSettingsSheet(vm, vm.cardSettingsTarget!!, onDismiss = { vm.closeCardSettings() })
+            }
             }
         }
         }
@@ -1289,6 +1357,8 @@ private fun ScreenContent(
     reduceMotion: Boolean,
     onThemeMode: (String) -> Unit,
     onReduceMotion: (Boolean) -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColor: (Boolean) -> Unit,
     onSignOut: () -> Unit,
 ) {
     when (screen) {
@@ -1296,16 +1366,22 @@ private fun ScreenContent(
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)
+        Screen.UserTabs -> UserTabsScreen(vm, navigate)
         Screen.Settings -> SettingsScreen(
             vm = vm,
             themeMode = themeMode,
             reduceMotion = reduceMotion,
             onThemeMode = onThemeMode,
             onReduceMotion = onReduceMotion,
+            dynamicColor = dynamicColor,
+            onDynamicColor = onDynamicColor,
             onSignOut = onSignOut,
             navigate = navigate,
         )
         is Screen.UserTab -> UserTabScreen(vm, screen.tabId, navigate)
+        // Stage F destinations (first-class bar items, brief §4).
+        Screen.Scenes -> ScenesScreen(vm)
+        Screen.Energy -> EnergyScreen(vm)
         Screen.TabManager -> TabManagerScreen(vm, goBack, navigate)
         Screen.HomeEditor -> HomeEditorScreen(vm, goBack)
         Screen.RoomManager -> RoomManagerScreen(vm, goBack)
@@ -1318,6 +1394,7 @@ private fun ScreenContent(
         is Screen.SecurityPanel -> SecurityPanelScreen(vm, goBack)
         is Screen.GreenhousePanel -> GreenhousePanelScreen(vm, goBack)
         is Screen.UpdatesPanel -> UpdatesPanelScreen(vm, goBack)
+        is Screen.HomeStatusPanel -> HomeStatusPanelScreen(vm, screen.categoryKey, navigate)
         is Screen.CameraClips -> CameraClipsScreen(vm, screen.entityId, goBack)
         is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
         Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)
@@ -1389,6 +1466,17 @@ private fun EntityPopupSheetContent(
                 Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 val accent = accentFor(entity.entityId)
+                // Customization round, item 2: the sheet header
+                // honors the same overrides as every card, plus the
+                // edit pencil beside the title.
+                val sheetCustom = rememberCardCustom(vm)
+                val sheetTitle = com.garrietta.haven.data.customTitleFor(
+                    sheetCustom.titles, entity.entityId,
+                    if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
+                )
+                val sheetIcon = com.garrietta.haven.ui.components.cardIconForKey(
+                    com.garrietta.haven.data.customIconKeyFor(sheetCustom.iconKeys, entity.entityId, com.garrietta.haven.ui.components.CARD_ICON_KEYS),
+                ) ?: domainIcon(entity)
                 Row(
                     Modifier.fillMaxWidth()
                         .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
@@ -1399,18 +1487,16 @@ private fun EntityPopupSheetContent(
                     // from the panel's first frame.
                     DomainBadge(
                         entity,
-                        domainIcon(entity),
+                        sheetIcon,
                         accent,
                         modifier = Modifier.size(48.dp).hideWhileTraveling(),
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        DialogTitleText(
-                if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
-                Modifier.fillMaxWidth(),
-            )
+                        DialogTitleText(sheetTitle, Modifier.fillMaxWidth())
                         Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    CardSettingsPencil(onClick = { vm.openCardSettings(entity.entityId) })
                 }
                 Spacer(Modifier.height(12.dp))
                 // Plain control, not the card's header bar: the header
@@ -1471,6 +1557,19 @@ private fun EntityPopupSheetContent(
                     title = "Card shape",
                     subtitle = shapeLabel(vm.settingsStore.cardShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalCardShape) ?: "Default corners",
                     onClick = { vm.openShapePicker(entity.entityId, true) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                // Customization round, item 2: the one Card
+                // settings surface (title, icon, badge shape, tile
+                // color), reachable from every entity's menu.
+                Spacer(Modifier.height(8.dp))
+                KodaMenuRow(
+                    badgeKey = "card-settings-${entity.entityId}",
+                    badgeKind = shapeForDomain(entity.domain),
+                    icon = domainIcon(entity),
+                    title = "Card settings",
+                    subtitle = "Title, icon, badge shape, tile color",
+                    onClick = { vm.openCardSettings(entity.entityId) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -1994,7 +2093,6 @@ private fun FrontDoorCameraPanel(
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
     val switchOn = states[FRONT_DOOR_LIVE_STREAM_SWITCH_ID]?.state == "on"
-    val battery = states[FRONT_DOOR_BATTERY_SENSOR_ID]?.state
     val engaged = vm.frontDoorLiveEngaged
     val stopReason = vm.frontDoorLiveStopReason
 
@@ -2014,6 +2112,21 @@ private fun FrontDoorCameraPanel(
     // live_view recording fallback.
     var live69a1Failed by remember { mutableStateOf(false) }
     var live69a1Ready by remember { mutableStateOf(false) }
+    // Visual-fidelity round §3: capped auto-restart for the live
+    // body. A post-frame stream error (stall, proxy drop) used to
+    // fail the live body over to the recording immediately — the
+    // "stops after several seconds" cutoff. Now the live body
+    // remounts (keyed on liveBodyKey) up to 3 consecutive errors
+    // with no intervening frame; any frame resets the count. Only
+    // after the cap — or on a pre-frame failure, which keeps the
+    // old immediate fallback — does the panel fall through to
+    // the truthful recording fallback + status line. The count
+    // and the remount key are SEPARATE: resetting the count on a
+    // frame must not itself remount the body (that would
+    // re-buffer a healthy stream).
+    var liveRestarts by remember { mutableIntStateOf(0) }
+    var liveBodyKey by remember { mutableIntStateOf(0) }
+    var liveEverFramed by remember { mutableStateOf(false) }
 
     // Engagement: the Live tab owns the switch. Resetting the probe
     // on every Live activation keeps a stale phase from surviving a
@@ -2029,6 +2142,9 @@ private fun FrontDoorCameraPanel(
             mjpegError = null
             live69a1Failed = false
             live69a1Ready = false
+            liveRestarts = 0
+            liveBodyKey = 0
+            liveEverFramed = false
             vm.startFrontDoorLive()
         }
     }
@@ -2041,6 +2157,10 @@ private fun FrontDoorCameraPanel(
     LaunchedEffect(switchOn) {
         if (!switchOn) {
             live69a1Ready = false
+            // A switch off ends the live session: a later on is a
+            // fresh attempt, not a continuation of the old count.
+            liveRestarts = 0
+            liveEverFramed = false
         } else {
             delay(2000)
             live69a1Ready = true
@@ -2159,8 +2279,17 @@ private fun FrontDoorCameraPanel(
     // so a WebRTC attempt that hears nothing in 20s falls through to
     // MJPEG instead of hanging. The effect restarts on every phase
     // change, so a completed attempt cancels its own timeout.
-    LaunchedEffect(phase, webrtcAttempt) {
+    // Visual-fidelity round §3: the effect is also keyed on the
+    // frame flags — once actual live frames have been received,
+    // the offer timeout is CANCELLED (the early return below) and
+    // can never cut a healthy stream over to the recording. The
+    // timeout still fires before the first frame, and a genuinely
+    // failed connection still reaches its truthful failure state.
+    // (Dormant while WebRTC is gated: phase is never CONNECTING —
+    // but correct for any future re-enable.)
+    LaunchedEffect(phase, webrtcAttempt, mjpegFrames, webrtcFrames) {
         if (phase != FrontDoorLivePhase.WEBRTC_CONNECTING) return@LaunchedEffect
+        if (mjpegFrames || webrtcFrames) return@LaunchedEffect
         delay(20_000)
         Log.w("Haven", "FrontDoorLive: webrtc offer timed out (20s, no answer)")
         webrtcOutcome = "timed out (no answer in 20s)"
@@ -2183,6 +2312,7 @@ private fun FrontDoorCameraPanel(
         phase == FrontDoorLivePhase.WEBRTC_CONNECTING -> "Connecting to live view…"
         phase == FrontDoorLivePhase.WEBRTC_LIVE -> "Live"
         phase == FrontDoorLivePhase.MJPEG && live69a1Failed -> "Live view unavailable — showing latest recording"
+        phase == FrontDoorLivePhase.MJPEG && liveRestarts > 0 && !mjpegFrames -> "Reconnecting to live view…"
         phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn -> "Live view"
         phase == FrontDoorLivePhase.MJPEG && mjpegFrames && !switchOn -> "Latest motion recording"
         phase == FrontDoorLivePhase.MJPEG && mjpegError != null -> "Live view unavailable"
@@ -2228,12 +2358,16 @@ private fun FrontDoorCameraPanel(
                             mjpegError = null
                             live69a1Failed = false
                             live69a1Ready = false
+                            liveRestarts = 0
+                            liveBodyKey = 0
+                            liveEverFramed = false
                             vm.startFrontDoorLive()
                         }) { Text("Resume live") }
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = { tab = FrontDoorTab.HISTORY }) {
-                            Text("Show latest recording", color = Color.White)
-                        }
+                        // Visual-fidelity round §3: the segmented
+                        // control is the sole visible mode selector
+                        // — the "Show latest recording" button that
+                        // used to sit here is removed (History is
+                        // one tap away on the segmented control).
                     }
                 }
             }
@@ -2252,19 +2386,51 @@ private fun FrontDoorCameraPanel(
                 // the switch is still on.
                 when {
                     !live69a1Failed && switchOn && live69a1Ready -> {
-                        CameraMjpegBody(
-                            vm, FRONT_DOOR_RING_MQTT_CAMERA_ID, enterProgress, recording = false, onClose = onClose,
-                            onFirstFrame = {
-                                Log.d("Haven", "FrontDoorLive: 69a1 live first frame (switch on=$switchOn)")
-                                mjpegFrames = true
-                            },
-                            onError = { message ->
-                                Log.w("Haven", "FrontDoorLive: 69a1 live error: $message — falling back to recording")
-                                mjpegError = message
-                                mjpegFrames = false
-                                live69a1Failed = true
-                            },
-                        )
+                        // Visual-fidelity round §3: keyed on the
+                        // remount key (NOT the restart count), so
+                        // a post-frame error remounts a fresh
+                        // stream instead of failing over to the
+                        // recording, while a frame resetting the
+                        // count does not itself remount.
+                        key(liveBodyKey) {
+                            CameraMjpegBody(
+                                vm, FRONT_DOOR_RING_MQTT_CAMERA_ID, enterProgress, recording = false, onClose = onClose,
+                                onFirstFrame = {
+                                    Log.d("Haven", "FrontDoorLive: 69a1 live first frame (switch on=$switchOn)")
+                                    mjpegFrames = true
+                                    liveEverFramed = true
+                                    liveRestarts = 0
+                                },
+                                onError = { message ->
+                                    if (liveEverFramed && liveRestarts < 3) {
+                                        // Post-frame interruption:
+                                        // restart the live body
+                                        // (cap 3 consecutive errors
+                                        // with no intervening frame)
+                                        // instead of cutting over
+                                        // to the recording. The
+                                        // error is cleared so the
+                                        // status reads
+                                        // "Reconnecting…", not
+                                        // "unavailable", mid-retry.
+                                        Log.w("Haven", "FrontDoorLive: 69a1 live error: $message — restarting live (attempt ${liveRestarts + 1}/3)")
+                                        mjpegFrames = false
+                                        mjpegError = null
+                                        liveRestarts += 1
+                                        liveBodyKey += 1
+                                    } else {
+                                        // Pre-frame failure, or the
+                                        // cap reached: the truthful
+                                        // fallthrough to the labeled
+                                        // recording fallback.
+                                        Log.w("Haven", "FrontDoorLive: 69a1 live error: $message — falling back to recording")
+                                        mjpegError = message
+                                        mjpegFrames = false
+                                        live69a1Failed = true
+                                    }
+                                },
+                            )
+                        }
                     }
                     !live69a1Failed && switchOn -> {
                         Column(
@@ -2362,19 +2528,14 @@ private fun FrontDoorCameraPanel(
             }
             Spacer(Modifier.height(8.dp))
             Text(pathLine, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "Live-stream switch: " + if (switchOn) "On" else "Off" +
-                    (battery?.let { " · Battery $it%" } ?: "") +
-                    " · Auto-off on close, background, or 10 min",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-            )
-            if (tab == FrontDoorTab.LIVE && engaged) {
-                TextButton(onClick = { tab = FrontDoorTab.HISTORY }) {
-                    Text("Show latest recording instead", color = Color.White)
-                }
-            }
+            // Visual-fidelity round §3: the raw diagnostic line
+            // ("Live-stream switch: On · Battery … · Auto-off …")
+            // is removed, and the segmented control above is the
+            // sole visible mode selector — the "Show latest
+            // recording instead" button that used to sit here is
+            // removed (History is one tap away on the segmented
+            // control). pathLine status lines stay: they are
+            // user-facing status, not diagnostics.
         }
     }
 }
@@ -2592,7 +2753,7 @@ private fun ServiceErrorBanner(message: String, onDismiss: () -> Unit, modifier:
  * default ripple clipped to CircleShape.
  */
 @Composable
-private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
+private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier, badgedScreens: Set<Screen> = emptySet()) {
     val reduceMotion = LocalReduceMotion.current
     val haptics = LocalHapticFeedback.current
     val currentIndex = selectedIndex ?: -1
@@ -2614,7 +2775,22 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     // vertical capsule and never changes shape across tabs.
     var pillOrigin by remember { mutableStateOf(0f) }
     var iconRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
-    val targetIconRect = iconRects[currentIndex]
+    // Expressive-menus round, item 5: the unfolded rail scrubs
+    // exactly like the folded pill bar (drag along the rail to
+    // pick a tab, commit on release, haptic tick per tab). The
+    // highlight + indicator follow the finger while scrubbing.
+    val scrub = rememberPillScrubState(
+        tabIds = items.indices.toList(),
+        onHoverChange = { haptics.performHapticFeedback(HapticFeedbackType.SegmentTick) },
+        onCommit = { target ->
+            if (target != currentIndex) {
+                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                onSelect(items[target].screen)
+            }
+        },
+    )
+    val scrubIndex = scrub.hoveredTab ?: currentIndex
+    val targetIconRect = iconRects[scrubIndex]
     val density = LocalDensity.current
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
         else springSpatial()
@@ -2660,7 +2836,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     ) {
         Surface(
             shape = FloatingCorner,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+            color = PillBarContainer.copy(alpha = 0.96f),
             tonalElevation = 8.dp,
             shadowElevation = 16.dp,
         ) {
@@ -2682,18 +2858,19 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                     )
                 }
                 Column(
-                    Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 12.dp),
+                    Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 12.dp).pillScrubVertical(scrub),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     for ((index, item) in items.withIndex()) {
-                        val highlighted = index == currentIndex
+                        val highlighted = index == scrubIndex
                         val contentColor = if (highlighted) selectedPillGlyph(scheme, isDark)
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            else pillUnselectedGlyph(scheme, isDark)
                         // Folded-pill item geometry (48dp tall), so
                         // the rail and the bar share one item rhythm.
                         Box(
                             modifier = Modifier.width(56.dp).height(48.dp)
+                                .pillScrubItem(scrub, index)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
@@ -2725,6 +2902,16 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                                     modifier = Modifier.size(24.dp)
                                         .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
                                 )
+                                // Stage E §9: same condition dot as the
+                                // folded pill — never a count.
+                                if (item.screen in badgedScreens) {
+                                    Box(
+                                        Modifier.align(Alignment.TopEnd)
+                                            .padding(top = 2.dp, end = 6.dp)
+                                            .size(8.dp)
+                                            .background(alertDotColor(true), CircleShape)
+                                    )
+                                }
                             }
                         }
                     }
@@ -2735,25 +2922,25 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
 }
 
 /**
- * The pill-bar bottom navigation, rebuilt on measured positions: a single
- * indicator morphs between tabs by animating its left/right bounds with
- * spring(0.74, 380) from the tabs' measured window rects — it is never
- * instantly reattached as a fixed-size pill. The indicator target follows
- * the scrub hover when present, else the selected tab. Round 5: the bar
- * is icon-only (48dp-tall items, uniform 56dp icon ovals, uniform
- * horizontal padding), so its width is constant across every tab
- * switch — no label ever widens the selected item, and the old
- * "Living Room lig" truncation is gone by construction (there is no
- * label text to truncate). Round 8: the unfolded side pill is
- * icon-only too, so neither chrome variant shows labels.
- * The shell is a floating island: 32dp corners, surfaceContainer, subtle
- * shadow, 16dp horizontal and 12dp bottom padding at the call site.
- * Dragging along the bar still scrubs the highlight (haptic
- * tick per tab) and commits on release, Koda-style.
+ * UI rewrite round (2026-11-03): the folded pill bar. The ACTIVE
+ * destination renders ONE unified capsule (44dp tall, CircleShape,
+ * 16dp horizontal padding, #9BF67C fill) wrapping BOTH the filled
+ * 22dp icon AND the 14sp bold label, both #0A2005 inside the capsule
+ * — this fixes the two flagged bugs (black label outside the green
+ * oval against the black bar; capsule wrapping only the icon).
+ * Unselected destinations are a 22dp outlined icon, no label. The
+ * container is #161D17 in both themes with light-sage unselected
+ * icons (#D7E2D4); no blue anywhere. The old measured sliding
+ * indicator is gone (there is no indicator to glide — the capsule
+ * IS the item), so no rect tracking and no animation state.
+ * Dragging along the bar still scrubs the highlight (haptic tick
+ * per tab) and commits on release, Koda-style. Floating vs Compact
+ * moves bar height (64dp vs 52dp), outer padding, and corner radius
+ * via [NavPillGeometry]. The folded scroll-away and the invisible
+ * unfolded bottom clearance are untouched.
  */
 @Composable
-private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier) {
-    val reduceMotion = LocalReduceMotion.current
+private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier, geometry: NavPillGeometry = navPillGeometry(NavStyle.FLOATING), badgedScreens: Set<Screen> = emptySet()) {
     val haptics = LocalHapticFeedback.current
     val currentIndex = selectedIndex ?: -1
     val scrub = rememberPillScrubState(
@@ -2766,137 +2953,61 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             }
         },
     )
-    // Measured tab positions, in window coordinates: the bar origin is
-    // subtracted, so the indicator stays correct while the row scrolls.
-    // Round 4: the indicator is a FIXED 56x32dp oval centered on the
-    // selected/scrub-hovered tab's ICON rect — never the full square
-    // text bounding box (the old whole-item rect + 8dp padding made
-    // a 48dp-tall capsule that swallowed the label). Icon rects are
-    // recorded on the icon boxes below; the item rect is only the
-    // first-frame fallback before any icon has reported.
-    var barOrigin by remember { mutableStateOf(0f) }
-    var itemRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
-    var iconRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
-    val targetIndex = scrub.hoveredTab ?: currentIndex
-    val targetRect = iconRects[targetIndex] ?: itemRects[targetIndex]
-    val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
-        else spring(dampingRatio = 0.74f, stiffness = 380f)
-    val density = LocalDensity.current
-    val indicatorCenterX by animateFloatAsState(
-        targetRect?.let { (it.left + it.right) / 2f - barOrigin } ?: 0f,
-        animationSpec = indicatorSpec,
-        label = "pillCenterX",
-    )
-    // Auto-width floating island (production-upgrade round): the bar
-    // is only as wide as its items, centered, capped at the screen
-    // width (beyond which the row scrolls exactly as before). Raised
-    // per the spec sample: surfaceContainerHigh at 0.96 alpha, tonal
-    // 8dp, shadow 16dp. The measured sliding indicator, instant label
-    // switch, and >10ch icon-only rule are unchanged.
+    // Auto-width floating island, centered, capped at the screen
+    // width (beyond which the row scrolls exactly as before).
     Box(modifier, contentAlignment = Alignment.Center) {
         BoxWithConstraints {
             Surface(
                 modifier = Modifier.wrapContentWidth().widthIn(max = maxWidth),
-                shape = FloatingCorner,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f),
+                shape = RoundedCornerShape(geometry.cornerRadius),
+                color = PillBarContainer.copy(alpha = 0.96f),
                 tonalElevation = 8.dp,
                 shadowElevation = 16.dp,
             ) {
-                Box(
-                    Modifier.wrapContentWidth()
-                        .onGloballyPositioned { barOrigin = it.boundsInWindow().left },
+                Row(
+                    modifier = Modifier.wrapContentWidth().horizontalScroll(rememberScrollState()).padding(horizontal = geometry.rowHorizontalPadding, vertical = geometry.rowVerticalPadding).pillScrub(scrub),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-            // The morphing indicator, behind the items: a fixed
-            // 56x32dp oval centered on the target icon (Round 4 —
-            // the old whole-item capsule is gone). Vertically
-            // centered in the bar; only its horizontal center
-            // animates, so the highlight glides tab to tab without
-            // ever resizing into the label's bounding box.
-            // Round 8: the selected fill/glyph come from the shared
-            // tokens (dark = Koda-blue pill, light = secondaryContainer
-            // unchanged), so folded and unfolded chrome agree.
-            val pillScheme = MaterialTheme.colorScheme
-            val pillIsDark = isDarkBackdrop(pillScheme.background)
-            if (targetRect != null) {
-                Box(
-                    Modifier.align(Alignment.CenterStart)
-                        .offset { IntOffset((indicatorCenterX - with(density) { 28.dp.toPx() }).roundToInt(), 0) }
-                        .size(56.dp, 32.dp)
-                        .background(selectedPillFill(pillScheme, pillIsDark), CircleShape),
-                )
-            }
-            // Scrolls horizontally once tabs overflow; short bars stay centered.
-            Row(
-                // Row horizontal padding 18dp (2026-11-01 polish
-                // round, was 10dp): the selected indicator overhangs
-                // its item by 8dp each side, so at 10dp the first /
-                // last selected pill sat ~2dp from the bar's
-                // background edge — flush, while middle tabs float
-                // inset. 18dp gives edge selections the same ~10dp
-                // breathing room inside the bar. Height unchanged
-                // (8 + 48 + 8 = 64dp); auto-width centering untouched.
-                modifier = Modifier.wrapContentWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp).pillScrub(scrub),
-                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                for ((index, item) in items.withIndex()) {
-                    // Highlight follows the scrub hover (the indicator
-                    // glides under the finger). Round 5: the bar is
-                    // icon-only (pillLabelVisible always false), so
-                    // every item is the same 56dp-wide icon oval and
-                    // the bar's width never stretches or jumps when
-                    // the selection moves — the indicator's glide is
-                    // the only motion. The label branch below is
-                    // retained but unreachable while the token is
-                    // false; the side pill carries labels instead.
-                    val highlighted = (scrub.hoveredTab ?: currentIndex) == index
-                    val showLabel = pillLabelVisible(item.label, index == currentIndex)
-                    val contentColor = if (highlighted) selectedPillGlyph(pillScheme, pillIsDark)
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    Box(
-                        modifier = Modifier.height(48.dp)
-                            .onGloballyPositioned { itemRects = itemRects + (index to it.boundsInWindow()) }
-                            .pillScrubItem(scrub, index)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                            ) {
-                                if (index != currentIndex) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    onSelect(item.screen)
-                                }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        // Round 4: ripple lives ONLY on the 56x32dp
-                        // icon oval (clipped to CircleShape); the
-                        // label taps through the indication-null
-                        // item box, so no ripple or highlight ever
-                        // covers the full text bounding box.
-                        val onIconTap = {
+                    for ((index, item) in items.withIndex()) {
+                        val highlighted = (scrub.hoveredTab ?: currentIndex) == index
+                        val onTap = {
                             if (index != currentIndex) {
                                 haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onSelect(item.screen)
                             }
                         }
-                        if (showLabel) {
+                        if (highlighted) {
+                            // ONE unified capsule: icon + label inside the lime fill.
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                modifier = Modifier.height(geometry.itemHeight)
+                                    .pillScrubItem(scrub, index)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) { onTap() }
+                                    .background(PillBarActiveCapsule, CircleShape)
+                                    .padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Box(
-                                    Modifier.size(56.dp, 32.dp).clip(CircleShape).clickable(onClick = onIconTap),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(item.icon, contentDescription = item.label, tint = contentColor, modifier = Modifier.size(24.dp)
-                                        .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) })
+                                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                                    Icon(item.icon, contentDescription = item.label, tint = PillBarActiveGlyph, modifier = Modifier.size(22.dp))
+                                    // Stage E §9: a condition dot on the
+                                    // icon's corner — never a count.
+                                    if (item.screen in badgedScreens) {
+                                        Box(
+                                            Modifier.align(Alignment.TopEnd)
+                                                .size(8.dp)
+                                                .background(alertDotColor(false), CircleShape)
+                                        )
+                                    }
                                 }
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(8.dp))
                                 Text(
                                     item.label,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = contentColor,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PillBarActiveGlyph,
                                     maxLines = 1,
                                     softWrap = false,
                                     overflow = TextOverflow.Ellipsis,
@@ -2904,22 +3015,29 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                             }
                         } else {
                             Box(
-                                Modifier.size(56.dp, 32.dp).clip(CircleShape).clickable(onClick = onIconTap),
+                                modifier = Modifier.height(geometry.itemHeight)
+                                    .pillScrubItem(scrub, index)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) { onTap() }
+                                    .padding(horizontal = 12.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(
-                                    if (highlighted) item.icon else item.outlinedIcon,
-                                    contentDescription = item.label,
-                                    tint = contentColor,
-                                    modifier = Modifier.size(24.dp)
-                                        .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
-                                )
+                                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                                    Icon(item.outlinedIcon, contentDescription = item.label, tint = PillBarUnselectedGlyph, modifier = Modifier.size(22.dp))
+                                    if (item.screen in badgedScreens) {
+                                        Box(
+                                            Modifier.align(Alignment.TopEnd)
+                                                .size(8.dp)
+                                                .background(alertDotColor(true), CircleShape)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
             }
         }
     }
@@ -3007,8 +3125,20 @@ fun DetailPopupTitleHeader(title: String) {
  * its own title row + top-right X (not a back arrow) and is
  * untouched by this header.
  */
+/**
+ * Customization round, item 2: optional displayTitle/displayIcon
+ * (the caller's Card-settings overrides) and an optional edit
+ * pencil beside the title opening Card settings. Callers without
+ * a ViewModel keep the old behavior exactly.
+ */
 @Composable
-fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
+fun DetailPopupHeader(
+    entity: HaEntity,
+    onDismiss: () -> Unit,
+    displayTitle: String? = null,
+    displayIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onEdit: (() -> Unit)? = null,
+) {
     val heroTarget = LocalHeroTarget.current
     val accent = accentFor(entity.entityId)
     Row(
@@ -3022,7 +3152,7 @@ fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
         // title back until the final 2% handoff window.
         DomainBadge(
             entity,
-            domainIcon(entity),
+            displayIcon ?: domainIcon(entity),
             accent,
             modifier = Modifier.size(48.dp).hideWhileTraveling().clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -3032,10 +3162,13 @@ fun DetailPopupHeader(entity: HaEntity, onDismiss: () -> Unit) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             DialogTitleText(
-                if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
+                displayTitle ?: if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
                 Modifier.fillMaxWidth(),
             )
             Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (onEdit != null) {
+            CardSettingsPencil(onClick = onEdit)
         }
     }
     Spacer(Modifier.height(4.dp))

@@ -156,6 +156,13 @@ fun ThermostatDial(
     val onInsideTapState = rememberUpdatedState(onInsideTap)
 
     var grabbed by remember { mutableStateOf<SetpointSelector?>(null) }
+    // Visual-fidelity round §5: angular offset between the pointer
+    // and the grabbed thumb's TRUE angle at drag start. The drawn
+    // thumb may sit up to 9° away from its true angle (separation),
+    // so the drag handler subtracts this offset from the pointer
+    // angle — the value stays put at grab and then follows the
+    // finger 1:1, instead of jumping ~1°F on first move.
+    var grabAngleOffset by remember { mutableStateOf(0f) }
     var strain by remember { mutableStateOf<Float?>(null) }
     var lastApplied by remember { mutableStateOf(0f) }
     // Track widening while grabbed; pulse phase for the active bloom.
@@ -181,8 +188,26 @@ fun ThermostatDial(
     val drawnCool = ((if (grabbed == SetpointSelector.COOLING) strain else null) ?: cool)
         .let { if (dual) maxOf(it, heat) else it }
     val drawnSingle = (if (grabbed == SetpointSelector.HEATING && !dual) strain else null) ?: single
-    val animatedHeatAngle by animateFloatAsState(dial240AngleForValue(drawnHeat, range), needleSpec, label = "heatAngle")
-    val animatedCoolAngle by animateFloatAsState(dial240AngleForValue(drawnCool, range), needleSpec, label = "coolAngle")
+    // Visual-fidelity round §5: the DRAWN dual angles are spread to
+    // a minimum 18° of arc apart (separatedDualAngles) so the
+    // purple/blue thumb circles never overlap at the top of the
+    // dial — the actual setpoint VALUES (heat/cool) are untouched;
+    // only the drawn positions move. The separated pair feeds the
+    // animated targets (hence the radii, thumb centers, and shaded
+    // range below) AND the grab test, so taps land on the thumb
+    // they see. The drag handler corrects for the separation with
+    // grabAngleOffset (below), so a grabbed thumb never jumps the
+    // value on first move.
+    val (separatedHeatAngle, separatedCoolAngle) = if (dual) {
+        separatedDualAngles(
+            dial240AngleForValue(drawnHeat, range),
+            dial240AngleForValue(drawnCool, range),
+        )
+    } else {
+        dial240AngleForValue(drawnHeat, range) to dial240AngleForValue(drawnCool, range)
+    }
+    val animatedHeatAngle by animateFloatAsState(separatedHeatAngle, needleSpec, label = "heatAngle")
+    val animatedCoolAngle by animateFloatAsState(separatedCoolAngle, needleSpec, label = "coolAngle")
     val animatedSingleAngle by animateFloatAsState(dial240AngleForValue(drawnSingle, range), needleSpec, label = "singleAngle")
 
     fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 22.dp.toPx() }
@@ -241,10 +266,23 @@ fun ThermostatDial(
                         // Staggered grab centers (see dualThumbRadii):
                         // the drawn thumbs sit on these radii when
                         // close, so the grab test must use them too.
-                        val (heatGrabRadius, coolGrabRadius) = if (dual) {
-                            dualThumbRadii(
+                        // Visual-fidelity round §5: the grab angles
+                        // are the SEPARATED drawn angles (not the
+                        // true value angles), so the thumb the user
+                        // sees is the thumb they grab.
+                        val (grabHeatAngle, grabCoolAngle) = if (dual) {
+                            separatedDualAngles(
                                 dial240AngleForValue(heatState.value, range),
                                 dial240AngleForValue(coolState.value, range),
+                            )
+                        } else {
+                            dial240AngleForValue(heatState.value, range) to
+                                dial240AngleForValue(coolState.value, range)
+                        }
+                        val (heatGrabRadius, coolGrabRadius) = if (dual) {
+                            dualThumbRadii(
+                                grabHeatAngle,
+                                grabCoolAngle,
                                 trackRadius, 30.dp.toPx(), 20.dp.toPx(), 4.dp.toPx(), 12.dp.toPx(),
                             )
                         } else {
@@ -257,8 +295,8 @@ fun ThermostatDial(
                             return sqrt(dx * dx + dy * dy)
                         }
                         grabbed = if (dual) {
-                            val dh = distTo(dial240AngleForValue(heatState.value, range), heatGrabRadius)
-                            val dc = distTo(dial240AngleForValue(coolState.value, range), coolGrabRadius)
+                            val dh = distTo(grabHeatAngle, heatGrabRadius)
+                            val dc = distTo(grabCoolAngle, coolGrabRadius)
                             when {
                                 dh <= grabR && dc <= grabR ->
                                     if (dh <= dc) SetpointSelector.HEATING else SetpointSelector.COOLING
@@ -281,27 +319,63 @@ fun ThermostatDial(
                             }
                             strain = null
                         }
+                        // Visual-fidelity round §5: record how far
+                        // the pointer sits from the grabbed thumb's
+                        // TRUE angle. The drawn thumb may be
+                        // separated from its true angle, so without
+                        // this the first drag move would jump the
+                        // value toward the pointer. The offset is
+                        // subtracted in onDrag; it is 0 when the
+                        // thumb is drawn at its true angle.
+                        grabAngleOffset = if (grabbed != null) {
+                            val pointerAngle = (Math.toDegrees(
+                                atan2(
+                                    (offset.y - cy).toDouble(),
+                                    (offset.x - cx).toDouble(),
+                                ),
+                            ).toFloat() + 360f) % 360f
+                            val trueAngle = if (dual) {
+                                if (grabbed == SetpointSelector.HEATING) {
+                                    dial240AngleForValue(heatState.value, range)
+                                } else {
+                                    dial240AngleForValue(coolState.value, range)
+                                }
+                            } else {
+                                dial240AngleForValue(singleState.value, range)
+                            }
+                            (pointerAngle - trueAngle + 540f) % 360f - 180f
+                        } else {
+                            0f
+                        }
                     },
                     onDragEnd = {
                         grabbed?.let { g -> onFinishedState.value(g, lastApplied) }
                         grabbed = null
                         strain = null
+                        grabAngleOffset = 0f
                     },
                     onDragCancel = {
                         grabbed = null
                         strain = null
+                        grabAngleOffset = 0f
                     },
                     onDrag = { change, _ ->
                         val g = grabbed ?: return@detectDragGestures
                         change.consume()
                         val cx = size.width / 2f
                         val cy = size.height / 2f
-                        val angleDeg = (Math.toDegrees(
+                        // Visual-fidelity round §5: the effective
+                        // angle is the pointer angle minus the grab
+                        // offset, so the value follows the finger
+                        // 1:1 from its true value instead of
+                        // jumping to the separated drawn position.
+                        val pointerAngle = (Math.toDegrees(
                             atan2(
                                 (change.position.y - cy).toDouble(),
                                 (change.position.x - cx).toDouble(),
                             ),
                         ).toFloat() + 360f) % 360f
+                        val angleDeg = (pointerAngle - grabAngleOffset + 360f) % 360f
                         val rel = (angleDeg - DIAL240_START_DEG + 360f) % 360f
                         val span = range.endInclusive - range.start
                         if (rel <= DIAL240_SWEEP_DEG) {

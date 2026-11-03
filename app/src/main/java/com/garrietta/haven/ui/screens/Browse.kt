@@ -17,6 +17,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -32,8 +34,11 @@ import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.SectionHeader
-import com.garrietta.haven.ui.components.pillClearanceBottom
 import com.garrietta.haven.ui.controls.EntityControlCard
+import com.garrietta.haven.data.groupEntitiesByDevice
+import com.garrietta.haven.data.deviceMatchesQuery
+import com.garrietta.haven.data.deviceDisplayName
+import com.garrietta.haven.data.attachDeviceInfo
 
 const val UNASSIGNED_AREA = "__unassigned__"
 
@@ -45,7 +50,7 @@ fun AreasScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val unassignedCount = states.values.count { entityAreas[it.entityId] == null }
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
             Spacer(Modifier.height(16.dp))
@@ -98,7 +103,7 @@ fun AreaDetailScreen(vm: HavenViewModel, areaId: String, onBack: () -> Unit, nav
         .sortedWith(compareBy({ it.domain }, { it.friendlyName }))
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item { DetailTopBar(name, onBack) }
         var lastDomain: String? = null
@@ -127,6 +132,9 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val areas by vm.areas.collectAsState()
     val entityAreas by vm.entityAreas.collectAsState()
+    val deviceInfo by vm.deviceInfo.collectAsState()
+    val entityDevices by vm.entityDevices.collectAsState()
+    var openDevice by remember { mutableStateOf<com.garrietta.haven.data.DeviceGroup?>(null) }
     val results = if (query.isBlank()) {
         emptyList()
     } else {
@@ -157,13 +165,46 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         } else {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+                contentPadding = PaddingValues(bottom = 16.dp),
             ) {
+                // Customization round, item 3: device results
+                // alongside entity results — a device row opens a
+                // sheet listing its real entities, never a dead row.
+                val deviceGroups = attachDeviceInfo(
+                    groupEntitiesByDevice(states.values.toList(), entityDevices), deviceInfo,
+                ).filter { deviceMatchesQuery(query, it, states) }
+                    .sortedBy { (it.info?.name ?: it.deviceId).lowercase() }
+                if (deviceGroups.isNotEmpty()) {
+                    item {
+                        Text("Devices", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    items(deviceGroups) { group ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(deviceDisplayName(group), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    listOfNotNull(group.info?.manufacturer, group.info?.model).joinToString(" · ").ifEmpty { "${group.entityIds.size} entities" },
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            TextButton(onClick = { openDevice = group }) { Text("View") }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    item {
+                        Text("Entities", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
                 items(results) { entity ->
                     EntityControlCard(entity, vm) { vm.openPopup(it) }
                     Spacer(Modifier.height(12.dp))
                 }
                 item { Spacer(Modifier.height(16.dp)) }
+            }
+            if (openDevice != null) {
+                DeviceSheet(vm, openDevice!!, onDismiss = { openDevice = null })
             }
         }
     }

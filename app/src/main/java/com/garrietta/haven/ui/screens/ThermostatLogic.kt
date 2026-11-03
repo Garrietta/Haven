@@ -216,6 +216,57 @@ fun dualThumbRadii(
     return (trackRadiusPx - offset) to (trackRadiusPx + offset)
 }
 
+/** Minimum VISUAL separation between the dual dial thumbs, in dial-arc degrees. */
+const val DUAL_THUMB_MIN_ARC_SEPARATION_DEG = 18f
+
+/**
+ * Visual-fidelity round §5: spreads the DRAWN heating/cooling thumb
+ * angles to at least [minSeparationDeg] of dial arc apart (18° on the
+ * 240° sweep over a 30°F display range ≈ 2.25°F of arc — the thumbs
+ * clear each other at the top of the dial without touching the
+ * values). VISUAL ONLY: the returned angles are draw positions and
+ * grab-test positions; the heating/cooling setpoints themselves are
+ * never rewritten, the dial model is untouched, and a drag still
+ * reports the value under the finger (the grab test uses these same
+ * separated angles, so taps land on the thumb they see).
+ *
+ * Spreading is symmetric about the pair's midpoint, then clamped
+ * into the arc: if the spread would push the heat thumb below the
+ * arc start, both angles shift up by the overshoot; likewise at the
+ * arc end. A pair already separated passes through untouched.
+ * Applied on top of [dualThumbRadii] (which staggers RADII when
+ * thumbs are close) — angle separation and radius stagger compose:
+ * close setpoints get both angular room and radial stagger. Pure.
+ */
+fun separatedDualAngles(
+    heatAngleDeg: Float,
+    coolAngleDeg: Float,
+    minSeparationDeg: Float = DUAL_THUMB_MIN_ARC_SEPARATION_DEG,
+): Pair<Float, Float> {
+    if (coolAngleDeg - heatAngleDeg >= minSeparationDeg) return heatAngleDeg to coolAngleDeg
+    val mid = (heatAngleDeg + coolAngleDeg) / 2f
+    var heat = mid - minSeparationDeg / 2f
+    var cool = mid + minSeparationDeg / 2f
+    val arcStart = DIAL240_START_DEG
+    val arcEnd = DIAL240_START_DEG + DIAL240_SWEEP_DEG
+    if (heat < arcStart) {
+        cool += arcStart - heat
+        heat = arcStart
+    }
+    if (cool > arcEnd) {
+        heat -= cool - arcEnd
+        cool = arcEnd
+    }
+    // A range narrower than the separation cannot occur on the 240°
+    // arc, but never return an inverted pair if it ever did.
+    if (heat > cool) {
+        val m = (heat + cool) / 2f
+        heat = m
+        cool = m
+    }
+    return heat to cool
+}
+
 /**
  * Rubber-banding past the dial ends: values inside the range pass through
  * unchanged; overshoot past either end is damped to 35% of the excess, so

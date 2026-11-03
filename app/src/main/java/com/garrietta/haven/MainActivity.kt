@@ -1,6 +1,7 @@
 package com.garrietta.haven
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,6 +18,11 @@ class MainActivity : ComponentActivity() {
         // the system guessing — the old default left headers colliding with
         // the status bar on the Fold8.
         enableEdgeToEdge()
+        // UI rewrite round §6 (exit flash): the navigation bar is
+        // fully transparent, never an opaque inset box — this
+        // complements (not replaces) the Scaffold/overlay
+        // backgrounds painted with the theme color in HavenApp.
+        window.navigationBarColor = Color.TRANSPARENT
         super.onCreate(savedInstanceState)
         vm.handleOAuthIntent(intent)
         setContent {

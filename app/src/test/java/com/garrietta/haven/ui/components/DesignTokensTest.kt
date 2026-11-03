@@ -15,17 +15,25 @@ class DesignTokensTest {
     private val scheme = lightColorScheme()
 
     @Test
-    fun pillLabelVisibleNeverShowsOnFoldedBar() {
-        // Round 5: the folded bottom PillNav is icon-only, so the
-        // token is false for every label, selected or not — the bar
-        // width can never jump on a tab switch. Round 8: the
-        // unfolded side pill is icon-only too, so neither chrome
-        // variant shows labels anymore.
-        assertFalse(pillLabelVisible("Bedroom", true))
-        assertFalse(pillLabelVisible("1234567890", true))
-        assertFalse(pillLabelVisible("Living Room", true))
-        assertFalse(pillLabelVisible("Bedroom", false))
-        assertFalse(pillLabelVisible("Living Room", false))
+    fun pillTokensMatchRewriteDirective() {
+        // UI rewrite round: theme-independent chrome — the same
+        // container, lime capsule, ink glyph, and pale-sage
+        // unselected icons in BOTH themes (never blue on dark).
+        assertEquals(Color(0xFF161D17), PillBarContainer)
+        assertEquals(Color(0xFF9BF67C), PillBarActiveCapsule)
+        assertEquals(Color(0xFF0A2005), PillBarActiveGlyph)
+        assertEquals(Color(0xFFD7E2D4), PillBarUnselectedGlyph)
+        val dark = darkColorScheme()
+        assertEquals(PillBarActiveCapsule, selectedPillFill(scheme, false))
+        assertEquals(PillBarActiveCapsule, selectedPillFill(dark, true))
+        assertEquals(PillBarActiveGlyph, selectedPillGlyph(scheme, false))
+        assertEquals(PillBarActiveGlyph, selectedPillGlyph(dark, true))
+        assertEquals(PillBarUnselectedGlyph, pillUnselectedGlyph(scheme, false))
+        assertEquals(PillBarUnselectedGlyph, pillUnselectedGlyph(dark, true))
+        // Active glyph on capsule, and unselected sage on the
+        // near-black container, both clear 4.5:1.
+        assertTrue(contrastRatio(PillBarActiveGlyph, PillBarActiveCapsule) >= 4.5f)
+        assertTrue(contrastRatio(PillBarUnselectedGlyph, PillBarContainer) >= 4.5f)
     }
 
     @Test
@@ -369,11 +377,15 @@ class DesignTokensTest {
     }
 
     @Test
-    fun selectedPillIsBlueInDarkAndUnchangedInLight() {
-        assertEquals(scheme.secondaryContainer, selectedPillFill(scheme, false))
-        assertEquals(scheme.onSecondaryContainer, selectedPillGlyph(scheme, false))
-        assertEquals(SelectedPillBlue, selectedPillFill(scheme, true))
-        assertEquals(Color.White, selectedPillGlyph(scheme, true))
-        assertTrue(contrastRatio(Color.White, SelectedPillBlue) >= 3.0f)
+    fun selectedPillIsLimeCapsuleInBothThemes() {
+        // UI rewrite round: the selected pill is the SAME lime
+        // capsule in both themes — the Round 8 blue dark pill is
+        // gone (it was the flagged dark-rail bug). The capsule
+        // stays lime whether dynamic color is on or off.
+        assertEquals(PillBarActiveCapsule, selectedPillFill(scheme, false))
+        assertEquals(PillBarActiveGlyph, selectedPillGlyph(scheme, false))
+        assertEquals(PillBarActiveCapsule, selectedPillFill(scheme, true))
+        assertEquals(PillBarActiveGlyph, selectedPillGlyph(scheme, true))
+        assertTrue(contrastRatio(PillBarActiveGlyph, PillBarActiveCapsule) >= 4.5f)
     }
 }

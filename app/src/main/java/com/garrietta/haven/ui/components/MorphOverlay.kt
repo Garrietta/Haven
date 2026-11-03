@@ -164,6 +164,16 @@ val LocalArcTarget = staticCompositionLocalOf<((Rect) -> Unit)?> { null }
 val LocalMorphProgress = staticCompositionLocalOf<(() -> Float)?> { null }
 
 /**
+ * Visual-fidelity round §5: whether a morph is currently CLOSING
+ * (an animated dismiss is running). The overlay root provides this
+ * from its dismiss flags; panels read it through their own
+ * isClosing parameters, while source cards — which have no
+ * isClosing parameter — read it here to pick the close branch of
+ * [hideHeroWhenMorphSource]. Defaults to false (enter / rest).
+ */
+val LocalMorphClosing = staticCompositionLocalOf { false }
+
+/**
  * Alpha for the active morph source card (see
  * [hideWhenMorphSource]). Round 5: the overlay root provides 1f
  * always — the card never fades; the opaque panel surface covers
@@ -242,6 +252,26 @@ fun Modifier.dissolveIntoTraveler(): Modifier = composed {
 }
 
 /**
+ * Source-badge alpha on a morphing surface CLOSE at [progress]
+ * (1 = panel at rest, 0 = landed back on the card) — the
+ * visual-fidelity round §5 fix for the exit tail gap. The old rule
+ * hid the source badge binarily for the whole morph: on close, the
+ * traveling badge fades with the container over the final 25%
+ * (see [morphPanelContainerAlphaClose]) while the source badge
+ * stayed hidden until the dismiss coroutine cleared state frames
+ * after progress reached 0 — a gap where no badge showed at all.
+ * This curve is the traveler's exact inverse: while the panel
+ * surface is opaque the badge value is moot (the card is covered),
+ * and over the container's fade window the badge crossfades in
+ * against the coincident traveler, reaching full opacity exactly
+ * at landing — before any state clear — so no frame lacks a badge
+ * and no doubling forms (the two coincide to sub-pixel accuracy).
+ * Pure, unit-tested.
+ */
+fun morphSourceBadgeAlphaOnClose(progress: Float): Float =
+    1f - heroHeaderAlpha(progress) * morphPanelContainerAlphaClose(progress)
+
+/**
  * Hides this layout's header while it is the active morph source's
  * traveling header (layout unchanged, alpha only). Round 5: the
  * overlay root provides a null hidden id, so this never hides in
@@ -251,11 +281,36 @@ fun Modifier.dissolveIntoTraveler(): Modifier = composed {
  * forms. The mechanism is retained: if a hidden id is ever
  * provided again, the header hides from frame 0 exactly as before
  * (the doubling read in every 2026-10-29 verdict video).
+ *
+ * Visual-fidelity round §5: the badge variant below
+ * ([hideHeroWhenMorphSource]) is closing-aware — on enter it
+ * still hides binarily (the traveler owns the badge for the whole
+ * flight), but on close it crossfades back in via
+ * [morphSourceBadgeAlphaOnClose] instead of staying hidden until
+ * state clears. This header variant is badge-text-agnostic and
+ * keeps the binary rule: headers (unlike badges) are never the
+ * traveling element, so no exit-tail gap applies to them.
  */
 fun Modifier.hideHeroWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenHeroId.current
+    // Visual-fidelity round §5: closing-aware. On enter the badge
+    // hides binarily (the traveler owns the badge for the whole
+    // flight — any earlier return would double it). On close the
+    // badge crossfades back in via morphSourceBadgeAlphaOnClose
+    // (the traveler's exact inverse), reaching full opacity at
+    // landing — before the dismiss coroutine clears state — so
+    // the exit tail never has a badge-less frame. Progress is read
+    // ONLY inside graphicsLayer (the overlay root provides the
+    // active morph's progress lambda); a null progress (no morph)
+    // falls back to fully visible, which is also the rest state.
+    val closing = LocalMorphClosing.current
+    val progress = LocalMorphProgress.current
     graphicsLayer {
-        alpha = if (id == hiddenId) 0f else 1f
+        alpha = when {
+            id != hiddenId -> 1f
+            !closing -> 0f
+            else -> morphSourceBadgeAlphaOnClose(progress?.invoke() ?: 0f)
+        }
     }
 }
 

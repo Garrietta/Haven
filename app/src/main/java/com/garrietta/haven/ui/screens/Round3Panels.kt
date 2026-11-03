@@ -127,8 +127,16 @@ import com.garrietta.haven.data.updateDisplayName
 import com.garrietta.haven.data.updatesSummary
 import com.garrietta.haven.data.vacuumTileLine
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.screens.rememberCardCustom
+import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.data.domainCardColors
+import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.controls.MediaSquircle
+import com.garrietta.haven.ui.controls.MediaTransportRow
+import com.garrietta.haven.ui.controls.MediaVolumeRow
 import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.ServiceSlider
 import com.garrietta.haven.ui.controls.stateText
@@ -168,10 +176,21 @@ private fun PanelBodyText(text: String) {
     Text(text, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** A small pill button that never looks enabled when it is not. */
+/**
+ * Expressive-menus round: a LARGE 56dp pill button that never looks
+ * enabled when it is not (was a default OutlinedButton). Covers the
+ * vacuum / security / media panel actions; calls are identical.
+ */
 @Composable
 private fun PillAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, enabled = enabled) { Text(label) }
+    PressablePillButton(
+        onClick = onClick,
+        enabled = enabled,
+        height = 56.dp,
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        Text(label, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 /** One labeled on/off row (vacuum toggles, greenhouse automations). */
@@ -200,7 +219,7 @@ private fun ToggleRow(label: String, sub: String?, checked: Boolean, enabled: Bo
 @Composable
 private fun PanelCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = generalCardShape(0),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -220,9 +239,10 @@ private fun PanelPill(label: String, selected: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     PressablePillButton(
         onClick = onClick,
+        height = 56.dp,
         containerColor = if (selected) scheme.primaryContainer else scheme.secondaryContainer,
         contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSecondaryContainer,
-        contentPadding = PaddingValues(horizontal = 16.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
@@ -277,23 +297,45 @@ private fun SelectChips(entity: HaEntity, vm: HavenViewModel, label: String) {
  * domain leaves no empty shell behind. Shared by the folded
  * LazyColumn (as one item) and the unfolded left column.
  */
+/**
+ * Visual-fidelity round §4: the Round 3 Home blocks as four
+ * INDEPENDENTLY gated sections (Security, Robot vacuum, TV &
+ * media, Greenhouse & irrigation) — the combined "Round 3 blocks"
+ * toggle is unbundled. Each block renders only when its domain
+ * exists in live state and keeps the original 16dp trailing
+ * spacing, so folded and unfolded spacing is unchanged. The
+ * stored preference migrates via migrateRound3Hidden /
+ * migrateRound3SectionOrder (combined-on maps to all four on).
+ */
 @Composable
-fun Round3HomeBlocks(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
+fun Round3SecurityBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val alarm = states[ALARM_ID]
     if (alarm != null) {
         SecurityBannerSection(alarm, vm) { navigate(Screen.SecurityPanel) }
         Spacer(Modifier.height(16.dp))
     }
+}
+
+@Composable
+fun Round3VacuumBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val vacuum = states[VACUUM_ID]
     if (vacuum != null) {
         VacuumTileSection(vacuum, states, vm) { navigate(Screen.VacuumPanel) }
         Spacer(Modifier.height(16.dp))
     }
+}
+
+@Composable
+fun Round3MediaBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val media = MEDIA_PLAYER_IDS.mapNotNull { states[it] }
     if (media.isNotEmpty()) {
         MediaRowSection(media, vm) { entity -> navigate(Screen.MediaPanel(entity.entityId)) }
         Spacer(Modifier.height(16.dp))
     }
+}
+
+@Composable
+fun Round3GreenhouseBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val greenhousePresent = (GREENHOUSE_AUTOMATION_IDS + GREENHOUSE_TIMER_IDS +
         listOf(GREENHOUSE_WATER_DUE_ID, SPRINKLER_SWITCH_ID)).any { states.containsKey(it) }
     if (greenhousePresent) {
@@ -309,7 +351,7 @@ private fun SecurityBannerSection(alarm: HaEntity, vm: HavenViewModel, onOpen: (
         Modifier.fillMaxWidth()
             .reportCardBounds(ALARM_ID)
             .hideWhenMorphSource(ALARM_ID)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.primaryContainer)
             .clickable { onOpen() }
             .padding(16.dp),
@@ -358,7 +400,7 @@ private fun VacuumTileSection(
         Modifier.fillMaxWidth()
             .reportCardBounds(VACUUM_ID)
             .hideWhenMorphSource(VACUUM_ID)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .clickable { onOpen() }
             .padding(16.dp),
@@ -367,8 +409,10 @@ private fun VacuumTileSection(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.CleaningServices, contentDescription = null, tint = accentFor(VACUUM_ID))
                 Spacer(Modifier.width(8.dp))
+                // Customization round, item 2: the vacuum block
+                // title honors a custom title for vacuum.t2292.
                 Text(
-                    vacuum.friendlyName,
+                    customTitleFor(rememberCardCustom(vm).titles, vacuum.entityId, vacuum.friendlyName),
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -419,7 +463,7 @@ private fun MediaTile(entity: HaEntity, vm: HavenViewModel, onOpen: () -> Unit) 
         Modifier.width(172.dp)
             .reportCardBounds(entity.entityId)
             .hideWhenMorphSource(entity.entityId)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .clickable { onOpen() }
             .padding(16.dp),
@@ -490,7 +534,7 @@ private fun GreenhouseSummaryCard(states: Map<String, HaEntity>, onOpen: () -> U
         Modifier.fillMaxWidth()
             .reportCardBounds(GREENHOUSE_AUTOMATION_IDS.first())
             .hideWhenMorphSource(GREENHOUSE_AUTOMATION_IDS.first())
-            .clip(RoundedCornerShape(24.dp))
+            .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .clickable { onOpen() }
             .padding(16.dp),
@@ -556,26 +600,38 @@ fun PresenceBlock(homeTrackers: List<HaEntity>, states: Map<String, HaEntity>) {
     } else {
         for (group in groups) {
             if (group.isOther) {
-                // Other row: one chip per unmapped device, under a
-                // clearly labeled "Other" heading — never folded
-                // into a person's chip.
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // UI rewrite round §7: "Other" lives INSIDE its
+                // rounded presence chip beside the count badge —
+                // never as a bare label outside the container
+                // pushing device names out of alignment. The
+                // per-device chips are gone; tapping this one chip
+                // still opens the sheet with every unmapped device
+                // (same as a person's chip).
+                Row(
+                    Modifier.clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .clickable { selected = group }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         "Other",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(56.dp),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
-                    Row(
-                        Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier.size(22.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        for (member in group.members) {
-                            PresenceChip(label = member.friendlyName, initial = "?", accentId = member.entityId) {
-                                selected = group
-                            }
-                        }
+                        Text(
+                            "${group.members.size}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
                     }
                 }
             } else {
@@ -931,26 +987,28 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         }
         Spacer(Modifier.height(16.dp))
         PanelSectionTitle("Volume")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = {
+        // Expressive-menus round: mute squircle pill + slider (was a
+        // bare IconButton); the slider and its call are unchanged.
+        MediaVolumeRow(
+            muted = muted,
+            onToggleMute = {
                 vm.callService(
                     "media_player", "volume_mute", entityId,
                     JSONObject().put("is_volume_muted", !muted),
                 )
-            }) {
-                Icon(
-                    if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                    contentDescription = if (muted) "Unmute" else "Mute",
-                )
-            }
-            Box(Modifier.weight(1f)) {
-                ServiceSlider(
-                    (volume * 100).toFloat(), 0f..100f,
-                    { vm.callService("media_player", "volume_set", entityId, JSONObject().put("volume_level", it / 100f)) },
-                    accentFor(entityId),
-                    formatValue = { "${it.toInt()}%" },
-                )
-            }
+            },
+        ) {
+            // Customization round, item 8: media badge fill
+            // accent (very light purple #DAB9FF in dark mode).
+            val panelMediaAccent = vm.states.value[entityId]?.let {
+                domainCardColors(it, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
+            } ?: accentFor(entityId)
+            ServiceSlider(
+                (volume * 100).toFloat(), 0f..100f,
+                { vm.callService("media_player", "volume_set", entityId, JSONObject().put("volume_level", it / 100f)) },
+                panelMediaAccent,
+                formatValue = { "${it.toInt()}%" },
+            )
         }
         if (sources.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
@@ -959,43 +1017,28 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Expressive-menus round: sources are large 56dp
+                // PanelPills (the real output affordance — HA has no
+                // queue), not 32dp FilterChips.
                 for (item in sources) {
-                    FilterChip(
+                    PanelPill(
+                        label = item,
                         selected = source == item,
                         onClick = {
                             vm.callService("media_player", "select_source", entityId, JSONObject().put("source", item))
                         },
-                        label = { Text(item) },
                     )
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
         PanelSectionTitle("Transport")
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PressablePillButton(
-                onClick = { vm.callService("media_player", "media_previous_track", entityId) },
-                modifier = Modifier.width(56.dp),
-            ) { Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous") }
-            PressablePillButton(
-                onClick = { vm.callService("media_player", "media_play_pause", entityId) },
-                modifier = Modifier.width(88.dp),
-                height = 56.dp,
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-                Icon(
-                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (playing) "Pause" else "Play",
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(if (playing) "Pause" else "Play", fontWeight = FontWeight.SemiBold)
-            }
-            PressablePillButton(
-                onClick = { vm.callService("media_player", "media_next_track", entityId) },
-                modifier = Modifier.width(56.dp),
-            ) { Icon(Icons.Filled.SkipNext, contentDescription = "Next") }
-        }
+        MediaTransportRow(
+            playing = playing,
+            onPrevious = { vm.callService("media_player", "media_previous_track", entityId) },
+            onPlayPause = { vm.callService("media_player", "media_play_pause", entityId) },
+            onNext = { vm.callService("media_player", "media_next_track", entityId) },
+        )
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -1019,6 +1062,7 @@ private fun DpadGrid(onCommand: (String) -> Unit) {
                             onClick = { onCommand(cell.second) },
                             modifier = Modifier.width(88.dp),
                             height = 56.dp,
+                            shape = MediaSquircle,
                             containerColor = if (cell.first == "OK") MaterialTheme.colorScheme.primaryContainer
                             else MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = if (cell.first == "OK") MaterialTheme.colorScheme.onPrimaryContainer

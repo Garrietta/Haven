@@ -63,6 +63,29 @@ class HaClient(
     val entityAreas: StateFlow<Map<String, String>> = _entityAreas.asStateFlow()
 
     /**
+     * entity_id -> device_id, from the entity registry (expressive-
+     * menus round, item 7). Previously kept only as the private
+     * registryEntityDevices map for manufacturer/area resolution;
+     * exposing it lets camera cards find a motion sensor on the
+     * SAME device — a genuine registry link, never a name guess.
+     * Empty until the entity registry arrives: empty means
+     * unknown, never "no motion sensor".
+     */
+    private val _entityDevices = MutableStateFlow<Map<String, String>>(emptyMap())
+    val entityDevices: StateFlow<Map<String, String>> = _entityDevices.asStateFlow()
+
+    /**
+     * Customization round, item 3: device-registry info by device
+     * id — name (name_by_user wins over name, matching HA's own
+     * display rule), model, manufacturer. Additive: nothing about
+     * the existing area/manufacturer publishing changes. Empty
+     * until the device registry arrives; empty means unknown, never
+     * "no devices".
+     */
+    private val _deviceInfo = MutableStateFlow<Map<String, HaDeviceInfo>>(emptyMap())
+    val deviceInfo: StateFlow<Map<String, HaDeviceInfo>> = _deviceInfo.asStateFlow()
+
+    /**
      * Latest registry parts, kept so each fetch can recompute the
      * map independently (2026-10-30 verdict round): entity-registry
      * areas, entity→device links, device-registry areas.
@@ -70,6 +93,7 @@ class HaClient(
     private var registryEntityAreas: Map<String, String?> = emptyMap()
     private var registryEntityDevices: Map<String, String> = emptyMap()
     private var registryDeviceAreas: Map<String, String?> = emptyMap()
+    private val deviceInfoById: MutableMap<String, HaDeviceInfo> = mutableMapOf()
 
     private val _lovelace = MutableStateFlow<LovelaceConfig?>(null)
     val lovelace: StateFlow<LovelaceConfig?> = _lovelace.asStateFlow()
@@ -433,7 +457,17 @@ class HaClient(
                 // for who made the device.
                 val maker = d.optString("manufacturer")
                 if (maker.isNotEmpty()) deviceToMaker[id] = maker
+                // Device info for device-aware search (item 3).
+                val displayName = d.optString("name_by_user").ifEmpty { d.optString("name") }
+                if (displayName.isNotEmpty()) {
+                    deviceInfoById[id] = HaDeviceInfo(
+                        displayName,
+                        d.optString("model").ifEmpty { null },
+                        maker.ifEmpty { null },
+                    )
+                }
             }
+            if (deviceInfoById.isNotEmpty()) _deviceInfo.value = deviceInfoById.toMap()
             if (deviceToArea.isNotEmpty() || deviceToMaker.isNotEmpty()) {
                 registryDeviceAreas = deviceToArea
                 manufacturerByEntity = registryEntityDevices.mapNotNull { (entityId, deviceId) ->
@@ -456,6 +490,7 @@ class HaClient(
         _entityAreas.value = resolveEntityAreas(
             registryEntityAreas, registryEntityDevices, registryDeviceAreas,
         )
+        _entityDevices.value = registryEntityDevices
     }
 
 

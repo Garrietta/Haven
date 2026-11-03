@@ -17,6 +17,25 @@ val HOME_SECTIONS: List<Pair<String, String>> = listOf(
     "cameras" to "Cameras",
     "weather" to "Weather",
     "home" to "Who's home",
+    // Stage D: Home Status (real entities only) and Favorites, both
+    // hideable like every other section. Per-category Status toggles
+    // use "status:<category-key>" keys in the same hidden set.
+    "status" to "Home Status",
+    "favorites" to "Favorites",
+    // Stage G: the Round 3 blocks (vacuum, media, security,
+    // greenhouse, updates) are hideable and orderable like every
+    // other Home block.
+    // Visual-fidelity round §4: the combined "round3" toggle is
+    // UNBUNDLED into four independent toggles (Security, Robot
+    // vacuum, TV & media, Greenhouse & irrigation). The legacy
+    // "round3" key is migrated at every read site (see
+    // migrateRound3SectionOrder / migrateRound3Hidden below) so no
+    // stored preference is ever lost: combined-on maps to all four
+    // on, combined-off maps to all four off.
+    "round3-security" to "Security",
+    "round3-vacuum" to "Robot vacuum",
+    "round3-media" to "TV & media",
+    "round3-greenhouse" to "Greenhouse & irrigation",
 )
 // Room sections are toggled by "room:<areaId>" keys in the same
 // hidden-sections set (see HomeEditorScreen); they are not listed
@@ -24,6 +43,85 @@ val HOME_SECTIONS: List<Pair<String, String>> = listOf(
 // Legacy keys ("playing", "lights", "alerts") from the flat Home
 // layout are ignored: those sections no longer exist — their
 // entities now live in their rooms.
+
+/**
+ * Stage G: the canonical Home section order (the layout as shipped
+ * before arrangement existed). Stored orders resolve against it.
+ * The greeting is NOT orderable — it is the header, always first
+ * (like Home in the pill bar) — and the room-filter chips stay pinned
+ * after it (they are a filter control, not a section). Orderable
+ * blocks are everything below: hero, weather, who's-home, status,
+ * favorites, round-3 blocks, rooms.
+ */
+/**
+ * UI rewrite round §4: the fresh-state default — Greeting, Cameras,
+ * Home Status, Favorites shown; everything else hidden. Governs
+ * DEFAULTS ONLY: it applies exactly when the user has never stored a
+ * hidden-sections preference (the key is absent). A stored set — even
+ * an empty one (the user explicitly showed everything) — always wins,
+ * and this constant never overwrites it. Rooms are not part of this
+ * rule (room visibility is governed by their own room toggles,
+ * default shown).
+ */
+val DEFAULT_HIDDEN_HOME_SECTIONS: Set<String> = setOf(
+    "weather", "home",
+    "round3-security", "round3-vacuum", "round3-media", "round3-greenhouse",
+)
+
+val HOME_SECTION_ORDER_DEFAULT: List<String> = listOf(
+    "cameras", "weather", "home", "status", "favorites",
+    "round3-security", "round3-vacuum", "round3-media", "round3-greenhouse",
+    "rooms",
+)
+
+/**
+ * Visual-fidelity round §4: the four Round 3 block keys, in the
+ * position the combined "round3" key used to occupy.
+ */
+val ROUND3_BLOCK_KEYS: List<String> = listOf(
+    "round3-security", "round3-vacuum", "round3-media", "round3-greenhouse",
+)
+
+/**
+ * Migrates a stored Home section order from the combined "round3"
+ * key to the four independent keys, in place (same position, same
+ * relative order). Orders without the legacy key pass through
+ * untouched. Pure and unit-tested. Applied at read sites (Today,
+ * HomeEditor) rather than by rewriting stored orders, so a stored
+ * order is never mutated by merely rendering it.
+ */
+fun migrateRound3SectionOrder(stored: List<String>): List<String> =
+    stored.flatMap { if (it == "round3") ROUND3_BLOCK_KEYS else listOf(it) }
+
+/**
+ * Migrates a stored hidden-sections set from the combined "round3"
+ * key to the four independent keys: combined-hidden maps to all four
+ * hidden, combined-shown (or absent) maps to all four shown. The
+ * legacy key itself is always dropped. Pure and unit-tested.
+ */
+fun migrateRound3Hidden(hidden: Set<String>): Set<String> =
+    if ("round3" in hidden) hidden - "round3" + ROUND3_BLOCK_KEYS.toSet()
+    else hidden - "round3"
+
+/**
+ * Stage G: resolves a stored arrangement against the canonical order.
+ * Stored keys not in [canonical] are dropped (a removed section can
+ * never break the layout); canonical keys missing from [stored] are
+ * appended in canonical order (a new section can never vanish from an
+ * old stored order); duplicates keep their first occurrence. Pure and
+ * unit-tested. Used for Home sections AND room order (same contract).
+ */
+fun resolveOrder(stored: List<String>, canonical: List<String>): List<String> {
+    val seen = mutableSetOf<String>()
+    val out = mutableListOf<String>()
+    for (key in stored) {
+        if (key in canonical && seen.add(key)) out.add(key)
+    }
+    for (key in canonical) {
+        if (seen.add(key)) out.add(key)
+    }
+    return out
+}
 
 /**
  * Groups entities by their HA area (2026-10-30 Home reorg):

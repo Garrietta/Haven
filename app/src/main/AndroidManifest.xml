@@ -36,6 +36,23 @@
                     android:scheme="haven" />
             </intent-filter>
         </activity>
+        <!-- Customization round, item 10: Haven as an Android
+             Device Controls provider, so it appears in Samsung's
+             Device control panel / Manage apps list alongside
+             SmartThings, Home, and Home Assistant (their selections
+             are untouched — this only adds Haven as a choice).
+             No metadata XML is required by the Controls API; the
+             service's app intent opens MainActivity. Manifest-only
+             reference, so pre-R devices never load the class. -->
+        <service
+            android:name=".HavenControlsService"
+            android:label="Haven"
+            android:permission="android.permission.BIND_CONTROLS"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.controls.ControlsProviderService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

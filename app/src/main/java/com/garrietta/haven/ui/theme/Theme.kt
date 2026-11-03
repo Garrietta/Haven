@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -167,39 +168,172 @@ val LargeTopShape: Shape = (HavenShapes.large as RoundedCornerShape).copy(
  */
 val FloatingCorner = RoundedCornerShape(32.dp)
 
+/**
+ * Stage B (redesign): the PINNED Haven light scheme — the permanent
+ * light-theme identity, identical on every device regardless of
+ * wallpaper. Soft warm off-white background, sage/muted-green
+ * surfaces, charcoal primary text, bright lime accents used
+ * selectively (selected pill, active toggles), pastel-friendly
+ * containers with soft card/background separation. This replaces
+ * the dynamic-M3 light scheme (see [HavenTheme]): the fixed palette
+ * IS the design system, and device-state colors stay automatic from
+ * real HA states via the semantic tokens (Stage E), never from the
+ * wallpaper. Pure (no Android calls), unit-tested for contrast.
+ */
+fun havenLightColorScheme(): ColorScheme = lightColorScheme(
+    primary = Color(0xFF3E6B2F),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFC1E88A),
+    onPrimaryContainer = Color(0xFF1E2A12),
+    secondary = Color(0xFF5A6B52),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFDCE5D0),
+    onSecondaryContainer = Color(0xFF25301F),
+    // Stage B fix (unit-test caught): the first pinned tertiary
+    // (0xFF6E7F5E) gave white-on-tertiary only 4.32:1, below the 4.5
+    // floor. This slightly deeper sage clears 4.72:1 with the same
+    // character; onTertiary stays White like primary/secondary.
+    tertiary = Color(0xFF677958),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFE4E8D8),
+    onTertiaryContainer = Color(0xFF232B1E),
+    error = Color(0xFFB3261E),
+    onError = Color.White,
+    errorContainer = Color(0xFFF9DEDC),
+    onErrorContainer = Color(0xFF410E0B),
+    background = Color(0xFFFAF7F0),
+    onBackground = Color(0xFF1E1E1A),
+    surface = Color(0xFFF1EFE4),
+    onSurface = Color(0xFF1E1E1A),
+    surfaceVariant = Color(0xFFE9EDE0),
+    onSurfaceVariant = Color(0xFF5B5A51),
+    surfaceTint = Color(0xFF3E6B2F),
+    inverseSurface = Color(0xFF2E2F29),
+    inverseOnSurface = Color(0xFFF4F1E6),
+    inversePrimary = Color(0xFFAED6A0),
+    surfaceDim = Color(0xFFE7E4D6),
+    surfaceBright = Color(0xFFFFFBF2),
+    surfaceContainerLowest = Color(0xFFFFFBF2),
+    surfaceContainerLow = Color(0xFFF4F1E6),
+    surfaceContainer = Color(0xFFE9EDE0),
+    surfaceContainerHigh = Color(0xFFDDE5D0),
+    surfaceContainerHighest = Color(0xFFCBD8BC),
+    outline = Color(0xFFC6C4B4),
+    outlineVariant = Color(0xFFE1DFD0),
+    scrim = Color.Black,
+)
+
+/**
+ * Stage B (redesign): the PINNED Haven dark scheme — Round 8's
+ * true-black container steps with FIXED near-white on-colors
+ * (Round 8 kept on-colors dynamic; the fixed palette now pins
+ * them too, so dark is identical regardless of wallpaper). The
+ * dark onSurfaceVariant is pinned to a warm light grey that clears
+ * 4.5:1 against every dark container step — this is the token-level
+ * floor for app-wide non-weather secondary text (Stage B item 2):
+ * every onSurfaceVariant use in dark passes without per-site edits,
+ * and [legibleSecondaryOn] still floors edge cases where text sits
+ * on an arbitrary container. Pure, unit-tested.
+ */
+fun havenDarkColorScheme(): ColorScheme = darkColorScheme(
+    primary = Color(0xFFAED6A0),
+    onPrimary = Color(0xFF1E2A12),
+    primaryContainer = Color(0xFF2E4A2E),
+    onPrimaryContainer = Color(0xFFD6EBCC),
+    secondary = Color(0xFF9DB08F),
+    onSecondary = Color(0xFF1E2A12),
+    secondaryContainer = Color(0xFF2A352A),
+    onSecondaryContainer = Color(0xFFD6E2CC),
+    tertiary = Color(0xFF9FB4AD),
+    onTertiary = Color(0xFF1E2A12),
+    tertiaryContainer = Color(0xFF25302E),
+    onTertiaryContainer = Color(0xFFD2E0DC),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
+    background = Color.Black,
+    onBackground = Color(0xFFF2F2EF),
+    surface = Color(0xFF121212),
+    onSurface = Color(0xFFF2F2EF),
+    surfaceVariant = Color(0xFF1E1E1E),
+    onSurfaceVariant = Color(0xFFC9C9C4),
+    surfaceTint = Color(0xFFAED6A0),
+    inverseSurface = Color(0xFFFAF7F0),
+    inverseOnSurface = Color(0xFF1E1E1A),
+    inversePrimary = Color(0xFF3E6B2F),
+    surfaceDim = Color.Black,
+    surfaceBright = Color(0xFF2B2B2B),
+    surfaceContainerLowest = Color.Black,
+    surfaceContainerLow = Color(0xFF161616),
+    surfaceContainer = Color(0xFF1E1E1E),
+    surfaceContainerHigh = Color(0xFF2B2B2B),
+    surfaceContainerHighest = Color(0xFF383838),
+    outline = Color(0xFF3F3F3A),
+    outlineVariant = Color(0xFF262622),
+    scrim = Color.Black,
+)
+
+/**
+ * Pure theme-mode resolution, so it is unit-testable without a
+ * composition: "light" forces light, "dark" forces dark, anything
+ * else (including "system") follows the system. Pure.
+ */
+fun resolveHavenIsDark(themeMode: String, isSystemDark: Boolean): Boolean =
+    when (themeMode) {
+        "light" -> false
+        "dark" -> true
+        else -> isSystemDark
+    }
+
 @Composable
 fun HavenTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    /**
+     * Stage B: Android dynamic (wallpaper) color. OPTIONAL and
+     * DISABLED BY DEFAULT — the fixed Haven palettes above are the
+     * identity, and dynamic color must never override them
+     * unexpectedly. When on, light/dark resolve to the dynamic
+     * schemes (dark keeps Round 8's pinned container steps);
+     * when off (the default), both themes are fully pinned.
+     */
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
     val scheme = if (darkTheme) {
-        val base = try {
-            dynamicDarkColorScheme(context)
-        } catch (e: Exception) {
-            darkColorScheme()
+        if (dynamicColor) {
+            val base = try {
+                dynamicDarkColorScheme(context)
+            } catch (e: Exception) {
+                darkColorScheme()
+            }
+            // Round 8 dark pass, preserved under dynamic color:
+            // true-black background with stepped surfaceContainers.
+            // Only the container steps are pinned — every on-color
+            // stays dynamic here, and near-white on-colors keep
+            // their contrast against black.
+            base.copy(
+                background = Color.Black,
+                surface = Color(0xFF121212),
+                surfaceContainerLowest = Color.Black,
+                surfaceContainerLow = Color(0xFF161616),
+                surfaceContainer = Color(0xFF1E1E1E),
+                surfaceContainerHigh = Color(0xFF2B2B2B),
+                surfaceContainerHighest = Color(0xFF383838),
+            )
+        } else {
+            havenDarkColorScheme()
         }
-        // Round 8 dark pass: true-black background (the Koda dark
-        // reference) with stepped surfaceContainers, so cards,
-        // grouped panels, and the pill bar separate from the
-        // background without turning grey. Only the container
-        // steps are pinned — every on-color stays dynamic, and
-        // near-white on-colors keep their contrast against black.
-        // Light theme is untouched (this branch is dark-only).
-        base.copy(
-            background = Color.Black,
-            surface = Color(0xFF121212),
-            surfaceContainerLowest = Color.Black,
-            surfaceContainerLow = Color(0xFF161616),
-            surfaceContainer = Color(0xFF1E1E1E),
-            surfaceContainerHigh = Color(0xFF2B2B2B),
-            surfaceContainerHighest = Color(0xFF383838),
-        )
     } else {
-        try {
-            dynamicLightColorScheme(context)
-        } catch (e: Exception) {
-            lightColorScheme()
+        if (dynamicColor) {
+            try {
+                dynamicLightColorScheme(context)
+            } catch (e: Exception) {
+                lightColorScheme()
+            }
+        } else {
+            havenLightColorScheme()
         }
     }
     MaterialTheme(

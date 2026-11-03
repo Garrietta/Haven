@@ -387,4 +387,22 @@ class MorphMathTest {
         assertTrue(mid > 0f && mid < 1f)
         assertTrue(morphExitCardAlpha(0.25f) > mid)
     }
+
+    @Test
+    fun sourceBadgeAlphaOnClose_isTravelerInverseAndLandsVisible() {
+        // At rest (progress 1) the badge value is 1 (moot: the card
+        // is covered by the opaque panel) — the curve matters over
+        // the container fade window, where it must mirror the
+        // traveler's fade exactly (badge + traveler sum to 1).
+        for (p in listOf(0.25f, 0.125f, 0.05f)) {
+            val badge = morphSourceBadgeAlphaOnClose(p)
+            val traveler = heroHeaderAlpha(p) * morphPanelContainerAlphaClose(p)
+            assertEquals(1f, badge + traveler, 0.001f)
+        }
+        // At landing the badge is fully visible BEFORE any state
+        // clear — the exit-tail gap is closed by construction.
+        assertEquals(1f, morphSourceBadgeAlphaOnClose(0f), 0.001f)
+        // Mid-close the badge is hidden while the traveler flies.
+        assertEquals(0f, morphSourceBadgeAlphaOnClose(0.9f), 0.001f)
+    }
 }

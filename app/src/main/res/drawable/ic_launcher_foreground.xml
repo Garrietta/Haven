@@ -3,11 +3,27 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Stylised house with a spark: Haven's mark. -->
+    <!-- Haven's mark, customization round item 4 (masking
+         refinement): a large charcoal house with SOFT rounded
+         apex/eaves (M3 Expressive geometry, distinguishing it from
+         Google Home's sharp triangle), a warm off-white door, and a
+         small leaf-green spark upper-right (Haven's third tone).
+         The whole mark sits inside the central 66dp safe zone
+         (center 54,54, radius 33: farthest points are the house
+         base corners at ~31.1dp from center), centered, with
+         nothing critical near the edges — so Samsung's default
+         squircle, Pixel's circle, square, rectangle, teardrop, and
+         expressive masks all show the identical mark. The old
+         lime-squircle-tile-on-charcoal design is gone: no inner
+         tile, no dark frame to clip. Background (full-bleed lime
+         gradient) lives in ic_launcher_background.xml. -->
     <path
-        android:fillColor="#5EEAD4"
-        android:pathData="M54,22 L82,46 V80 H68 V60 H40 V80 H26 V46 Z" />
+        android:fillColor="#161D17"
+        android:pathData="M32,54 L50,32 Q54,28 58,32 L76,54 V76 H64 V60 H44 V76 H32 Z" />
     <path
-        android:fillColor="#F0FDFA"
-        android:pathData="M54,14 L58,24 L68,28 L58,32 L54,42 L50,32 L40,28 L50,24 Z" />
+        android:fillColor="#FAF7F0"
+        android:pathData="M49,76 V60 H59 V76 Z" />
+    <path
+        android:fillColor="#3E6B2F"
+        android:pathData="M72,25 L74,30 L79,32 L74,34 L72,39 L70,34 L65,32 L70,30 Z" />
 </vector>

@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0B3B36</color>
+    <!-- Customization round, item 4: the adaptive background is now
+         the gradient drawable; this color is kept only as the
+         legacy fallback tone (capsule lime, never charcoal, so no
+         dark frame can ever read through a mask again). -->
+    <color name="ic_launcher_background">#9BF67C</color>
 </resources>

@@ -25,7 +25,11 @@ import com.garrietta.haven.data.UserTab
 import com.garrietta.haven.data.cardToYaml
 import com.garrietta.haven.data.changeCardType
 import com.garrietta.haven.data.parseCardYaml
+import com.garrietta.haven.data.DEFAULT_HIDDEN_HOME_SECTIONS
+import com.garrietta.haven.data.HOME_SECTION_ORDER_DEFAULT
 import com.garrietta.haven.data.TokenStore
+import com.garrietta.haven.ui.components.NavStyle
+import com.garrietta.haven.ui.components.navStyleFromKey
 import com.garrietta.haven.data.isNetworkAvailable
 import com.garrietta.haven.data.normalizeInstanceUrl
 import com.garrietta.haven.data.probeFailureMessage
@@ -33,7 +37,11 @@ import com.garrietta.haven.data.probeInstance
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -46,9 +54,15 @@ import java.net.URLEncoder
 /** Top-level navigation destinations. Detail screens push on top of these. */
 sealed class Screen {
     data object Today : Screen()
+    /** Stage F: first-class Scenes destination (brief §4/§10). */
+    data object Scenes : Screen()
+    /** Stage F: first-class Energy destination (brief §4/§11). */
+    data object Energy : Screen()
     data object Dashboards : Screen()
     data object Areas : Screen()
     data object Search : Screen()
+    /** UI rewrite round: the custom-tabs browse list (Settings -> Browse -> User Tabs). */
+    data object UserTabs : Screen()
     data object Settings : Screen()
     /** A user-created tab; Home and Settings are the built-in tabs. */
     data class UserTab(val tabId: String) : Screen()
@@ -63,6 +77,8 @@ sealed class Screen {
     data object SecurityPanel : Screen()
     data object GreenhousePanel : Screen()
     data object UpdatesPanel : Screen()
+    /** UI rewrite round §7: a Home Status group's full-screen panel. */
+    data class HomeStatusPanel(val categoryKey: String) : Screen()
     /** Scrollable recorded-clips timeline for a camera (long-press on its tile). */
     data class CameraClips(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()
@@ -117,10 +133,52 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun openShapePicker(entityId: String?, forCard: Boolean) { shapePickerTarget = ShapePickerTarget(entityId, forCard) }
     fun closeShapePicker() { shapePickerTarget = null }
 
+    /**
+     * Customization round, item 2: bumped whenever Card settings
+     * saves, so every surface reading the customization maps
+     * recomposes immediately (same pattern as shapePrefsVersion).
+     */
+    var cardCustomVersion by mutableStateOf(0)
+        private set
+
+    fun bumpCardCustom() { cardCustomVersion++ }
+
+    /** The entity whose Card settings sheet is open, or null. */
+    var cardSettingsTarget by mutableStateOf<String?>(null)
+        private set
+
+    fun openCardSettings(entityId: String) { cardSettingsTarget = entityId }
+    fun closeCardSettings() { cardSettingsTarget = null }
+
     val connection = client.connection
     val states = client.states
     val areas = client.areas
     val entityAreas = client.entityAreas
+    val entityDevices = client.entityDevices
+    val deviceInfo = client.deviceInfo
+
+    /**
+     * Visual-fidelity round §6: one entity's state as its own flow,
+     * so a Home card recomposes ONLY when its own entity changes.
+     * The dashboard used to collect the whole states map in
+     * TodayScreen, so every entity update recomposed every card
+     * and re-ran grouping/sorting over ~366 entities. Cards now
+     * collect their own entityFlow (distinctUntilChanged: a new
+     * map emission carrying the same entity object is a no-op),
+     * while room MEMBERSHIP (area -> id lists) is memoized in
+     * TodayScreen on (state keys, areas, entity areas, light
+     * overrides) — membership recomputes only when the roster
+     * changes, never on a value update. Flows are cached per id
+     * (one SharedFlow per card id, WhileSubscribed so idle cards
+     * cost nothing); the cache is bounded by the entity roster.
+     */
+    private val entityFlowCache = mutableMapOf<String, kotlinx.coroutines.flow.StateFlow<com.garrietta.haven.data.HaEntity?>>()
+
+    fun entityFlow(id: String): kotlinx.coroutines.flow.StateFlow<com.garrietta.haven.data.HaEntity?> =
+        entityFlowCache.getOrPut(id) {
+            client.states.map { it[id] }.distinctUntilChanged()
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), client.states.value[id])
+        }
     val lovelace = client.lovelace
     val lovelaceError = client.lovelaceError
     val dashboards = client.dashboards
@@ -503,13 +561,11 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             settingsStore.selectedDashboardPath = path
             settingsStore.hasSelectedDashboard = has
         }
-        // Starter tabs seed once, from the first full states snapshot. The
-        // guard is the persisted flag, not the tab list: a user who deletes
-        // every tab must not get them back on the next launch. The Cameras
-        // curation runs right after seeding, on the same snapshot.
+        // UI rewrite round: starter-tab seeding is REMOVED — seeded tabs
+        // used to push Settings off the pill bar. The Cameras curation
+        // still runs on the first full states snapshot.
         viewModelScope.launch {
             val first = client.states.first { it.isNotEmpty() }
-            maybeSeedTabs(first)
             maybeMigrateCameras(first)
         }
         autoConnect()
@@ -554,6 +610,117 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         mutateTab(tabId) { it.copy(cards = it.cards + yaml) }
     }
 
+    // ---- Stage D favorites ----
+
+    /** Ordered favorite entity ids, owned here so Home recomposes on change. */
+    var favorites by mutableStateOf(settingsStore.favoriteEntityIds())
+        private set
+
+    fun addFavorite(entityId: String) {
+        if (entityId in favorites) return
+        favorites = favorites + entityId
+        settingsStore.setFavoriteEntityIds(favorites)
+    }
+
+    fun removeFavorite(entityId: String) {
+        favorites = favorites - entityId
+        settingsStore.setFavoriteEntityIds(favorites)
+    }
+
+    fun moveFavorite(entityId: String, delta: Int) {
+        val list = favorites.toMutableList()
+        val i = list.indexOf(entityId)
+        val j = (i + delta).coerceIn(list.indices)
+        if (i < 0 || i == j) return
+        val id = list.removeAt(i)
+        list.add(j, id)
+        favorites = list
+        settingsStore.setFavoriteEntityIds(favorites)
+    }
+
+    // ---- Stage E badge preferences (persisting setters, like navStyle) ----
+
+    private var badgeNavState by mutableStateOf(settingsStore.badgeNav)
+    var badgeNav: Boolean
+        get() = badgeNavState
+        set(value) {
+            badgeNavState = value
+            settingsStore.badgeNav = value
+        }
+
+    private var badgeRoomState by mutableStateOf(settingsStore.badgeRoom)
+    var badgeRoom: Boolean
+        get() = badgeRoomState
+        set(value) {
+            badgeRoomState = value
+            settingsStore.badgeRoom = value
+        }
+
+    // ---- Stage G reset customization ----
+
+    /**
+     * Restores presentation defaults WITHOUT deleting user content:
+     * default Home sections shown (Greeting, Cameras, Home Status,
+     * Favorites — the fresh-state default, not "show everything"),
+     * canonical section order, room
+     * presentation cleared (names/icons/order), navigation reset
+     * (floating pill, automatic icons, all tabs shown), badge prefs
+     * on. Favorites and tabs are CONTENT, not presentation, and are
+     * never touched by a reset.
+     */
+    fun resetCustomization() {
+        settingsStore.homeHiddenSections = DEFAULT_HIDDEN_HOME_SECTIONS
+        settingsStore.setHomeSectionOrder(HOME_SECTION_ORDER_DEFAULT)
+        settingsStore.setRoomOrder(emptyList())
+        for (id in settingsStore.roomDisplayNames().keys.toList()) {
+            settingsStore.setRoomDisplayName(id, null)
+        }
+        for (id in settingsStore.roomIconKeys().keys.toList()) {
+            settingsStore.setRoomIconKey(id, null)
+        }
+        resetNavigation()
+        badgeNav = true
+        badgeRoom = true
+        bumpHomePrefs()
+    }
+
+    // ---- Stage C navigation customization ----
+
+    /** Picker icon key, or null for automatic. Unknown keys fall back to auto at render. */
+    fun setTabIcon(tabId: String, iconKey: String?) {
+        mutateTab(tabId) { it.copy(icon = iconKey) }
+    }
+
+    /** Hides the tab from the pill bar (it stays listed in TabManager). */
+    fun setTabHidden(tabId: String, hidden: Boolean) {
+        mutateTab(tabId) { it.copy(hidden = hidden) }
+    }
+
+    /**
+     * Folded pill style, owned here so TabManager writes recompose the
+     * chrome. The setter persists too (a separate setNavStyle function
+     * would clash with the property setter on the JVM), so callers
+     * assign vm.navStyle directly.
+     */
+    private var navStyleState by mutableStateOf(navStyleFromKey(settingsStore.navStyle))
+    var navStyle: NavStyle
+        get() = navStyleState
+        set(value) {
+            navStyleState = value
+            settingsStore.navStyle = value.key
+        }
+
+    /**
+     * Resets navigation preferences to defaults WITHOUT deleting tabs:
+     * floating style, automatic icons, all tabs shown. Tab deletion stays
+     * an explicit per-tab action — a reset must never destroy tabs.
+     */
+    fun resetNavigation() {
+        navStyle = NavStyle.FLOATING
+        userTabs = userTabs.map { it.copy(icon = null, hidden = false) }
+        tabsStore.saveTabs(userTabs)
+    }
+
     fun updateCardYaml(tabId: String, index: Int, yaml: String) {
         mutateTab(tabId) { tab ->
             if (index !in tab.cards.indices) tab
@@ -589,51 +756,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             true
         } catch (e: Exception) {
             false
-        }
-    }
-
-    /**
-     * Garrett's starter tabs, seeded once from his instance's entities — this
-     * is his personal initial configuration, not defaults for fresh users
-     * (a fresh user with none of these entities gets no tabs, just Home and
-     * Settings). Cameras take the curated set (see [curatedCameras]), never
-     * every camera-domain entity; no entity id is guessed, only matched.
-     */
-    private fun maybeSeedTabs(states: Map<String, com.garrietta.haven.data.HaEntity>) {
-        if (tabsStore.seeded) return
-        tabsStore.seeded = true
-        if (userTabs.isNotEmpty()) return
-        fun card(type: String, entityId: String) = "type: $type\nentity: $entityId\n"
-        val tabs = mutableListOf<UserTab>()
-        val climate = states["climate.thermostat"] ?: states.values.firstOrNull { it.domain == "climate" }
-        if (climate != null) {
-            val cards = mutableListOf(card("thermostat", climate.entityId))
-            for (sensorId in listOf("sensor.thermostat_current_temperature", "sensor.thermostat_current_humidity")) {
-                if (states.containsKey(sensorId)) cards.add(card("sensor", sensorId))
-            }
-            tabs.add(UserTab("seed_thermostat", "Thermostat", cards))
-        }
-        val garage = states.values.firstOrNull { it.domain == "cover" && it.friendlyName.contains("garage", ignoreCase = true) }
-            ?: states.values.firstOrNull { it.domain == "cover" }
-        if (garage != null) {
-            tabs.add(UserTab("seed_garage", "Garage Door", listOf(card("tile", garage.entityId))))
-        }
-        val livingLights = listOf("light.lamp_socket_1", "light.standing_lamp_socket_1")
-            .filter { states.containsKey(it) }
-            .ifEmpty {
-                states.values.filter { it.domain == "light" && it.friendlyName.contains("living", ignoreCase = true) }
-                    .map { it.entityId }
-            }
-        if (livingLights.isNotEmpty()) {
-            tabs.add(UserTab("seed_living_lights", "Living Room lights", livingLights.map { card("light", it) }))
-        }
-        val cameras = curatedCameras(states)
-        if (cameras.isNotEmpty()) {
-            tabs.add(UserTab("seed_cameras", "Cameras", cameras.map { card("camera", it) }))
-        }
-        if (tabs.isNotEmpty()) {
-            userTabs = tabs
-            tabsStore.saveTabs(tabs)
         }
     }
 
@@ -935,6 +1057,18 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun turnOn(id: String) = actuate(id, "on") { done ->
         client.callService(id.substringBefore("."), "turn_on", id, null, done)
+    }
+
+    /**
+     * Stage F: scene activation. A DIRECT service call, not turnOn:
+     * a scene's state is its last-activated timestamp, not on/off, so
+     * actuate()'s optimistic "on" would paint a false state and fight
+     * the guard. Reports Home Assistant's own success/failure via
+     * [onDone] so the UI can show Sent/Failed honestly — never
+     * "active", because scenes have no active state.
+     */
+    fun activateScene(entityId: String, onDone: (Boolean) -> Unit) {
+        client.callService("scene", "turn_on", entityId, null, onDone)
     }
 
     fun turnOff(id: String) = actuate(id, "off") { done ->

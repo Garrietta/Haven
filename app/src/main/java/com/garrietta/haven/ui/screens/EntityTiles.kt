@@ -60,8 +60,16 @@ import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.cardIconForKey
+import com.garrietta.haven.ui.components.CARD_ICON_KEYS
+import com.garrietta.haven.data.tilePresetFor
+import com.garrietta.haven.data.tilePresetColor
+import com.garrietta.haven.data.customIconKeyFor
+import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.badgeColors
 import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.lightBrightnessContainer
@@ -71,7 +79,6 @@ import com.garrietta.haven.ui.components.hideBodyWhenMorphSource
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
-import com.garrietta.haven.ui.components.pillClearanceBottom
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
@@ -114,9 +121,12 @@ fun TabTileGrid(
         columns = if (LocalWideLayout.current) GridCells.Adaptive(minSize = 220.dp) else GridCells.Adaptive(minSize = 160.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(bottom = pillClearanceBottom()),
+        contentPadding = PaddingValues(bottom = 16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
+        // Expressive-menus round, item 6: grid position feeds the
+        // general card shape's rotating 12dp corner.
+        var tileIndex = 0
         for (yaml in cards) {
             val parsed = try {
                 parseCardYaml(yaml)
@@ -147,10 +157,11 @@ fun TabTileGrid(
                                 vm,
                                 entity,
                                 navigate = navigate,
+                                gridIndex = tileIndex++,
                             )
                         }
                     } else {
-                        item(key = "missing:$id") { MissingEntityTile(id) }
+                        item(key = "missing:$id") { MissingEntityTile(id, gridIndex = tileIndex++) }
                     }
                 }
             }
@@ -216,7 +227,7 @@ private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)? = null) {
+fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)? = null, gridIndex: Int = 0) {
     val accent = accentFor(entity.entityId)
     // Snapshot-held visuals (2026-10-30 verdict round, same rule as
     // cards): while this tile's morph is open, its badge, name,
@@ -227,6 +238,13 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     // flash on dismiss. Body controls and actuation stay live.
     val snap = vm.travelSnapshots[entity.entityId]
     val display = snap ?: entity
+    // Customization round, item 2: user-tab tiles honor the same
+    // overrides as Home cards (title, icon, tile color).
+    val tileCustom = rememberCardCustom(vm)
+    val tileTitle = customTitleFor(tileCustom.titles, entity.entityId,
+        if (entity.domain == "sensor") sensorDisplayName(display) else displayCameraName(display))
+    val tileIcon = cardIconForKey(customIconKeyFor(tileCustom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
+    val tilePresetContainer = tilePresetColor(tilePresetFor(tileCustom.tilePresets, entity.entityId), isDarkBackdrop(MaterialTheme.colorScheme.background))
     // The tile's window bounds feed the camera rise origin (and are
     // kept for it). Detail/sheet morphs use the root bounds reported
     // to the shared map (see MorphOverlay), never this rect.
@@ -240,8 +258,10 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         label = "tilePress",
     )
     Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = when {
+        // Expressive-menus round, item 6: the general card shape
+        // (a shape-picker override still beats it, as on Home).
+        shape = LocalShapePrefs.current.cardShape(entity.entityId) ?: generalCardShape(gridIndex),
+        color = tilePresetContainer ?: when {
             // Lit tiles tint by kelvin AND brightness: a dim light reads
             // dimmer than a bright one, never full-tint at 10%.
             display.domain == "light" && display.state == "on" ->
@@ -405,7 +425,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        domainIcon(entity),
+                        tileIcon,
                         contentDescription = null,
                         tint = badgeGlyph,
                         modifier = Modifier.size(26.dp),
@@ -440,7 +460,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // suffix for Ring only; sensor names strip the
                 // "Thermostat Current " prefix; every other entity
                 // is byte-identical.
-                if (entity.domain == "sensor") sensorDisplayName(display) else displayCameraName(display),
+                tileTitle,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -619,9 +639,9 @@ private fun CameraTileVisual(vm: HavenViewModel, entity: HaEntity, accent: Color
 }
 
 @Composable
-private fun MissingEntityTile(id: String) {
+private fun MissingEntityTile(id: String, gridIndex: Int = 0) {
     Surface(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = generalCardShape(gridIndex),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth(),
     ) {

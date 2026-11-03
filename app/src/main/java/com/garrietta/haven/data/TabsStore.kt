@@ -8,8 +8,19 @@ import org.json.JSONObject
  * One user-created tab: a title and its cards, each card stored as raw YAML
  * text (HAOS-style) so the editor round-trips exactly what the user typed.
  * The YAML is parsed to JSON only at render time.
+ * Stage C: [icon] is the picker's stored key, or null for automatic
+ * (derived from the first card / title as before); [hidden] removes the
+ * tab from the pill bar while keeping it listed in TabManager, so it can
+ * always be shown again. Both fields are migration-safe: older JSON
+ * without them loads as icon=null, hidden=false.
  */
-data class UserTab(val id: String, val title: String, val cards: List<String>)
+data class UserTab(
+    val id: String,
+    val title: String,
+    val cards: List<String>,
+    val icon: String? = null,
+    val hidden: Boolean = false,
+)
 
 /**
  * Persists user tabs in SharedPreferences as one JSON array. Tabs are the
@@ -45,7 +56,15 @@ class TabsStore(context: Context) {
                 for (j in 0 until cardsArr.length()) {
                     cardsArr.optString(j).ifEmpty { null }?.let { cards.add(it) }
                 }
-                out.add(UserTab(id, obj.optString("title").ifEmpty { "Tab" }, cards))
+                out.add(
+                    UserTab(
+                        id,
+                        obj.optString("title").ifEmpty { "Tab" },
+                        cards,
+                        icon = obj.optString("icon").ifEmpty { null },
+                        hidden = obj.optBoolean("hidden"),
+                    )
+                )
             }
             out
         } catch (e: Exception) {
@@ -58,7 +77,15 @@ class TabsStore(context: Context) {
         for (tab in tabs) {
             val cardsArr = JSONArray()
             for (card in tab.cards) cardsArr.put(card)
-            arr.put(JSONObject().put("id", tab.id).put("title", tab.title).put("cards", cardsArr))
+            val obj = JSONObject()
+                .put("id", tab.id)
+                .put("title", tab.title)
+                .put("cards", cardsArr)
+                .put("hidden", tab.hidden)
+            // Icon keys are written only when set, so older readers
+            // (and older JSON) keep seeing the auto-derived icon.
+            if (tab.icon != null) obj.put("icon", tab.icon)
+            arr.put(obj)
         }
         prefs.edit().putString("tabs_json", arr.toString()).apply()
     }

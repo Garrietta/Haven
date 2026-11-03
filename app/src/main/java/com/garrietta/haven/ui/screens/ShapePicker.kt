@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,7 +38,10 @@ import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.ShapePickerTarget
 import com.garrietta.haven.ui.theme.FloatingCorner
 import com.garrietta.haven.ui.components.SHAPE_OPTIONS
+import com.garrietta.haven.data.CARD_CORNER_OPTIONS
+import com.garrietta.haven.ui.components.ShapeOption
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.components.shapeForKey
 import com.garrietta.haven.ui.components.shapeLabel
@@ -102,18 +106,30 @@ fun ShapePickerDialog(vm: HavenViewModel, target: ShapePickerTarget, onClose: ()
                 )
                 Spacer(Modifier.height(16.dp))
                 if (target.entityId != null) {
-                    OutlinedButton(
+                    // Expressive-menus round: large 56dp pill, same tap.
+                    PressablePillButton(
                         onClick = {
                             if (target.forCard) store.setCardShapeOverride(target.entityId, null)
                             else store.setBadgeShapeOverride(target.entityId, null)
                             vm.bumpShapePrefs()
                             onClose()
                         },
+                        height = 56.dp,
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Use default") }
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    ) { Text("Use default", fontWeight = FontWeight.SemiBold) }
                     Spacer(Modifier.height(12.dp))
                 }
-                SHAPE_OPTIONS.chunked(3).forEach { row ->
+                // Customization round, item 1: the card picker
+                // offers the 8 corner variants FIRST (the default
+                // grid language), then the expressive polygons —
+                // one picker, not a second one.
+                val pickerOptions = if (target.forCard) {
+                    CARD_CORNER_OPTIONS.map { ShapeOption(it.key, it.label) } + SHAPE_OPTIONS
+                } else {
+                    SHAPE_OPTIONS
+                }
+                pickerOptions.chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth()) {
                         row.forEach { option ->
                             val selected = option.key == currentKey
@@ -165,7 +181,14 @@ fun ShapePickerDialog(vm: HavenViewModel, target: ShapePickerTarget, onClose: ()
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+                PressablePillButton(
+                    onClick = onClose,
+                    height = 56.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) { Text("Close", fontWeight = FontWeight.SemiBold) }
             }
         }
     }
