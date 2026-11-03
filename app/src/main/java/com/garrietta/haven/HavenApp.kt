@@ -1046,8 +1046,8 @@ fun HavenApp(vm: HavenViewModel) {
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     onDismiss = { dismissSheet() },
                     isClosing = sheetExiting,
-                    heroTarget = { r -> heroTarget = anim.id to r },
-                    arcTarget = { r -> arcTarget = anim.id to r },
+                    heroTargetReporter = { r -> heroTarget = anim.id to r },
+                    arcTargetReporter = { r -> arcTarget = anim.id to r },
                     onPanelPlaced = { sheetPanelBounds = it },
                 ) {
                     EntityPopupSheetContent(
@@ -1103,8 +1103,8 @@ fun HavenApp(vm: HavenViewModel) {
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     onDismiss = { dismissDetail() },
                     isClosing = detailExiting,
-                    heroTarget = { r -> heroTarget = anim.entityId to r },
-                    arcTarget = { r -> arcTarget = anim.entityId to r },
+                    heroTargetReporter = { r -> heroTarget = anim.entityId to r },
+                    arcTargetReporter = { r -> arcTarget = anim.entityId to r },
                 ) {
                     content(anim.screen)
                 }
@@ -1142,8 +1142,8 @@ fun HavenApp(vm: HavenViewModel) {
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     onDismiss = { dismissPopout() },
                     isClosing = popoutExiting,
-                    heroTarget = { r -> heroTarget = anim.id to r },
-                    arcTarget = { r -> arcTarget = anim.id to r },
+                    heroTargetReporter = { r -> heroTarget = anim.id to r },
+                    arcTargetReporter = { r -> arcTarget = anim.id to r },
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
