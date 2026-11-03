@@ -54,10 +54,13 @@ import java.util.concurrent.Flow
  * Mapping lives in ControlsMapping (pure, tested); this service
  * only renders specs and forwards actions to HaClient.
  *
- * Not logged in (or the session never yields states within ~10s):
- * exactly ONE stateless control, "Open Haven to sign in", whose
- * app intent opens MainActivity — an honest launcher, never a
- * fake device, and never a crash. Token refresh is deliberately
+ * Not logged in: exactly ONE stateless control, "Open Haven to
+ * sign in", whose app intent opens MainActivity — an honest
+ * launcher, never a fake device, and never a crash. Logged in but
+ * no states within ~10s: the one-shot publisher completes EMPTY
+ * (never the sign-in tile — that tile for a signed-in user was
+ * misleading and lingered as the panel's only Haven tile); the
+ * panel re-queries on its next open. Token refresh is deliberately
  * NOT reimplemented here (HaClient has no refresh path); the
  * sign-in control is the graceful state.
  */
@@ -68,7 +71,20 @@ class HavenControlsService : ControlsProviderService() {
     private val tokenStore by lazy { TokenStore(applicationContext) }
     private val settingsStore by lazy { SettingsStore(applicationContext) }
     private val client by lazy { HaClient(serviceScope) }
-    private var started = false
+    private var startedUrl: String? = null
+    private var startedToken: String? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        // Feedback round 2, item 9: connect EAGERLY when the
+        // service is created. The panel binds this service before
+        // it asks for controls, so a cold panel open used to pay
+        // the full WS-connect + state-dump latency inside
+        // SystemUI's publish window — the "controls missing, then
+        // appearing on their own" transient. Connecting here moves
+        // that cost ahead of the first publisher request.
+        ensureStarted()
+    }
 
     private fun appIntentFor(entityId: String): PendingIntent {
         val intent = Intent(applicationContext, MainActivity::class.java)
@@ -81,11 +97,26 @@ class HavenControlsService : ControlsProviderService() {
     }
 
     private fun ensureStarted() {
-        if (started) return
         val url = tokenStore.instanceUrl
         val token = tokenStore.accessToken
-        if (url.isNullOrBlank() || token.isNullOrBlank()) return
-        started = true
+        if (url.isNullOrBlank() || token.isNullOrBlank()) {
+            // Signed out (or never signed in) after a previous
+            // start: drop the stale connection so no controls keep
+            // publishing for a signed-out session.
+            if (startedUrl != null) {
+                client.disconnect()
+                startedUrl = null
+                startedToken = null
+            }
+            return
+        }
+        if (startedUrl == url && startedToken == token) return
+        // Token/URL changed since the last start (sign-out/in,
+        // token rotation): the old one-shot `started` flag kept
+        // the stale session forever. Reconnect on the new pair.
+        if (startedUrl != null) client.disconnect()
+        startedUrl = url
+        startedToken = token
         client.connect(url, token)
     }
 
@@ -119,6 +150,21 @@ class HavenControlsService : ControlsProviderService() {
                 RangeTemplate(spec.entityId, 0f, 100f, spec.rangeValue ?: 0f, 1f, "%1$.0f%%"),
             )
             ControlKind.TEMPERATURE -> {
+                // Feedback round 2, item 8: the temperature panel
+                // widget IS the in-panel popup (Android docs'
+                // "Open temperature panel widget": tap = panel,
+                // long-press = app). Two construction defects
+                // could push a panel to the app intent instead:
+                // (1) currentActiveMode duplicated currentMode, so
+                // a heat_cool system advertised HEAT_COOL as its
+                // active mode — a selected mode, not an action;
+                // it now comes from hvac_action (heating -> HEAT,
+                // cooling -> COOL, idle -> selected mode). (2) A
+                // thermostat whose hvac_modes mapped to no flags
+                // published an empty mode set, which cannot render
+                // a detail panel; it now falls back to the selected
+                // mode's flag. The app intent stays as the panel's
+                // long-press "open app" affordance only.
                 var flags = 0
                 for (mode in spec.climateModes) {
                     flags = flags or when (climateModeFromHa(mode)) {
@@ -132,6 +178,17 @@ class HavenControlsService : ControlsProviderService() {
                 }
                 val currentMode = climateModeFromHa(spec.climateMode ?: "")?.let { modeToTemplate(it) }
                     ?: TemperatureControlTemplate.MODE_UNKNOWN
+                if (flags == 0) {
+                    flags = when (climateModeFromHa(spec.climateMode ?: "")) {
+                        ClimateMode.OFF -> TemperatureControlTemplate.FLAG_MODE_OFF
+                        ClimateMode.HEAT -> TemperatureControlTemplate.FLAG_MODE_HEAT
+                        ClimateMode.COOL -> TemperatureControlTemplate.FLAG_MODE_COOL
+                        ClimateMode.HEAT_COOL -> TemperatureControlTemplate.FLAG_MODE_HEAT_COOL
+                        ClimateMode.ECO -> TemperatureControlTemplate.FLAG_MODE_ECO
+                        null -> 0
+                    }
+                }
+                val currentActiveMode = spec.climateActiveMode?.let { modeToTemplate(it) } ?: currentMode
                 TemperatureControlTemplate(
                     spec.entityId,
                     RangeTemplate(
@@ -143,7 +200,7 @@ class HavenControlsService : ControlsProviderService() {
                         "%1$.0f°",
                     ),
                     currentMode,
-                    currentMode,
+                    currentActiveMode,
                     flags,
                 )
             }
@@ -205,13 +262,17 @@ class HavenControlsService : ControlsProviderService() {
                     }
                     // One-shot list: wait briefly for states, then
                     // publish the default set (favorites first).
-                    // Still empty after the wait = session
-                    // unavailable, not "no devices": sign-in control.
+                    // Still empty after the wait while LOGGED IN =
+                    // a slow/unavailable session, not "signed out":
+                    // complete empty (never the sign-in tile — see
+                    // the class KDoc). The panel re-queries on its
+                    // next open, and the live publisher keeps
+                    // updating already-added controls meanwhile.
                     val states = withTimeoutOrNull(10_000) {
                         client.states.filter { it.isNotEmpty() }.first()
                     }
                     if (states == null) {
-                        subscriber.onNext(signInControl())
+                        // No emission: see the comment above.
                     } else {
                         val specs = defaultControls(states.values.toList(), settingsStore.favoriteEntityIds())
                         for (spec in specs) {

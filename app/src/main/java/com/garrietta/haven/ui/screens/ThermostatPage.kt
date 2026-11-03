@@ -102,14 +102,23 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
-    // Round 6: the dial range is fixed HERE, in the popout — the
-    // HA range narrowed to 55-85F (see thermostatDisplayRange), so
-    // 67/69 setpoints get clear arc separation instead of crowding.
-    // Values themselves are never rewritten; out-of-range thumbs
-    // clamp to the arc end and the Hero flags it. The Hero takes
-    // this range as a parameter, so the popout surface cannot
-    // silently fall back to a different range.
-    val displayRange = thermostatDisplayRange(min, max)
+    // Feedback round 2, item 4: the dial range is computed HERE,
+    // in the popout — a DYNAMIC bracket around the current
+    // setpoints (see thermostatDisplayRange), so 67/69 setpoints
+    // get clear arc separation instead of crowding. Values
+    // themselves are never rewritten; out-of-range thumbs clamp
+    // to the arc end and the Hero flags it. The Hero takes this
+    // range as a parameter, so the popout surface cannot silently
+    // fall back to a different range.
+    val lowAttr = entity.attrDouble("target_temp_low")?.toFloat()
+    val highAttr = entity.attrDouble("target_temp_high")?.toFloat()
+    val singleAttr = entity.attrDouble("temperature")?.toFloat()
+    val displaySetpoints = if (lowAttr != null && highAttr != null) {
+        listOf(lowAttr, highAttr)
+    } else {
+        listOfNotNull(singleAttr)
+    }
+    val displayRange = thermostatDisplayRange(min, max, displaySetpoints)
     // UI rewrite round §6: the dial state is hoisted here so the
     // popout renders the dial INSIDE the scallop disc and the
     // Heat/Cool bar BELOW it (see rememberThermostatDialState).
@@ -167,9 +176,17 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
         // 0.72 x radius = 115.2dp, but the 240dp dial's outer bloom
         // reaches 134dp — so bloom crossed the border at the top,
         // where 67/69 thumbs sit near the valleys. THERMOSTAT_SCALLOP
-        // valleys sit at 0.88 x radius = 140.8dp, so everything
-        // clears: track outer 107dp (33.8 margin), pill outer 120dp
-        // (20.8), idle bloom 134dp (6.8), pulse bloom 138dp (2.8).
+        // valleys sit at 0.88 x radius = 140.8dp. Feedback round 2,
+        // item 4: the bar protrudes more (track inset 22dp -> 20dp,
+        // stroke 12dp -> 16dp idle / 18dp -> 22dp grabbed), so with
+        // the 240dp dial everything still clears: track outer
+        // 111dp grabbed (29.8 margin), pill outer 122dp (18.8),
+        // idle bloom 136dp (4.8), pulse bloom 140dp (0.8 — the
+        // absolute worst case of full stagger + peak pulse + a
+        // valley-aligned thumb; the bloom is a soft alpha fade,
+        // so it kisses the scallop, never crosses it as a hard
+        // edge). The bar's inner edge is unchanged (92dp), so the
+        // dual-number row keeps its clearance.
         // The brief's alternative — shrinking the track 24dp — was
         // NOT taken: it would push the ring's inner edge to 80dp,
         // inside the 169dp dual-number row (84.5dp half-width), a
@@ -512,7 +529,12 @@ private fun ThermostatDialBlock(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            // Feedback round 2, item 4: the steppers sit 16dp below
+            // the Indoor label (was 8dp) — further from the dial,
+            // giving the dual numbers room clear of the icon, while
+            // staying inside the dial face (the centered column
+            // grows internally; the panel gains no room).
+            Spacer(Modifier.height(16.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
                 verticalAlignment = Alignment.CenterVertically,

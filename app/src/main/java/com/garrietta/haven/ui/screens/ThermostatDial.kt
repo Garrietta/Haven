@@ -168,8 +168,12 @@ fun ThermostatDial(
     // Track widening while grabbed; pulse phase for the active bloom.
     // The phase is read only inside the Canvas draw block below, so the
     // infinite transition redraws the dial without recomposing the page.
+    // Feedback round 2, item 4: the bar protrudes more — 16dp idle
+    // (was 12dp), 22dp grabbed (was 18dp). With the inset below
+    // (20dp, was 22dp) the bar's outer edge moves out 4dp while its
+    // inner edge stays put, so the numbers keep their clearance.
     val trackStroke by animateDpAsState(
-        if (grabbed != null) 18.dp else 12.dp,
+        if (grabbed != null) 22.dp else 16.dp,
         animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springMorph(),
         label = "trackStroke",
     )
@@ -210,7 +214,7 @@ fun ThermostatDial(
     val animatedCoolAngle by animateFloatAsState(separatedCoolAngle, needleSpec, label = "coolAngle")
     val animatedSingleAngle by animateFloatAsState(dial240AngleForValue(drawnSingle, range), needleSpec, label = "singleAngle")
 
-    fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 22.dp.toPx() }
+    fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 20.dp.toPx() }
 
     fun thumbCenter(angleDeg: Float, radius: Float, cx: Float, cy: Float): Offset {
         val a = Math.toRadians(angleDeg.toDouble()).toFloat()

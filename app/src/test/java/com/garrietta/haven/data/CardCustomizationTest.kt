@@ -79,6 +79,57 @@ class CardCustomizationTest {
         assertTrue("glyph hue $gh", gh in 35f..55f)
     }
 
+    // Feedback round 2, item 1: the preset is an ON-state color —
+    // it applies only while the entity is active; off/unknown
+    // states read inactive for every domain.
+    @Test
+    fun presetAppliesOnlyWhenActive() {
+        // Binary toggleables: "on" only.
+        assertTrue(presetAppliesForState("light", "on"))
+        assertTrue(!presetAppliesForState("light", "off"))
+        assertTrue(presetAppliesForState("switch", "on"))
+        assertTrue(!presetAppliesForState("fan", "off"))
+        // Vacuum: cleaning/returning only.
+        assertTrue(presetAppliesForState("vacuum", "cleaning"))
+        assertTrue(presetAppliesForState("vacuum", "returning"))
+        assertTrue(!presetAppliesForState("vacuum", "docked"))
+        assertTrue(!presetAppliesForState("vacuum", "idle"))
+        // Lock: locked only; cover: anything but closed.
+        assertTrue(presetAppliesForState("lock", "locked"))
+        assertTrue(!presetAppliesForState("lock", "unlocked"))
+        assertTrue(presetAppliesForState("cover", "open"))
+        assertTrue(presetAppliesForState("cover", "opening"))
+        assertTrue(!presetAppliesForState("cover", "closed"))
+        // Climate: anything but off.
+        assertTrue(presetAppliesForState("climate", "heat_cool"))
+        assertTrue(presetAppliesForState("climate", "heat"))
+        assertTrue(!presetAppliesForState("climate", "off"))
+        // Media idle/paused keeps its row; sensors have no off state.
+        assertTrue(presetAppliesForState("media_player", "idle"))
+        assertTrue(presetAppliesForState("sensor", "off"))
+        // Universal: blank/unavailable/unknown is inactive everywhere.
+        assertTrue(!presetAppliesForState("light", "unavailable"))
+        assertTrue(!presetAppliesForState("climate", "unknown"))
+        assertTrue(!presetAppliesForState("media_player", ""))
+    }
+
+    // Feedback round 2, item 2: the switch follows the preset —
+    // checked track = preset badge bg, checked thumb = preset
+    // container; unchecked = the matrix inactive pair.
+    @Test
+    fun presetSwitchColorsFollowPresetWhenChecked() {
+        val lime = TILE_PRESETS.first { it.key == "lime" }
+        val colors = presetSwitchColors(lime, false)
+        val (badgeBg, _) = presetBadgeColors(lime, false)
+        assertEquals(badgeBg, colors.trackChecked)
+        assertEquals(Color(0xFFC8F5A6), colors.thumbChecked)
+        assertEquals(Color(0xFF52564E), colors.trackUnchecked)
+        assertEquals(Color.White, colors.thumbUnchecked)
+        val dark = presetSwitchColors(lime, true)
+        assertEquals(Color(0xFF8C9188), dark.trackUnchecked)
+        assertEquals(Color(0xFF9E9E9E), dark.thumbUnchecked)
+    }
+
     private fun luminance(c: Color): Double {
         fun lin(v: Float): Double {
             val s = v.toDouble()

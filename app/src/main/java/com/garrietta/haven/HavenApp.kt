@@ -1,6 +1,8 @@
 package com.garrietta.haven
 import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.PopupSideAnchor
 import com.garrietta.haven.ui.components.centeredPopupEnter
+import com.garrietta.haven.ui.components.popupSideAnchor
 import com.garrietta.haven.ui.components.ShapePrefs
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.badgeRectInRow
@@ -363,6 +365,11 @@ fun HavenApp(vm: HavenViewModel) {
         val sheetProgress = remember { Animatable(0f) }
         val detailProgress = remember { Animatable(0f) }
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
+        // Feedback round 2, item 7: the last ON-TAB rail index,
+        // remembered so the rail's selected indicator survives
+        // popups (updated at the rail call site below whenever
+        // selectedNavIndex returns non-null).
+        var lastRailTabIndex by remember { mutableStateOf<Int?>(null) }
         val popoutProgress = remember { Animatable(0f) }
         // The live panel's root rect (camera-rise origin for
         // sheet Details actions); re-reported on every panel place.
@@ -925,9 +932,17 @@ fun HavenApp(vm: HavenViewModel) {
                 // "pill bar pushes to the left and then has like a
                 // choppy return" on unfolded. A mounted rail during
                 // panels is covered, never interactive: panel
-                // overlays are later siblings above this Row, and
-                // selectedNavIndex returns null off-tab (the rail
-                // renders unhighlighted via selectedIndex ?: -1).
+                // overlays are later siblings above this Row.
+                // Feedback round 2, item 7: selectedNavIndex
+                // returns null off-tab, and a popup IS off-tab
+                // (current stops being a tab screen while a
+                // sheet/detail/popout anim runs), so the old code
+                // passed null and the selected indicator vanished
+                // the moment a popup opened. While any modal anim
+                // is active, fall back to the last on-tab index;
+                // other off-tab screens keep the old unhighlighted
+                // behavior (null), and dialogs never change
+                // current, so they never need the fallback.
                 if (LocalWideLayout.current) {
                     val barItems = pillBarItems()
                     // Stage E §9: the Home dot lights only for a real
@@ -937,9 +952,16 @@ fun HavenApp(vm: HavenViewModel) {
                     // recomposes on state changes, not the whole app.
                     val chromeStates by vm.states.collectAsState()
                     val badged = if (vm.badgeNav && hasImportantAlert(chromeStates.values.toList())) setOf(Screen.Today) else emptySet()
+                    val onTabIndex = selectedNavIndex(current, barItems)
+                    if (onTabIndex != null) lastRailTabIndex = onTabIndex
+                    val railSelectedIndex = if (sheetAnim != null || detailAnim != null || popoutAnim != null) {
+                        onTabIndex ?: lastRailTabIndex
+                    } else {
+                        onTabIndex
+                    }
                     VerticalSidePill(
                         items = barItems,
-                        selectedIndex = selectedNavIndex(current, barItems),
+                        selectedIndex = railSelectedIndex,
                         onSelect = goTop,
                         badgedScreens = badged,
                     )
@@ -1866,22 +1888,34 @@ private fun PanelOverlay(
  * Feedback round, item 3: the UNFOLDED/TABLET popup. This
  * deliberately reverses the both-postures full-screen law for
  * unfolded only — folded keeps PanelOverlay's full-screen morph.
- * A centered rounded-corner surface (88% of the overlay, capped
- * at 560dp wide) over a dim scrim, entering from the pressed
- * tile's direction (see centeredPopupEnter): the offset runs
- * along the tile→popup-center vector, so the animation varies
- * with the tile's location and always lands centered. No
- * TravelingHeader/Arc on this path (a traveler flying to a
- * centered popup reads wrong), and two badge-visibility guards
+ * Feedback round 2, item 6 (SUPERSEDES the dead-center
+ * positioning): a CONTENT-SIZED surface (~half the old window:
+ * 62% of the overlay, capped at 400dp wide and 75% tall, scrolling
+ * internally when the content is taller) anchored toward the SIDE
+ * of the screen where the source tile sits (left third -> start,
+ * right third -> end, else centered), with a 16dp side margin —
+ * so a right-side tile's popup sits on that side, and the enter
+ * animation still runs from the tile's direction (see
+ * centeredPopupEnter, fed with the side-anchored popup center
+ * computed analytically here, not the overlay center — the target
+ * must be known at frame 0, before layout measures the surface).
+ * The thermostat disc (320dp + 32dp padding = 352dp) sets the
+ * width floor: the narrowest wide layout is 600dp, and
+ * 0.62 x (600 - 32) = 352dp, so the disc fits exactly even at the
+ * threshold; internal polygons keep their sizes (shrinking the
+ * disc would break the dual-number row and grab targets — the
+ * window shrink + side anchor deliver the complaint, not a disc
+ * resize). No TravelingHeader/Arc on this path (a traveler flying
+ * to a side popup reads wrong), and two badge-visibility guards
  * replace them: LocalMorphProgress is pinned to 1f inside the
  * popup, so destination headers wearing hideWhileTraveling render
  * fully visible from frame 0; and the overlay root nulls
  * LocalHiddenHeroId on wide while a modal is open, so the source
  * card's badge never hides behind the scrim (the page behind a
- * centered popup stays visible, unlike the opaque full-screen
- * panel). The camera panel keeps PanelOverlay on both postures —
- * a video surface needs the full area; the complaint was about
- * info pages. Scrim tap dismisses (a stated behavior addition:
+ * popup stays visible, unlike the opaque full-screen panel). The
+ * camera panel keeps PanelOverlay on both postures — a video
+ * surface needs the full area; the complaint was about info
+ * pages. Scrim tap dismisses (a stated behavior addition:
  * full-screen panels have no scrim); the surface consumes its own
  * taps. Sheet callers pass onPanelPlaced so the sheet→detail
  * handoff (vm.pageOrigin) keeps working.
@@ -1909,21 +1943,49 @@ private fun CenteredPopup(
         )
         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val density = LocalDensity.current
-            val popupCenter = with(density) {
-                Offset(
-                    overlayOrigin.x + maxWidth.toPx() / 2f,
-                    overlayOrigin.y + maxHeight.toPx() / 2f,
-                )
-            }
+            val overlayWidthPx = with(density) { maxWidth.toPx() }
+            val overlayHeightPx = with(density) { maxHeight.toPx() }
+            val sideMarginPx = with(density) { 16.dp.toPx() }
+            // The visible surface width: 62% of the padded width,
+            // capped at 400dp — the same width the Surface below
+            // resolves to, so the enter target matches placement.
+            val popupWidthPx = minOf(
+                overlayWidthPx.let { (it - 2f * sideMarginPx) * 0.62f },
+                with(density) { 400.dp.toPx() },
+            )
+            val anchor = popupSideAnchor(source?.center?.x, overlayOrigin.x, overlayWidthPx)
+            val popupCenter = Offset(
+                when (anchor) {
+                    PopupSideAnchor.START -> overlayOrigin.x + sideMarginPx + popupWidthPx / 2f
+                    PopupSideAnchor.END -> overlayOrigin.x + overlayWidthPx - sideMarginPx - popupWidthPx / 2f
+                    PopupSideAnchor.CENTER -> overlayOrigin.x + overlayWidthPx / 2f
+                },
+                overlayOrigin.y + overlayHeightPx / 2f,
+            )
             val distancePx = with(density) { 96.dp.toPx() }
+            // Hoisted here, in the BoxWithConstraints scope: the
+            // inner anchor Box below has a plain BoxScope receiver,
+            // so maxHeight is not in scope inside it.
+            val popupMaxHeight = maxHeight * 0.75f
+            // The padded anchor box: 16dp side margins, aligned to
+            // the tile's side (the outer box fills the overlay, so
+            // its own contentAlignment is irrelevant).
+            Box(
+                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                contentAlignment = when (anchor) {
+                    PopupSideAnchor.START -> Alignment.CenterStart
+                    PopupSideAnchor.END -> Alignment.CenterEnd
+                    PopupSideAnchor.CENTER -> Alignment.Center
+                },
+            ) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = panelBackground,
                 shadowElevation = 16.dp,
                 modifier = Modifier
-                    .fillMaxWidth(0.88f)
-                    .widthIn(max = 560.dp)
-                    .heightIn(max = maxHeight * 0.88f)
+                    .fillMaxWidth(0.62f)
+                    .widthIn(max = 400.dp)
+                    .heightIn(max = popupMaxHeight)
                     .graphicsLayer {
                         // Round 7 rule: progress read ONLY here.
                         val enter = centeredPopupEnter(progress(), source?.center, popupCenter, distancePx)
@@ -1961,6 +2023,7 @@ private fun CenteredPopup(
                         content()
                     }
                 }
+            }
             }
         }
     }
@@ -3236,9 +3299,17 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     ) {
         Surface(
             shape = FloatingCorner,
-            color = PillBarContainer.copy(alpha = 0.96f),
-            tonalElevation = 8.dp,
-            shadowElevation = 16.dp,
+            // Feedback round 2, item 5: NO background bar behind
+            // the pill — transparent container, no elevations, so
+            // content visibly scrolls underneath during
+            // transitions. The selected capsule (#9BF67C, opaque)
+            // + icons are the only visible chrome; unselected
+            // glyphs go theme-aware (see pillUnselectedGlyph) so
+            // they stay legible on light content with no dark
+            // container behind them.
+            color = Color.Transparent,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
             Box(
                 Modifier.onGloballyPositioned { pillOrigin = it.boundsInWindow().top },
@@ -3346,8 +3417,10 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
  * colors cross-fade on tween 200, all on the expressive fast
  * spatial spring (see the item block).
  * Unselected destinations are a 22dp outlined icon, no label. The
- * container is #161D17 in both themes with light-sage unselected
- * icons (#D7E2D4); no blue anywhere. The old measured sliding
+ * bar has NO background container (feedback round 2, item 5): it
+ * floats transparently over content, so unselected glyphs are
+ * theme-aware (light sage on dark, dark charcoal on light — see
+ * pillUnselectedGlyph); no blue anywhere. The old measured sliding
  * indicator is gone (there is no indicator to glide — the capsule
  * IS the item), so no rect tracking and no animation state.
  * Dragging along the bar still scrubs the highlight (haptic tick
@@ -3359,6 +3432,8 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
 @Composable
 private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen) -> Unit, modifier: Modifier = Modifier, geometry: NavPillGeometry = navPillGeometry(NavStyle.FLOATING), badgedScreens: Set<Screen> = emptySet()) {
     val haptics = LocalHapticFeedback.current
+    val scheme = MaterialTheme.colorScheme
+    val isDark = isDarkBackdrop(scheme.background)
     val currentIndex = selectedIndex ?: -1
     val scrub = rememberPillScrubState(
         tabIds = items.indices.toList(),
@@ -3377,9 +3452,13 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             Surface(
                 modifier = Modifier.wrapContentWidth().widthIn(max = maxWidth),
                 shape = RoundedCornerShape(geometry.cornerRadius),
-                color = PillBarContainer.copy(alpha = 0.96f),
-                tonalElevation = 8.dp,
-                shadowElevation = 16.dp,
+                // Feedback round 2, item 5: NO background bar —
+                // transparent container, no elevations (see the
+                // rail's Surface for the same treatment and the
+                // reason the unselected glyph goes theme-aware).
+                color = Color.Transparent,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
             ) {
                 Row(
                     modifier = Modifier.wrapContentWidth().horizontalScroll(rememberScrollState()).padding(horizontal = geometry.rowHorizontalPadding, vertical = geometry.rowVerticalPadding).pillScrub(scrub),
@@ -3432,7 +3511,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                             label = "pillItemColor",
                         )
                         val glyphColor by animateColorAsState(
-                            if (highlighted) PillBarActiveGlyph else PillBarUnselectedGlyph,
+                            if (highlighted) PillBarActiveGlyph else pillUnselectedGlyph(scheme, isDark),
                             animationSpec = tween(200),
                             label = "pillGlyphColor",
                         )

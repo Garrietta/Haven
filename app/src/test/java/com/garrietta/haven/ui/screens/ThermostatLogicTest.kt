@@ -328,24 +328,43 @@ class ThermostatLogicTest {
     }
 
     // Round 4: the dial maps 55-85F by default, so 67/69 thumbs
-    // separate; HA ranges outside it fall back untouched, and
-    // setpoint values are never rewritten (only the display range).
+    // Feedback round 2, item 4: the display range is DYNAMIC —
+    // it brackets the current setpoints with a 10°F margin,
+    // clamped to [40, 100]. 67/69 with a 45–95 HA range gives
+    // 57–79 (his example bands); the max never exceeds 100, the
+    // min never drops below 40. HA ranges outside [40, 100] fall
+    // back untouched, and setpoint values are never rewritten
+    // (only the display range).
     @Test
-    fun thermostatDisplayRange_narrowsTo55_85() {
-        assertEquals(55f..85f, thermostatDisplayRange(50f, 90f))
-        assertEquals(60f..80f, thermostatDisplayRange(60f, 80f))
+    fun thermostatDisplayRange_bracketsSetpointsWithMargin() {
+        assertEquals(57f..79f, thermostatDisplayRange(45f, 95f, listOf(67f, 69f)))
+        assertEquals(57f..79f, thermostatDisplayRange(40f, 100f, listOf(67f, 69f)))
+        // Single setpoint brackets the same way.
+        assertEquals(60f..80f, thermostatDisplayRange(40f, 100f, listOf(70f)))
+    }
+
+    @Test
+    fun thermostatDisplayRange_clampsTo40_100() {
+        // High setpoints: the top clamps at 100, the bracket
+        // tightens below rather than inverting.
+        assertEquals(85f..100f, thermostatDisplayRange(40f, 100f, listOf(95f)))
+        // Low setpoints: the bottom clamps at 40.
+        assertEquals(40f..62f, thermostatDisplayRange(30f, 100f, listOf(50f, 52f)))
+        // No setpoints reported: HA range intersected with [40, 100].
+        assertEquals(45f..95f, thermostatDisplayRange(45f, 95f, emptyList()))
     }
 
     @Test
     fun thermostatDisplayRange_fallsBackWhenNoOverlap() {
         // A Celsius thermostat (e.g. 10-30C) has no overlap with
-        // 55-85, so the HA range is used as-is.
-        assertEquals(10f..30f, thermostatDisplayRange(10f, 30f))
+        // [40, 100], so the HA range is used as-is.
+        assertEquals(10f..30f, thermostatDisplayRange(10f, 30f, listOf(21f)))
+        assertEquals(10f..30f, thermostatDisplayRange(10f, 30f, emptyList()))
     }
 
     @Test
     fun thermostatDisplayRange_degenerate() {
-        assertEquals(70f..70f, thermostatDisplayRange(70f, 70f))
+        assertEquals(70f..70f, thermostatDisplayRange(70f, 70f, listOf(70f)))
     }
 
     @Test

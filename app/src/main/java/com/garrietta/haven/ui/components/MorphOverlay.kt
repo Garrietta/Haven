@@ -520,6 +520,26 @@ fun heroHeaderAlpha(progress: Float): Float =
  */
 data class PopupEnter(val offset: Offset, val scale: Float, val alpha: Float)
 
+/**
+ * Feedback round 2, item 6: which side of the overlay a popup
+ * anchors to, from the source tile's center x. The overlay spans
+ * [overlayLeft, overlayLeft + overlayWidth] in root coords; the
+ * source center's relative position splits it into thirds — left
+ * third -> START, right third -> END, middle (or a null source,
+ * i.e. no reported card rect) -> CENTER. Pure, unit-tested.
+ */
+enum class PopupSideAnchor { START, CENTER, END }
+
+fun popupSideAnchor(sourceCenterX: Float?, overlayLeft: Float, overlayWidth: Float): PopupSideAnchor {
+    if (sourceCenterX == null || overlayWidth <= 0f) return PopupSideAnchor.CENTER
+    val rel = (sourceCenterX - overlayLeft) / overlayWidth
+    return when {
+        rel < 1f / 3f -> PopupSideAnchor.START
+        rel > 2f / 3f -> PopupSideAnchor.END
+        else -> PopupSideAnchor.CENTER
+    }
+}
+
 fun centeredPopupEnter(
     progress: Float,
     sourceCenter: Offset?,

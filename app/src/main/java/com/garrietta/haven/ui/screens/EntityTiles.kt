@@ -63,6 +63,8 @@ import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
+import com.garrietta.haven.data.inactiveCardColors
+import com.garrietta.haven.data.presetAppliesForState
 import com.garrietta.haven.data.presetBadgeColors
 import com.garrietta.haven.data.tilePresetFor
 import com.garrietta.haven.data.tilePresetColor
@@ -246,7 +248,17 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         if (entity.domain == "sensor") sensorDisplayName(display) else displayCameraName(display))
     val tileIcon = cardIconForKey(customIconKeyFor(tileCustom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
     val tilePreset = tilePresetFor(tileCustom.tilePresets, entity.entityId)
-    val tilePresetContainer = tilePresetColor(tilePreset, isDarkBackdrop(MaterialTheme.colorScheme.background))
+    // Feedback round 2, item 1: same ON-state gating as Home cards
+    // — a preset tile whose entity is off renders INACTIVE gray.
+    val tilePresetActive = tilePreset != null && presetAppliesForState(display.domain, display.state)
+    val tilePresetContainer = if (tilePresetActive) tilePresetColor(tilePreset, isDarkBackdrop(MaterialTheme.colorScheme.background)) else null
+    val tileInactiveContainer = if (tilePreset != null) inactiveCardColors(isDarkBackdrop(MaterialTheme.colorScheme.background)).container else null
+    // Feedback round 2, item 3: same polygon-clip guard as Home
+    // cards — polygon outlines cut into the bottom text zone, so
+    // polygon tiles shift their text block up 12dp (spacer 16->4,
+    // bottom padding 16->28, height unchanged).
+    val tileOutline = LocalShapePrefs.current.cardShape(entity.entityId) ?: generalCardShape(gridIndex)
+    val tileIsPolygon = tileOutline !is RoundedCornerShape
     // The tile's window bounds feed the camera rise origin (and are
     // kept for it). Detail/sheet morphs use the root bounds reported
     // to the shared map (see MorphOverlay), never this rect.
@@ -262,8 +274,8 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     Surface(
         // Expressive-menus round, item 6: the general card shape
         // (a shape-picker override still beats it, as on Home).
-        shape = LocalShapePrefs.current.cardShape(entity.entityId) ?: generalCardShape(gridIndex),
-        color = tilePresetContainer ?: when {
+        shape = tileOutline,
+        color = tilePresetContainer ?: tileInactiveContainer ?: when {
             // Lit tiles tint by kelvin AND brightness: a dim light reads
             // dimmer than a bright one, never full-tint at 10%.
             display.domain == "light" && display.state == "on" ->
@@ -330,7 +342,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 },
             ),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (tileIsPolygon) 28.dp else 16.dp)) {
             if (entity.domain == "camera") {
                 CameraTileVisual(vm, entity, accent)
             } else {
@@ -369,8 +381,11 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // Feedback round, item 5: a set preset drives the
                 // badge pair too (dark tint + vivid glyph from the
                 // preset hue); unset tiles keep badgeColors.
-                val (badgeBg, badgeGlyph) = if (tilePreset != null) {
-                    presetBadgeColors(tilePreset, isDarkBackdrop(MaterialTheme.colorScheme.background))
+                val (badgeBg, badgeGlyph) = if (tilePresetActive) {
+                    presetBadgeColors(tilePreset!!, isDarkBackdrop(MaterialTheme.colorScheme.background))
+                } else if (tilePreset != null) {
+                    val inactive = inactiveCardColors(isDarkBackdrop(MaterialTheme.colorScheme.background))
+                    inactive.badgeBg to inactive.badgeGlyph
                 } else {
                     badgeColors(
                         MaterialTheme.colorScheme, display, accent,
@@ -442,7 +457,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 }
                 } // badge-zone Box
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(if (tileIsPolygon) 4.dp else 16.dp))
             // Round 4 split zone, lower half: tapping the name or
             // status opens the panel (binary tiles); long-press
             // anywhere does the same. Non-binary tiles keep their

@@ -75,7 +75,10 @@ import com.garrietta.haven.data.motionSensorForCamera
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.customIconKeyFor
+import com.garrietta.haven.data.inactiveCardColors
+import com.garrietta.haven.data.presetAppliesForState
 import com.garrietta.haven.data.presetBadgeColors
+import com.garrietta.haven.data.presetSwitchColors
 import com.garrietta.haven.data.tilePresetColor
 import com.garrietta.haven.data.tilePresetFor
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
@@ -905,11 +908,19 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
     // Feedback round, item 5: a set preset drives the badge pair
     // too (dark tint + vivid glyph from the preset hue), not just
     // the container — the matrix only applies to unset cards.
+    // Feedback round 2, item 1: the preset is an ON-state color —
+    // a preset media card whose player is off/unavailable renders
+    // the matrix INACTIVE gray, never the custom on-color.
     val mediaPreset = tilePresetFor(mediaCustom.tilePresets, entity.entityId)
-    val container = tilePresetColor(mediaPreset, isDark)
+    val mediaPresetActive = mediaPreset != null && presetAppliesForState(display.domain, display.state)
+    val container = (if (mediaPresetActive) tilePresetColor(mediaPreset, isDark) else null)
+        ?: (if (mediaPreset != null) inactiveCardColors(isDark).container else null)
         ?: cardColors?.container ?: scheme.surfaceContainerLow
-    val (badgeBg, badgeGlyph) = if (mediaPreset != null) {
-        presetBadgeColors(mediaPreset, isDark)
+    val (badgeBg, badgeGlyph) = if (mediaPresetActive) {
+        presetBadgeColors(mediaPreset!!, isDark)
+    } else if (mediaPreset != null) {
+        val inactive = inactiveCardColors(isDark)
+        inactive.badgeBg to inactive.badgeGlyph
     } else if (cardColors != null) {
         cardColors.badgeBg to cardColors.badgeGlyph
     } else {
@@ -1154,8 +1165,15 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // Feedback round, item 5: a set preset drives the badge pair
     // too (see the media card above) — even for temp/humidity
     // sensors, whose coral/sky bypass only governs unset cards.
+    // Feedback round 2, item 1: the preset is an ON-state color —
+    // it applies only while the entity is active; a preset card
+    // whose entity is off renders the matrix INACTIVE gray, never
+    // the custom on-color. (The display snapshot's state, so a
+    // morph-open card keeps the color it opened with.)
     val roomPreset = tilePresetFor(roomCustom.tilePresets, entity.entityId)
-    val container = tilePresetColor(roomPreset, isDark)
+    val presetActive = roomPreset != null && presetAppliesForState(display.domain, display.state)
+    val container = (if (presetActive) tilePresetColor(roomPreset, isDark) else null)
+        ?: (if (roomPreset != null) inactiveCardColors(isDark).container else null)
         ?: cardColors?.container ?: when {
         display.domain == "light" && display.state == "on" ->
             lightBrightnessContainer(
@@ -1181,8 +1199,13 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     }
     val nameColor = ensureContrast(scheme.onSurface, container, 4.5f)
     val statusColor = ensureContrast(scheme.onSurfaceVariant, container, 4.5f)
-    val (badgeBg, badgeGlyph) = if (roomPreset != null) {
-        presetBadgeColors(roomPreset, isDark)
+    val (badgeBg, badgeGlyph) = if (presetActive) {
+        presetBadgeColors(roomPreset!!, isDark)
+    } else if (roomPreset != null) {
+        // Preset set but off: the INACTIVE pair, matching the gray
+        // container above (feedback round 2, item 1).
+        val inactive = inactiveCardColors(isDark)
+        inactive.badgeBg to inactive.badgeGlyph
     } else if (cardColors != null) {
         cardColors.badgeBg to cardColors.badgeGlyph
     } else {
@@ -1207,14 +1230,30 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // Lock confirmation (§1 safety): turning a locked lock off
     // from the card Switch opens the detail panel's exact dialog
     // copy. Locking is direct, mirroring LockControl.
+    // Feedback round 2, item 3: polygon card outlines (the
+    // expressive shapes from the shape picker) are inscribed in a
+    // circle of the card's min dimension, so their edges cut into
+    // the content box near the bottom — subtitle descenders ("heat
+    // cool", "closed", the bottom of "O") get clipped by the polygon
+    // edge. Rounded-corner outlines never clip (28dp corners clear
+    // the 16dp-padded text zone), so only polygon outlines get the
+    // shifted layout: the badge-to-text spacer shrinks 16dp -> 4dp
+    // and the bottom padding grows 16dp -> 28dp, moving the whole
+    // text block up 12dp with the card height unchanged at 136dp
+    // (content stays 129dp: 16 + 44 + 4 + title + subtitle + 28).
+    // Bottom padding alone cannot move top-anchored content — the
+    // spacer reduction is the mechanism; the padding growth keeps
+    // the total height (and the Surface's internal layout) intact.
+    val cardOutline = LocalShapePrefs.current.cardShape(entity.entityId)
+        ?: homeCardShapeByIndex(gridIndex)
+    val isPolygonCard = cardOutline !is RoundedCornerShape
     var confirmUnlock by remember { mutableStateOf(false) }
     Surface(
         // Card-outline shape (2026-10-30 picker): a per-entity
         // override beats the global default; without either, the
         // §1 stable alternating asymmetric shape (never
         // extraLarge here — the mockup's cards are asymmetric).
-        shape = LocalShapePrefs.current.cardShape(entity.entityId)
-            ?: homeCardShapeByIndex(gridIndex),
+        shape = cardOutline,
         color = container,
         modifier = Modifier.fillMaxWidth()
             .height(136.dp)
@@ -1237,7 +1276,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 onLongClick = { openPanel() },
             ),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (isPolygonCard) 28.dp else 16.dp)) {
             // §1: NO inner sub-box. Round 4's badge zone wore a
             // surfaceContainerHighest background + 24dp corners +
             // 8dp padding — the "wide rectangular inner sub-box"
@@ -1307,7 +1346,16 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 // matrix track/thumb colors. The stock Switch below
                 // is a defensive fallback only — domainSwitchColors
                 // covers every domain that reaches this branch.
-                val pillSwitchColors = domainSwitchColors(display, isDark)
+                // Feedback round 2, item 2: a set preset drives the
+                // switch too (preset badge bg track, preset
+                // container thumb when checked; inactive gray when
+                // unchecked) — the badge icon's chromatic styling,
+                // extended to the switch.
+                val pillSwitchColors = if (roomPreset != null) {
+                    presetSwitchColors(roomPreset, isDark)
+                } else {
+                    domainSwitchColors(display, isDark)
+                }
                 when (display.domain) {
                     "light", "switch", "input_boolean", "fan" -> if (pillSwitchColors != null) {
                         PillSwitch(
@@ -1383,7 +1431,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 }
             }
             } // badge-zone Box
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(if (isPolygonCard) 4.dp else 16.dp))
             // Round 4 split zone, lower half: tapping the name or
             // status text opens the expanded panel (binary cards);
             // long-press anywhere does the same. Non-binary cards

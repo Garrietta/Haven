@@ -77,4 +77,26 @@ class ControlsMappingTest {
         assertEquals(listOf("switch.mango", "light.zebra", "light.apple"), specs.map { it.entityId })
         assertTrue(specs.all { it.kind != ControlKind.TEMPERATURE || it.deviceType == ControlDeviceType.THERMOSTAT })
     }
+
+    // Feedback round 2, item 8: the template's active mode comes
+    // from hvac_action (what the system is DOING), not the selected
+    // mode — and the spec carries it.
+    @Test
+    fun climateActiveModeComesFromHvacAction() {
+        assertEquals(ClimateMode.HEAT, climateActiveModeFromHvacAction("heating"))
+        assertEquals(ClimateMode.COOL, climateActiveModeFromHvacAction("cooling"))
+        assertNull(climateActiveModeFromHvacAction("idle"))
+        assertNull(climateActiveModeFromHvacAction("off"))
+        assertNull(climateActiveModeFromHvacAction(null))
+        assertNull(climateActiveModeFromHvacAction("drying"))
+        val spec = mapEntityToControl(
+            entity("climate.thermostat", "heat_cool", mapOf("hvac_action" to "heating", "hvac_modes" to listOf("heat", "cool", "heat_cool", "off"))),
+        )!!
+        assertEquals(ClimateMode.HEAT, spec.climateActiveMode)
+        assertEquals("heat_cool", spec.climateMode)
+        val idle = mapEntityToControl(
+            entity("climate.thermostat", "heat_cool", mapOf("hvac_action" to "idle")),
+        )!!
+        assertNull(idle.climateActiveMode)
+    }
 }

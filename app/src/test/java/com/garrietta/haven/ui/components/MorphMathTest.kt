@@ -442,4 +442,24 @@ class MorphMathTest {
         // Mid-close the badge is hidden while the traveler flies.
         assertEquals(0f, morphSourceBadgeAlphaOnClose(0.9f), 0.001f)
     }
+
+    // Feedback round 2, item 6: popup side-anchoring buckets the
+    // source tile's center into overlay thirds.
+    @Test
+    fun popupSideAnchor_bucketsByThirds() {
+        // Overlay 0..900: left third -> START, right third -> END.
+        assertEquals(PopupSideAnchor.START, popupSideAnchor(100f, 0f, 900f))
+        assertEquals(PopupSideAnchor.START, popupSideAnchor(299f, 0f, 900f))
+        assertEquals(PopupSideAnchor.CENTER, popupSideAnchor(300f, 0f, 900f))
+        assertEquals(PopupSideAnchor.CENTER, popupSideAnchor(450f, 0f, 900f))
+        assertEquals(PopupSideAnchor.CENTER, popupSideAnchor(600f, 0f, 900f))
+        assertEquals(PopupSideAnchor.END, popupSideAnchor(601f, 0f, 900f))
+        assertEquals(PopupSideAnchor.END, popupSideAnchor(850f, 0f, 900f))
+        // Non-zero overlay origin shifts the thirds with it.
+        assertEquals(PopupSideAnchor.START, popupSideAnchor(150f, 100f, 900f))
+        assertEquals(PopupSideAnchor.END, popupSideAnchor(950f, 100f, 900f))
+        // No reported rect (or a degenerate overlay) -> CENTER.
+        assertEquals(PopupSideAnchor.CENTER, popupSideAnchor(null, 0f, 900f))
+        assertEquals(PopupSideAnchor.CENTER, popupSideAnchor(100f, 0f, 0f))
+    }
 }

@@ -104,6 +104,60 @@ fun presetBadgeColors(preset: TilePreset, isDark: Boolean): Pair<Color, Color> {
     return badgeBg to badgeGlyph
 }
 
+/**
+ * Feedback round 2, item 1: a custom tile preset is an ON-state
+ * color. It applies only while the entity is in its active state;
+ * when the entity is off (or its state is unknown), the card must
+ * render the matrix INACTIVE gray — the custom on-color never
+ * persists into the off state. The active set is per-domain, using
+ * only states HA actually reports (never an invented state):
+ * - binary toggleables (light/switch/input_boolean/fan): "on" only.
+ * - vacuum: cleaning/returning only (docked/idle is its off state).
+ * - lock: "locked" only (unlocked is the non-active state).
+ * - cover: anything but "closed" (open/opening/closing are active).
+ * - climate: anything but "off" (heat/cool/heat_cool/dry/fan_only/
+ *   auto are all live modes; "off" is the off state).
+ * - media/sensors/everything else: always active — media idle/
+ *   paused keeps its row (standing rewrite judgment) and sensors
+ *   have no off state to gray into (a motion sensor reading "off"
+ *   is its normal state, not an off state).
+ * - universal: blank/unavailable/unknown is inactive for every
+ *   domain (no state, no color).
+ * Callers apply this to the container AND the badge pair together;
+ * when it returns false with a preset set, they render the matrix
+ * INACTIVE row, not the matrix live row.
+ */
+fun presetAppliesForState(domain: String, state: String): Boolean {
+    if (state.isBlank() || state == "unavailable" || state == "unknown") return false
+    return when (domain) {
+        "light", "switch", "input_boolean", "fan" -> state == "on"
+        "vacuum" -> state == "cleaning" || state == "returning"
+        "lock" -> state == "locked"
+        "cover" -> state != "closed"
+        "climate" -> state != "off"
+        else -> true
+    }
+}
+
+/**
+ * Feedback round 2, item 2: the card switch follows the custom
+ * theme too, with the same chromatic styling the badge icon
+ * already uses (feedback round, item 5). Checked track = the
+ * preset badge bg (dark tint of the assigned color), checked
+ * thumb = the preset container; unchecked = the matrix inactive
+ * pair (a preset card is gray when off, so its switch reads gray
+ * too). Callers use this whenever a preset is set — the PillSwitch
+ * checked boolean already selects the right side, so active and
+ * inactive cards both read correctly through one colors object.
+ */
+fun presetSwitchColors(preset: TilePreset, isDark: Boolean): CardSwitchColors {
+    val (badgeBg, _) = presetBadgeColors(preset, isDark)
+    val container = tilePresetColor(preset, isDark)!!
+    val inactiveTrack = if (isDark) Color(0xFF8C9188) else Color(0xFF52564E)
+    val mutedThumb = if (isDark) Color(0xFF9E9E9E) else Color.White
+    return CardSwitchColors(badgeBg, container, inactiveTrack, mutedThumb)
+}
+
 /** Pure RGB (0..1) -> HSV (h 0..360, s 0..1, v 0..1). */
 fun rgbToHsv(r: Float, g: Float, b: Float): Triple<Float, Float, Float> {
     val max = maxOf(r, g, b)

@@ -157,20 +157,38 @@ fun dial240ValueFromAngle(deg: Float, range: ClosedFloatingPointRange<Float>): F
 }
 
 /**
- * The dial's DISPLAY range (Round 4): the HA min/max narrowed to
- * 55–85°F, so setpoints 2° apart (67°/69°) get clear arc
- * separation instead of crowding on a wide range. This narrows
- * only the drawn arc: setpoint values themselves are never
- * rewritten — a value outside the display range still clamps to
- * the arc end for drawing (see dial240AngleForValue) and the
- * caller flags it. When the HA range does not overlap 55–85 at
- * all (e.g. a Celsius thermostat), the HA range is used as-is,
- * never an empty or inverted range.
+ * The dial's DISPLAY range (feedback round 2, item 4 — SUPERSEDES
+ * the fixed 55–85°F range from Round 4): it brackets the CURRENT
+ * setpoints with a 10°F margin, clamped to [40, 100]°F, so two
+ * close setpoints (67°/69°) stay visibly distinct and near the bar
+ * ends instead of crowding on a wide range. E.g. 67/69 with a
+ * 45–95 HA range gives 57–79 (his example bands: max ~75–80,
+ * min ~55–60); the max never exceeds 100, the min never drops
+ * below 40. This narrows only the drawn arc: setpoint values
+ * themselves are never rewritten — a value outside the display
+ * range still clamps to the arc end for drawing (see
+ * dial240AngleForValue) and the caller flags it. When the HA
+ * range does not overlap [40, 100] at all (e.g. a Celsius
+ * thermostat), the HA range is used as-is, never an empty or
+ * inverted range. With no setpoints reported, the HA range
+ * intersected with [40, 100] is the fallback (same guards).
+ * KNOWN LIMIT (pre-existing architecture, window changed, not
+ * mechanism): the dial's drag handler maps pointer angles through
+ * this display range, so drags are limited to the dynamic window;
+ * the +/− steppers clamp to the full HA range, so the full range
+ * stays reachable via steppers.
  */
-fun thermostatDisplayRange(min: Float, max: Float): ClosedFloatingPointRange<Float> {
+fun thermostatDisplayRange(min: Float, max: Float, setpoints: List<Float>): ClosedFloatingPointRange<Float> {
     if (max <= min) return min..max
-    val lo = maxOf(55f, min)
-    val hi = minOf(85f, max)
+    if (setpoints.isEmpty()) {
+        val lo = maxOf(40f, min)
+        val hi = minOf(100f, max)
+        return if (lo < hi) lo..hi else min..max
+    }
+    val low = setpoints.min()
+    val high = setpoints.max()
+    val lo = maxOf(40f, min, low - 10f)
+    val hi = minOf(100f, max, high + 10f)
     return if (lo < hi) lo..hi else min..max
 }
 

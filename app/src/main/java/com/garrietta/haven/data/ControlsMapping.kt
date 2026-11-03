@@ -53,6 +53,8 @@ data class ControlSpec(
     /** For TEMPERATURE: current mode string, hvac_modes, current/target temps. */
     val climateMode: String? = null,
     val climateModes: List<String> = emptyList(),
+    /** For TEMPERATURE: the active mode from hvac_action (see climateActiveModeFromHvacAction), or null when idle. */
+    val climateActiveMode: ClimateMode? = null,
     val currentTemp: Float? = null,
     val targetTemp: Float? = null,
     val targetHigh: Float? = null,
@@ -78,6 +80,25 @@ fun climateModeToHa(mode: ClimateMode): String = when (mode) {
     ClimateMode.COOL -> "cool"
     ClimateMode.HEAT_COOL -> "heat_cool"
     ClimateMode.ECO -> "eco"
+}
+
+/**
+ * Feedback round 2, item 8: the template's "current active mode"
+ * is what the system is DOING right now (hvac_action), not the
+ * selected mode. A heat_cool thermostat that is heating reports
+ * active = HEAT; one that is cooling reports COOL; idle (or any
+ * other action) reports null, and the service falls back to the
+ * selected mode. The old code passed the selected mode for both
+ * currentMode and currentActiveMode, so a heat_cool system
+ * advertised HEAT_COOL as its active mode — a mode, not an
+ * action — which some panel renderers cannot map to a detail
+ * state and answer with the app intent instead of the in-panel
+ * temperature widget. Pure, unit-tested.
+ */
+fun climateActiveModeFromHvacAction(hvacAction: String?): ClimateMode? = when (hvacAction) {
+    "heating" -> ClimateMode.HEAT
+    "cooling" -> ClimateMode.COOL
+    else -> null
 }
 
 /** Map one HA entity to a system control spec, or null when the domain is deliberately excluded. */
@@ -132,6 +153,7 @@ fun mapEntityToControl(entity: HaEntity): ControlSpec? {
             ControlSpec(
                 entity.entityId, title, ControlDeviceType.THERMOSTAT, ControlKind.TEMPERATURE,
                 climateMode = entity.state, climateModes = modes,
+                climateActiveMode = climateActiveModeFromHvacAction(entity.attrString("hvac_action")),
                 currentTemp = entity.attrDouble("current_temperature")?.toFloat(),
                 targetTemp = displayTemp, targetHigh = high, targetLow = low,
                 minTemp = entity.attrDouble("min_temp")?.toFloat(),

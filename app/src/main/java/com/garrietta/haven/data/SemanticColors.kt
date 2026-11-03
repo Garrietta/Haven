@@ -286,6 +286,15 @@ private fun MatrixRow.toCardColors(isDark: Boolean): DomainCardColors {
     return DomainCardColors(if (isDark) darkContainer else lightContainer, badgeBg, glyph)
 }
 
+/**
+ * Feedback round 2, item 1: the matrix INACTIVE row as card
+ * colors, for preset cards whose entity is off. MatrixRow stays
+ * private to this file (the matrix is a closed table); callers
+ * use this accessor, never a reconstructed gray.
+ */
+fun inactiveCardColors(isDark: Boolean): DomainCardColors =
+    MatrixRow.INACTIVE.toCardColors(isDark)
+
 /** A power reading on the entity itself (plug-style switches/sensors). */
 private fun hasPowerReading(entity: HaEntity): Boolean =
     entity.attrDouble("current_power_w") != null ||
