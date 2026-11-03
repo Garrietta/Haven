@@ -1,5 +1,151 @@
 # Haven Changelog
 
+## Feedback backlog round (2026-11-03, from the 13:08 videos)
+
+Eight items from Garrett's 13:08 feedback videos (transcripts
+`video-1a.txt` + `video-55.txt`), built on the pushed tree
+(`bef61a5e`, CI Build APKs run #106 green) and pushed through
+GitHub + GitHub Actions. 318 unit tests, 0 failures (313 baseline
++ 5 new). Local APK: `haven-feedback-debug.apk` (67,089,289 bytes).
+
+1. **Icon dark rendering — investigated, then redesigned.** The
+   customization round's icon verified CORRECT in the built APK
+   (compiled adaptive XML wiring, gradient background drawable,
+   legacy PNG pixels all lime) — yet Garrett's Fold8 recents pane
+   rendered a black house on a black background. Pixel sampling of
+   his screenshot shows the foreground intact (charcoal house,
+   white door, green spark) over a black field: the device path
+   blackened the background layer, consistent with system
+   dark-icon treatment (One UI 8.5 forced dark icons / Android 16
+   QPR2 auto-theming). The exact Samsung code path cannot be
+   proven from the build VM, so the redesign removes the variable
+   instead of guessing at it: background is now SOLID capsule lime
+   `#9BF67C` (no gradient vector), and the foreground is
+   SELF-SUFFICIENT — a bright off-white `#FAF7F0` tile (52×52,
+   radius 16) carrying the charcoal house, a LIME `#9BF67C` door
+   (an off-white door would merge with the tile), and the
+   leaf-green spark. The mark stays inside the 66dp safe zone
+   (base corners ~21.3dp, apex 14dp, spark tips ~29.7dp from
+   center); the tile corners (~36.8dp) may nick under a circle
+   mask, but the tile is a plate, not critical content. Result
+   survives all three renders: normal (lime field + white tile),
+   black-background (black field + white tile), and themed
+   (monochrome house+spark silhouette, updated to the new
+   geometry). Legacy PNGs regenerated to match. Verified from the
+   built APK's compiled drawables, not just the sources.
+2. **Unfolded pill choppiness — root cause + fix.** The unfolded
+   rail was gated on `isTopLevel(current)`, so tapping a card
+   unmounted the 84dp rail (current stopped being top-level), the
+   Scaffold snapped 84dp wider, and the rail slid back in on
+   close — the "pushes to the left and then has like a choppy
+   return". The rail now mounts whenever wide, regardless of
+   top-level. A mounted rail during panels is covered, never
+   interactive (panel overlays are later siblings above the Row),
+   and renders unhighlighted off-tab (`selectedNavIndex` null →
+   `-1`). The folded floating pill is untouched.
+3. **Unfolded centered popups (folded keeps full-screen morph).**
+   This deliberately reverses the both-postures full-screen law
+   for unfolded/tablet only. New `CenteredPopup` (HavenApp.kt):
+   centered rounded-corner surface (88% of the overlay, capped at
+   560dp wide, 28dp corners, 16dp shadow) over a dim scrim (black
+   0.45 × progress, tap dismisses — a stated behavior addition,
+   since full-screen panels have no scrim), entering FROM the
+   pressed tile's direction via pure `centeredPopupEnter`
+   (MorphOverlay.kt, unit-tested): offset = (1−progress) × 96dp
+   along the tile→popup-center unit vector, scale 0.92→1, alpha
+   0→1, progress clamped — so the close exits back toward the
+   tile automatically. No TravelingHeader/Arc on this path; two
+   badge guards replace them: `LocalMorphProgress` pinned to 1f
+   inside the popup (destination headers render fully visible
+   from frame 0) and `LocalHiddenHeroId` nulled on wide while a
+   modal is open (the source card's badge never hides behind the
+   scrim, since the page behind stays visible). Sheet callers
+   keep `onPanelPlaced` so the sheet→detail handoff
+   (`vm.pageOrigin`) works. The camera panel keeps PanelOverlay
+   on both postures — a video surface needs the full area; the
+   complaint was about info pages. ModalBottomSheet dialogs
+   (Favorites, shape picker, card settings, device sheet) were
+   already dialog surfaces and are out of scope.
+4. **Camera grain (living room + garage Tapo).** Haven decoded the
+   MJPEG proxy at full resolution — no downsampling in the app —
+   so the grain is the SOURCE (HA ffmpeg-transcoding the Tapo
+   RTSP feeds to MJPEG), not Haven. The HA app is sharper because
+   it plays the native H.264 stream. New `CameraLiveBody`
+   (HavenApp.kt): stream-capable non-Ring cameras (the
+   SUPPORT_STREAM bit, HA's frontend gate) now try HLS first via
+   the existing `HaClient.requestHlsUrl` + `createHlsPlayer`
+   (Bearer-authed ExoPlayer on a SurfaceView, no media3-ui
+   dependency; 8s timeout), falling back to the MJPEG body
+   TERMINALLY on any failure, timeout, or player error (no retry
+   loop). Ring cameras, non-stream cameras, and unknown entities
+   keep the MJPEG body byte for byte. Wired into the fullscreen
+   viewer and the hero panel body; the Front Door panel's bodies
+   keep `CameraMjpegBody` directly and its liveness rules are
+   untouched. Hero quadrants keep snapshots (still thumbnails).
+   Before/after per camera: Tapo living room + garage — MJPEG
+   proxy → HLS native stream with MJPEG fallback; outdoor Tapo —
+   same route (was already clear, now also HLS-first); Ring/front
+   door — unchanged, MJPEG recording path + 69a1 live rules intact.
+5. **Custom tile color drives badge/icon tints (explicit override
+   of the customization round's matrix-driven badge rule, when a
+   preset is set; unset cards keep the matrix).** New pure
+   `presetBadgeColors` (CardCustomization.kt, unit-tested):
+   badgeBg = the preset hue darkened to near-black (HSV value
+   0.13, saturation ≥ 0.55); badgeGlyph = the preset hue at full
+   saturation, 0.72 HSL lightness — the bright tint of the
+   assigned color (yellow tile → yellow-tinted almost-black badge
+   + amber/gold glyph, exactly as described). A pure vivid HSV
+   glyph was tried first and REJECTED: vivid blue/purple are
+   perceptually dark and fail 4.5:1 on near-black; the
+   0.72-lightness tint clears 4.5:1 for all 8 presets in both
+   themes. Applied to HomeRoomCard, HomeRoomMediaCard, EntityTile,
+   and the new Home Status tiles. Switch tracks stay
+   matrix-driven (he pointed at badges/icons, not switches).
+6. **Search-by-device, not a separate add page.** The Favorites
+   sheet's standalone "Add devices" list is REMOVED; the Devices
+   section (search + tap-to-expand dropdown) is the only add
+   path, with add/remove/reorder behavior identical. Entities
+   with no registry device link keep an add path as ONE
+   "Ungrouped entities" expandable row in the same pattern (not
+   a separate page) — otherwise removing the list would silently
+   strand them, which the no-silent-removals law forbids.
+7. **Home Status panel as 50/50 tiles.** `HomeStatusPanelScreen`
+   renders entities as 136dp tile cards in a 2-column grid (new
+   `HomeStatusTile` in Screens.kt: 44dp badge, 16sp bold title,
+   13sp state subtitle, general card shape by index, custom
+   title/icon/color/shape honored, preset-driven badge tints),
+   tap → detail exactly as the old rows did. Plain chunked Rows,
+   not a lazy grid (the panel content already scrolls in
+   PanelOverlay's wrapper). The cleared-group all-clear line is
+   unchanged. Subtitle is the humanized state text (the rows
+   showed the raw state string).
+8. **Device null row — mechanism proven, then fixed at three
+   layers.** The frame shows "Device null / 18 entities" in the
+   Favorites sheet's Devices section. Proven from the code + a
+   JVM test against the actual org.json jar: `optString` returns
+   "" for JSON null AND for a missing key, so the "null" is a
+   literal string arriving as `device_id` from HA's entity
+   registry for those 18 entities — not a JSON null. Fixes:
+   HaClient's entity-registry parse treats blank or
+   case-insensitive "null" device ids as absent;
+   `groupEntitiesByDevice` drops them from any source;
+   `deviceDisplayName` falls back to "Unknown device" for
+   blank/"null" ids (registry name still wins; model/manufacturer
+   stay in the row subtitle where both call sites already render
+   them, never duplicated into the title); the Favorites sheet
+   now uses `deviceDisplayName` (single source of truth, as
+   SearchScreen already did). The literal string "Device null"
+   can no longer render anywhere. The 18 entities surface under
+   the new Ungrouped row (item 6), still addable.
+
+Standing law kept: `webrtcEnabled = false`; nav locked to
+Home/Scenes/Energy/Settings with user tabs under Settings →
+Browse; active capsule `#9BF67C` on `#161D17`; 14-row domain
+matrix except item 5's explicit override; thermostat scallop
+containment, 1°F steps, handle-grab-only; folded full-screen
+morph; no fake devices, no invented controls, no silent feature
+removals. `maybeSeedTabs` remains zero hits.
+
 ## Unreleased local rounds — landed 2026-11-02 → 2026-11-03 (base: #105 `5f1fea9f`)
 
 Five rounds were implemented and built locally (no CI, no pushes) against the

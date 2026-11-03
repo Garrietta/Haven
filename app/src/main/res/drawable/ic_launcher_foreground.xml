@@ -3,27 +3,33 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Haven's mark, customization round item 4 (masking
-         refinement): a large charcoal house with SOFT rounded
-         apex/eaves (M3 Expressive geometry, distinguishing it from
-         Google Home's sharp triangle), a warm off-white door, and a
-         small leaf-green spark upper-right (Haven's third tone).
-         The whole mark sits inside the central 66dp safe zone
-         (center 54,54, radius 33: farthest points are the house
-         base corners at ~31.1dp from center), centered, with
-         nothing critical near the edges — so Samsung's default
-         squircle, Pixel's circle, square, rectangle, teardrop, and
-         expressive masks all show the identical mark. The old
-         lime-squircle-tile-on-charcoal design is gone: no inner
-         tile, no dark frame to clip. Background (full-bleed lime
-         gradient) lives in ic_launcher_background.xml. -->
-    <path
-        android:fillColor="#161D17"
-        android:pathData="M32,54 L50,32 Q54,28 58,32 L76,54 V76 H64 V60 H44 V76 H32 Z" />
+    <!-- Feedback round, item 1 (icon dark-render redesign): the
+         foreground is now SELF-SUFFICIENT — a bright off-white
+         #FAF7F0 tile (52x52, rect 28..80, radius 16) carrying the
+         charcoal house, so the mark survives even when the device
+         path renders the background layer black (Garrett's Fold8
+         recents pane showed exactly that: black field, intact
+         charcoal house + white door + green spark). The door is
+         now lime #9BF67C, not off-white: against the charcoal house
+         AND the off-white tile it must pop, and an off-white door
+         would merge with the tile. House geometry stays inside
+         the 66dp safe zone (center 54,54, radius 33): base corners
+         at ~21.3dp, apex 14dp, spark tips ~29.7dp from center.
+         The tile corners sit ~36.8dp out — past the safe-zone
+         circle — but the tile is a plate, not critical content:
+         circle/squircle/square/rectangle masks may nick a corner
+         tip, never the house. Background (solid lime) lives in
+         ic_launcher_background.xml. -->
     <path
         android:fillColor="#FAF7F0"
-        android:pathData="M49,76 V60 H59 V76 Z" />
+        android:pathData="M28,44 Q28,28 44,28 H64 Q80,28 80,44 V64 Q80,80 64,80 H44 Q28,80 28,64 Z" />
+    <path
+        android:fillColor="#161D17"
+        android:pathData="M40,54 L52,40 Q54,38 56,40 L68,54 V70 H58 V56 H50 V70 H40 Z" />
+    <path
+        android:fillColor="#9BF67C"
+        android:pathData="M50,70 V56 H58 V70 Z" />
     <path
         android:fillColor="#3E6B2F"
-        android:pathData="M72,25 L74,30 L79,32 L74,34 L72,39 L70,34 L65,32 L70,30 Z" />
+        android:pathData="M70,29 L72,34 L77,36 L72,38 L70,43 L68,38 L63,36 L68,34 Z" />
 </vector>

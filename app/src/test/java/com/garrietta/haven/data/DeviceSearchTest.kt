@@ -46,4 +46,29 @@ class DeviceSearchTest {
         assertEquals("Device dev9", deviceDisplayName(DeviceGroup("dev9", null, emptyList())))
         assertEquals("Heater", deviceDisplayName(DeviceGroup("dev1", HaDeviceInfo("Heater", null, null), emptyList())))
     }
+
+    @Test
+    fun literalNullAndBlankDeviceIdsAreDropped() {
+        val entities = listOf(
+            entity("light.a", "A"),
+            entity("light.b", "B"),
+            entity("light.c", "C"),
+        )
+        val groups = groupEntitiesByDevice(
+            entities,
+            mapOf("light.a" to "null", "light.b" to "NULL", "light.c" to "dev1"),
+        )
+        assertEquals(1, groups.size)
+        assertEquals("dev1", groups[0].deviceId)
+        assertEquals(listOf("light.c"), groups[0].entityIds)
+    }
+
+    @Test
+    fun displayNameNeverRendersDeviceNull() {
+        assertEquals("Unknown device", deviceDisplayName(DeviceGroup("null", null, emptyList())))
+        assertEquals("Unknown device", deviceDisplayName(DeviceGroup("", null, emptyList())))
+        assertFalse(deviceDisplayName(DeviceGroup("null", null, emptyList())).contains("null", ignoreCase = true))
+        // A registry name still wins over any id weirdness.
+        assertEquals("Heater", deviceDisplayName(DeviceGroup("null", HaDeviceInfo("Heater", null, null), emptyList())))
+    }
 }

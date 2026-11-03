@@ -3,15 +3,17 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Single-color variant of the new Haven mark for themed icons
-         (Android 13+): the house + leaf spark silhouette only, in
-         the same safe-zone geometry as the foreground. The system
-         tints this one color; the off-white door is deliberately
-         omitted because it would vanish in one tint. -->
+    <!-- Single-color variant of the feedback-round Haven mark for
+         themed icons (Android 13+): the house + leaf spark
+         silhouette only, in the same safe-zone geometry as the
+         foreground. The system tints this one color; the lime door
+         is deliberately omitted because it would vanish in one
+         tint, and the off-white tile is omitted because the system
+         supplies the themed field. -->
     <path
         android:fillColor="#000000"
-        android:pathData="M32,54 L50,32 Q54,28 58,32 L76,54 V76 H64 V60 H44 V76 H32 Z" />
+        android:pathData="M40,54 L52,40 Q54,38 56,40 L68,54 V70 H58 V56 H50 V70 H40 Z" />
     <path
         android:fillColor="#000000"
-        android:pathData="M72,25 L74,30 L79,32 L74,34 L72,39 L70,34 L65,32 L70,30 Z" />
+        android:pathData="M70,29 L72,34 L77,36 L72,38 L70,43 L68,38 L63,36 L68,34 Z" />
 </vector>

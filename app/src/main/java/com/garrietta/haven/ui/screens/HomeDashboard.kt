@@ -2,6 +2,7 @@ package com.garrietta.haven.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,6 +63,7 @@ import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.data.deriveHomeStatus
 import com.garrietta.haven.data.isHomeRoomEntity
 import com.garrietta.haven.data.groupEntitiesByDevice
+import com.garrietta.haven.data.deviceDisplayName
 import com.garrietta.haven.data.deviceMatchesQuery
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.attachDeviceInfo
@@ -223,30 +225,25 @@ fun HomeStatusPanelScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        // Customization round, item 2: panel rows honor custom titles.
-        val panelCustom = rememberCardCustom(vm)
-        for (entity in item.entities) {
+        // Feedback round, item 7: entities as 50/50 TILE cards,
+        // not plain rows — the same card language as room grids
+        // (see HomeStatusTile in Screens.kt), tap → detail exactly
+        // as the rows did. Plain Rows of two tiles (not a lazy
+        // grid): the panel content already scrolls in PanelOverlay's
+        // wrapper, and a lazy grid inside it cannot measure.
+        for ((rowIndex, pair) in item.entities.chunked(2).withIndex()) {
             Row(
-                Modifier.fillMaxWidth()
-                    .clickable { navigate(Screen.EntityDetail(entity.entityId)) }
-                    .padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    customTitleFor(panelCustom.titles, entity.entityId, entity.friendlyName),
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    entity.state,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                for ((colIndex, entity) in pair.withIndex()) {
+                    Box(Modifier.weight(1f)) {
+                        HomeStatusTile(vm, entity, rowIndex * 2 + colIndex, navigate)
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -374,6 +371,7 @@ fun FavoritesSheet(
     val entityDevices by vm.entityDevices.collectAsState()
     val sheetCustom = rememberCardCustom(vm)
     var expandedDevice by remember { mutableStateOf<String?>(null) }
+    var ungroupedExpanded by remember { mutableStateOf(false) }
     // Expressive-menus round, item 2: search narrows BOTH lists —
     // the long "Add devices" list is the painful one, but the
     // favorites list gets the same filter so one query searches
@@ -431,34 +429,13 @@ fun FavoritesSheet(
                 }
                 Spacer(Modifier.height(4.dp))
             }
-            Spacer(Modifier.height(16.dp))
-            Text("Add devices", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            val candidates = states.values
-                .filter { isHomeRoomEntity(it) && it.entityId !in vm.favorites && favoriteMatchesQuery(query, it.friendlyName, it.entityId) }
-                .sortedBy { it.friendlyName }
-            if (candidates.isEmpty()) {
-                Text(
-                    if (query.isNotBlank()) "No devices match \"$query\"."
-                    else "Every room device is already a favorite.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            for (entity in candidates) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        customTitleFor(sheetCustom.titles, entity.entityId, entity.friendlyName),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    SheetIconSquircleButton(Icons.Filled.Add, "Add favorite", onClick = { vm.addFavorite(entity.entityId) })
-                }
-                Spacer(Modifier.height(4.dp))
-            }
+            // Feedback round, item 6: the standalone "Add devices"
+            // list is DELIBERATELY GONE (the user: "I don't even
+            // want this individual add devices page") — the
+            // Devices section below (search + tap-to-expand
+            // dropdown) is the only add path, plus the Ungrouped
+            // row after it for entities with no device link.
+            // Add/remove/reorder behavior is unchanged.
             // Customization round, item 3: DEVICE-level results
             // alongside entity results. A device row expands inline
             // to its real entities (each with an Add button, and a
@@ -478,7 +455,7 @@ fun FavoritesSheet(
                 )
             }
             for (group in deviceGroups) {
-                val groupName = group.info?.name ?: "Device ${group.deviceId}"
+                val groupName = deviceDisplayName(group)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable { expandedDevice = if (expandedDevice == group.deviceId) null else group.deviceId }) {
                         Text(groupName, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -508,6 +485,55 @@ fun FavoritesSheet(
                             if (member.entityId !in vm.favorites) {
                                 SheetIconSquircleButton(Icons.Filled.Add, "Add favorite", onClick = { vm.addFavorite(member.entityId) })
                             }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+            // Feedback round, item 6 (companion to the removed
+            // "Add devices" list) + item 8: entities with NO
+            // registry device link — including the ex-"Device
+            // null" group, whose literal-"null" device ids are
+            // now treated as absent — keep their only add path
+            // as ONE expandable row in this same search +
+            // tap-to-expand pattern, not a separate page. Hidden
+            // entirely when every room entity belongs to a device.
+            val allGroupedIds = groupEntitiesByDevice(states.values.toList(), entityDevices)
+                .flatMap { it.entityIds }.toSet()
+            val ungrouped = states.values
+                .filter { isHomeRoomEntity(it) && it.entityId !in vm.favorites && it.entityId !in allGroupedIds && favoriteMatchesQuery(query, it.friendlyName, it.entityId) }
+                .sortedBy { it.friendlyName }
+            if (ungrouped.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { ungroupedExpanded = !ungroupedExpanded }) {
+                        Text("Ungrouped entities", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${ungrouped.size} entities",
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    SheetIconSquircleButton(
+                        if (ungroupedExpanded) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
+                        if (ungroupedExpanded) "Collapse ungrouped entities" else "Expand ungrouped entities",
+                        onClick = { ungroupedExpanded = !ungroupedExpanded },
+                    )
+                }
+                if (ungroupedExpanded) {
+                    for (member in ungrouped) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp)) {
+                            Text(
+                                customTitleFor(sheetCustom.titles, member.entityId, member.friendlyName),
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).clickable {
+                                    onDismiss()
+                                    vm.openPopup(member.entityId)
+                                },
+                            )
+                            SheetIconSquircleButton(Icons.Filled.Add, "Add favorite", onClick = { vm.addFavorite(member.entityId) })
                         }
                         Spacer(Modifier.height(4.dp))
                     }

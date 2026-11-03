@@ -1,5 +1,6 @@
 package com.garrietta.haven
 import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.centeredPopupEnter
 import com.garrietta.haven.ui.components.ShapePrefs
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.badgeRectInRow
@@ -50,6 +51,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -137,6 +139,10 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.key
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import android.view.SurfaceView
+import com.garrietta.haven.data.cameraSupportsStream
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
@@ -804,7 +810,14 @@ fun HavenApp(vm: HavenViewModel) {
                 // split from the header-row/text sites for exactly
                 // this, so hiding the badge cannot blank a card.
                 // At rest the id is null and every badge shows.
-                LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
+                // Feedback round, item 3: on wide, an open modal
+                // means a centered popup, whose page behind stays
+                // visible — so the source card's badge must NOT
+                // hide (no traveler owns it on this path). Null
+                // the hidden id on wide; folded keeps the exact
+                // old rule. The camera panel never sets the id, so
+                // it is unaffected either way.
+                LocalHiddenHeroId provides (if (LocalWideLayout.current && (sheetAnim != null || detailAnim != null || popoutAnim != null)) null else (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id)),
                 // Visual-fidelity round §5: the closing flag and the
                 // active morph's progress, for the source cards'
                 // closing-aware badge crossfade (see
@@ -894,7 +907,19 @@ fun HavenApp(vm: HavenViewModel) {
             // Scaffold below is deliberately NOT keyed (its
             // screens keep scroll state across postures).
             key(LocalWideLayout.current) {
-                if (LocalWideLayout.current && isTopLevel(current)) {
+                // Feedback round, item 2: the rail mounts whenever
+                // wide, REGARDLESS of top-level. The old
+                // isTopLevel gate unmounted the rail the moment a
+                // card opened a detail panel (current stopped being
+                // top-level), so the Scaffold snapped 84dp wider
+                // on tap and the rail slid back in on close — the
+                // "pill bar pushes to the left and then has like a
+                // choppy return" on unfolded. A mounted rail during
+                // panels is covered, never interactive: panel
+                // overlays are later siblings above this Row, and
+                // selectedNavIndex returns null off-tab (the rail
+                // renders unhighlighted via selectedIndex ?: -1).
+                if (LocalWideLayout.current) {
                     val barItems = pillBarItems()
                     // Stage E §9: the Home dot lights only for a real
                     // important alert (unlocked lock, open door/window,
@@ -1097,6 +1122,24 @@ fun HavenApp(vm: HavenViewModel) {
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
                 BackHandler { dismissSheet() }
+                // Feedback round, item 3: unfolded gets the
+                // centered popup; folded keeps the full-screen
+                // morph + traveler below, byte for byte.
+                if (LocalWideLayout.current) {
+                    CenteredPopup(
+                        progress = { sheetProgress.value },
+                        source = cardBounds[anim.id] ?: anim.source,
+                        overlayOrigin = overlayOrigin,
+                        panelBackground = MaterialTheme.colorScheme.background,
+                        onDismiss = { dismissSheet() },
+                        onPanelPlaced = { sheetPanelBounds = it },
+                    ) {
+                        EntityPopupSheetContent(
+                            vm, navigate, anim.id, panelBounds = sheetPanelBounds,
+                            onDetails = { dismissSheetInstant() },
+                        )
+                    }
+                } else {
                 // Round 6: no measurement frame — the panel is
                 // composed ONCE, at target geometry, and the live
                 // header reports the travel target from its
@@ -1140,6 +1183,7 @@ fun HavenApp(vm: HavenViewModel) {
                     progress = { sheetProgress.value }, overlayOrigin,
                     isClosing = sheetExiting,
                 )
+                } // else: folded full-screen morph (feedback item 3)
             }
             // Detail panel overlay: FULL-SCREEN PANEL (2026-11-01
             // panels round) — SUPERSEDES the 2026-10-30 centered
@@ -1153,6 +1197,20 @@ fun HavenApp(vm: HavenViewModel) {
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 BackHandler { dismissDetail() }
+                // Feedback round, item 3: unfolded gets the
+                // centered popup; folded keeps the full-screen
+                // morph + traveler below, byte for byte.
+                if (LocalWideLayout.current) {
+                    CenteredPopup(
+                        progress = { detailProgress.value },
+                        source = cardBounds[anim.entityId] ?: anim.source,
+                        overlayOrigin = overlayOrigin,
+                        panelBackground = MaterialTheme.colorScheme.background,
+                        onDismiss = { dismissDetail() },
+                    ) {
+                        content(anim.screen)
+                    }
+                } else {
                 // Round 4: the thermostat detail special-case is
                 // gone with Screen.Thermostat — every detail panel
                 // content is dialog-owned (plain column, no own
@@ -1187,6 +1245,7 @@ fun HavenApp(vm: HavenViewModel) {
                     progress = { detailProgress.value }, overlayOrigin,
                     isClosing = detailExiting,
                 )
+                } // else: folded full-screen morph (feedback item 3)
             }
             // Thermostat pop-out panel (Round 4: the ONLY
             // thermostat panel — tap and long-press on the Ecobee
@@ -1198,6 +1257,23 @@ fun HavenApp(vm: HavenViewModel) {
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
                 BackHandler { dismissPopout() }
+                // Feedback round, item 3: unfolded gets the
+                // centered popup; folded keeps the full-screen
+                // morph + traveler below, byte for byte.
+                if (LocalWideLayout.current) {
+                    CenteredPopup(
+                        progress = { popoutProgress.value },
+                        source = cardBounds[anim.id] ?: anim.source,
+                        overlayOrigin = overlayOrigin,
+                        panelBackground = MaterialTheme.colorScheme.background,
+                        onDismiss = { dismissPopout() },
+                    ) {
+                        ThermostatPopoutContent(
+                            vm, anim.id,
+                            onClose = { dismissPopout() },
+                        )
+                    }
+                } else {
                 // Round 6: no measurement frame here either (see
                 // the sheet block); progress is a lambda.
                 PanelOverlay(
@@ -1226,6 +1302,7 @@ fun HavenApp(vm: HavenViewModel) {
                     onDismiss = { dismissPopout() },
                     isClosing = popoutExiting,
                 )
+                } // else: folded full-screen morph (feedback item 3)
             }
             // Camera live-feed panel (2026-11-01 panels round): the
             // Home quadrant hero's tap target, formerly a centered
@@ -1273,7 +1350,10 @@ fun HavenApp(vm: HavenViewModel) {
                         // for Ring (same verdict as fullscreen) and
                         // live for native cameras; `recording` only
                         // switches the connecting/error copy.
-                        CameraMjpegBody(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
+                        // Feedback round, item 4: HLS-first for
+                        // stream-capable non-Ring cameras; Ring
+                        // keeps this MJPEG body via the route.
+                        CameraLiveBody(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
                         Row(
                             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1735,6 +1815,110 @@ private fun PanelOverlay(
 }
 
 /**
+ * Feedback round, item 3: the UNFOLDED/TABLET popup. This
+ * deliberately reverses the both-postures full-screen law for
+ * unfolded only — folded keeps PanelOverlay's full-screen morph.
+ * A centered rounded-corner surface (88% of the overlay, capped
+ * at 560dp wide) over a dim scrim, entering from the pressed
+ * tile's direction (see centeredPopupEnter): the offset runs
+ * along the tile→popup-center vector, so the animation varies
+ * with the tile's location and always lands centered. No
+ * TravelingHeader/Arc on this path (a traveler flying to a
+ * centered popup reads wrong), and two badge-visibility guards
+ * replace them: LocalMorphProgress is pinned to 1f inside the
+ * popup, so destination headers wearing hideWhileTraveling render
+ * fully visible from frame 0; and the overlay root nulls
+ * LocalHiddenHeroId on wide while a modal is open, so the source
+ * card's badge never hides behind the scrim (the page behind a
+ * centered popup stays visible, unlike the opaque full-screen
+ * panel). The camera panel keeps PanelOverlay on both postures —
+ * a video surface needs the full area; the complaint was about
+ * info pages. Scrim tap dismisses (a stated behavior addition:
+ * full-screen panels have no scrim); the surface consumes its own
+ * taps. Sheet callers pass onPanelPlaced so the sheet→detail
+ * handoff (vm.pageOrigin) keeps working.
+ */
+@Composable
+private fun CenteredPopup(
+    progress: () -> Float,
+    source: Rect?,
+    overlayOrigin: Offset,
+    panelBackground: Color,
+    onDismiss: () -> Unit,
+    onPanelPlaced: ((Rect) -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        // Scrim: dims the still-visible page behind the popup.
+        Box(
+            Modifier.fillMaxSize()
+                .graphicsLayer { alpha = 0.45f * progress().coerceIn(0f, 1f) }
+                .background(Color.Black)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { if (progress() > 0.5f) onDismiss() },
+        )
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            val density = LocalDensity.current
+            val popupCenter = with(density) {
+                Offset(
+                    overlayOrigin.x + maxWidth.toPx() / 2f,
+                    overlayOrigin.y + maxHeight.toPx() / 2f,
+                )
+            }
+            val distancePx = with(density) { 96.dp.toPx() }
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = panelBackground,
+                shadowElevation = 16.dp,
+                modifier = Modifier
+                    .fillMaxWidth(0.88f)
+                    .widthIn(max = 560.dp)
+                    .heightIn(max = maxHeight * 0.88f)
+                    .graphicsLayer {
+                        // Round 7 rule: progress read ONLY here.
+                        val enter = centeredPopupEnter(progress(), source?.center, popupCenter, distancePx)
+                        translationX = enter.offset.x
+                        translationY = enter.offset.y
+                        scaleX = enter.scale
+                        scaleY = enter.scale
+                        alpha = enter.alpha
+                    }
+                    .onGloballyPositioned { coords ->
+                        onPanelPlaced?.invoke(coords.boundsInRoot())
+                    }
+                    // Consume taps on the surface so they never
+                    // reach the scrim dismiss beneath it.
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { },
+            ) {
+                // Pin destination-header visibility: with no
+                // traveler on this path, headers must render fully
+                // visible from frame 0 (see the KDoc above).
+                CompositionLocalProvider(LocalMorphProgress provides { 1f }) {
+                    Column(
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                        content()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * The single traveling header (2026-10-29 pop-up round, Relay-style;
  * 2026-10-30 verdict round: TRUE element travel, not recreation;
  * 2026-11-01 polish round: BADGE ONLY). The badge lerps along its
@@ -2010,7 +2194,10 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     val isRing = entity?.let { isRingCamera(it) } == true
     BackHandler { onClose() }
     Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
-        CameraMjpegBody(
+        // Feedback round, item 4: HLS-first for stream-capable
+        // non-Ring cameras; Ring keeps the MJPEG recording body
+        // with its labels, byte for byte (CameraLiveBody routes).
+        CameraLiveBody(
             vm, cameraId, enterProgress, recording = isRing, onClose = onClose,
             connectingText = if (isRing) "Loading recording…" else null,
             errorPrefix = if (isRing) "MJPEG proxy" else null,
@@ -2564,6 +2751,163 @@ private fun RowScope.FrontDoorTabOption(label: String, selected: Boolean, onClic
  * the copy only;
  * a recording view must never say "live".
  */
+/**
+ * Feedback round, item 4: the HLS-first live body for NON-Ring
+ * cameras. Haven's live path was the MJPEG proxy for every camera:
+ * HA ffmpeg-transcodes the Tapo RTSP feeds to MJPEG, which is
+ * where the living-room/garage grain comes from (Haven decodes
+ * the MJPEG at full resolution — no downsampling in the app —
+ * so the grain is the source, not Haven). The HA app shows the
+ * same cameras sharper because it plays the native H.264 stream,
+ * and Haven already owns the HLS machinery (HaClient.requestHlsUrl
+ * + createHlsPlayer, Bearer-authed) — it was just never wired
+ * into a viewer.
+ *
+ * Routing (Ring untouched by construction):
+ * - Ring camera, or a camera that does not advertise stream
+ *   support (cameraSupportsStream: the SUPPORT_STREAM bit, the
+ *   same gate HA's frontend uses) → the existing MJPEG body,
+ *   byte for byte, with its connecting/error copy intact.
+ * - Stream-capable non-Ring camera → request the HLS playlist
+ *   (8s timeout); on a URL, play it with ExoPlayer on a
+ *   SurfaceView (no media3-ui dependency); on any failure,
+ *   timeout, or player error, fall back to the MJPEG body
+ *   TERMINALLY for this mount (no HLS retry loop). Hero
+ *   quadrants keep snapshots (still thumbnails, not the grain
+ *   complaint); the Front Door panel's bodies keep
+ *   CameraMjpegBody directly and are never routed through here.
+ */
+@Composable
+private fun CameraLiveBody(
+    vm: HavenViewModel,
+    cameraId: String,
+    enterProgress: () -> Float,
+    recording: Boolean,
+    onClose: () -> Unit,
+    connectingText: String? = null,
+    errorPrefix: String? = null,
+    onFirstFrame: (() -> Unit)? = null,
+    onError: ((String) -> Unit)? = null,
+) {
+    val states by vm.states.collectAsState()
+    val entity = states[cameraId]
+    // Ring + non-stream cameras + unknown entities: MJPEG, unchanged.
+    if (entity == null || isRingCamera(entity) || !cameraSupportsStream(entity)) {
+        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, onFirstFrame, onError)
+        return
+    }
+    var hlsUrl by remember(cameraId) { mutableStateOf<String?>(null) }
+    var hlsFailed by remember(cameraId) { mutableStateOf(false) }
+    LaunchedEffect(cameraId) {
+        var done = false
+        val timeout = launch {
+            delay(8000)
+            if (!done) {
+                done = true
+                hlsFailed = true
+            }
+        }
+        vm.client.requestHlsUrl(cameraId) { url, _ ->
+            if (!done) {
+                done = true
+                timeout.cancel()
+                if (url != null) hlsUrl = url else hlsFailed = true
+            }
+        }
+    }
+    if (hlsFailed) {
+        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, onFirstFrame, onError)
+        return
+    }
+    val url = hlsUrl
+    if (url == null) {
+        // Attempting: mirror the MJPEG Connecting stage (cached
+        // frame dimmed + loading text) so the wait reads the same.
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            val last = vm.lastCameraFrame(cameraId)
+            if (last != null) {
+                Image(
+                    bitmap = last.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.25f },
+                )
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Loading camera…", color = Color.White, fontSize = 16.sp)
+            }
+        }
+        return
+    }
+    CameraHlsPlayerBody(
+        vm, cameraId, url, enterProgress, onFirstFrame,
+        // Player error → MJPEG fallback, terminal for this mount.
+        // onError is deliberately NOT forwarded: the fallback body
+        // owns error display from here (same content, MJPEG).
+        onPlayerError = { hlsFailed = true },
+    )
+}
+
+/** ExoPlayer HLS playback on a bare SurfaceView (no media3-ui). */
+@Composable
+private fun CameraHlsPlayerBody(
+    vm: HavenViewModel,
+    cameraId: String,
+    playlistUrl: String,
+    enterProgress: () -> Float,
+    onFirstFrame: (() -> Unit)?,
+    onPlayerError: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    var rendered by remember(cameraId, playlistUrl) { mutableStateOf(false) }
+    val player = remember(cameraId, playlistUrl) {
+        vm.client.createHlsPlayer(context, playlistUrl).apply {
+            addListener(object : Player.Listener {
+                override fun onRenderedFirstFrame() {
+                    if (!rendered) {
+                        rendered = true
+                        onFirstFrame?.invoke()
+                    }
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    onPlayerError(error.message ?: "HLS playback failed")
+                }
+            })
+        }
+    }
+    DisposableEffect(cameraId, playlistUrl) {
+        onDispose { player.release() }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (!rendered) {
+            val last = vm.lastCameraFrame(cameraId)
+            if (last != null) {
+                Image(
+                    bitmap = last.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.25f },
+                )
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Loading camera…", color = Color.White, fontSize = 16.sp)
+            }
+        }
+        AndroidView(
+            factory = { ctx -> SurfaceView(ctx).also { player.setVideoSurfaceView(it) } },
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                // Same enter curve as the MJPEG body.
+                val p = enterProgress().coerceIn(0f, 1f)
+                val s = 0.94f + 0.06f * p
+                scaleX = s
+                scaleY = s
+                alpha = 0.7f + 0.3f * p
+            },
+        )
+    }
+}
+
 @Composable
 private fun CameraMjpegBody(
     vm: HavenViewModel,

@@ -3,26 +3,20 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Customization round, item 4 (masking refinement): FULL-BLEED
-         background — a vertical lime gradient that runs to the mask
-         edge. There is deliberately NO dark frame layer and NO inner
-         tile behind the mark: the old charcoal background + smaller
-         lime squircle read as a frame under Samsung's squircle mask
-         and clipped into a visible border. With a full-bleed field,
-         circle, squircle, square, rectangle, and expressive masks
-         all show the same field edge-to-edge and the same mark
-         intact (the mark itself lives inside the 66dp safe zone).
-         Gradient in Haven tokens only: primaryContainer #C1E88A
-         at the top to capsule lime #9BF67C at the bottom — Google's
-         2026 gradient/no-container direction, in Haven's palette. -->
-    <path android:pathData="M0,0 H108 V108 H0 Z">
-        <gradient
-            android:type="linear"
-            android:startX="54"
-            android:startY="0"
-            android:endX="54"
-            android:endY="108"
-            android:startColor="#C1E88A"
-            android:endColor="#9BF67C" />
-    </path>
+    <!-- Feedback round, item 1 (icon dark-render redesign): SOLID
+         bright lime field, full bleed — no gradient vector. The
+         customization round's gradient background verified intact
+         in the built APK, yet Garrett's Fold8 recents pane rendered
+         the icon as a black house on a black background: the device
+         path blackened the background layer (consistent with system
+         dark-icon treatment — One UI 8.5 forced dark icons /
+         Android 16 QPR2 auto-theming) while the foreground rendered
+         intact. A solid field removes the gradient-vector variable
+         from that equation; the foreground below is now ALSO
+         self-sufficient (bright off-white tile carrying the mark),
+         so the icon stays legible even when a device path forces
+         the background to black. Tokens: capsule lime #9BF67C. -->
+    <path
+        android:fillColor="#9BF67C"
+        android:pathData="M0,0 H108 V108 H0 Z" />
 </vector>

@@ -69,3 +69,102 @@ fun tilePresetFor(presets: Map<String, String>, entityId: String): TilePreset? {
 /** The preset's container color for the current theme, or null for default. */
 fun tilePresetColor(preset: TilePreset?, isDark: Boolean): Color? =
     preset?.let { if (isDark) it.dark else it.light }
+
+/**
+ * Feedback round, item 5: when a custom tile preset is set, the
+ * card's badge + icon colors derive from that preset — they do
+ * NOT stay matrix-driven (the customization round's rule, which
+ * the user explicitly overrode: "those should become equally as
+ * like dark versions of the colors that I've assigned. So instead
+ * of being a green tinted, almost black, it should be a yellow
+ * tinted, almost black. And this should be like an amber,
+ * orange-ish color on both of those").
+ *
+ * Derivation, hue-preserving (pure RGB<->HSV/HSL, no android
+ * dependency so unit tests run on the JVM):
+ * - badgeBg: the preset's theme color darkened to a near-black
+ *   tint (HSV value 0.13, saturation kept high) — a yellow tile
+ *   gives a yellow-tinted almost-black badge, never matrix green.
+ * - badgeGlyph: the preset hue at full saturation and 0.72 HSL
+ *   lightness — the BRIGHT tint of the assigned color, which for
+ *   the yellow preset reads amber/gold, exactly as he described.
+ *   (A pure vivid HSV glyph was tried first and REJECTED: vivid
+ *   blue/purple are perceptually dark and fail 4.5:1 on a
+ *   near-black badge. The 0.72-lightness tint clears 4.5:1 for
+ *   every preset in both themes — pinned by CardCustomizationTest.)
+ * Unset cards keep the matrix (callers only use this when
+ * [tilePresetFor] returns a preset). Switch tracks stay
+ * matrix-driven: he pointed at badges/icons, not switches.
+ */
+fun presetBadgeColors(preset: TilePreset, isDark: Boolean): Pair<Color, Color> {
+    val base = if (isDark) preset.dark else preset.light
+    val (h, s, _) = rgbToHsv(base.red, base.green, base.blue)
+    val badgeBg = hsvToColor(h, s.coerceAtLeast(0.55f), 0.13f)
+    val badgeGlyph = hslToColor(h, 1.0f, 0.72f)
+    return badgeBg to badgeGlyph
+}
+
+/** Pure RGB (0..1) -> HSV (h 0..360, s 0..1, v 0..1). */
+fun rgbToHsv(r: Float, g: Float, b: Float): Triple<Float, Float, Float> {
+    val max = maxOf(r, g, b)
+    val min = minOf(r, g, b)
+    val delta = max - min
+    val h = when {
+        delta == 0f -> 0f
+        max == r -> (60f * ((g - b) / delta) + 360f) % 360f
+        max == g -> 60f * ((b - r) / delta) + 120f
+        else -> 60f * ((r - g) / delta) + 240f
+    }
+    val s = if (max == 0f) 0f else delta / max
+    return Triple(h, s, max)
+}
+
+/** Pure HSV -> Compose [Color] (opaque). */
+fun hsvToColor(h: Float, s: Float, v: Float): Color {
+    val hh = ((h % 360f) + 360f) % 360f / 60f
+    val c = v * s
+    val x = c * (1f - kotlin.math.abs(hh % 2f - 1f))
+    val m = v - c
+    val (r, g, b) = when (hh.toInt()) {
+        0 -> Triple(c, x, 0f)
+        1 -> Triple(x, c, 0f)
+        2 -> Triple(0f, c, x)
+        3 -> Triple(0f, x, c)
+        4 -> Triple(x, 0f, c)
+        else -> Triple(c, 0f, x)
+    }
+    return Color(r + m, g + m, b + m)
+}
+
+/** Pure RGB (0..1) -> HSL (h 0..360, s 0..1, l 0..1). */
+fun rgbToHsl(r: Float, g: Float, b: Float): Triple<Float, Float, Float> {
+    val max = maxOf(r, g, b)
+    val min = minOf(r, g, b)
+    val l = (max + min) / 2f
+    val delta = max - min
+    if (delta == 0f) return Triple(0f, 0f, l)
+    val s = if (l < 0.5f) delta / (max + min) else delta / (2f - max - min)
+    val h = when (max) {
+        r -> (60f * ((g - b) / delta) + 360f) % 360f
+        g -> 60f * ((b - r) / delta) + 120f
+        else -> 60f * ((r - g) / delta) + 240f
+    }
+    return Triple(h, s, l)
+}
+
+/** Pure HSL -> Compose [Color] (opaque). */
+fun hslToColor(h: Float, s: Float, l: Float): Color {
+    val hh = ((h % 360f) + 360f) % 360f / 60f
+    val c = (1f - kotlin.math.abs(2f * l - 1f)) * s
+    val x = c * (1f - kotlin.math.abs(hh % 2f - 1f))
+    val m = l - c / 2f
+    val (r, g, b) = when (hh.toInt()) {
+        0 -> Triple(c, x, 0f)
+        1 -> Triple(x, c, 0f)
+        2 -> Triple(0f, c, x)
+        3 -> Triple(0f, x, c)
+        4 -> Triple(x, 0f, c)
+        else -> Triple(c, 0f, x)
+    }
+    return Color(r + m, g + m, b + m)
+}

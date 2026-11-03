@@ -26,6 +26,10 @@ fun groupEntitiesByDevice(
     val grouped = linkedMapOf<String, MutableList<String>>()
     for (entity in entities) {
         val deviceId = entityDevices[entity.entityId] ?: continue
+        // Feedback round, item 8: belt & braces beside the
+        // HaClient parse guard — a blank or literal-"null" device
+        // id is never a device, from any source.
+        if (deviceId.isBlank() || deviceId.equals("null", ignoreCase = true)) continue
         grouped.getOrPut(deviceId) { mutableListOf() }.add(entity.entityId)
     }
     return grouped.entries.map { (deviceId, ids) -> DeviceGroup(deviceId, null, ids.sorted()) }
@@ -35,9 +39,19 @@ fun groupEntitiesByDevice(
 fun attachDeviceInfo(groups: List<DeviceGroup>, deviceInfo: Map<String, HaDeviceInfo>): List<DeviceGroup> =
     groups.map { it.copy(info = deviceInfo[it.deviceId]) }
 
-/** Display name for a device row: registry name, else "Device <id>" (never blank). */
-fun deviceDisplayName(group: DeviceGroup): String =
-    group.info?.name?.takeIf { it.isNotBlank() } ?: "Device ${group.deviceId}"
+/** Display name for a device row: registry name, else "Device <id>" (never blank, never the literal "Device null"). */
+fun deviceDisplayName(group: DeviceGroup): String {
+    group.info?.name?.takeIf { it.isNotBlank() }?.let { return it }
+    // Feedback round, item 8: a blank or literal-"null" id has no
+    // honest "Device <id>" form — "Unknown device" is the floor.
+    // (Model/manufacturer stay in the row subtitle, where both
+    // call sites already render them — never duplicated into the
+    // title.) Groups with such ids are dropped by
+    // groupEntitiesByDevice before they reach a row; this is the
+    // last-resort guard for direct callers.
+    val id = group.deviceId.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+    return if (id != null) "Device $id" else "Unknown device"
+}
 
 /**
  * Device match for a search query: registry name, model, or

@@ -75,6 +75,7 @@ import com.garrietta.haven.data.motionSensorForCamera
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.customIconKeyFor
+import com.garrietta.haven.data.presetBadgeColors
 import com.garrietta.haven.data.tilePresetColor
 import com.garrietta.haven.data.tilePresetFor
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
@@ -879,6 +880,72 @@ private fun homeCardStatus(entity: HaEntity): String = when (entity.domain) {
 fun homeCardShapeByIndex(index: Int): RoundedCornerShape = generalCardShape(index)
 
 /**
+ * Feedback round, item 7: the Home Status panel's entity tile —
+ * the same 136dp card language as room grids (44dp badge, 16sp
+ * bold title, 13sp subtitle, general card shape by index, custom
+ * title/icon/color/shape honored, preset-driven badge tints per
+ * item 5), rendered in a 2-column (50/50) grid. Tap goes to the
+ * entity detail page, exactly as the old plain rows did — no
+ * popup, no toggle. Title matches the old row (custom title or
+ * friendly name); subtitle is the humanized state text.
+ */
+@Composable
+fun HomeStatusTile(vm: HavenViewModel, entity: HaEntity, gridIndex: Int, navigate: (Screen) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val isDark = isDarkBackdrop(scheme.background)
+    val cardColors = domainCardColors(entity, isDark)
+    val tileCustom = rememberCardCustom(vm)
+    val preset = tilePresetFor(tileCustom.tilePresets, entity.entityId)
+    val container = tilePresetColor(preset, isDark)
+        ?: cardColors?.container ?: scheme.surfaceContainerLow
+    val (badgeBg, badgeGlyph) = if (preset != null) {
+        presetBadgeColors(preset, isDark)
+    } else if (cardColors != null) {
+        cardColors.badgeBg to cardColors.badgeGlyph
+    } else {
+        badgeColors(scheme, entity, accentFor(entity.entityId))
+    }
+    val title = customTitleFor(tileCustom.titles, entity.entityId, entity.friendlyName)
+    val icon = cardIconForKey(customIconKeyFor(tileCustom.iconKeys, entity.entityId, CARD_ICON_KEYS))
+        ?: domainIcon(entity)
+    Surface(
+        shape = LocalShapePrefs.current.cardShape(entity.entityId) ?: generalCardShape(gridIndex),
+        color = container,
+        modifier = Modifier.fillMaxWidth().height(136.dp)
+            .clickable { navigate(Screen.EntityDetail(entity.entityId)) },
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Box(
+                Modifier.size(44.dp).background(
+                    badgeBg,
+                    LocalShapePrefs.current.badgeShape(entity.entityId)
+                        ?: polygonShape(shapeForDomain(entity.domain)),
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = badgeGlyph, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = ensureContrast(scheme.onSurface, container, 4.5f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                entity.stateText(),
+                fontSize = 13.sp,
+                color = ensureContrast(scheme.onSurfaceVariant, container, 4.5f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
  * Visual-fidelity round §1: the wide (2x1) media card — the
  * mockup's Sonos Arc row. Fixed 136dp like the standard cards, so
  * a media row never unbalances its neighbors. Layout: a 48dp
@@ -901,9 +968,15 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
     val isDark = isDarkBackdrop(scheme.background)
     val cardColors = domainCardColors(display, isDark)
     val mediaCustom = rememberCardCustom(vm)
-    val container = tilePresetColor(tilePresetFor(mediaCustom.tilePresets, entity.entityId), isDark)
+    // Feedback round, item 5: a set preset drives the badge pair
+    // too (dark tint + vivid glyph from the preset hue), not just
+    // the container — the matrix only applies to unset cards.
+    val mediaPreset = tilePresetFor(mediaCustom.tilePresets, entity.entityId)
+    val container = tilePresetColor(mediaPreset, isDark)
         ?: cardColors?.container ?: scheme.surfaceContainerLow
-    val (badgeBg, badgeGlyph) = if (cardColors != null) {
+    val (badgeBg, badgeGlyph) = if (mediaPreset != null) {
+        presetBadgeColors(mediaPreset, isDark)
+    } else if (cardColors != null) {
         cardColors.badgeBg to cardColors.badgeGlyph
     } else {
         badgeColors(scheme, display, accentFor(entity.entityId))
@@ -1134,7 +1207,11 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     val cardDisplayName = customTitleFor(roomCustom.titles, entity.entityId, sensorDisplayName(display))
     val cardIcon = cardIconForKey(customIconKeyFor(roomCustom.iconKeys, entity.entityId, CARD_ICON_KEYS))
         ?: domainIcon(display)
-    val container = tilePresetColor(tilePresetFor(roomCustom.tilePresets, entity.entityId), isDark)
+    // Feedback round, item 5: a set preset drives the badge pair
+    // too (see the media card above) — even for temp/humidity
+    // sensors, whose coral/sky bypass only governs unset cards.
+    val roomPreset = tilePresetFor(roomCustom.tilePresets, entity.entityId)
+    val container = tilePresetColor(roomPreset, isDark)
         ?: cardColors?.container ?: when {
         display.domain == "light" && display.state == "on" ->
             lightBrightnessContainer(
@@ -1160,7 +1237,9 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     }
     val nameColor = ensureContrast(scheme.onSurface, container, 4.5f)
     val statusColor = ensureContrast(scheme.onSurfaceVariant, container, 4.5f)
-    val (badgeBg, badgeGlyph) = if (cardColors != null) {
+    val (badgeBg, badgeGlyph) = if (roomPreset != null) {
+        presetBadgeColors(roomPreset, isDark)
+    } else if (cardColors != null) {
         cardColors.badgeBg to cardColors.badgeGlyph
     } else {
         badgeColors(scheme, display, accent)

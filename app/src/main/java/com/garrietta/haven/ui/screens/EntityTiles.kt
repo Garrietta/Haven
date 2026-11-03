@@ -63,6 +63,7 @@ import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
+import com.garrietta.haven.data.presetBadgeColors
 import com.garrietta.haven.data.tilePresetFor
 import com.garrietta.haven.data.tilePresetColor
 import com.garrietta.haven.data.customIconKeyFor
@@ -244,7 +245,8 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     val tileTitle = customTitleFor(tileCustom.titles, entity.entityId,
         if (entity.domain == "sensor") sensorDisplayName(display) else displayCameraName(display))
     val tileIcon = cardIconForKey(customIconKeyFor(tileCustom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
-    val tilePresetContainer = tilePresetColor(tilePresetFor(tileCustom.tilePresets, entity.entityId), isDarkBackdrop(MaterialTheme.colorScheme.background))
+    val tilePreset = tilePresetFor(tileCustom.tilePresets, entity.entityId)
+    val tilePresetContainer = tilePresetColor(tilePreset, isDarkBackdrop(MaterialTheme.colorScheme.background))
     // The tile's window bounds feed the camera rise origin (and are
     // kept for it). Detail/sheet morphs use the root bounds reported
     // to the shared map (see MorphOverlay), never this rect.
@@ -364,9 +366,16 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // untriggered binary sensors all return the pop-up
                 // grey pair (surfaceContainerHighest +
                 // onSurfaceVariant) from that one function.
-                val (badgeBg, badgeGlyph) = badgeColors(
-                    MaterialTheme.colorScheme, display, accent,
-                )
+                // Feedback round, item 5: a set preset drives the
+                // badge pair too (dark tint + vivid glyph from the
+                // preset hue); unset tiles keep badgeColors.
+                val (badgeBg, badgeGlyph) = if (tilePreset != null) {
+                    presetBadgeColors(tilePreset, isDarkBackdrop(MaterialTheme.colorScheme.background))
+                } else {
+                    badgeColors(
+                        MaterialTheme.colorScheme, display, accent,
+                    )
+                }
                 val shapeAction = shapeTapAction(vm, entity)
                 val badgeInteraction = remember { MutableInteractionSource() }
                 val badgePressed by badgeInteraction.collectIsPressedAsState()

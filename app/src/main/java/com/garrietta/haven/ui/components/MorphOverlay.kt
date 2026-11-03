@@ -507,6 +507,42 @@ fun heroHeaderAlpha(progress: Float): Float =
     1f - smoothstep(0.98f, 1.0f, progress)
 
 /**
+ * Feedback round, item 3: the unfolded centered popup's enter
+ * transform, pure so unit tests pin it. The popup enters FROM the
+ * pressed tile's direction: at progress 0 it sits [distancePx]
+ * along the unit vector from the popup center toward the source
+ * tile's center, at 0.92 scale and 0 alpha; at progress 1 it is
+ * centered, full scale, opaque — so the close (the same lifecycle
+ * running in reverse) exits back toward the tile automatically.
+ * Progress is clamped first (spring overshoot must never push the
+ * offset past the tile or the scale past 1). A null source (no
+ * reported card rect) fades + scales in place, with no offset.
+ */
+data class PopupEnter(val offset: Offset, val scale: Float, val alpha: Float)
+
+fun centeredPopupEnter(
+    progress: Float,
+    sourceCenter: Offset?,
+    popupCenter: Offset,
+    distancePx: Float,
+): PopupEnter {
+    val p = progress.coerceIn(0f, 1f)
+    val direction = if (sourceCenter == null) {
+        Offset.Zero
+    } else {
+        val d = sourceCenter - popupCenter
+        val len = d.getDistance()
+        if (len < 1f) Offset.Zero else d / len
+    }
+    val remaining = 1f - p
+    return PopupEnter(
+        offset = direction * (remaining * distancePx),
+        scale = 0.92f + 0.08f * p,
+        alpha = p,
+    )
+}
+
+/**
  * Hides a destination header while its traveling header is in
  * flight: alpha 0 for the whole morph except the final 2%
  * handoff window (1 − [heroHeaderAlpha]), 1 at rest and outside

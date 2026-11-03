@@ -20,6 +20,43 @@ class MorphMathTest {
     }
 
     @Test
+    fun centeredPopupEnter_comesFromTileDirection() {
+        // Tile left of center → offset points left at p=0, gone at p=1.
+        val left = centeredPopupEnter(0f, Offset(100f, 500f), Offset(500f, 500f), 96f)
+        assertEquals(-96f, left.offset.x, 0.001f)
+        assertEquals(0f, left.offset.y, 0.001f)
+        assertEquals(0.92f, left.scale, 0.001f)
+        assertEquals(0f, left.alpha, 0.001f)
+        // Tile below-right → diagonal offset toward it.
+        val diag = centeredPopupEnter(0f, Offset(600f, 600f), Offset(500f, 500f), 96f)
+        assertTrue(diag.offset.x > 0f && diag.offset.y > 0f)
+        // Halfway: half distance, mid scale/alpha.
+        val mid = centeredPopupEnter(0.5f, Offset(100f, 500f), Offset(500f, 500f), 96f)
+        assertEquals(-48f, mid.offset.x, 0.001f)
+        assertEquals(0.96f, mid.scale, 0.001f)
+        assertEquals(0.5f, mid.alpha, 0.001f)
+        // At rest: centered, full scale, opaque (component-wise:
+        // Offset packs -0.0 distinctly from 0.0, so never compare
+        // whole offsets after a multiply-by-zero).
+        val rest = centeredPopupEnter(1f, Offset(100f, 500f), Offset(500f, 500f), 96f)
+        assertEquals(0f, rest.offset.x, 0.001f)
+        assertEquals(0f, rest.offset.y, 0.001f)
+        assertEquals(1f, rest.scale, 0.001f)
+        assertEquals(1f, rest.alpha, 0.001f)
+        // Null source: fade + scale in place, no offset.
+        val sourceless = centeredPopupEnter(0f, null, Offset(500f, 500f), 96f)
+        assertEquals(0f, sourceless.offset.x, 0.001f)
+        assertEquals(0f, sourceless.offset.y, 0.001f)
+        // Spring overshoot clamps: never past the tile, never past 1.
+        val over = centeredPopupEnter(1.5f, Offset(100f, 500f), Offset(500f, 500f), 96f)
+        assertEquals(0f, over.offset.x, 0.001f)
+        assertEquals(0f, over.offset.y, 0.001f)
+        assertEquals(1f, over.scale, 0.001f)
+        val under = centeredPopupEnter(-0.5f, Offset(100f, 500f), Offset(500f, 500f), 96f)
+        assertEquals(-96f, under.offset.x, 0.001f)
+    }
+
+    @Test
     fun lerpRect_midpoint() {
         assertEquals(Rect(50f, 1000f, 790f, 1700f), lerpRect(from, to, 0.5f))
     }

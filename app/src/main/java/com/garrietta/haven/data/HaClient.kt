@@ -433,7 +433,16 @@ class HaClient(
                 val areaId = o.optString("area_id")
                 if (areaId.isNotEmpty()) entityToArea[entityId] = areaId
                 val deviceId = o.optString("device_id")
-                if (deviceId.isNotEmpty()) entityToDevice[entityId] = deviceId
+                // Feedback round, item 8: HA carries the literal
+                // string "null" as device_id for a set of entities
+                // (proven, not guessed: org.json optString returns
+                // "" for JSON null and for a missing key, so a
+                // "null" reaching here is a real string) — treating
+                // it as a device id renders a "Device null" row
+                // with 18 entities on Garrett's phone. Treat it as
+                // absent; those entities surface under the
+                // Favorites sheet's Ungrouped row instead.
+                if (deviceId.isNotEmpty() && !deviceId.equals("null", ignoreCase = true)) entityToDevice[entityId] = deviceId
             }
             if (entityToArea.isNotEmpty() || entityToDevice.isNotEmpty()) {
                 registryEntityAreas = entityToArea
