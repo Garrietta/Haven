@@ -286,6 +286,33 @@ fun separatedDualAngles(
 }
 
 /**
+ * Feedback round 5, item 5: the dual-number gap, computed from dial
+ * geometry — the label analogue of [separatedDualAngles]. The two
+ * setpoint numbers sit side by side in the dial's center; the gap
+ * between their inner edges must stay ample no matter what the
+ * temperatures are set to, and the pair must clear the track's inner
+ * edge on both sides. So the gap is the dial's inner width minus
+ * both measured label widths minus twice the edge clearance —
+ * floored at [minGapPx], which always wins: when the labels are
+ * wide (3-digit setpoints, large font scale) the inter-label gap
+ * is preserved and the pair may kiss the ring's inner edge by a
+ * couple of pixels instead (glyph side bearings keep the drawn
+ * characters clear). VISUAL ONLY, like the thumb separation: the
+ * setpoints themselves are never rewritten, clamped, or nudged —
+ * this only positions labels. Pure.
+ */
+fun dualNumberGapPx(
+    heatLabelWidthPx: Float,
+    coolLabelWidthPx: Float,
+    dialInnerWidthPx: Float,
+    minGapPx: Float,
+    edgeClearancePx: Float,
+): Float {
+    val fittingGap = dialInnerWidthPx - heatLabelWidthPx - coolLabelWidthPx - 2f * edgeClearancePx
+    return maxOf(minGapPx, fittingGap)
+}
+
+/**
  * Rubber-banding past the dial ends: values inside the range pass through
  * unchanged; overshoot past either end is damped to 35% of the excess, so
  * the thumb resists instead of pinning hard. The APPLIED value is still

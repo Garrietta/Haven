@@ -94,6 +94,47 @@ class CardCustomizationTest {
         assertNull(detailBadgeOverride(presets, HaEntity("light.lamp", "unavailable", emptyMap()), false))
     }
 
+    // Feedback round 5, item 4: the popup accent is the tile
+    // preset's container, and it is deliberately UNGATED — unlike
+    // the badge override above, it returns the container whenever
+    // a preset is set, even for inactive-state entities. The two
+    // filmed cases are exactly that: a CLOSED garage door with
+    // cooling blue and a DOCKED vacuum with sage neutral must
+    // still theme their popups; a gated accent would show nothing
+    // for both. Null only when no preset is set (never invent
+    // color where the user chose none).
+    @Test
+    fun detailPageAccentReturnsContainerUngated() {
+        val cooling = TILE_PRESETS.first { it.key == "cooling" }
+        val sage = TILE_PRESETS.first { it.key == "sage" }
+        val presets = mapOf(
+            "cover.garage" to "cooling",
+            "vacuum.v" to "sage",
+            "light.lamp" to "amber",
+        )
+        // Inactive-state entities still get their container.
+        assertEquals(
+            tilePresetColor(cooling, false),
+            detailPageAccent(presets, HaEntity("cover.garage", "closed", emptyMap()), false),
+        )
+        assertEquals(
+            tilePresetColor(sage, false),
+            detailPageAccent(presets, HaEntity("vacuum.v", "docked", emptyMap()), false),
+        )
+        // Active entities and both themes, same rule.
+        assertEquals(
+            tilePresetColor(cooling, true),
+            detailPageAccent(presets, HaEntity("cover.garage", "open", emptyMap()), true),
+        )
+        assertEquals(
+            tilePresetColor(sage, true),
+            detailPageAccent(presets, HaEntity("vacuum.v", "cleaning", emptyMap()), true),
+        )
+        // Unset / unknown key: null, never an invented color.
+        assertNull(detailPageAccent(presets, HaEntity("light.plain", "on", emptyMap()), false))
+        assertNull(detailPageAccent(mapOf("light.lamp" to "nope"), HaEntity("light.lamp", "on", emptyMap()), false))
+    }
+
     @Test
     fun amberPresetReadsAmberOnYellowTintedNearBlack() {
         val amber = TILE_PRESETS.first { it.key == "amber" }

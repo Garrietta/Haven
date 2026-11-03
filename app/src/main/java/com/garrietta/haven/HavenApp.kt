@@ -159,6 +159,7 @@ import androidx.media3.common.Player
 import android.view.SurfaceView
 import com.garrietta.haven.data.cameraSupportsStream
 import com.garrietta.haven.data.detailBadgeOverride
+import com.garrietta.haven.data.detailPageAccent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
@@ -303,6 +304,13 @@ private class SheetAnim(val id: String, val source: Rect?)
 /** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
 private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?)
 
+/** Feedback round 5, item 1: a detail opened from a panel card, stacked above the panel overlay
+ * WITHOUT touching the backstack. The panel stays the backstack top, so the base page never
+ * switches to the panel page (the "middleman" screen). Back from this layer returns to the panel
+ * popup, not Home. The source rect is captured at tap time from the panel card, same rule as
+ * the detail block's open-captured rect. */
+private class PanelDetailAnim(val entityId: String, val source: Rect?)
+
 /** Open thermostat pop-out morph: the climate entity plus its source card rect (same fallback rule as sheets). */
 private class PopoutAnim(val id: String, val source: Rect?)
 
@@ -368,6 +376,9 @@ fun HavenApp(vm: HavenViewModel) {
         var arcTarget by remember { mutableStateOf<Pair<String, Rect>?>(null) }
         var sheetAnim by remember { mutableStateOf<SheetAnim?>(null) }
         var detailAnim by remember { mutableStateOf<DetailAnim?>(null) }
+        // Feedback round 5, item 1: the stacked panel-detail layer (see PanelDetailAnim).
+        var panelDetailAnim by remember { mutableStateOf<PanelDetailAnim?>(null) }
+        val panelDetailProgress = remember { Animatable(0f) }
         val sheetProgress = remember { Animatable(0f) }
         val detailProgress = remember { Animatable(0f) }
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
@@ -394,6 +405,7 @@ fun HavenApp(vm: HavenViewModel) {
         var morphGeneration by remember { mutableIntStateOf(0) }
         var sheetExiting by remember { mutableStateOf(false) }
         var detailExiting by remember { mutableStateOf(false) }
+        var panelDetailExiting by remember { mutableStateOf(false) }
         var popoutExiting by remember { mutableStateOf(false) }
         // Scroll-away state lives here, above goTop, so a tab switch
         // can reset it: it used to persist across tabs (remembered on
@@ -419,6 +431,7 @@ fun HavenApp(vm: HavenViewModel) {
             vm.closePopup()
             sheetAnim = null
             detailAnim = null
+            panelDetailAnim = null
             popoutAnim = null
             heroTarget = null
             arcTarget = null
@@ -563,8 +576,50 @@ fun HavenApp(vm: HavenViewModel) {
                 }
             }
         }
+        // Feedback round 5, item 1: the stacked panel-detail layer's dismiss paths. These mirror
+        // dismissDetail/dismissDetailInstant exactly, except they never touch the backstack —
+        // the panel stays the backstack top throughout, so dismissing returns to the panel popup.
+        fun dismissPanelDetailInstant() {
+            val anim = panelDetailAnim ?: return
+            if (panelDetailAnim?.entityId == anim.entityId) {
+                panelDetailAnim = null
+            }
+            vm.clearTravelSnapshot(anim.entityId)
+            heroTarget = null
+            arcTarget = null
+        }
+        fun dismissPanelDetail() {
+            val anim = panelDetailAnim ?: return
+            if (panelDetailExiting) return
+            panelDetailExiting = true
+            vm.captureTravelSnapshot(anim.entityId)
+            val gen = morphGeneration
+            scope.launch {
+                try {
+                    if (reduceMotion) panelDetailProgress.snapTo(0f)
+                    else panelDetailProgress.animateTo(0f, springBounds())
+                } finally {
+                    panelDetailExiting = false
+                    if (gen == morphGeneration && panelDetailAnim?.entityId == anim.entityId) {
+                        dismissPanelDetailInstant()
+                    }
+                }
+            }
+        }
+        // Open a panel detail: capture the tapped panel card's rect now (the panel is still
+        // composed, so cardBounds holds the panel card's rect); the open effect below animates
+        // progress 0 -> 1. A retap while one is open replaces it and clears the stale snapshot.
+        fun openPanelDetail(entityId: String) {
+            val prev = panelDetailAnim
+            if (prev != null && prev.entityId != entityId) {
+                vm.clearTravelSnapshot(prev.entityId)
+            }
+            if (prev?.entityId == entityId) return
+            panelDetailAnim = PanelDetailAnim(entityId, cardBounds[entityId])
+        }
         val goBack: () -> Unit = {
-            if (detailAnim != null) dismissDetail()
+            if (panelDetailAnim != null) dismissPanelDetail()
+            else if (detailAnim != null) dismissDetail()
             else if (popoutAnim != null) dismissPopout()
             else if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
         }
@@ -574,6 +629,7 @@ fun HavenApp(vm: HavenViewModel) {
             vm.closePopup()
             sheetAnim = null
             detailAnim = null
+            panelDetailAnim = null
             popoutAnim = null
             heroTarget = null
             arcTarget = null
@@ -639,6 +695,22 @@ fun HavenApp(vm: HavenViewModel) {
                 heroTarget = null
                 arcTarget = null
                 vm.clearTravelSnapshot(anim.entityId)
+            }
+        }
+        // Feedback round 5, item 1: panel-detail open effect (mirrors the detail effect). The
+        // snapshot is captured from the tapped panel card's rect; no traveler flies on this
+        // layer (the source lives in the sub-panel underneath), so no hero/arc target is needed.
+        LaunchedEffect(panelDetailAnim?.entityId) {
+            val anim = panelDetailAnim
+            if (anim != null) {
+                vm.captureTravelSnapshot(anim.entityId)
+                if (!reduceMotion) {
+                    panelDetailProgress.snapTo(0f)
+                    panelDetailProgress.animateTo(1f, springBounds())
+                } else panelDetailProgress.snapTo(1f)
+            } else {
+                heroTarget = null
+                arcTarget = null
             }
         }
         // Thermostat pop-out open effect (mirrors the sheet effect):
@@ -766,6 +838,9 @@ fun HavenApp(vm: HavenViewModel) {
                     vm = vm,
                     navigate = navigate,
                     goBack = goBack,
+                    // Feedback round 5, item 1: panel cards open the stacked panel-detail
+                    // layer instead of pushing EntityDetail (see openPanelDetail).
+                    onPanelDetail = { entityId -> openPanelDetail(entityId) },
                     themeMode = themeMode,
                     reduceMotion = reduceMotion,
                     onThemeMode = {
@@ -789,7 +864,7 @@ fun HavenApp(vm: HavenViewModel) {
             // GONE: the pill now exits the viewport during panels (see
             // the pill-exit below), which replaces the blur as the answer
             // to the panel problem, and the panel itself covers the page.
-            val modalActive = sheetAnim != null || detailAnim != null || popoutAnim != null
+            val modalActive = sheetAnim != null || detailAnim != null || panelDetailAnim != null || popoutAnim != null
             // Scroll-away (production-upgrade round): the pill slides
             // out of view on a downward scroll past 8dp and returns on
             // an upward scroll past 8dp (the spec sample's thresholds,
@@ -857,7 +932,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // read the root lambda only inside graphicsLayer,
                 // never during composition — no per-frame
                 // recomposition cost.
-                LocalMorphClosing provides (sheetExiting || detailExiting || popoutExiting),
+                LocalMorphClosing provides (sheetExiting || detailExiting || panelDetailExiting || popoutExiting),
                 LocalMorphProgress provides {
                     when {
                         sheetAnim != null -> sheetProgress.value
@@ -1419,6 +1494,49 @@ fun HavenApp(vm: HavenViewModel) {
                 )
                 } // else: folded full-screen morph (feedback item 3)
             }
+            // Feedback round 5, item 1: the stacked panel-detail layer. Composed AFTER the detail
+            // block, so it draws above the still-visible panel popup; it renders DetailPageScreen
+            // directly (never via content(EntityDetail)), so the backstack stays
+            // [Today, HomeStatusPanel] and the base page never switches to the panel page.
+            // The source is the rect captured at tap time (the panel card's rect); the live map
+            // is only the fallback for cards that never reported bounds. No traveler flies here:
+            // the source lives in the sub-panel underneath, so the destination header badge
+            // renders from frame 0 (LocalSuppressTraveler = true, same rule as round 4's
+            // detailFromPanel gate). No hero/arc targets are reported on this layer — with no
+            // traveler, nothing consumes them, and reporting would clobber the panel's targets.
+            // Posture mirrors the detail block: centered popup unfolded, full-screen morph folded.
+            if (panelDetailAnim != null) {
+                val anim = panelDetailAnim!!
+                BackHandler { dismissPanelDetail() }
+                val panelDetailSource = anim.source ?: cardBounds[anim.entityId]
+                if (LocalWideLayout.current) {
+                    CenteredPopup(
+                        progress = { panelDetailProgress.value },
+                        source = panelDetailSource,
+                        overlayOrigin = overlayOrigin,
+                        panelBackground = MaterialTheme.colorScheme.background,
+                        onDismiss = { dismissPanelDetail() },
+                    ) {
+                        CompositionLocalProvider(LocalSuppressTraveler provides true) {
+                            DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
+                        }
+                    }
+                } else {
+                PanelOverlay(
+                    progress = { panelDetailProgress.value },
+                    source = panelDetailSource,
+                    overlayOrigin = overlayOrigin,
+                    panelBackground = MaterialTheme.colorScheme.background,
+                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    onDismiss = { dismissPanelDetail() },
+                    isClosing = panelDetailExiting,
+                ) {
+                    CompositionLocalProvider(LocalSuppressTraveler provides true) {
+                        DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
+                    }
+                }
+                } // else: folded full-screen morph (mirrors the detail block)
+            }
             // Thermostat pop-out panel (Round 4: the ONLY
             // thermostat panel — tap and long-press on the Ecobee
             // card both land here; the old pop-out -> Details page
@@ -1605,6 +1723,10 @@ private fun ScreenContent(
     vm: HavenViewModel,
     navigate: (Screen) -> Unit,
     goBack: () -> Unit,
+    // Feedback round 5, item 1: panel cards open the stacked panel-detail layer. Default is a
+    // no-op so existing call sites are unaffected; the HavenApp content lambda passes the real
+    // opener, and only the HomeStatusPanel branch forwards it.
+    onPanelDetail: (String) -> Unit = {},
     themeMode: String,
     reduceMotion: Boolean,
     onThemeMode: (String) -> Unit,
@@ -1646,7 +1768,7 @@ private fun ScreenContent(
         is Screen.SecurityPanel -> SecurityPanelScreen(vm, goBack)
         is Screen.GreenhousePanel -> GreenhousePanelScreen(vm, goBack)
         is Screen.UpdatesPanel -> UpdatesPanelScreen(vm, goBack)
-        is Screen.HomeStatusPanel -> HomeStatusPanelScreen(vm, screen.categoryKey, navigate)
+        is Screen.HomeStatusPanel -> HomeStatusPanelScreen(vm, screen.categoryKey, navigate, onPanelDetail)
         is Screen.CameraClips -> CameraClipsScreen(vm, screen.entityId, goBack)
         is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
         Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)
@@ -1735,6 +1857,15 @@ private fun EntityPopupSheetContent(
                     sheetCustom.tilePresets, entity,
                     isDarkBackdrop(MaterialTheme.colorScheme.background),
                 )
+                // Feedback round 5, item 4: the sheet's controls carry
+                // the assigned tile color itself (ungated — see
+                // detailPageAccent: the video-3 garage/vacuum sheets
+                // are closed/docked entities, and the user expects
+                // the chosen color there regardless of state).
+                val sheetAccent = detailPageAccent(
+                    sheetCustom.tilePresets, entity,
+                    isDarkBackdrop(MaterialTheme.colorScheme.background),
+                )
                 Row(
                     Modifier.fillMaxWidth()
                         .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
@@ -1762,7 +1893,7 @@ private fun EntityPopupSheetContent(
                 // is a dead control here (this IS the detail surface),
                 // so the card renders without it and the name still shows.
                 // Nested: the sheet panel is already a container.
-                EntityControlCard(entity, vm, onDetail = { }, showHeader = false, nested = true)
+                EntityControlCard(entity, vm, onDetail = { }, showHeader = false, nested = true, pageAccent = sheetAccent, pageBadge = sheetBadgeOverride)
                 Spacer(Modifier.height(12.dp))
                 Row {
                     KodaMenuRow(

@@ -65,6 +65,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -321,17 +322,29 @@ fun PressablePillButton(
  * by [height] (48dp on the page, 32dp on the tile).
  */
 @Composable
-fun ExpressiveStepper(symbol: String, onClick: () -> Unit, height: Dp = 48.dp, modifier: Modifier = Modifier) {
+fun ExpressiveStepper(
+    symbol: String,
+    onClick: () -> Unit,
+    height: Dp = 48.dp,
+    modifier: Modifier = Modifier,
+    // Feedback round 5, item 4: the thermostat steppers carry the
+    // tile preset accent when set; null keeps the scheme defaults
+    // byte-identical (tile steppers pass nothing).
+    containerColor: androidx.compose.ui.graphics.Color? = null,
+    contentColor: androidx.compose.ui.graphics.Color? = null,
+) {
     PressablePillButton(
         onClick = onClick,
         modifier = modifier.width(height * 1.5f),
         height = height,
+        containerColor = containerColor ?: MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = contentColor ?: MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Text(
             symbol,
             fontSize = if (height >= 48.dp) 22.sp else 16.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = contentColor ?: MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 }
@@ -367,7 +380,12 @@ fun shapeTapAction(vm: HavenViewModel, entity: HaEntity): (() -> Unit)? = when (
 }
 
 @Composable
-fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit) {
+fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true, showForecast: Boolean = true, nested: Boolean = false, morphSource: Boolean = !nested, headerClickable: Boolean = true, onDetail: (String) -> Unit,
+    // Feedback round 5, item 4: the page accent funnel. The assigned tile color (preset
+    // container, or null) and badge pair (or null) thread from the detail page / sheet into
+    // every domain control below, so one resolution themes the whole surface. Default null
+    // keeps every existing caller (home tiles, boards, areas, search) byte-identical.
+    pageAccent: Color? = null, pageBadge: Pair<Color, Color>? = null) {
     val accent = accentFor(entity.entityId)
     // Snapshot-held visuals (2026-10-30 verdict round): when this
     // card is the active morph source, its badge, name, state, and
@@ -497,7 +515,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     val headerCustom = rememberCardCustom(vm)
                     val headerIcon = cardIconForKey(customIconKeyFor(headerCustom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(display)
                     val headerTitle = customTitleFor(headerCustom.titles, entity.entityId, sensorDisplayName(display))
-                    DomainBadge(display, headerIcon, accent, Modifier.size(56.dp).then(if (morphSource) Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier).then(badgeClick))
+                    DomainBadge(display, headerIcon, accent, Modifier.size(56.dp).then(if (morphSource) Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier).then(badgeClick), badgeOverride = pageBadge)
                     Spacer(Modifier.width(16.dp))
                     Row(
                         Modifier.weight(1f).then(detailClick),
@@ -514,13 +532,13 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
             }
             when (entity.domain) {
                 "light" -> LightControl(entity, vm)
-                "switch" -> SwitchControl(entity, vm)
-                "cover" -> CoverControl(entity, vm)
-                "climate" -> ClimateControl(entity, vm)
-                "vacuum" -> VacuumControl(entity, vm)
-                "media_player" -> MediaControl(entity, vm)
-                "fan" -> FanControl(entity, vm)
-                "lock" -> LockControl(entity, vm)
+                "switch" -> SwitchControl(entity, vm, pageAccent)
+                "cover" -> CoverControl(entity, vm, pageAccent)
+                "climate" -> ClimateControl(entity, vm, pageAccent)
+                "vacuum" -> VacuumControl(entity, vm, pageAccent, pageBadge)
+                "media_player" -> MediaControl(entity, vm, pageAccent, pageBadge)
+                "fan" -> FanControl(entity, vm, pageAccent)
+                "lock" -> LockControl(entity, vm, pageAccent)
                 else -> MoreControl(entity, vm, showForecast = showForecast)
             }
         }
@@ -624,18 +642,27 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel, showBulb: Boolean = true)
 }
 
 @Composable
-fun SwitchControl(entity: HaEntity, vm: HavenViewModel) {
+fun SwitchControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        PillToggle(entity.state == "on", { vm.toggle(entity.entityId) }, accentFor(entity.entityId))
+        // Feedback round 5, item 4: the toggle track is the assigned tile color when a preset
+        // is set (same pastel-container language as the detail big toggle), else the hashed
+        // identity accent as before. Unchecked stays surfaceVariant inside PillToggle.
+        PillToggle(entity.state == "on", { vm.toggle(entity.entityId) }, pageAccent ?: accentFor(entity.entityId))
         Spacer(Modifier.width(12.dp))
         Text(if (entity.state == "on") "On" else "Off", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
 @Composable
-fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
+fun CoverControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
     val position = entity.attrInt("current_position") ?: if (entity.state == "open") 100 else 0
     val accent = accentFor(entity.entityId)
+    // Feedback round 5, item 4: the sheet door fill, pills, and slider follow the assigned
+    // tile color when a preset is set (the video-3 garage sheet: sky blue door + pills +
+    // slider), else the hashed identity accent as before. Disabled pills keep their
+    // surfaceContainerHighest muted treatment — the invalid-direction law is untouched.
+    val pillContainer = pageAccent ?: MaterialTheme.colorScheme.secondaryContainer
+    val pillContent = if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer
     val isGarage = entity.attrString("device_class") == "garage"
     Row(verticalAlignment = Alignment.CenterVertically) {
         // Door visual: the door slides up as the cover opens, on the house spring.
@@ -653,7 +680,7 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
             Box(
                 Modifier.fillMaxWidth()
                     .height(110.dp * animatedDoorFraction)
-                    .background(accent, MaterialTheme.shapes.large)
+                    .background(pageAccent ?: accent, MaterialTheme.shapes.large)
                     .align(Alignment.TopCenter),
             )
         }
@@ -686,6 +713,8 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
                     modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
                     height = 56.dp,
                     enabled = !isOpen,
+                    containerColor = if (isOpen) MaterialTheme.colorScheme.surfaceContainerHighest else pillContainer,
+                    contentColor = if (isOpen) MaterialTheme.colorScheme.onSurfaceVariant else pillContent,
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 ) { Text("Open", fontWeight = FontWeight.SemiBold) }
                 PressablePillButton(
@@ -693,12 +722,14 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
                     modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
                     height = 56.dp,
                     enabled = !isClosed,
+                    containerColor = if (isClosed) MaterialTheme.colorScheme.surfaceContainerHighest else pillContainer,
+                    contentColor = if (isClosed) MaterialTheme.colorScheme.onSurfaceVariant else pillContent,
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 ) { Text("Close", fontWeight = FontWeight.SemiBold) }
                 PressablePillButton(
                     onClick = { vm.callService("cover", "stop_cover", entity.entityId) },
                     height = 56.dp,
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    containerColor = pageAccent ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 ) { Text("Stop", fontWeight = FontWeight.SemiBold) }
@@ -706,12 +737,12 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel) {
         }
     }
     Spacer(Modifier.height(8.dp))
-    ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent, formatValue = { "${it.toInt()}%" })
+    ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, pageAccent ?: accent, formatValue = { "${it.toInt()}%" })
 }
 
 
 @Composable
-fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
+fun ClimateControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
     val accent = accentFor(entity.entityId)
     val current = entity.attrDouble("current_temperature")
     // Heat/cool thermostats (like the Ecobee) report target_temp_high/low
@@ -790,7 +821,10 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel) {
         // The slider moves the same active setpoint and snaps to whole
         // degrees on release, so every path changes temperature in 1°
         // intervals. Its window matches the dial's dynamic window.
-        ServiceSlider(active, displayRange, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, accent, formatValue = { "${snapToDegree(it.toDouble()).toInt()}°" })
+        // Feedback round 5, item 4: the sheet climate slider follows the assigned tile color;
+        // the dial itself keeps its heat/cool mode colors (they carry mode meaning, item 6
+        // reworks only the dial's label/stepper layout around the kept scallop).
+        ServiceSlider(active, displayRange, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, pageAccent ?: accent, formatValue = { "${snapToDegree(it.toDouble()).toInt()}°" })
         if (modes.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -865,7 +899,7 @@ fun applyClimateSetpoint(vm: HavenViewModel, entity: HaEntity, selector: Setpoin
  * generic control is what every OTHER vacuum entity (e.g. the
  * HomeKit bridge vacuum_homekit of the same Eufy) gets.
  */
-fun VacuumControl(entity: HaEntity, vm: HavenViewModel) {
+fun VacuumControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null, pageBadge: Pair<Color, Color>? = null) {
     val battery = entity.attrInt("battery_level")
     val fanSpeed = entity.attrString("fan_speed")
     val speeds = entity.attrList("fan_speed_list")?.mapNotNull { it as? String } ?: emptyList()
@@ -876,22 +910,38 @@ fun VacuumControl(entity: HaEntity, vm: HavenViewModel) {
     )
     if (battery != null) {
         Spacer(Modifier.height(8.dp))
-        LinearProgressIndicator(progress = { (battery / 100f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        // Feedback round 5, item 4: the battery meter follows the badge pair (dark ink in
+        // light theme, bright tint in dark — the same pair the badge renders), so the meter
+        // stays visible on the page background in both themes. No preset → default primary.
+        val batteryColor = pageBadge?.let { if (isDarkBackdrop(MaterialTheme.colorScheme.background)) it.second else it.first }
+        if (batteryColor != null) {
+            LinearProgressIndicator(progress = { (battery / 100f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = batteryColor)
+        } else {
+            LinearProgressIndicator(progress = { (battery / 100f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        }
     }
     Spacer(Modifier.height(12.dp))
+    // Feedback round 5, item 4: every action pill carries the assigned tile color (the
+    // video-3 vacuum sheet: sage Start/Dock/Locate), with theme-aware onSurface text. The
+    // video-3 sheet is the headline case — a DOCKED vacuum — so this reads pageAccent, not
+    // the state-gated badge pair (see detailPageAccent's gating note).
+    val vacuumPillContainer = pageAccent ?: MaterialTheme.colorScheme.secondaryContainer
+    val vacuumPillContent = if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (entity.state == "cleaning") {
             PressablePillButton(onClick = { vm.callService("vacuum", "pause", entity.entityId) }, height = 56.dp,
+                containerColor = vacuumPillContainer, contentColor = vacuumPillContent,
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Pause", fontWeight = FontWeight.SemiBold) }
         } else {
             PressablePillButton(onClick = { vm.callService("vacuum", "start", entity.entityId) }, height = 56.dp,
+                containerColor = vacuumPillContainer, contentColor = vacuumPillContent,
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Start", fontWeight = FontWeight.SemiBold) }
         }
         PressablePillButton(onClick = { vm.callService("vacuum", "return_to_base", entity.entityId) }, height = 56.dp,
+            containerColor = vacuumPillContainer, contentColor = vacuumPillContent,
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Dock", fontWeight = FontWeight.SemiBold) }
         PressablePillButton(onClick = { vm.callService("vacuum", "locate", entity.entityId) }, height = 56.dp,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            contentColor = MaterialTheme.colorScheme.onSurface,
+            containerColor = vacuumPillContainer, contentColor = vacuumPillContent,
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { Text("Locate", fontWeight = FontWeight.SemiBold) }
     }
     if (speeds.isNotEmpty()) {
@@ -907,6 +957,9 @@ fun VacuumControl(entity: HaEntity, vm: HavenViewModel) {
                         vm.callService("vacuum", "set_fan_speed", entity.entityId, JSONObject().put("fan_speed", speed))
                     },
                     label = { Text(humanizeOptionLabel(speed)) },
+                    // Feedback round 5, item 4: the selected speed chip carries the tile
+                    // color; unselected chips stay scheme (their signal is selected-vs-not).
+                    colors = if (pageAccent != null) FilterChipDefaults.filterChipColors(selectedContainerColor = pageAccent) else FilterChipDefaults.filterChipColors(),
                 )
             }
         }
@@ -914,7 +967,7 @@ fun VacuumControl(entity: HaEntity, vm: HavenViewModel) {
 }
 
 @Composable
-fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
+fun MediaControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null, pageBadge: Pair<Color, Color>? = null) {
     val title = entity.attrString("media_title") ?: "Nothing playing"
     val artist = entity.attrString("media_artist")
     val volume = entity.attrDouble("volume_level") ?: 0.5
@@ -925,12 +978,16 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
         Spacer(Modifier.height(8.dp))
         // Expressive-menus round: the reference-player transport
         // (big central squircle + flanking squircles) replaces the
-        // 56dp pill row; service calls are identical.
+        // 56dp pill row; service calls are identical. Feedback
+        // round 5, item 4: the central squircle carries the tile
+        // color when a preset is set; flanking squircles stay
+        // scheme (their signal is flanking-vs-central, not color).
         MediaTransportRow(
             playing = playing,
             onPrevious = { vm.callService("media_player", "media_previous_track", entity.entityId) },
             onPlayPause = { vm.callService("media_player", "media_play_pause", entity.entityId) },
             onNext = { vm.callService("media_player", "media_next_track", entity.entityId) },
+            pageAccent = pageAccent,
         )
         Spacer(Modifier.height(12.dp))
         val muted = entity.attrBool("is_volume_muted") ?: false
@@ -946,7 +1003,11 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
             // Customization round, item 8: media badge fill
             // accent (very light purple #DAB9FF in dark mode),
             // never the deep-ink glyph or the hashed identity accent.
-            val sheetMediaAccent = domainCardColors(entity, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
+            // Feedback round 5, item 4: a preset tile color wins over
+            // the matrix badge fill (its dark ink, so the slider stays
+            // visible on the page background in both themes).
+            val sheetMediaAccent = pageBadge?.first
+                ?: domainCardColors(entity, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
                 ?: accentFor(entity.entityId)
             ServiceSlider(
                 (volume * 100).toFloat(), 0f..100f,
@@ -963,10 +1024,13 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
             Box {
                 // The source is the real output affordance (HA has no
                 // queue): a large 56dp pill trigger, not an outlined
-                // button, with large menu items below.
+                // button, with large menu items below. Feedback round
+                // 5, item 4: the source pill carries the tile color.
                 PressablePillButton(
                     onClick = { expanded = true },
                     height = 56.dp,
+                    containerColor = pageAccent ?: MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 ) {
                     Text(currentSource, fontWeight = FontWeight.SemiBold)
@@ -993,21 +1057,22 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel) {
 }
 
 @Composable
-fun FanControl(entity: HaEntity, vm: HavenViewModel) {
+fun FanControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
     val pct = entity.attrInt("percentage") ?: 0
     val presets = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
     val oscillating = entity.attrBool("oscillating") ?: false
     Text("Speed $pct%", fontWeight = FontWeight.SemiBold)
+    // Feedback round 5, item 4: speed slider + oscillate toggle follow the tile color.
     ServiceSlider(
         pct.toFloat(), 0f..100f,
         { vm.callService("fan", "set_percentage", entity.entityId, JSONObject().put("percentage", it.toInt())) },
-        accentFor(entity.entityId),
+        pageAccent ?: accentFor(entity.entityId),
     )
     Row(verticalAlignment = Alignment.CenterVertically) {
         PillToggle(
             oscillating,
             { vm.callService("fan", "oscillate", entity.entityId, JSONObject().put("oscillating", !oscillating)) },
-            accentFor(entity.entityId),
+            pageAccent ?: accentFor(entity.entityId),
         )
         Spacer(Modifier.width(12.dp))
         Text("Oscillate", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1031,22 +1096,27 @@ fun FanControl(entity: HaEntity, vm: HavenViewModel) {
 }
 
 @Composable
-fun LockControl(entity: HaEntity, vm: HavenViewModel) {
+fun LockControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
     var confirmUnlock by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(entity.stateText(), fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.weight(1f))
         if (entity.state == "locked") {
             // Expressive-menus round: large 56dp pill, same tap.
+            // Feedback round 5, item 4: the pill carries the tile color.
             PressablePillButton(
                 onClick = { confirmUnlock = true },
                 height = 56.dp,
+                containerColor = pageAccent ?: MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             ) { Text("Unlock", fontWeight = FontWeight.SemiBold) }
         } else {
             PressablePillButton(
                 onClick = { vm.callService("lock", "lock", entity.entityId) },
                 height = 56.dp,
+                containerColor = pageAccent ?: MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             ) { Text("Lock", fontWeight = FontWeight.SemiBold) }
         }

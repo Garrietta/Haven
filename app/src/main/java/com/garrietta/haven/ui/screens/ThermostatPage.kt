@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 import com.garrietta.haven.data.detailBadgeOverride
+import com.garrietta.haven.data.detailPageAccent
 import com.garrietta.haven.ui.components.LocalSuppressTraveler
 import com.garrietta.haven.ui.components.compositeOver
 import com.garrietta.haven.ui.components.isDarkBackdrop
@@ -47,9 +48,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -106,6 +109,12 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     // card's preset pair, like every other detail header.
     val popoutCustom = rememberCardCustom(vm)
     val popoutBadge = detailBadgeOverride(
+        popoutCustom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+    )
+    // Feedback round 5, item 4: the tile preset accent tints the
+    // stepper pills below the disc, like the other popup elements.
+    val popoutAccent = detailPageAccent(
         popoutCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
     )
@@ -220,6 +229,12 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
                 ),
             )
         }
+        // Feedback round 5, item 6: the - / + steppers live HERE,
+        // below the scallop disc with 16dp of daylight — never
+        // inside the dial face, never on the radial. The scallop
+        // itself is untouched (the user likes it).
+        Spacer(Modifier.height(16.dp))
+        ThermostatSteppers(dialState, popoutAccent)
         // The Heat/Cool bar + out-of-range note live BELOW the disc
         // with 28dp of daylight (the bar used to live inside the
         // disc, where its square corners crossed the scallop's
@@ -340,7 +355,7 @@ private fun orderedFanModes(modes: List<String>): List<String> {
     return canonical.filter { it in modes } + modes.filter { it !in canonical }
 }
 
-/** Hero dial: Google Home's dual numbers + inside steppers + ring marks.
+/** Hero dial: Google Home's dual numbers + steppers below the dial + ring marks.
  *
  * Heat/cool thermostats have two setpoints and the dial edits exactly one
  * of them: the active selector, toggled by tapping inside the dial face
@@ -372,7 +387,45 @@ fun ThermostatHero(
     val state = rememberThermostatDialState(entity, vm, min, max, displayRange)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         ThermostatDialBlock(state, entity, vm, displayRange, diameter, numberBackdrop)
+        // Feedback round 5, item 6: the steppers sit below the
+        // dial block, clear of the radial — same move as the
+        // popout, so no surface keeps them inside the dial face.
+        Spacer(Modifier.height(16.dp))
+        ThermostatSteppers(state, accent = null)
         ThermostatBelowDial(state)
+    }
+}
+
+/**
+ * Feedback round 5, item 6: the thermostat - / + steppers as
+ * their own centered row, rendered BELOW the dial (never inside
+ * the dial face), so they can never sit on the temperature
+ * radial. Item 4: the tile preset accent tints the pills when
+ * set (content = onSurface, the pill-content law); null keeps
+ * the scheme defaults byte-identical.
+ */
+@Composable
+private fun ThermostatSteppers(
+    state: ThermostatDialState,
+    accent: Color?,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ExpressiveStepper(
+            "−",
+            onClick = { state.stepActive(-1f) },
+            containerColor = accent,
+            contentColor = if (accent != null) scheme.onSurface else null,
+        )
+        ExpressiveStepper(
+            "+",
+            onClick = { state.stepActive(1f) },
+            containerColor = accent,
+            contentColor = if (accent != null) scheme.onSurface else null,
+        )
     }
 }
 
@@ -519,7 +572,46 @@ private fun ThermostatDialBlock(
             diameter = diameter,
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // Hoisted above the dual/single branch so the measurer
+            // slot never shifts if the mode changes mid-lifetime.
+            val textMeasurer = rememberTextMeasurer()
+            val density = LocalDensity.current
             if (state.heatCool) {
+                // Feedback round 5, item 5: the gap between the two
+                // numbers is COMPUTED from dial geometry, never a
+                // fixed guess — the measured label widths plus the
+                // track's inner width (diameter minus twice the
+                // 20dp track inset and the 8dp idle half-stroke;
+                // see ThermostatDial's trackRadiusPx/trackStroke)
+                // feed dualNumberGapPx, which spreads the pair to
+                // fill the inner width with 8dp of clearance per
+                // side, floored at an ample 32dp. The 240dp popout
+                // dial cannot fit 32dp plus full clearance at
+                // 52.sp (its inner width is 184dp against ~153dp
+                // of labels), so there the floor wins and the pair
+                // kisses the ring's inner edge by ~2dp of label
+                // BOX per side — the drawn glyphs stay clear on
+                // their side bearings; the 300dp hero dial gets
+                // the full computed spread. Visual only: setpoints
+                // are never touched, only label positions.
+                val numberStyle = TextStyle(
+                    fontSize = 52.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFeatureSettings = "tnum",
+                )
+                val heatLabelWidth = textMeasurer.measure(
+                    state.heat.value.toDouble().formatTemp(), numberStyle,
+                ).size.width.toFloat()
+                val coolLabelWidth = textMeasurer.measure(
+                    state.cool.value.toDouble().formatTemp(), numberStyle,
+                ).size.width.toFloat()
+                val innerWidthPx = with(density) { (diameter - 56.dp).toPx() }
+                val dualGap = with(density) {
+                    dualNumberGapPx(
+                        heatLabelWidth, coolLabelWidth, innerWidthPx,
+                        32.dp.toPx(), 8.dp.toPx(),
+                    ).toDp()
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     KineticTempText(
                         state.heat.value,
@@ -527,7 +619,7 @@ private fun ThermostatDialBlock(
                         active = state.selector.value == SetpointSelector.HEATING,
                         backdrop = numberBackdrop,
                     )
-                    Spacer(Modifier.width(16.dp))
+                    Spacer(Modifier.width(dualGap))
                     KineticTempText(
                         state.cool.value,
                         CoolBlue,
@@ -539,8 +631,14 @@ private fun ThermostatDialBlock(
                 KineticTempText(state.single.value, state.dialAccent, active = true, fontSize = 72.sp, backdrop = numberBackdrop)
             }
             // Round 6: the indoor temperature label lives HERE,
-            // directly above the - / + buttons — never inside the
-            // dial canvas, never below the steppers.
+            // in the dial's center below the numbers — never
+            // inside the dial canvas. Feedback round 5, item 6:
+            // the - / + steppers NO LONGER live here: they moved
+            // below the dial (see ThermostatSteppers, rendered by
+            // the popout under the scallop disc and by the hero
+            // under the dial block), clear of the radial, so the
+            // centered overlay holds only numbers + Indoor text
+            // and no text overlaps the ring at rest.
             if (current != null) {
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -549,19 +647,6 @@ private fun ThermostatDialBlock(
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            // Feedback round 2, item 4: the steppers sit 16dp below
-            // the Indoor label (was 8dp) — further from the dial,
-            // giving the dual numbers room clear of the icon, while
-            // staying inside the dial face (the centered column
-            // grows internally; the panel gains no room).
-            Spacer(Modifier.height(16.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ExpressiveStepper("−", onClick = { state.stepActive(-1f) })
-                ExpressiveStepper("+", onClick = { state.stepActive(1f) })
             }
         }
         }
@@ -624,14 +709,19 @@ private fun ThermostatBelowDial(state: ThermostatDialState) {
  * The default size is the DUAL-number size (the single-setpoint call
  * site passes 72.sp explicitly). Dual numbers sit inside the dial's
  * ring, so their width must clear the track's inner edge: at 64.sp
- * the "67° + 16dp + 70°" row spans ~208dp (half-width ~104dp),
+ * the old "67° + 16dp + 70°" row spanned ~208dp (half-width ~104dp),
  * past the 260dp pop-out dial's ~102dp inner edge at rest — and the
- * kinetic scale-out (1.15x) pushes it to ~239dp, a definite overlap
+ * kinetic scale-out (1.15x) pushed it to ~239dp, a definite overlap
  * with the bar (the 2026-10-29 verdict video's circled 67°/70°).
- * At 52.sp the row spans ~169dp (~194dp at peak scale), clearing the
- * bar on both the 260dp pop-out dial and the 300dp page dial (whose
- * inner edge is ~122dp). The single number stays 72.sp: ~108dp wide,
- * no overlap.
+ * At 52.sp with the feedback-round-5 computed gap the row spans
+ * labels + gap: ~185dp at rest on the 240dp pop-out dial (inner
+ * width 184dp — the 32dp floor costs ~2dp of label BOX per side,
+ * drawn glyphs stay clear on their side bearings) and ~231dp on
+ * the 300dp hero dial (inner width 244dp, full 8dp clearance per
+ * side). The kinetic peak scale (1.15x, outgoing text only, sliding
+ * vertically away) can transiently touch the ring during a value
+ * change; at rest the pair is clear. The single number stays
+ * 72.sp: ~108dp wide, no overlap.
  */
 @Composable
 private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 52.sp, backdrop: Color) {

@@ -11,6 +11,28 @@ class ThermostatLogicTest {
     private fun entity(entityId: String, state: String, attrs: Map<String, Any?> = emptyMap()) =
         HaEntity(entityId, state, attrs)
 
+    // Feedback round 5, item 5: the dual-number gap is computed
+    // from dial geometry — it spreads the pair to fill the inner
+    // width with the edge clearance, floored at the ample minimum.
+    @Test
+    fun dualNumberGapSpreadsToFillInnerWidth() {
+        // 300dp hero dial: inner width 244, two 76px labels,
+        // 8px clearance per side -> 244 - 152 - 16 = 76px gap.
+        assertEquals(76f, dualNumberGapPx(76f, 76f, 244f, 32f, 8f), 0.001f)
+    }
+
+    @Test
+    fun dualNumberGapFloorsAtMinimumWhenDialIsNarrow() {
+        // 240dp popout dial: inner width 184, two 78px labels,
+        // 8px clearance -> fitting gap 12px, below the 32px floor.
+        assertEquals(32f, dualNumberGapPx(78f, 78f, 184f, 32f, 8f), 0.001f)
+        // 3-digit labels (100°) widen further; the floor still wins
+        // so the numbers never touch each other.
+        assertEquals(32f, dualNumberGapPx(102f, 78f, 184f, 32f, 8f), 0.001f)
+        // Even absurdly wide labels never push the gap below the floor.
+        assertEquals(32f, dualNumberGapPx(200f, 200f, 184f, 32f, 8f), 0.001f)
+    }
+
     @Test
     fun rangeFractionClampsAndGuardsZeroSpan() {
         assertEquals(0f, rangeFraction(0.0, 50.0, 90.0), 0.001f)

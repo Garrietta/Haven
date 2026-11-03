@@ -1,5 +1,169 @@
 # Haven Changelog
 
+## Feedback round 5 (2026-11-03, videos new1 + new2 + new3)
+
+Three narrated videos against the feedback-round-4 build
+(`6cebaa52`, CI Build APKs run #111 green). 339 unit tests, 0
+failures (336 baseline + 3 new: two dual-number-gap cases and
+one popup-accent gating case). NOTE: no local APK this round
+— the sandbox's Gradle daemon IPC broke after the baseline
+(a fresh Gradle user home and a trivial `help` task fail the
+same way: the client cannot read a valid message from its own
+daemon), so local builds and local test runs were impossible
+and CI is the verifier; the CI haven-debug artifact is the
+installable build.
+
+### Item 1 — panel-card tap opens the detail directly (video new1)
+
+Tapping a card inside a Home Status panel (e.g. the Lights
+panel) used to switch the base page to a full-width panel page
+behind the detail popup — a middleman screen the user never
+asked for. The detail now opens as a stacked overlay directly
+over the panel popup: a backstack-independent `PanelDetailAnim`
+layer in `HavenApp.kt`, sourced from the tapped panel card's
+open-captured rect (live bounds map as fallback), with back
+returning to the panel popup, never to Home. Round 4's
+nested-panel ghosting fixes stay intact (base renders
+instantly while an overlay is open; the traveler stays
+suppressed under overlays; the panel-detail layer reports no
+traveler targets of its own, so it cannot clobber the panel's).
+Wide postures get the centered popup, folded gets the panel
+overlay; climate via this layer renders the same
+`ThermostatPopout` as the detail path.
+
+### Item 2 — detail toggle track takes the preset pastel (video new1)
+
+Round 4 set the preset detail toggle track to the preset badge
+background (dark). The user corrected himself on video: it is
+the BACKGROUND that changes, not the knob. The detail toggle
+track now uses the preset's pastel container (Standing Lamp
+reads yellow #FFE082, matching its card; the knob stays
+white) via the new `detailPageAccent` helper, which supersedes
+round 4's judgment call for the toggle. Non-preset detail
+toggles are unchanged.
+
+### Item 3 — card text can no longer clip at card edges (video new2)
+
+On the Home Status page the thermostat card's "Cooling to 67°"
+lost its descender and the Garage Door card's "Closed" was cut
+in half at the card's bottom edge. Root cause: the fixed
+136dp card left ≤6dp of slack on the filmed variants (48dp
+garage door visual, 26sp climate trailing temperature, title
++ subtitle line heights), so any font-scale growth overflowed
+the Surface clip. The fix is a real layout buffer, not an
+overlay: 136dp is now a FLOOR (`heightIn(min = 136.dp)`), so
+standard cards stay exactly 136dp and overflowing content
+grows its card instead of clipping — title + subtitle fully
+fit on every variant. The change is in `HomeRoomCard` itself,
+so it covers all three surfaces that render it (Home grid,
+Home Status panels, Favorites); the polygon path keeps its
+round-2 spacer/padding shift. A grown card makes its grid row
+taller; its row-mate stays 136dp top-aligned. Search rows use
+`EntityTile`, a different component with no fixed height, and
+are unaffected.
+
+### Item 4 — tile color themes the whole popup page (video new3)
+
+Changing a tile's color used to change only the tile. The
+stored tile choice now drives the popup page's key elements
+for every entity type, through `detailPageAccent` threaded
+from the detail content and the sheet card funnels (optional
+params defaulting to current behavior, so untouched callers
+are byte-identical). Themed: cover sheet door fill, Open /
+Close / Stop pills and position slider; garage detail slatted
+door, 56dp pills and slider; vacuum Start / Pause / Dock /
+Locate pills, battery progress and selected fan-speed chip;
+media transport central squircle, volume slider and source
+pill; switch / fan toggles and sliders; lock pills; climate
+sheet slider; thermostat stepper pills (see item 6); Round-3
+vacuum and media panel pills, sliders and toggles. Pill
+content reads onSurface when an accent is present, else the
+previous onSecondaryContainer; disabled pills keep the muted
+treatment and 0.38 alpha dim law.
+
+Judgment call, reported prominently: the popup accent is
+deliberately UNGATED, diverging from the brief's "keep
+presetAppliesForState gating" clause. Both filmed examples
+are inactive-state entities — a CLOSED garage door with
+cooling blue, a DOCKED vacuum with sage neutral — and a
+gated accent would show NOTHING for exactly the two cases
+the user filmed ("any time you change the color of a tile…
+for ANY entity"). The accent returns the container whenever
+a preset is set and null only when none is set, so no color
+is ever invented where the user chose none. Card faces keep
+the on-state law (a preset card renders inactive gray when
+off) and badges keep `detailBadgeOverride`'s gating (badges
+signal state); toggle off-states still read gray via the
+unchecked branch.
+
+Deliberately left on defaults: the page background stays
+scheme.background (chrome, not an element; tinting the page
+face risks washing out readability and disturbing morph
+fromBackground reconciliation); section headers stay text
+colors (pastel accent as text fails contrast); hero state
+text keeps hashed accentFor (readability); light hero
+kelvin / brightness panels and light sliders / hue dots
+stay device colors (they show actual color temperature, not
+a theme choice); light status cards stay scheme surfaces;
+sensor / binary_sensor semantic tints stay (temperature
+coral / humidity sky bypass the matrix by standing law);
+generic Turn on / off / Toggle outlined buttons stay
+(outlined text; accent text unreadable); media flanking
+squircles stay scheme (flanking-vs-central hierarchy);
+fan / vacuum unselected chips stay scheme (selected-vs-not
+is the signal); Round-3 vacuum tile Clean / Dock pills are a
+card surface, not a popup page, and keep the card law; media
+panel D-pad buttons are remote.tv's chrome, a different
+entity than the player; security / greenhouse / updates
+panel actions have no single entity preset to resolve;
+thermostat dial mode colors and Mode / Fan segmented bars
+keep mode semantics (the header badge is already preset-
+themed via `detailBadgeOverride`).
+
+### Item 5 — thermostat numbers get a computed gap (video new3)
+
+The dual setpoint numbers (e.g. Heat 66° / Cool 70°) sat 16dp
+apart and crowded each other at rest and during changes. The
+gap is now computed from dial geometry
+(`dualNumberGapPx` in `ThermostatLogic.kt`, the label
+analogue of `separatedDualAngles`): measured label widths
+plus the track's inner width (diameter minus twice the 20dp
+track inset and the 8dp idle half-stroke) spread the pair to
+fill the inner width with 8dp of clearance per side, floored
+at an ample 32dp. The 300dp hero dial gets the full spread
+(~75dp); the 240dp popout dial cannot fit 32dp plus full
+clearance at 52sp (inner width 184dp against ~153dp of
+labels), so there the floor wins and the pair kisses the
+ring's inner edge by ~2dp of label box per side — the drawn
+glyphs stay clear on their side bearings. VISUAL ONLY, like
+the thumb separation: setpoints are never rewritten,
+clamped, or nudged; only label positions move.
+
+### Item 6 — steppers move below the dial; no text on the radial (video new3)
+
+The - / + steppers sat inside the dial face, on the radial.
+They now render as their own row BELOW the dial on both
+surfaces that share `ThermostatDialBlock`: under the scallop
+disc in the popout (16dp of daylight) and under the dial
+block in the hero. The scalloped card background is kept
+exactly as the user likes it; only the layout around it
+moved. With the steppers out, the centered overlay holds
+only the numbers + Indoor label, so no text overlaps the
+radial at rest. Residual: the kinetic number animation's
+outgoing text scales to 1.15x while sliding vertically away
+during a value change, which can transiently touch the ring
+mid-change; at rest the pair is clear (see item 5).
+
+### Standing law re-verified
+
+WebRTC stays gated off (`webrtcEnabled = false`); no
+negative padding in any changed file (progress clamped to
+[0,1] before geometry math); thermostat stays 1°F,
+handle-grab-only, inside-tap toggles heat / cool, clamps +
+gap-proofing, onFinished reports the actually-set value;
+nav stays Home / Scenes / Energy / Settings; pill tokens
+unchanged.
+
 ## Feedback round 4 (2026-11-03, videos df1 + df2)
 
 Two narrated videos against the feedback-round-3 build

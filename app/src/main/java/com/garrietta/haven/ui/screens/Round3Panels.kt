@@ -131,6 +131,7 @@ import com.garrietta.haven.ui.screens.rememberCardCustom
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.data.customTitleFor
+import com.garrietta.haven.data.detailPageAccent
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.components.generalCardShape
@@ -182,11 +183,24 @@ private fun PanelBodyText(text: String) {
  * vacuum / security / media panel actions; calls are identical.
  */
 @Composable
-private fun PillAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+private fun PillAction(
+    label: String,
+    enabled: Boolean = true,
+    // Feedback round 5, item 4: the panel action pill carries the panel entity's tile color
+    // when a preset is set, else the scheme default. onClick stays LAST so existing
+    // trailing-lambda call sites keep working; disabled pills keep their muted law via
+    // the caller's alpha/enabled handling (PressablePillButton has no disabled color of its
+    // own — callers dim via Modifier.alpha, as the vacuum panel does).
+    containerColor: androidx.compose.ui.graphics.Color? = null,
+    contentColor: androidx.compose.ui.graphics.Color? = null,
+    onClick: () -> Unit,
+) {
     PressablePillButton(
         onClick = onClick,
         enabled = enabled,
         height = 56.dp,
+        containerColor = containerColor ?: MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = contentColor ?: MaterialTheme.colorScheme.onSecondaryContainer,
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(label, fontWeight = FontWeight.SemiBold)
@@ -748,6 +762,11 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
         }
         return
     }
+    // Feedback round 5, item 4: the panel's action pills carry the vacuum's tile color
+    // (ungated — see detailPageAccent; a docked vacuum's panel still shows its sage).
+    val vacuumPanelCustom = rememberCardCustom(vm)
+    val vacuumPanelAccent = detailPageAccent(vacuumPanelCustom.tilePresets, vacuum, isDarkBackdrop(MaterialTheme.colorScheme.background))
+    val vacuumPanelPillContent = if (vacuumPanelAccent != null) MaterialTheme.colorScheme.onSurface else null
     // Lidar map: the map camera's latest snapshot, cache-first like
     // the camera hero — a snapshot, never claimed as a live render.
     LaunchedEffect(VACUUM_MAP_CAMERA_ID) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
@@ -792,7 +811,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     PanelBodyText("Map snapshot not available yet.")
                     Spacer(Modifier.height(8.dp))
-                    PillAction("Refresh map") { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
+                    PillAction("Refresh map", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
                 }
             }
         }
@@ -800,21 +819,21 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
         PanelCard {
         PanelSectionTitle("Transport")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillAction("Start") { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
-            PillAction("Pause") { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
-            PillAction("Return to Base") { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
+            PillAction("Start", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
+            PillAction("Pause", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
+            PillAction("Return to Base", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
         }
         }
         PanelCard {
         PanelSectionTitle("Dock actions")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillAction("Empty Dust Bin") { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
-            PillAction("Wash Mop") { vm.callService("button", "press", VACUUM_WASH_MOP_BUTTON_ID) }
+            PillAction("Empty Dust Bin", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
+            PillAction("Wash Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_WASH_MOP_BUTTON_ID) }
         }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillAction("Dry Mop") { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
-            PillAction("Stop Dry Mop") { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
+            PillAction("Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
+            PillAction("Stop Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
         }
         }
         PanelCard {
@@ -853,7 +872,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.width(12.dp))
-                PillAction("Reset") { vm.callService("button", "press", consumable.resetButtonId) }
+                PillAction("Reset", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", consumable.resetButtonId) }
             }
             Spacer(Modifier.height(12.dp))
         }
@@ -917,6 +936,15 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val volume = entity.attrDouble("volume_level") ?: 0.5
     val muted = entity.attrBool("is_volume_muted") ?: false
     val remote = states[REMOTE_TV_ID]
+    // Feedback round 5, item 4: the panel's action pill + volume slider carry the player's
+    // tile color (container for the pill, badge ink for the slider, as on the sheet).
+    val mediaPanelCustom = rememberCardCustom(vm)
+    val mediaPanelAccent = detailPageAccent(mediaPanelCustom.tilePresets, entity, isDarkBackdrop(MaterialTheme.colorScheme.background))
+    val mediaPanelBadge = com.garrietta.haven.data.detailBadgeOverride(
+        mediaPanelCustom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+    )
+    val mediaPanelPillContent = if (mediaPanelAccent != null) MaterialTheme.colorScheme.onSurface else null
     Column(Modifier.padding(horizontal = 16.dp)) {
         DetailPopupTitleHeader(entity.friendlyName)
         if (unavailable) {
@@ -949,7 +977,7 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            PillAction(if (off) "Turn on" else "Turn off") {
+            PillAction(if (off) "Turn on" else "Turn off", containerColor = mediaPanelAccent, contentColor = mediaPanelPillContent) {
                 if (off) vm.turnOn(entityId) else vm.turnOff(entityId)
             }
             Text(
@@ -1000,9 +1028,12 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         ) {
             // Customization round, item 8: media badge fill
             // accent (very light purple #DAB9FF in dark mode).
-            val panelMediaAccent = vm.states.value[entityId]?.let {
-                domainCardColors(it, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
-            } ?: accentFor(entityId)
+            // Feedback round 5, item 4: a preset tile color's dark
+            // ink wins over the matrix fill, as on the sheet.
+            val panelMediaAccent = mediaPanelBadge?.first
+                ?: vm.states.value[entityId]?.let {
+                    domainCardColors(it, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
+                } ?: accentFor(entityId)
             ServiceSlider(
                 (volume * 100).toFloat(), 0f..100f,
                 { vm.callService("media_player", "volume_set", entityId, JSONObject().put("volume_level", it / 100f)) },

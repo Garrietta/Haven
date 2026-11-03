@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -1255,8 +1256,22 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         // extraLarge here — the mockup's cards are asymmetric).
         shape = cardOutline,
         color = container,
+        // Feedback round 5, item 3: 136dp is a FLOOR, not a
+        // ceiling. The fixed height left ≤6dp of slack on the
+        // filmed variants (48dp garage door visual, 26sp climate
+        // trailing temperature, title + subtitle line heights),
+        // so any font-scale growth overflowed the Surface clip
+        // and cut subtitle descenders ("Cooling to 67°") and whole
+        // lines ("Closed") at the card's bottom edge. With a
+        // minimum height, standard cards stay exactly 136dp and
+        // overflowing content grows its card instead of clipping
+        // — a real layout buffer, never an overlay/scrim, never
+        // negative padding. A grown card makes its grid row
+        // taller; its row-mate stays 136dp top-aligned, which
+        // reads better than cut text. The polygon path keeps its
+        // round-2 spacer/padding shift (inscribed-circle clip).
         modifier = Modifier.fillMaxWidth()
-            .height(136.dp)
+            .heightIn(min = 136.dp)
             .reportCardBounds(entity.entityId)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)

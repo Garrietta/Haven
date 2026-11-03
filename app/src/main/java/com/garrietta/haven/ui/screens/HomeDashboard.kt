@@ -204,6 +204,11 @@ fun HomeStatusPanelScreen(
     vm: HavenViewModel,
     categoryKey: String,
     navigate: (Screen) -> Unit,
+    // Feedback round 5, item 1: when provided, panel card taps open the stacked panel-detail
+    // layer above this panel instead of pushing EntityDetail (which used to evict this panel
+    // overlay and re-render the panel as the base page — the "middleman" screen). Null/fallback
+    // keeps the old navigate(EntityDetail) route.
+    onPanelDetail: ((String) -> Unit)? = null,
 ) {
     val states by vm.states.collectAsState()
     val item = deriveHomeStatus(
@@ -273,7 +278,13 @@ fun HomeStatusPanelScreen(
                                     entity.entityId,
                                     navigate,
                                     rowIndex * 2 + colIndex,
-                                ) { navigate(Screen.EntityDetail(entity.entityId)) }
+                                ) {
+                                    // Feedback round 5, item 1: stacked panel detail, no
+                                    // backstack push, no base-page switch. Back from the
+                                    // detail returns to this panel popup.
+                                    if (onPanelDetail != null) onPanelDetail(entity.entityId)
+                                    else navigate(Screen.EntityDetail(entity.entityId))
+                                }
                             }
                         }
                     }

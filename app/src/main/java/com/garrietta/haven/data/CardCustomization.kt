@@ -136,6 +136,40 @@ fun detailBadgeOverride(
 }
 
 /**
+ * Feedback round 5, items 2 + 4: the assigned tile color itself — the preset's container
+ * (pastel in light theme, deep tone in dark) — for an entity with a custom tile preset.
+ * Item 2: this SUPERSEDES round 4's judgment call that set the detail big-toggle track to the
+ * preset badge bg (dark tonal ink): on video the user corrected that the toggle BACKGROUND
+ * should be the assigned color (Standing Lamp's track yellow, like its card), while the knob
+ * stays white. Note the knob-contrast consequence the user accepted: the big toggle's knob is
+ * hardcoded white, so a pastel track + white knob is lower contrast than the old dark track —
+ * the disc edge is still visible (white vs pastel luminance differ), and the track color is
+ * what he asked to see.
+ *
+ * GATING — DELIBERATE, DOCUMENTED DIVERGENCE from [detailBadgeOverride]: this accent is
+ * intentionally NOT gated by [presetAppliesForState]. The video-3 evidence forces it: both
+ * headline examples are inactive-state entities — a CLOSED garage door set to cooling blue,
+ * and a DOCKED vacuum set to sage — and the user expects the chosen color through the popup
+ * regardless ("any time you change the color of a tile, it should change the key colors
+ * associated with the elements of the popup page for ANY entity"). A gated accent would show
+ * NOTHING for exactly the two cases he filmed. The card face keeps its on-state law (a preset
+ * card renders inactive gray when off, so color still signals state on the grid) and badges
+ * keep [detailBadgeOverride]'s gating (badges signal state); only the popup accent — a control
+ * surface, not a state signal — follows the user's choice unconditionally. Null ONLY when no
+ * preset is set (never invent color where the user chose none); callers then keep defaults.
+ * (Toggle off-state still reads gray: VerticalPillToggle/PillToggle use surfaceVariant when
+ * unchecked, whatever accent is passed.)
+ */
+fun detailPageAccent(
+    presets: Map<String, String>,
+    entity: HaEntity,
+    isDark: Boolean,
+): Color? {
+    val preset = tilePresetFor(presets, entity.entityId) ?: return null
+    return tilePresetColor(preset, isDark)
+}
+
+/**
  * Feedback round 2, item 1: a custom tile preset is an ON-state
  * color. It applies only while the entity is in its active state;
  * when the entity is off (or its state is unknown), the card must

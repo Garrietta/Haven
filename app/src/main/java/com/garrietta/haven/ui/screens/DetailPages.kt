@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -94,6 +95,7 @@ import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.data.detailBadgeOverride
+import com.garrietta.haven.data.detailPageAccent
 import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.lightBrightnessContainer
@@ -157,6 +159,13 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         detailCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
     )
+    // Feedback round 5, items 2 + 4: the assigned tile color itself (preset container), gated
+    // by the same active rules as the badge pair — the detail toggle track (item 2) and the
+    // page-wide accent (item 4) share this one resolution, so they can never disagree.
+    val detailAccent = detailPageAccent(
+        detailCustom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+    )
     // Climate safety net (Round 4): any path still landing on an
     // EntityDetail for climate renders the primary dial panel
     // directly — the secondary thermostat page is deleted.
@@ -188,7 +197,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         }
         return
     }
-    DetailPageContent(vm, entity, onBack, badgeOverride = detailBadge)
+    DetailPageContent(vm, entity, onBack, badgeOverride = detailBadge, pageAccent = detailAccent)
 }
 
 /**
@@ -242,6 +251,10 @@ private fun DetailPageContent(
     // resolved by DetailPageScreen from the same store maps the
     // card reads.
     badgeOverride: Pair<Color, Color>? = null,
+    // Feedback round 5, items 2 + 4: the assigned tile color itself (preset container, or
+    // null), resolved by DetailPageScreen next to the badge pair. The detail toggle track
+    // (item 2) and every themed page element (item 4) read this one value.
+    pageAccent: Color? = null,
 ) {
     val accent = accentFor(entity.entityId)
     val hero: @Composable () -> Unit = {
@@ -302,11 +315,15 @@ private fun DetailPageContent(
                 VerticalPillToggle(
                     checked = entity.state == "on",
                     onToggle = { vm.toggle(entity.entityId) },
-                    // Feedback round 4, item 2: the toggle track is
-                    // the preset badge bg (dark tonal ink) when a
-                    // preset is active — the card's switch track —
-                    // else the default primary, as before.
-                    onColor = badgeOverride?.first ?: MaterialTheme.colorScheme.primary,
+                    // Feedback round 5, item 2 (SUPERSEDES round 4's
+                    // badge-bg track): the toggle track is the
+                    // preset's pastel container when a preset is
+                    // active — Standing Lamp's track goes yellow
+                    // like its card — else the default primary, as
+                    // before. The knob stays hardcoded white inside
+                    // VerticalPillToggle, per the user's correction
+                    // (the background changes, not the knob).
+                    onColor = pageAccent ?: MaterialTheme.colorScheme.primary,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -324,20 +341,20 @@ private fun DetailPageContent(
                 // fabricated; no entity ids are shown.
                 LightStatusCard(entity, vm)
             }
-            "switch", "input_boolean" -> SwitchControl(entity, vm)
-            "cover" -> CoverPageControl(entity, vm)
-            "lock" -> LockControl(entity, vm)
+            "switch", "input_boolean" -> SwitchControl(entity, vm, pageAccent)
+            "cover" -> CoverPageControl(entity, vm, pageAccent)
+            "lock" -> LockControl(entity, vm, pageAccent)
             // Detail keeps only the labeled strip (see history()):
             // SensorTile's own chart would duplicate it (2026-10-30).
             "sensor", "binary_sensor" -> SensorTile(entity, vm, showHeader = false, showChart = false)
-            "media_player" -> MediaPageControl(entity, vm)
-            "vacuum" -> VacuumControl(entity, vm)
-            "fan" -> FanControl(entity, vm)
+            "media_player" -> MediaPageControl(entity, vm, pageAccent, badgeOverride)
+            "vacuum" -> VacuumControl(entity, vm, pageAccent, badgeOverride)
+            "fan" -> FanControl(entity, vm, pageAccent)
             "weather" -> WeatherControl(entity, vm, showForecast = true)
             // This inner card is page content, never a morph source: it
             // must not report bounds or hide (the page overlay itself
             // is the morph surface).
-            else -> EntityControlCard(entity, vm, onDetail = { }, showHeader = false, morphSource = false)
+            else -> EntityControlCard(entity, vm, onDetail = { }, showHeader = false, morphSource = false, pageAccent = pageAccent, pageBadge = badgeOverride)
         }
         Spacer(Modifier.height(16.dp))
         // Generic on/off actions, only where they make sense: an entity
@@ -424,12 +441,12 @@ fun garageDoorFillFraction(position: Int?, state: String): Float {
 
 /** Cover page: open/close/stop always, position slider only when the cover reports one. */
 @Composable
-private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
+private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
     val position = entity.attrInt("current_position")
     val accent = accentFor(entity.entityId)
     val isGarage = entity.attrString("device_class") == "garage"
     if (isGarage) {
-        GarageDoorMenu(entity, vm, position)
+        GarageDoorMenu(entity, vm, position, pageAccent)
         return
     }
     Column {
@@ -445,21 +462,26 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
         val isClosed = entity.state == "closed" || position == 0
         val isOpen = entity.state == "open" || position == 100
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Feedback round 5, item 4: Open/Close carry the tile color; Stop stays the
+            // outlined default (an outlined pill has no fill to tint, and accent-colored
+            // text on the page background fails contrast). Disabled pills keep the dim law.
             FilledTonalButton(
                 onClick = { vm.callService("cover", "open_cover", entity.entityId) },
                 modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
                 enabled = !isOpen,
+                colors = if (pageAccent != null) ButtonDefaults.filledTonalButtonColors(containerColor = pageAccent, contentColor = MaterialTheme.colorScheme.onSurface) else ButtonDefaults.filledTonalButtonColors(),
             ) { Text("Open") }
             FilledTonalButton(
                 onClick = { vm.callService("cover", "close_cover", entity.entityId) },
                 modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
                 enabled = !isClosed,
+                colors = if (pageAccent != null) ButtonDefaults.filledTonalButtonColors(containerColor = pageAccent, contentColor = MaterialTheme.colorScheme.onSurface) else ButtonDefaults.filledTonalButtonColors(),
             ) { Text("Close") }
             OutlinedButton(onClick = { vm.callService("cover", "stop_cover", entity.entityId) }) { Text("Stop") }
         }
         if (position != null) {
             Spacer(Modifier.height(8.dp))
-            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, accent, formatValue = { "${it.toInt()}%" })
+            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, pageAccent ?: accent, formatValue = { "${it.toInt()}%" })
         }
     }
 }
@@ -481,7 +503,7 @@ private fun CoverPageControl(entity: HaEntity, vm: HavenViewModel) {
  * camera feed is a later round, explicitly not added.
  */
 @Composable
-private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?) {
+private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?, pageAccent: Color? = null) {
     // Open fraction: 1 - closed fraction (see garageDoorFillFraction).
     val openFraction = 1f - garageDoorFillFraction(position, entity.state)
     val reduceMotion = LocalReduceMotion.current
@@ -500,11 +522,14 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
         // panel translates UP as the door opens (reverse on close).
         // The Open/Close/Stop pills and the position slider below
         // are unchanged, with the same invalid-direction law.
+        // Feedback round 5, item 4: the slatted door fill is the tile color (the video-3
+        // garage detail: sky blue door), else the scheme primary as before.
         GarageDoorVisual(
             openFraction = openClamped,
             onToggle = { vm.toggleCover(entity.entityId) },
             width = 160.dp,
             height = 180.dp,
+            doorColor = pageAccent ?: MaterialTheme.colorScheme.primary,
         )
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -515,13 +540,16 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
             // treatment from round 1 looked fully active while
             // closed. The alpha drop is unmistakable against the
             // full-alpha siblings, and enabled = false blocks taps.
+            // Feedback round 5, item 4: Open/Close/Stop all carry the tile color (the
+            // video-3 garage detail: sky blue pills). Disabled pills keep their muted
+            // surfaceContainerHighest treatment — the invalid-direction law is untouched.
             PressablePillButton(
                 onClick = { vm.callService("cover", "open_cover", entity.entityId) },
                 modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
                 height = 56.dp,
                 enabled = !isOpen,
-                containerColor = if (isOpen) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = if (isOpen) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
+                containerColor = if (isOpen) MaterialTheme.colorScheme.surfaceContainerHighest else (pageAccent ?: MaterialTheme.colorScheme.secondaryContainer),
+                contentColor = if (isOpen) MaterialTheme.colorScheme.onSurfaceVariant else (if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer),
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Open", fontWeight = FontWeight.SemiBold)
@@ -531,8 +559,8 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
                 modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
                 height = 56.dp,
                 enabled = !isClosed,
-                containerColor = if (isClosed) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = if (isClosed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
+                containerColor = if (isClosed) MaterialTheme.colorScheme.surfaceContainerHighest else (pageAccent ?: MaterialTheme.colorScheme.secondaryContainer),
+                contentColor = if (isClosed) MaterialTheme.colorScheme.onSurfaceVariant else (if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer),
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Close", fontWeight = FontWeight.SemiBold)
@@ -540,7 +568,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
             PressablePillButton(
                 onClick = { vm.callService("cover", "stop_cover", entity.entityId) },
                 height = 56.dp,
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                containerColor = pageAccent ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
@@ -549,7 +577,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?)
         }
         if (position != null) {
             Spacer(Modifier.height(8.dp))
-            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, MaterialTheme.colorScheme.primary, formatValue = { "${it.toInt()}%" })
+            ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, pageAccent ?: MaterialTheme.colorScheme.primary, formatValue = { "${it.toInt()}%" })
         }
     }
 }
@@ -574,7 +602,7 @@ private fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Triple<Str
  * Anything HA would reject never renders as a button.
  */
 @Composable
-private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
+private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null, pageBadge: Pair<Color, Color>? = null) {
     val title = entity.attrString("media_title") ?: "Nothing playing"
     val artist = entity.attrString("media_artist")
     val volume = entity.attrDouble("volume_level")
@@ -586,11 +614,13 @@ private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
         Spacer(Modifier.height(8.dp))
         if (transportOk) {
             // Expressive-menus round: reference-player transport.
+            // Feedback round 5, item 4: the central squircle carries the tile color.
             MediaTransportRow(
                 playing = playing,
                 onPrevious = { vm.callService("media_player", "media_previous_track", entity.entityId) },
                 onPlayPause = { vm.callService("media_player", "media_play_pause", entity.entityId) },
                 onNext = { vm.callService("media_player", "media_next_track", entity.entityId) },
+                pageAccent = pageAccent,
             )
             Spacer(Modifier.height(12.dp))
         }
@@ -609,7 +639,10 @@ private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
                 // Customization round, item 8: the slider accent
                 // is the media badge FILL (very light purple #DAB9FF
                 // in dark mode), never the deep-ink badge glyph.
-                val mediaSliderAccent = domainCardColors(entity, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
+                // Feedback round 5, item 4: a preset tile color's dark
+                // ink wins over the matrix fill, as on the sheet.
+                val mediaSliderAccent = pageBadge?.first
+                    ?: domainCardColors(entity, isDarkBackdrop(MaterialTheme.colorScheme.background))?.badgeBg
                     ?: accentFor(entity.entityId)
                 ServiceSlider(
                     (volume * 100).toFloat(), 0f..100f,
@@ -625,9 +658,12 @@ private fun MediaPageControl(entity: HaEntity, vm: HavenViewModel) {
             val currentSource = entity.attrString("source") ?: "Source"
             Spacer(Modifier.height(12.dp))
             Box {
+                // Feedback round 5, item 4: the source pill carries the tile color.
                 PressablePillButton(
                     onClick = { expanded = true },
                     height = 56.dp,
+                    containerColor = pageAccent ?: MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = if (pageAccent != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSecondaryContainer,
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 ) {
                     Text(currentSource, fontWeight = FontWeight.SemiBold)

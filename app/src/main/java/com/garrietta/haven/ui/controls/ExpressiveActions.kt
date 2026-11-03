@@ -56,6 +56,9 @@ fun MediaTransportRow(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
+    // Feedback round 5, item 4: the central squircle carries the assigned tile color when a
+    // preset is set; flanking squircles stay scheme (their signal is flanking-vs-central).
+    pageAccent: androidx.compose.ui.graphics.Color? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Row(
@@ -77,8 +80,8 @@ fun MediaTransportRow(
             modifier = Modifier.size(96.dp),
             height = 96.dp,
             shape = MediaSquircle,
-            containerColor = scheme.primaryContainer,
-            contentColor = scheme.onPrimaryContainer,
+            containerColor = pageAccent ?: scheme.primaryContainer,
+            contentColor = if (pageAccent != null) scheme.onSurface else scheme.onPrimaryContainer,
         ) {
             Icon(
                 if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
