@@ -10,7 +10,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -60,7 +59,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SheetPageContent(
     origin: Rect?,
-    progress: Float,
+    progress: () -> Float,
     modifier: Modifier = Modifier,
     background: Color = MaterialTheme.colorScheme.background,
     content: @Composable () -> Unit,
@@ -78,27 +77,34 @@ fun SheetPageContent(
     } else {
         0f
     }
-    val active = bounds != null && progress < 1f
-    val shift = startShift * (1f - progress)
+    // Round 7: every progress read lives inside graphicsLayer
+    // blocks. The old code took progress as a Float and derived
+    // shift/radius/alpha during composition, so callers passing
+    // Animatable.value recomposed this whole subtree every frame.
+    // The corner clip also moves into the layer (shape + clip) so
+    // the radius no longer rebuilds a clip modifier per frame.
     // Shared clamped corner math: the sheet spring (0.85 damping)
     // overshoots past 1, and an unclamped 28.dp * (1f - progress)
     // would go negative and throw in createOutline (2026-10-29 crash
     // round). While active, progress < 1, so this matches the old
     // value exactly; it only guards the overshoot frames.
-    val radius = morphCornerTop(progress)
-    val contentAlpha = 0.55f + 0.45f * progress
     Box(
         modifier
             .onGloballyPositioned { pageBounds = it.boundsInWindow() }
             .graphicsLayer {
-                this.translationY = if (active) shift else 0f
+                val p = progress().coerceIn(0f, 1f)
+                val active = bounds != null && p < 1f
+                this.translationY = if (active) startShift * (1f - p) else 0f
+                val radius = morphCornerTop(p)
+                shape = RoundedCornerShape(topStart = if (active) radius else 0.dp, topEnd = if (active) radius else 0.dp)
+                clip = true
             }
-            .clip(RoundedCornerShape(topStart = if (active) radius else 0.dp, topEnd = if (active) radius else 0.dp))
             .background(background),
     ) {
         Box(
             Modifier.graphicsLayer {
-                this.alpha = if (active) contentAlpha else 1f
+                val p = progress().coerceIn(0f, 1f)
+                this.alpha = if (bounds != null && p < 1f) 0.55f + 0.45f * p else 1f
             },
         ) {
             content()

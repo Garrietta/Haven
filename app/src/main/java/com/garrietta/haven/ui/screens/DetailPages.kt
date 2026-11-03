@@ -787,7 +787,7 @@ fun CameraClipsScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) 
         }
         if (recordingId != null) {
             androidx.activity.compose.BackHandler { recordingId = null }
-            RecordingFullscreen(vm, recordingId!!, onClose = { recordingId = null }, enterProgress = 1f)
+            RecordingFullscreen(vm, recordingId!!, onClose = { recordingId = null }, enterProgress = { 1f })
         }
         if (playing != null) {
             androidx.activity.compose.BackHandler { playing = null }

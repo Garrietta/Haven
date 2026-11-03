@@ -1176,7 +1176,10 @@ fun HavenApp(vm: HavenViewModel) {
             if (vm.cameraDialogId != null) {
                 val camId = vm.cameraDialogId!!
                 BackHandler { dismissCameraDialog() }
-                val camP = cameraDialogProgress.value.coerceIn(0f, 1f)
+                // Round 7: no composition-time Animatable read here — the
+                // old `camP = cameraDialogProgress.value` recomposed this
+                // whole block every animation frame. Progress travels as
+                // a lambda and is read only inside graphicsLayer blocks.
                 val camStates by vm.states.collectAsState()
                 val camEntity = camStates[camId]
                 PanelOverlay(
@@ -1197,14 +1200,14 @@ fun HavenApp(vm: HavenViewModel) {
                     // History toggle; every other camera keeps the
                     // exact body below, byte for byte.
                     if (camId == FRONT_DOOR_LIVE_VIEW_ID) {
-                        FrontDoorCameraPanel(vm, camId, camP, onClose = { dismissCameraDialog() })
+                        FrontDoorCameraPanel(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, onClose = { dismissCameraDialog() })
                     } else {
                     Box(Modifier.fillMaxSize().background(Color.Black)) {
                         // The hero panel's MJPEG body is a recording
                         // for Ring (same verdict as fullscreen) and
                         // live for native cameras; `recording` only
                         // switches the connecting/error copy.
-                        CameraMjpegBody(vm, camId, camP, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
+                        CameraMjpegBody(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
                         Row(
                             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1251,12 +1254,12 @@ fun HavenApp(vm: HavenViewModel) {
             // bottom-sheet pages from their tile origin, not as morphs.
             if (cameraId != null) {
                 if (cameraExiting) {
-                    SheetPageContent(vm.pageOrigin, cameraExitProgress.value, background = Color.Black) {
-                        CameraFullscreen(vm, requestCameraClose, cameraExitProgress.value)
+                    SheetPageContent(vm.pageOrigin, { cameraExitProgress.value }, background = Color.Black) {
+                        CameraFullscreen(vm, requestCameraClose, { cameraExitProgress.value })
                     }
                 } else {
-                    SheetPageContent(vm.pageOrigin, cameraEnterProgress.value, background = Color.Black) {
-                        CameraFullscreen(vm, requestCameraClose, cameraEnterProgress.value)
+                    SheetPageContent(vm.pageOrigin, { cameraEnterProgress.value }, background = Color.Black) {
+                        CameraFullscreen(vm, requestCameraClose, { cameraEnterProgress.value })
                     }
                 }
             }
@@ -1692,19 +1695,28 @@ private fun TravelingHeader(
     // captures, and it is read as a plain value, never collected
     // — so unrelated state emissions never recompose the flight.
     val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
-    if (source == null) return
+    // Round 7 traveler-missing guard: a card that never reported
+    // bounds (source null) used to render no traveler while its own
+    // badge stayed hidden for the whole morph
+    // (hideHeroWhenMorphSource) — the icon vanished for the entire
+    // flight. Fall back to the destination rect: the traveler sits
+    // on the panel header from frame 0, coinciding with the
+    // destination badge (hidden until the 2% handoff), so no
+    // doubling forms and the badge never vanishes.
+    val effectiveSource = source ?: target
+    if (effectiveSource == null) return
     // Round 4 origin guard: a never-reported source rect lerps
     // from (0, 0) — the window origin, over the back arrow —
     // so a zero-size source renders nothing instead of a badge
     // that appears to spawn at the origin and drop into place.
-    if (source.width <= 0f || source.height <= 0f) return
+    if (effectiveSource.width <= 0f || effectiveSource.height <= 0f) return
     // No target yet (live header not yet reported): sit exactly on
     // the source badge rect instead of vanishing — returning early
     // here left a gap where no header showed at all, then the
     // traveler popped in mid-path (the 2026-10-30 verdict's icon
     // jump). Once the target arrives the same lerp carries it
     // continuously to the dialog header.
-    val targetRect = target ?: source
+    val targetRect = target ?: effectiveSource
     val density = LocalDensity.current
     // Tile sources report their square badge rect; card sources
     // report their wide header row. A near-square source is a
@@ -1713,9 +1725,9 @@ private fun TravelingHeader(
     // matters. The badge path is badge-rect to badge-rect, never
     // row-rect to row-rect: row heights differ (64/56/48dp), so
     // row travel always popped the badge size at the handoff.
-    val tileSource = source.width < source.height * 1.5f
-    val sourceBadge = if (tileSource) source
-        else badgeRectInRow(source, with(density) { 56.dp.toPx() })
+    val tileSource = effectiveSource.width < effectiveSource.height * 1.5f
+    val sourceBadge = if (tileSource) effectiveSource
+        else badgeRectInRow(effectiveSource, with(density) { 56.dp.toPx() })
     val targetBadge = badgeRectInRow(targetRect, with(density) { 48.dp.toPx() })
     val accent = accentFor(entity.entityId)
     // Badge only (2026-11-01 polish round): the name/state text
@@ -1806,10 +1818,14 @@ private fun TravelingArc(
 ) {
     val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
     if (entity.domain != "weather") return
-    if (source == null) return
+    // Round 7: same traveler-missing guard as TravelingHeader —
+    // sit on the destination rect when the card never reported
+    // bounds, so the arc never vanishes for the whole morph.
+    val effectiveSource = source ?: target
+    if (effectiveSource == null) return
     // Same no-target rule as TravelingHeader: sit on the source
     // rect until the live panel reports, never a gap.
-    val targetRect = target ?: source
+    val targetRect = target ?: effectiveSource
     val density = LocalDensity.current
     val temp = entity.attrDouble("temperature") ?: 0.0
     val conditionColor = weatherConditionColor(entity.state)
@@ -1824,7 +1840,7 @@ private fun TravelingArc(
             .size(with(density) { targetRect.width.toDp() }, with(density) { targetRect.height.toDp() })
             .graphicsLayer {
                 val p = progress().coerceIn(0f, 1f)
-                val rect = lerpRect(source, targetRect, p)
+                val rect = lerpRect(effectiveSource, targetRect, p)
                 transformOrigin = TransformOrigin(0f, 0f)
                 translationX = rect.left - targetRect.left
                 translationY = rect.top - targetRect.top
@@ -1871,7 +1887,7 @@ private fun TravelingArc(
  */
 
 @Composable
-private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgress: Float) {
+private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgress: () -> Float) {
     val cameraId = vm.fullscreenCameraId ?: return
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
@@ -1916,12 +1932,16 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
  *  1. The tab engages the ring-mqtt live-stream switch
  *     (ViewModel-owned, auto-off on panel close, tab flip, app
  *     background, and a 10-minute watchdog cap).
- *  2. WebRTC via the existing RingWebRtcSession + the app's WS
- *     connection (camera/webrtc/offer). A usable non-empty answer
- *     plus a first decoded frame earns the LIVE badge; an empty /
- *     failed answer, or a 20s offer timeout, falls through promptly
- *     to step 3 — no hang, no endless spinner, and the toggle to
- *     Event History is always tappable.
+ *  2. WebRTC (GATED OFF, Round 7): was via RingWebRtcSession +
+ *     the app's WS connection (camera/webrtc/offer). Two #103
+ *     tombstones (21:57:53 + 21:58:52, identical stripped
+ *     libjingle worker-thread SIGSEGV, same pc) prove the native
+ *     crash survives Round 6's complete teardown rewrite and
+ *     happens DURING the handshake — so the crashing path is not
+ *     started at all (see webrtcEnabled in FrontDoorCameraPanel).
+ *     A native SIGSEGV cannot be caught; gating is the only
+ *     deterministic fix. The 69a1 body in step 3 is the live
+ *     path and the wave test is its arbiter.
  *  3. The ring-mqtt live camera (camera.front_door_69a1) via its
  *     MJPEG proxy, once the live-stream switch reports on plus a
  *     ~2s settle wait (Round 5 Bug C). Frames here earn the LIVE
@@ -1964,7 +1984,7 @@ private enum class FrontDoorLivePhase { WEBRTC_CONNECTING, WEBRTC_LIVE, MJPEG }
 private fun FrontDoorCameraPanel(
     vm: HavenViewModel,
     cameraId: String,
-    enterProgress: Float,
+    enterProgress: () -> Float,
     onClose: () -> Unit,
 ) {
     val states by vm.states.collectAsState()
@@ -1975,7 +1995,9 @@ private fun FrontDoorCameraPanel(
     val stopReason = vm.frontDoorLiveStopReason
 
     var tab by remember { mutableStateOf(FrontDoorTab.LIVE) }
-    var phase by remember { mutableStateOf(FrontDoorLivePhase.WEBRTC_CONNECTING) }
+    // Round 7: initial phase is MJPEG (WebRTC gated off) — never
+    // WEBRTC_CONNECTING, so the WebRTC branch cannot mount first.
+    var phase by remember { mutableStateOf(FrontDoorLivePhase.MJPEG) }
     var webrtcAttempt by remember { mutableIntStateOf(0) }
     var webrtcFrames by remember { mutableStateOf(false) }
     var webrtcOutcome by remember { mutableStateOf<String?>(null) }
@@ -1994,8 +2016,9 @@ private fun FrontDoorCameraPanel(
     // History round-trip or a background stop.
     LaunchedEffect(tab) {
         if (tab == FrontDoorTab.LIVE) {
-            phase = FrontDoorLivePhase.WEBRTC_CONNECTING
-            webrtcAttempt++
+            // Round 7: WebRTC is gated off (see webrtcEnabled below).
+            // The Live tab goes straight to the 69a1 MJPEG live body.
+            phase = FrontDoorLivePhase.MJPEG
             webrtcFrames = false
             webrtcOutcome = null
             mjpegFrames = false
@@ -2054,8 +2077,24 @@ private fun FrontDoorCameraPanel(
     // after a background stop never re-inits a released surface.
     val context = LocalContext.current
     val rendererHolder = remember { object { var renderer: SurfaceViewRenderer? = null } }
-    val inWebRtcPhase = phase == FrontDoorLivePhase.WEBRTC_CONNECTING ||
-        phase == FrontDoorLivePhase.WEBRTC_LIVE
+    // Round 7 WebRTC gate: false until the native crash is resolved.
+    // Tombstones 21:57:53 + 21:58:52 on #103 (identical stripped
+    // libjingle worker-thread SIGSEGV, same pc) prove the crash
+    // survives Round 6's complete teardown rewrite and happens
+    // DURING the handshake, before any fallback can run — so the
+    // crashing path is not started at all. A native SIGSEGV cannot
+    // be caught; not starting WebRTC is the only deterministic fix.
+    // RingWebRtcSession + its tests stay in the tree for re-enable.
+    // Re-enable condition: a newer libwebrtc build (GetStream
+    // 1.3.10 is m125-based; LiveKit io.github.webrtc-sdk:android
+    // 150-series or GetStream stream-video-webrtc-android 137.x
+    // share the org.webrtc namespace) AND a device run with no
+    // process death. Until then the 69a1 MJPEG body is the live
+    // path and the wave test is its arbiter.
+    val webrtcEnabled = false
+    val inWebRtcPhase = webrtcEnabled &&
+        (phase == FrontDoorLivePhase.WEBRTC_CONNECTING ||
+            phase == FrontDoorLivePhase.WEBRTC_LIVE)
     DisposableEffect(inWebRtcPhase, webrtcAttempt, engaged) {
         val renderer = rendererHolder.renderer
         if (!inWebRtcPhase || !engaged || renderer == null) {
@@ -2177,8 +2216,8 @@ private fun FrontDoorCameraPanel(
                     if (stopReason != null) {
                         Spacer(Modifier.height(16.dp))
                         Button(onClick = {
-                            phase = FrontDoorLivePhase.WEBRTC_CONNECTING
-                            webrtcAttempt++
+                            // Round 7: gated — resume goes to MJPEG, never WebRTC.
+                            phase = FrontDoorLivePhase.MJPEG
                             webrtcFrames = false
                             webrtcOutcome = null
                             mjpegFrames = false
@@ -2364,7 +2403,7 @@ private fun RowScope.FrontDoorTabOption(label: String, selected: Boolean, onClic
 private fun CameraMjpegBody(
     vm: HavenViewModel,
     cameraId: String,
-    enterProgress: Float,
+    enterProgress: () -> Float,
     recording: Boolean,
     onClose: () -> Unit,
     // Ring recording labels: the connecting text and the
@@ -2408,10 +2447,12 @@ private fun CameraMjpegBody(
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    val s = 0.94f + 0.06f * enterProgress
+                    // Round 7: progress is a lambda, read ONLY here.
+                    val p = enterProgress()
+                    val s = 0.94f + 0.06f * p
                     scaleX = s
                     scaleY = s
-                    alpha = 0.7f + 0.3f * enterProgress
+                    alpha = 0.7f + 0.3f * p
                 },
             )
         }
@@ -2502,7 +2543,7 @@ private fun BoxScope.CameraHeader(name: String, badgeText: String?, onClose: () 
  * Public so the clips timeline screen can host it.
  */
 @Composable
-fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: () -> Unit, enterProgress: Float) {
+fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: () -> Unit, enterProgress: () -> Float) {
     val states by vm.states.collectAsState()
     val entity = states[recordingEntityId]
     BackHandler { onClose() }
@@ -2591,8 +2632,14 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
             .width(120.dp)
             .fillMaxHeight()
             .padding(start = 12.dp, top = 24.dp, bottom = 24.dp)
+            // Round 7: slide only, never fade. The old alpha ramp
+            // started the whole rail (icons + labels + surface) at
+            // invisible on every posture-switch remount (Round 6's
+            // key boundary remounts chrome on fold/unfold), so the
+            // rail icons transiently disappeared on every fold.
+            // Translation alone carries the enter motion; icons
+            // stay mounted and visible from frame 0.
             .graphicsLayer {
-                alpha = pillEnter.value
                 translationX = -8.dp.toPx() * (1f - pillEnter.value)
             },
         contentAlignment = Alignment.Center,
