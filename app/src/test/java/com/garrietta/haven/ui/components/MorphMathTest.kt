@@ -89,6 +89,33 @@ class MorphMathTest {
     }
 
     @Test
+    fun morphEnterContentAlpha_symmetricEnterCurve() {
+        // Round 5: content invisible through p = 0.15 (nothing at
+        // full opacity over the card on the first frame), fully in
+        // by p = 0.50, and clamped outside [0, 1].
+        assertEquals(0f, morphEnterContentAlpha(0f), 0.001f)
+        assertEquals(0f, morphEnterContentAlpha(0.15f), 0.001f)
+        assertEquals(1f, morphEnterContentAlpha(0.5f), 0.001f)
+        assertEquals(1f, morphEnterContentAlpha(1f), 0.001f)
+        assertEquals(0f, morphEnterContentAlpha(-0.5f), 0.001f)
+        assertEquals(1f, morphEnterContentAlpha(2f), 0.001f)
+    }
+
+    @Test
+    fun morphCloseBackgroundAlpha_opaqueThroughEightyPercent() {
+        // Round 5: the surface stays opaque from rest (p = 1) down
+        // to p = 0.20, then fades linearly to transparent at p = 0,
+        // so the stationary card is revealed smoothly, never popped.
+        assertEquals(1f, morphCloseBackgroundAlpha(1f), 0.001f)
+        assertEquals(1f, morphCloseBackgroundAlpha(0.5f), 0.001f)
+        assertEquals(1f, morphCloseBackgroundAlpha(0.20f), 0.001f)
+        assertEquals(0.5f, morphCloseBackgroundAlpha(0.10f), 0.001f)
+        assertEquals(0f, morphCloseBackgroundAlpha(0f), 0.001f)
+        assertEquals(1f, morphCloseBackgroundAlpha(2f), 0.001f)
+        assertEquals(0f, morphCloseBackgroundAlpha(-0.5f), 0.001f)
+    }
+
+    @Test
     fun fallbackFromRect_morphStaysInTargetAtEnd() {
         // Lerping from the fallback to the target ends exactly on the
         // target at every edge, so no snap on arrival.

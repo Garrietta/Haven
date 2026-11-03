@@ -96,17 +96,37 @@ const val FRONT_DOOR_SNAPSHOT_ID = "camera.front_door_snapshot"
 const val FRONT_DOOR_LIVE_STREAM_SWITCH_ID = "switch.front_door_live_stream"
 const val FRONT_DOOR_BATTERY_SENSOR_ID = "sensor.front_door_battery"
 
+/**
+ * Front Door live probe (Round 5 Bug C): the ring-mqtt live camera
+ * for the same doorbell — verified present in the HA template
+ * export (state idle, with ring-mqtt siblings). The core Ring
+ * integration's camera.front_door_live_view proxy serves only the
+ * last motion recording MP4, so it can never be the live path; when
+ * switch.front_door_live_stream is on, the panel streams THIS
+ * entity's proxy instead (its source is the live ring-mqtt feed),
+ * after a ~2s settle wait for the switch to report on. Frames from
+ * this entity earn the LIVE badge; frames from the live_view proxy
+ * never do (see frontDoorShowsLiveBadge).
+ */
+const val FRONT_DOOR_RING_MQTT_CAMERA_ID = "camera.front_door_69a1"
+
 /** Watchdog cap for a Front Door live session: the switch auto-offs after this long even if the panel stays open. */
 const val FRONT_DOOR_LIVE_MAX_MS = 10 * 60 * 1000L
 
 /**
  * The LIVE badge rule, as a pure function so it is unit tested: the
  * badge shows ONLY while frames are actually rendering on a live
- * path — WebRTC first frame, or MJPEG frames while the ring-mqtt
- * live-stream switch is confirmed on. MJPEG frames with the switch
- * off are the recording path (the 2026-10-30 verdict: the proxy
- * serves the most recent motion recording), so they never earn the
- * badge. No frames, no badge, regardless of what was attempted.
+ * path — a WebRTC first frame (remote description applied), or
+ * frames from the ring-mqtt live camera (camera.front_door_69a1)
+ * while the live-stream switch is confirmed on. Round 5 honesty
+ * correction (supersedes the #93 rule): the old MJPEG+switch-on
+ * rule is WRONG — the live_view proxy serves the last motion
+ * recording even with the switch on, so live_view proxy frames
+ * must be labeled as recordings and must NEVER feed this
+ * function's mjpegFrames argument; the panel feeds it only with
+ * 69a1 live-stream frames. Frames with the switch off are the
+ * recording path, so they never earn the badge. No frames, no
+ * badge, regardless of what was attempted.
  */
 fun frontDoorShowsLiveBadge(
     webrtcFrames: Boolean,

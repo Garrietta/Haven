@@ -134,6 +134,7 @@ import com.garrietta.haven.data.CameraStreamState
 import com.garrietta.haven.data.FRONT_DOOR_BATTERY_SENSOR_ID
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_STREAM_SWITCH_ID
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
+import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.RingWebRtcSession
 import com.garrietta.haven.data.frontDoorShowsLiveBadge
@@ -175,11 +176,10 @@ import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.lerpRect
-import com.garrietta.haven.ui.components.morphBackgroundAlpha
-import com.garrietta.haven.ui.components.morphCardAlpha
-import com.garrietta.haven.ui.components.morphExitCardAlpha
 import com.garrietta.haven.ui.controls.sensorDisplayName
+import com.garrietta.haven.ui.components.morphCloseBackgroundAlpha
 import com.garrietta.haven.ui.components.morphCloseContentAlpha
+import com.garrietta.haven.ui.components.morphEnterContentAlpha
 import com.garrietta.haven.ui.components.morphCornerTop
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.ScrollVisibilityState
@@ -366,9 +366,11 @@ fun HavenApp(vm: HavenViewModel) {
         // sharedBounds. Each panel captures its source card's root
         // rect at open for the traveling header/arc (which
         // interpolate ONE rect to the panel header, and exactly
-        // back on dismiss); the source card fades on morphCardAlpha
-        // (see LocalMorphCardAlpha), so source and destination are
-        // never both visible. The camera fullscreen keeps its own
+        // back on dismiss); the source card stays rendered and
+        // stationary throughout (Round 5, see
+        // LocalMorphCardAlpha), and the panel's opaque surface
+        // covers it, so source and destination are never both
+        // visible. The camera fullscreen keeps its own
         // rise, and vm.pageOrigin is still set by tile taps and
         // panel Details because the camera path needs it.
         val detailScreen = when (current) {
@@ -799,14 +801,23 @@ fun HavenApp(vm: HavenViewModel) {
             )
             CompositionLocalProvider(
                 LocalCardBounds provides cardBounds,
-                // The camera panel's quadrant is a morph source too:
-                // it hides while its panel is open (see
-                // CameraQuadrant), exactly like sheet/detail/pop-out
-                // sources, so the snapshot never doubles the video.
+                // The camera panel's quadrant is a morph source too
+                // (see CameraQuadrant): its rect anchors the panel
+                // morph, and the opaque panel covers it while open,
+                // so the snapshot never doubles the video.
                 LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id ?: vm.cameraDialogId),
                 LocalHeroBounds provides heroBounds,
                 LocalArcBounds provides arcBounds,
-                LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
+                // Round 5: no card header ever hides for a morph.
+                // The traveling header is badge-only, and the
+                // opaque panel (PanelOverlay: background opaque
+                // from frame 0 on enter, through p >= 0.20 on
+                // close) always covers the source card's rect —
+                // the interpolated rect always contains the source
+                // rect — so the stationary card header underneath
+                // can never double anything visible. Null here
+                // disables hideHeroWhenMorphSource everywhere.
+                LocalHiddenHeroId provides null,
                 // Shape picker state (2026-10-30): badges and card
                 // outlines resolve through this; re-read from the
                 // store whenever a picker save bumps the version.
@@ -816,46 +827,44 @@ fun HavenApp(vm: HavenViewModel) {
                     vm.settingsStore.badgeShapeOverrides(),
                     vm.settingsStore.cardShapeOverrides(),
                 ),
-                // Progress-driven source-card alpha (container
-                // transform): the active morph's progress drives the
-                // card fade-out on enter, so the card and the surface
-                // read as one element. On EXIT the source card stays
-                // HIDDEN until the morph lands (2026-11-01 round 1):
-                // the 2026-11-01 polish round's fully-opaque-under-
-                // panel exit composited the card over the leaving
-                // panel's remnants, which read as the thermostat
-                // dial bleeding through over already-visible grid
-                // tiles — and, with the close content fade in
-                // PanelOverlay, an early card return would double
-                // against the still-shrinking surface. The card
-                // reappears only once progress reaches ~0, the same
-                // frame the panel clears, so the landing is exact.
-                // No morph -> fully visible.
-                LocalMorphCardAlpha provides if (sheetExiting || detailExiting || popoutExiting) {
-                    val exitP = when {
-                        sheetAnim != null -> sheetProgress.value
-                        detailAnim != null -> detailProgress.value
-                        popoutAnim != null -> popoutProgress.value
-                        else -> 1f
-                    }.coerceIn(0f, 1f)
-                    // Round 4 exit flash fix (proven curve mismatch:
-                    // the old binary hide left the slot blank while
-                    // panel content was already gone, then popped
-                    // the card in one frame): the card stays hidden
-                    // exactly while panel content is visible
-                    // (progress > 0.85) and fades in smoothly over
-                    // [0.85 -> 0] — no frame has both at full
-                    // opacity (no doubling) and no frame has
-                    // neither (no blank slot, no pop).
-                    morphExitCardAlpha(exitP)
-                } else morphCardAlpha(
-                    when {
-                        sheetAnim != null -> sheetProgress.value
-                        detailAnim != null -> detailProgress.value
-                        popoutAnim != null -> popoutProgress.value
-                        else -> 1f
-                    },
-                ),
+                // Round 5 source-card rule (Google Home container
+                // transform — SUPERSEDES Round 4's exit-curve
+                // approach, where the card hid until progress
+                // 0.85 and faded back): the card NEVER hides or
+                // fades, on enter or on exit. It stays rendered
+                // and stationary at all times, and the panel's
+                // opaque surface does the covering (PanelOverlay:
+                // background alpha 1 from frame 0 on enter,
+                // through p >= 0.20 on close, fading only over
+                // [0.20, 0]). Because the interpolated panel rect
+                // always contains the source card rect, the opaque
+                // surface hides the card exactly where it would
+                // otherwise double — no blanked card, no redraw
+                // flash, and no frame with two visible copies.
+                // Reconciliation (verified in code): the old hide
+                // path was not what kept the Security / eufy /
+                // Greenhouse cards looking stationary — every
+                // morph-source card, including those, wears
+                // hideWhenMorphSource gated on LocalHiddenCardId
+                // and faded on this alpha. What kept their panels
+                // clean is that their panel surfaces are opaque at
+                // rest and their travelers are badge-only, so the
+                // card underneath was never the visible problem;
+                // the flash came from the card itself fading out
+                // and back. Making every card behave that way
+                // (stay rendered, let the opaque surface cover)
+                // removes the flash for Forecast Home, Ecobee
+                // Thermostat, Temperature, Humidity, and
+                // Standing Lamp alike. The one place a visible
+                // double could still form is the close tail: the
+                // traveler returns to the source badge rect while
+                // the panel background fades (p < 0.20) and the
+                // card badge shows through — so the traveler
+                // fades with the panel background on close (see
+                // TravelingHeader's alphaScale), landing as a
+                // short crossfade onto the coincident card badge
+                // instead of a doubled badge.
+                LocalMorphCardAlpha provides 1f,
             ) {
             // Overlay root: its root-coordinate origin anchors every
             // traveler rect. All panel overlays below render inside
@@ -1071,12 +1080,14 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTarget?.takeIf { it.first == anim.id }?.second,
                     sheetP, overlayOrigin,
                     onDismiss = { dismissSheet() },
+                    alphaScale = if (sheetExiting) morphCloseBackgroundAlpha(sheetP) else 1f,
                 )
                 // Traveling arc, above the panel (see TravelingArc).
                 TravelingArc(
                     vm, anim.id, arcBounds[anim.id],
                     arcTarget?.takeIf { it.first == anim.id }?.second,
                     sheetP, overlayOrigin,
+                    alphaScale = if (sheetExiting) morphCloseBackgroundAlpha(sheetP) else 1f,
                 )
             }
             // Detail panel overlay: FULL-SCREEN PANEL (2026-11-01
@@ -1123,11 +1134,13 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTarget?.takeIf { it.first == anim.entityId }?.second,
                     detailP, overlayOrigin,
                     onDismiss = { dismissDetail() },
+                    alphaScale = if (detailExiting) morphCloseBackgroundAlpha(detailP) else 1f,
                 )
                 TravelingArc(
                     vm, anim.entityId, arcBounds[anim.entityId],
                     arcTarget?.takeIf { it.first == anim.entityId }?.second,
                     detailP, overlayOrigin,
+                    alphaScale = if (detailExiting) morphCloseBackgroundAlpha(detailP) else 1f,
                 )
             }
             // Thermostat pop-out panel (Round 4: the ONLY
@@ -1175,6 +1188,7 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTarget?.takeIf { it.first == anim.id }?.second,
                     popoutP, overlayOrigin,
                     onDismiss = { dismissPopout() },
+                    alphaScale = if (popoutExiting) morphCloseBackgroundAlpha(popoutP) else 1f,
                 )
             }
             // Camera live-feed panel (2026-11-01 panels round): the
@@ -1509,15 +1523,22 @@ private fun EntityPopupSheetContent(
  *   springBounds progress that drove the old dialog, so an
  *   appear interrupted by a dismiss reverses cleanly mid-flight
  *   instead of jumping (an Animatable's animateTo cancels and
- *   restarts from the current value). The rect, corners
- *   (28dp -> 0dp via [morphCornerTop]), and background ramp
- *   ([morphBackgroundAlpha]: transparent at the card, opaque once
- *   grown) all come from MorphOverlay helpers via [MorphSurface];
- *   no parallel morph system. Content is laid out once at full
- *   size and clipped to the growing rect (never scaled), so it is
- *   present from the panel's first frame and never materializes
- *   late; destination headers hide only their badge while
- *   traveling (see TravelingHeader), never their text.
+ *   restarts from the current value). The rect and corners
+ *   (28dp -> 0dp via [morphCornerTop]) come from MorphOverlay
+ *   helpers via [MorphSurface]; no parallel morph system.
+ *   Round 5 opaque-cover rule: the surface background is opaque
+ *   from the panel's first frame on enter, and stays opaque
+ *   through the first 80% of a close, fading only over p = 0.20
+ *   down to 0 ([morphCloseBackgroundAlpha]) — the opaque surface
+ *   is what covers the stationary source card, so the card never
+ *   needs to hide. Content is laid out once at full size and
+ *   clipped to the growing rect (never scaled); it fades in
+ *   symmetrically on enter ([morphEnterContentAlpha]: invisible
+ *   through p = 0.15, in by p = 0.50) and out early on close
+ *   ([morphCloseContentAlpha]), so no panel content ever appears
+ *   at full opacity over the card on the first frame.
+ *   Destination headers hide only their badge while traveling
+ *   (see TravelingHeader), never their text.
  * - Chrome: status-bar padding + a back arrow row above the
  *   content (suppressed only for the camera panel, whose own
  *   header row carries Close). No drag-to-dismiss: Back and the
@@ -1584,13 +1605,20 @@ private fun PanelOverlay(
                 cornerTop = morphCornerTop(p),
                 cornerAll = morphCornerTop(p),
                 background = panelBackground,
-                backgroundAlpha = morphBackgroundAlpha(p),
-                // Enter: content present from the first frame (the
-                // panels round's rule). Close: content fades out
-                // early via morphCloseContentAlpha so the shrinking
-                // surface never carries full-opacity panel content
-                // over the grid tiles.
-                contentAlpha = if (isClosing) morphCloseContentAlpha(p) else 1f,
+                // Round 5 opaque cover: opaque from frame 0 on
+                // enter, opaque through p >= 0.20 on close, fading
+                // only over [0.20, 0] — the surface, not a card
+                // hide, is what covers the stationary card.
+                backgroundAlpha = if (isClosing) morphCloseBackgroundAlpha(p) else 1f,
+                // Symmetric content curve (Round 5): enter fades in
+                // over [0.15, 0.50] via morphEnterContentAlpha, so
+                // no inner content (e.g. the giant "Disarmed" text)
+                // appears at 100% opacity over the card on the
+                // first frame; close fades out early via
+                // morphCloseContentAlpha so the shrinking surface
+                // never carries full-opacity panel content over
+                // the grid tiles.
+                contentAlpha = if (isClosing) morphCloseContentAlpha(p) else morphEnterContentAlpha(p),
                 progress = p,
             ) {
                 if (scrollContent) {
@@ -1711,6 +1739,13 @@ private fun TravelingHeader(
     progress: Float,
     overlayOrigin: Offset,
     onDismiss: () -> Unit,
+    // Round 5 close-tail fade: on close, the traveler fades with
+    // the panel background (morphCloseBackgroundAlpha), so that in
+    // the final p < 0.20 window — when the stationary card badge
+    // shows through the fading panel — the traveler crossfades
+    // onto the coincident card badge instead of doubling it.
+    // 1f on enter (no effect).
+    alphaScale: Float = 1f,
 ) {
     // Snapshot-first (see the ViewModel KDoc): the live flow is
     // only the first-frame fallback before the open effect
@@ -1746,7 +1781,7 @@ private fun TravelingHeader(
     val targetBadge = badgeRectInRow(targetRect, with(density) { 48.dp.toPx() })
     val rect = lerpRect(sourceBadge, targetBadge, p)
     val accent = accentFor(entity.entityId)
-    val headerAlpha = heroHeaderAlpha(p)
+    val headerAlpha = heroHeaderAlpha(p) * alphaScale.coerceIn(0f, 1f)
     // Badge only (2026-11-01 polish round): the name/state text
     // used to ride beside the badge here, but the destination
     // header now shows its own text from frame 0 — keeping the
@@ -1812,6 +1847,11 @@ private fun TravelingArc(
     target: Rect?,
     progress: Float,
     overlayOrigin: Offset,
+    // Round 5 close-tail fade, mirroring TravelingHeader's
+    // alphaScale: on close the arc fades with the panel
+    // background so it crossfades onto the stationary card's arc
+    // panel instead of doubling it. 1f on enter (no effect).
+    alphaScale: Float = 1f,
 ) {
     val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
     if (entity.domain != "weather") return
@@ -1833,7 +1873,7 @@ private fun TravelingArc(
                 )
             }
             .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
-            .graphicsLayer { alpha = heroHeaderAlpha(p) }
+            .graphicsLayer { alpha = heroHeaderAlpha(p) * alphaScale.coerceIn(0f, 1f) }
             .background(conditionColor.copy(alpha = 0.14f), MaterialTheme.shapes.extraLarge)
             .padding(16.dp),
         contentAlignment = Alignment.Center,
@@ -1924,15 +1964,28 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
  *     failed answer, or a 20s offer timeout, falls through promptly
  *     to step 3 — no hang, no endless spinner, and the toggle to
  *     Event History is always tappable.
- *  3. The MJPEG proxy stream for the live-view camera, with the
- *     switch on. Frames here earn the LIVE badge ONLY while the
- *     switch state is confirmed on (see frontDoorShowsLiveBadge);
- *     if the switch reverts to off mid-stream, the badge drops and
- *     the status line says the frames are being treated as a
- *     recording. The wave test is what proves live: the status line
- *     tells the tester to wave and watch for it promptly.
- *  4. If MJPEG also errors, the status line names both failures and
- *     offers one tap to Event History.
+ *  3. The ring-mqtt live camera (camera.front_door_69a1) via its
+ *     MJPEG proxy, once the live-stream switch reports on plus a
+ *     ~2s settle wait (Round 5 Bug C). Frames here earn the LIVE
+ *     badge while the switch is confirmed on (see
+ *     frontDoorShowsLiveBadge); if the switch reverts to off
+ *     mid-stream, the body swaps to the recording fallback, the
+ *     badge drops, and the status line says so. The wave test is
+ *     what proves live: the status line tells the tester to wave
+ *     and watch for it promptly.
+ *  4. If the 69a1 stream also errors, the panel falls back to the
+ *     live-view camera's MJPEG proxy — labeled as the latest
+ *     motion recording, never live, no badge — and the status line
+ *     says the live view is unavailable. Event History offers the
+ *     same recording body one tap away.
+ *
+ * Round 5 honesty correction (supersedes the #93 rule): the old
+ * MJPEG+switch-on frames were recordings, not live — the
+ * live_view proxy serves only the last motion recording MP4, with
+ * or without the switch. After this fix, live_view proxy frames
+ * are labeled as recordings everywhere in this panel, and the
+ * LIVE badge appears ONLY for WebRTC frames (remote description
+ * applied) or 69a1 live-stream frames.
  *
  * Event History is the UNCHANGED recording body (the MJPEG proxy
  * labeled "Latest motion recording · Not live"), exactly as before.
@@ -1970,6 +2023,13 @@ private fun FrontDoorCameraPanel(
     var webrtcOutcome by remember { mutableStateOf<String?>(null) }
     var mjpegFrames by remember { mutableStateOf(false) }
     var mjpegError by remember { mutableStateOf<String?>(null) }
+    // Round 5 Bug C: the 69a1 live body has failed (and the panel
+    // is on the recording fallback), and the 69a1 body is armed
+    // (switch reported on + settle wait done). mjpegFrames feeds
+    // the LIVE badge ONLY from the 69a1 body — never from the
+    // live_view recording fallback.
+    var live69a1Failed by remember { mutableStateOf(false) }
+    var live69a1Ready by remember { mutableStateOf(false) }
 
     // Engagement: the Live tab owns the switch. Resetting the probe
     // on every Live activation keeps a stale phase from surviving a
@@ -1982,7 +2042,23 @@ private fun FrontDoorCameraPanel(
             webrtcOutcome = null
             mjpegFrames = false
             mjpegError = null
+            live69a1Failed = false
+            live69a1Ready = false
             vm.startFrontDoorLive()
+        }
+    }
+    // Round 5 Bug C settle wait: the 69a1 live body mounts only
+    // once the switch reports on AND ~2s have passed, so the
+    // ring-mqtt feed is actually up before its proxy is opened.
+    // The effect restarts if the switch flips, so an off->on
+    // re-arms the wait; off clears readiness at once, which swaps
+    // the body to the recording fallback.
+    LaunchedEffect(switchOn) {
+        if (!switchOn) {
+            live69a1Ready = false
+        } else {
+            delay(2000)
+            live69a1Ready = true
         }
     }
     // Backstop disengage: fires when the tab flips AND when the
@@ -2022,8 +2098,17 @@ private fun FrontDoorCameraPanel(
                             webrtcOutcome = "empty answer (${answer.error ?: "no SDP"})"
                             phase = FrontDoorLivePhase.MJPEG
                         } else {
-                            Log.d("Haven", "FrontDoorLive: webrtc answer usable")
+                            // Round 5 Bug A fix: the old code logged
+                            // "answer usable" here but never invoked
+                            // onAnswer, so the session never set
+                            // the remote description and WebRTC
+                            // could never produce frames. Applying
+                            // the answer is what completes the
+                            // negotiation (see RingWebRtcSession's
+                            // setRemoteDescription in onAnswer).
+                            Log.d("Haven", "FrontDoorLive: webrtc answer usable — applying remote description")
                             webrtcOutcome = "answer usable"
+                            onAnswer(answer)
                         }
                     }
                 },
@@ -2064,6 +2149,10 @@ private fun FrontDoorCameraPanel(
         phase = FrontDoorLivePhase.MJPEG
     }
 
+    // Round 5 honesty: mjpegFrames here is fed ONLY by the 69a1
+    // live body (see the MJPEG phase below) — live_view recording
+    // frames never reach it, so the badge can no longer fire on a
+    // recording with the switch on (the #93 rule's error).
     val showLive = frontDoorShowsLiveBadge(webrtcFrames, mjpegFrames, switchOn)
     // Round 4: clean user-facing status only — the #93 debug
     // "Live path: …" wording (switch + MJPEG internals, WebRTC
@@ -2075,6 +2164,7 @@ private fun FrontDoorCameraPanel(
         !engaged -> "Live paused — the live-stream switch is off"
         phase == FrontDoorLivePhase.WEBRTC_CONNECTING -> "Connecting to live view…"
         phase == FrontDoorLivePhase.WEBRTC_LIVE -> "Live"
+        phase == FrontDoorLivePhase.MJPEG && live69a1Failed -> "Live view unavailable — showing latest recording"
         phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn -> "Live view"
         phase == FrontDoorLivePhase.MJPEG && mjpegFrames && !switchOn -> "Latest motion recording"
         phase == FrontDoorLivePhase.MJPEG && mjpegError != null -> "Live view unavailable"
@@ -2118,6 +2208,8 @@ private fun FrontDoorCameraPanel(
                             webrtcOutcome = null
                             mjpegFrames = false
                             mjpegError = null
+                            live69a1Failed = false
+                            live69a1Ready = false
                             vm.startFrontDoorLive()
                         }) { Text("Resume live") }
                         Spacer(Modifier.height(8.dp))
@@ -2128,17 +2220,53 @@ private fun FrontDoorCameraPanel(
                 }
             }
             phase == FrontDoorLivePhase.MJPEG -> {
-                CameraMjpegBody(
-                    vm, cameraId, enterProgress, recording = false, onClose = onClose,
-                    onFirstFrame = {
-                        Log.d("Haven", "FrontDoorLive: mjpeg first frame (switch on=$switchOn)")
-                        mjpegFrames = true
-                    },
-                    onError = { message ->
-                        Log.w("Haven", "FrontDoorLive: mjpeg error: $message")
-                        mjpegError = message
-                    },
-                )
+                // Round 5 Bug C: the live body is the ring-mqtt
+                // 69a1 camera's proxy, never the live_view proxy
+                // (which serves only the last motion recording).
+                // Until the switch reports on + the settle wait
+                // lands, the connecting state shows; once the 69a1
+                // stream errors, the body falls back to the
+                // live_view proxy as a LABELED recording
+                // (recording = true, and no onFirstFrame feeding
+                // the badge — recording frames must never earn
+                // LIVE). A 69a1 error also clears mjpegFrames so
+                // the badge cannot linger on the fallback while
+                // the switch is still on.
+                when {
+                    !live69a1Failed && switchOn && live69a1Ready -> {
+                        CameraMjpegBody(
+                            vm, FRONT_DOOR_RING_MQTT_CAMERA_ID, enterProgress, recording = false, onClose = onClose,
+                            onFirstFrame = {
+                                Log.d("Haven", "FrontDoorLive: 69a1 live first frame (switch on=$switchOn)")
+                                mjpegFrames = true
+                            },
+                            onError = { message ->
+                                Log.w("Haven", "FrontDoorLive: 69a1 live error: $message — falling back to recording")
+                                mjpegError = message
+                                mjpegFrames = false
+                                live69a1Failed = true
+                            },
+                        )
+                    }
+                    !live69a1Failed && switchOn -> {
+                        Column(
+                            Modifier.fillMaxSize().padding(horizontal = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text("Connecting to live view…", color = Color.White, fontSize = 16.sp)
+                        }
+                    }
+                    else -> {
+                        CameraMjpegBody(
+                            vm, cameraId, enterProgress, recording = true, onClose = onClose,
+                            onError = { message ->
+                                Log.w("Haven", "FrontDoorLive: recording fallback error: $message")
+                                mjpegError = message
+                            },
+                        )
+                    }
+                }
             }
             else -> {
                 // WebRTC phases share one mounted renderer: moving
@@ -2580,12 +2708,12 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
  * indicator morphs between tabs by animating its left/right bounds with
  * spring(0.74, 380) from the tabs' measured window rects — it is never
  * instantly reattached as a fixed-size pill. The indicator target follows
- * the scrub hover when present, else the selected tab. Labels are
- * single-line with ellipsis, and a title over 10 characters suppresses its
- * static label in favor of an icon badge (selected: icon + label row,
- * appearing with no animation — labels switch in the same recomposition
- * as the selection, so two labels can never overlap; unselected: icon
- * only) — the old "Living Room lig" truncation is gone by construction.
+ * the scrub hover when present, else the selected tab. Round 5: the bar
+ * is icon-only (48dp-tall items, uniform 56dp icon ovals, uniform
+ * horizontal padding), so its width is constant across every tab
+ * switch — no label ever widens the selected item, and the old
+ * "Living Room lig" truncation is gone by construction (there is no
+ * label text to truncate). Labels live on the unfolded side pill.
  * The shell is a floating island: 32dp corners, surfaceContainer, subtle
  * shadow, 16dp horizontal and 12dp bottom padding at the call site.
  * Dragging along the bar still scrubs the highlight (haptic
@@ -2676,18 +2804,14 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             ) {
                 for ((index, item) in items.withIndex()) {
                     // Highlight follows the scrub hover (the indicator
-                    // glides under the finger); the LABEL follows only
-                    // the committed selection, with no animation at all.
-                    // The #49 vertical slide+fade still collided: while
-                    // the label's size animated, its text clipped to
-                    // "Thermo..." beside the fading outgoing label, and
-                    // scrubbing flashed labels across tabs. A label now
-                    // appears or vanishes in the same recomposition as
-                    // the selection change, so two labels can never
-                    // coexist in one frame; the indicator's glide is the
-                    // only motion. Trade accepted: item width snaps
-                    // instantly at selection while the indicator glides
-                    // (masked by the indicator's arrival).
+                    // glides under the finger). Round 5: the bar is
+                    // icon-only (pillLabelVisible always false), so
+                    // every item is the same 56dp-wide icon oval and
+                    // the bar's width never stretches or jumps when
+                    // the selection moves — the indicator's glide is
+                    // the only motion. The label branch below is
+                    // retained but unreachable while the token is
+                    // false; the side pill carries labels instead.
                     val highlighted = (scrub.hoveredTab ?: currentIndex) == index
                     val showLabel = pillLabelVisible(item.label, index == currentIndex)
                     val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer

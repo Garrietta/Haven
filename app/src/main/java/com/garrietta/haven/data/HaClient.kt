@@ -165,6 +165,19 @@ class HaClient(
     private val nextId = AtomicInteger(1)
     private val pending = ConcurrentHashMap<Int, (JSONObject) -> Unit>()
 
+    /**
+     * Pending WebRTC offer subscriptions (Round 5 Bug B): HA's
+     * `camera/webrtc/offer` is an event subscription — the SDP
+     * answer arrives later as a `type: "event"` message correlated
+     * by the command id, not as the command's result. Keyed by that
+     * command id; the entry carries a session id captured from the
+     * result (when it carried one) plus the answer callback, and is
+     * removed once the answer event arrives (candidates keep it
+     * open — see [handleMessage]).
+     */
+    private data class WebRtcSubscription(val sessionId: String?, val onAnswer: (WebRtcAnswer) -> Unit)
+    private val webrtcEventHandlers = ConcurrentHashMap<Int, WebRtcSubscription>()
+
     fun connect(url: String, accessToken: String) {
         manualDisconnect = false
         instanceUrl = url.trimEnd('/')
@@ -282,6 +295,33 @@ class HaClient(
                 }
             }
             "event" -> {
+                // Round 5 Bug B: a WebRTC subscription event,
+                // correlated by the command id it answers. The old
+                // code only handled state_changed here, so the SDP
+                // answer event was silently dropped — which is why
+                // the device read "empty answer": the answer was
+                // never empty, it never reached the callback. An
+                // answer event delivers (main thread) and closes
+                // the subscription; a candidate event keeps it open
+                // (the session sends a complete offer, so server
+                // trickle candidates are logged, not applied —
+                // there is no remote-candidate entry point on the
+                // session; if ICE fails on device, that is the
+                // next gap to close, not this routing).
+                val webrtcId = msg.optInt("id", -1)
+                val webrtcSub = webrtcEventHandlers[webrtcId]
+                if (webrtcSub != null) {
+                    val parsed = parseWebRtcEventAnswer(msg, webrtcSub.sessionId)
+                    if (parsed != null) {
+                        webrtcEventHandlers.remove(webrtcId)
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            webrtcSub.onAnswer(parsed)
+                        }
+                    } else {
+                        Log.d("Haven", "FrontDoorLive: webrtc event (non-answer) for subscription $webrtcId")
+                    }
+                    return
+                }
                 val event = msg.optJSONObject("event") ?: return
                 if (event.optString("event_type") == "state_changed") {
                     val data = event.optJSONObject("data") ?: return
@@ -693,7 +733,11 @@ class HaClient(
     /**
      * WebRTC offer round-trip for Ring live: sends the complete SDP
      * offer via `camera/webrtc/offer` and parses the answer + session
-     * id (see parseWebRtcAnswer). On an unknown-command error it falls
+     * id (see parseWebRtcAnswer). Round 5: the command is an event
+     * subscription — when the success result carries no answer yet,
+     * the answer is awaited as an event correlated by the command id
+     * (see handleMessage + parseWebRtcEventAnswer), not reported as
+     * "answer missing SDP". On an unknown-command error it falls
      * back to the legacy `camera/web_rtc` command (older HA). The
      * callback posts to the main thread; it may never fire if the
      * socket is down, so callers must time out (as the HLS path does).
@@ -703,12 +747,38 @@ class HaClient(
             android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(a) }
         }
         fun send(command: String) {
-            sendCommand(command, build = {
+            // The command id is needed inside onResult to register
+            // the event subscription; sendCommand assigns it
+            // synchronously before any message can arrive, so
+            // capturing it this way is safe.
+            var cmdId = -1
+            cmdId = sendCommand(command, build = {
                 it.put("entity_id", entityId)
                 it.put("offer", offerSdp)
             }, onResult = { msg ->
                 if (msg.optBoolean("success", false)) {
-                    post(parseWebRtcAnswer(msg))
+                    val result = msg.optJSONObject("result")
+                    val inlineAnswer = result?.optString("answer")?.ifEmpty { null }
+                        ?: result?.optString("sdp")?.ifEmpty { null }
+                    val sessionId = result?.optString("session_id")?.ifEmpty { null }
+                    if (inlineAnswer != null) {
+                        // Old shape: the result itself carries the
+                        // answer — deliver it at once.
+                        post(WebRtcAnswer(inlineAnswer, sessionId, null))
+                    } else if (command == "camera/webrtc/offer") {
+                        // Subscription shape (Round 5 Bug B): success
+                        // with no answer yet — the answer arrives
+                        // later as an event correlated by cmdId (see
+                        // handleMessage). Do NOT report "answer
+                        // missing SDP" here: that error is exactly
+                        // what the device read while real answers
+                        // were dropped by event routing. The
+                        // caller's timeout still bounds the wait.
+                        webrtcEventHandlers[cmdId] = WebRtcSubscription(sessionId, onResult)
+                        Log.d("Haven", "FrontDoorLive: webrtc offer subscribed (id=$cmdId), awaiting answer event")
+                    } else {
+                        post(parseWebRtcAnswer(msg))
+                    }
                 } else {
                     val err = msg.optJSONObject("error")
                     val code = err?.optString("code")

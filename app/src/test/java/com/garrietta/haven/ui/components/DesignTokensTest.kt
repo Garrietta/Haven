@@ -14,9 +14,13 @@ class DesignTokensTest {
     private val scheme = lightColorScheme()
 
     @Test
-    fun pillLabelVisibleOnlyWhenSelectedAndShort() {
-        assertTrue(pillLabelVisible("Bedroom", true))
-        assertTrue(pillLabelVisible("1234567890", true))
+    fun pillLabelVisibleNeverShowsOnFoldedBar() {
+        // Round 5: the folded bottom PillNav is icon-only, so the
+        // token is false for every label, selected or not — the bar
+        // width can never jump on a tab switch. The unfolded side
+        // pill does not use this token (its labels are unconditional).
+        assertFalse(pillLabelVisible("Bedroom", true))
+        assertFalse(pillLabelVisible("1234567890", true))
         assertFalse(pillLabelVisible("Living Room", true))
         assertFalse(pillLabelVisible("Bedroom", false))
         assertFalse(pillLabelVisible("Living Room", false))

@@ -25,16 +25,21 @@ import com.garrietta.haven.ui.theme.StateShape
  */
 
 // ---------------------------------------------------------------------------
-// Pill bar label clamp (spec item 3b)
+// Pill bar labels (spec item 3b, superseded Round 5)
 // ---------------------------------------------------------------------------
 
 /**
- * A tab label is shown only when the tab is selected AND its title is at
- * most 10 characters. Longer titles collapse to an icon badge, which is
- * what fixes the old "Living Room lig" truncation.
+ * Round 5: the folded bottom PillNav is icon-only — labels NEVER
+ * show there, so the bar's width is constant across every tab
+ * switch (the old selected-only / 10-character rule made the
+ * selected item wider than its siblings, so the whole bar
+ * stretched and jumped on every switch). The parameters are kept
+ * so call sites are untouched; both are ignored. The unfolded
+ * side pill does NOT use this function — its labels are always
+ * shown below the icon (see VerticalSidePill) — so this change
+ * cannot hide side-pill labels.
  */
-fun pillLabelVisible(label: String, isSelected: Boolean): Boolean =
-    isSelected && label.length <= 10
+fun pillLabelVisible(label: String, isSelected: Boolean): Boolean = false
 
 // ---------------------------------------------------------------------------
 // Light color temperature (spec item 2: secondary -> tertiary by kelvin)

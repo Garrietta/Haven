@@ -30,6 +30,30 @@ import org.webrtc.VideoTrack
  */
 data class WebRtcAnswer(val answerSdp: String?, val sessionId: String?, val error: String?)
 
+/**
+ * Pure parse of a `camera/webrtc/offer` subscription EVENT message
+ * (unit-tested, Round 5 Bug B): HA answers the offer command as an
+ * event subscription, not as a result — the answer arrives later as
+ * a `type: "event"` message whose `event` object carries
+ * `type: "answer"` and the answer SDP string (or `sdp`), plus the
+ * session id. Returns the answer for an answer event, null for any
+ * other event (candidates, unrelated events) — the caller keeps
+ * the subscription open across candidates and closes it on the
+ * answer. A missing/blank answer SDP yields an error result, never
+ * a silent null. [knownSessionId] (from the command's result, when
+ * it carried one) fills in when the event itself carries none.
+ */
+fun parseWebRtcEventAnswer(msg: JSONObject, knownSessionId: String? = null): WebRtcAnswer? {
+    if (msg.optString("type") != "event") return null
+    val event = msg.optJSONObject("event") ?: return null
+    if (event.optString("type") != "answer") return null
+    val answer = event.optString("answer").ifEmpty { null }
+        ?: event.optString("sdp").ifEmpty { null }
+    val sessionId = event.optString("session_id").ifEmpty { null } ?: knownSessionId
+    if (answer == null) return WebRtcAnswer(null, sessionId, "answer event missing SDP")
+    return WebRtcAnswer(answer, sessionId, null)
+}
+
 /** Pure parse of a `camera/webrtc/offer` result message (unit-tested). */
 fun parseWebRtcAnswer(msg: JSONObject): WebRtcAnswer {
     if (!msg.optBoolean("success", false)) {

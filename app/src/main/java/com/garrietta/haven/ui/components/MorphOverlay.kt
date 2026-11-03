@@ -64,17 +64,21 @@ fun centerTargetRect(overlayOrigin: Offset, overlaySize: IntSize, panelSize: Int
  *    diagonal fly-outs (the garage sheet dismissing toward the top-left
  *    corner): the old exit morph re-resolved its target through the
  *    framework at dismiss time instead of returning to the card.
- * 2. SINGLE SURFACE, SOURCE FADING (container transform, 2026-10-29
- *    natural-animations round — supersedes the #62 instant return
- *    AND the binary hide): while a morph is active, the source card
- *    renders with the progress-driven alpha from [morphCardAlpha]
- *    (visible at morph start, gone once the surface is opaque, fading
- *    back in whole over the last 40% of an animated exit), and the
- *    surface background fades in over [0, 0.35] via
- *    [morphBackgroundAlpha] while its content fades in late via
- *    [morphContentAlpha]. Start content fades out early, end content
- *    fades in late, symmetric on exit: the card and the surface read
- *    as ONE element transforming, never a blank solid panel flashing
+ * 2. SINGLE SURFACE, OPAQUE COVER (container transform, Round 5 —
+ *    supersedes the 2026-10-29 source-fading rule AND Round 4's
+ *    exit curve): while a morph is active, the source card stays
+ *    rendered at full alpha (the overlay root provides
+ *    [LocalMorphCardAlpha] = 1f; the [morphCardAlpha] /
+ *    [morphExitCardAlpha] curves below are retained as pure
+ *    functions but no longer drive the card), and the panel's
+ *    opaque surface covers it — background alpha 1 from frame 0
+ *    on enter, through p >= 0.20 on close, fading only over
+ *    [0.20, 0] via [morphCloseBackgroundAlpha] — while its
+ *    content fades in late via [morphEnterContentAlpha] on enter
+ *    and out early via [morphCloseContentAlpha] on close. Start
+ *    content fades out early, end content fades in late,
+ *    symmetric on exit: the card and the surface read as ONE
+ *    element transforming, never a blank solid panel flashing
  *    in at open, never both contents at full opacity at once (that
  *    was #49's ghosting), never a staged reappearance, never a snap
  *    back. Exit is the smooth reverse of enter on the same bounds
@@ -153,10 +157,11 @@ val LocalArcTarget = staticCompositionLocalOf<((Rect) -> Unit)?> { null }
 val LocalMorphProgress = staticCompositionLocalOf<Float?> { null }
 
 /**
- * Progress-driven alpha for the active morph source card (see
- * [hideWhenMorphSource]): 1 when no morph is active. Provided by the
- * overlay root from the active morph's progress via
- * [morphCardAlpha].
+ * Alpha for the active morph source card (see
+ * [hideWhenMorphSource]). Round 5: the overlay root provides 1f
+ * always — the card never fades; the opaque panel surface covers
+ * it. (Historically this was progress-driven via [morphCardAlpha];
+ * that curve is retained below but no longer wired in.)
  */
 val LocalMorphCardAlpha = staticCompositionLocalOf { 1f }
 
@@ -231,13 +236,14 @@ fun Modifier.dissolveIntoTraveler(): Modifier = composed {
 
 /**
  * Hides this layout's header while it is the active morph source's
- * traveling header (layout unchanged, alpha only). The card's header
- * must vanish the moment the traveling header appears at the same
- * rect — otherwise the morph opens with two copies of the badge,
- * name, and state (the doubling read in every 2026-10-29 verdict
- * video). The rest of the card still fades on [morphCardAlpha]; only
- * the header is hidden from frame 0, because the traveling header
- * replaces it exactly.
+ * traveling header (layout unchanged, alpha only). Round 5: the
+ * overlay root provides a null hidden id, so this never hides in
+ * practice — the opaque panel covers the stationary card header
+ * (the interpolated panel rect always contains the source rect),
+ * and the traveler is badge-only above the panel, so no doubling
+ * forms. The mechanism is retained: if a hidden id is ever
+ * provided again, the header hides from frame 0 exactly as before
+ * (the doubling read in every 2026-10-29 verdict video).
  */
 fun Modifier.hideHeroWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenHeroId.current
@@ -587,6 +593,36 @@ fun morphExitCardAlpha(progress: Float): Float =
  */
 fun morphBackgroundAlpha(progress: Float): Float =
     smoothstep(0f, 0.35f, progress)
+
+/**
+ * Content alpha for a morphing surface OPEN at [progress] (0 = card,
+ * 1 = target) — the Round 5 symmetric enter curve (PanelOverlay).
+ * Content stays invisible for the first 15% of the open (the opaque
+ * surface alone covers the stationary card, so nothing can appear
+ * at 100% opacity over the card on the first frame — the giant
+ * "Disarmed" text bug), then fades in over [0.15, 0.5]. The close
+ * direction keeps [morphCloseContentAlpha]; together they are
+ * symmetric: late-in on enter, early-out on close. Progress is
+ * clamped first, so spring overshoot can never push the alpha out
+ * of range. Pure, unit-tested.
+ */
+fun morphEnterContentAlpha(progress: Float): Float =
+    ((progress.coerceIn(0f, 1f) - 0.15f) / 0.35f).coerceIn(0f, 1f)
+
+/**
+ * Surface-background alpha for a morphing surface CLOSE at
+ * [progress] (1 = panel at rest, 0 = landed back on the card) —
+ * the Round 5 opaque-cover rule (PanelOverlay). The surface stays
+ * fully opaque through the first 80% of the close (progress 1 down
+ * to 0.20), so the shrinking panel cleanly covers the stationary
+ * card while open and through the return, and only fades out over
+ * [0.20, 0] to reveal the card smoothly underneath — no 1-frame
+ * pop, no blank slot. On enter the background is opaque from
+ * frame 0 (PanelOverlay passes 1f), so this curve is close-only.
+ * Progress is clamped first. Pure, unit-tested.
+ */
+fun morphCloseBackgroundAlpha(progress: Float): Float =
+    (progress.coerceIn(0f, 1f) / 0.20f).coerceIn(0f, 1f)
 
 /**
  * The single morphing surface. [rect] is the interpolated rect in root
