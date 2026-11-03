@@ -101,6 +101,14 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
+    // Round 6: the dial range is fixed HERE, in the popout — the
+    // HA range narrowed to 55-85F (see thermostatDisplayRange), so
+    // 67/69 setpoints get clear arc separation instead of crowding.
+    // Values themselves are never rewritten; out-of-range thumbs
+    // clamp to the arc end and the Hero flags it. The Hero takes
+    // this range as a parameter, so the popout surface cannot
+    // silently fall back to a different range.
+    val displayRange = thermostatDisplayRange(min, max)
     // Traveling header target (2026-10-29 pop-up round): the title
     // row reports its root rect into the measurement frame's hero
     // target, so the overlay's traveling header lands exactly here.
@@ -162,7 +170,7 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
             contentAlignment = Alignment.Center,
         ) {
             ThermostatHero(
-                entity, vm, min, max, diameter = 240.dp,
+                entity, vm, min, max, displayRange = displayRange, diameter = 240.dp,
                 // Numbers sit on the scallop disc: floor them against
                 // the disc color itself (2026-10-30 dial-clash fix).
                 numberBackdrop = compositeOver(
@@ -310,6 +318,7 @@ fun ThermostatHero(
     vm: HavenViewModel,
     min: Float,
     max: Float,
+    displayRange: ClosedFloatingPointRange<Float>,
     diameter: Dp = 300.dp,
     /** Color directly behind the dial numbers (the scallop disc). */
     numberBackdrop: Color,
@@ -363,12 +372,16 @@ fun ThermostatHero(
         }
         applyClimateSetpoint(vm, entity, selector, next.toDouble())
     }
-    // Round 4 display range: the arc maps 55–85°F (see
-    // thermostatDisplayRange), so 67°/69° thumbs get clear
-    // separation instead of crowding on the HA range. Values
-    // outside it are NOT rewritten — their thumbs clamp to the
-    // arc end for drawing and the flag below says so.
-    val displayRange = thermostatDisplayRange(min, max)
+    // Round 6: displayRange arrives from the caller (the popout
+    // passes thermostatDisplayRange(min, max) = 55-85F, so 67/69
+    // thumbs get clear separation instead of crowding on the HA
+    // range). Values outside it are NOT rewritten — their thumbs
+    // clamp to the arc end for drawing and the flag below says so.
+    // Thumb spacing for close setpoints is the radial stagger in
+    // dualThumbRadii (ThermostatDial): at 67/69 on a 240dp dial the
+    // 30x20dp pills sit on radii 24dp apart and clear each other
+    // (verified numerically — see the round report); only their
+    // translucent blooms overlap, by design.
     val outOfRangeNote: String? = when {
         heatCool && (heat < displayRange.start || heat > displayRange.endInclusive) ->
             "Heat ${heat.toDouble().formatTemp()} is outside the dial range " +
@@ -391,7 +404,12 @@ fun ThermostatHero(
                 single = single,
                 dual = heatCool,
                 current = current?.toFloat(),
-                currentLabel = current?.let { it.formatTemp() },
+                // Round 6: the canvas label is retired — the indoor
+                // temperature now renders as a Compose Text above
+                // the steppers below (one label, not two), so it
+                // can never collide with the dial's bottom gap or
+                // duplicate the center numbers.
+                currentLabel = null,
                 range = displayRange,
                 mode = entity.state,
                 selector = selector,
@@ -427,6 +445,18 @@ fun ThermostatHero(
                 } else {
                     KineticTempText(single, dialAccent, active = true, fontSize = 72.sp, backdrop = numberBackdrop)
                 }
+                // Round 6: the indoor temperature label lives
+                // HERE, directly above the - / + buttons — never
+                // inside the dial canvas, never below the steppers.
+                if (current != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Indoor ${current.formatTemp()}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -454,8 +484,9 @@ fun ThermostatHero(
             )
         }
         if (heatCool) {
-            // Round 4: a full 24dp of daylight above the pill so
-            // it never overlaps the dial's bottom edge.
+            // Round 6 confirms 24dp of daylight above the pill so
+            // it never overlaps the dial's bottom edge — 24dp is
+            // the latest figure and wins over any 20dp figure.
             Spacer(Modifier.height(24.dp))
             val scheme = MaterialTheme.colorScheme
             SegmentedOptionBar(

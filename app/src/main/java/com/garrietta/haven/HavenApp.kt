@@ -99,9 +99,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -122,6 +122,8 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.key
@@ -160,27 +162,21 @@ import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
 import com.garrietta.haven.ui.components.rememberPillScrubState
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.unit.IntSize
 import com.garrietta.haven.ui.components.LocalArcBounds
 import com.garrietta.haven.ui.components.LocalArcTarget
 import com.garrietta.haven.ui.components.LocalCardBounds
 import com.garrietta.haven.ui.components.LocalHeroBounds
 import com.garrietta.haven.ui.components.LocalHeroTarget
-import com.garrietta.haven.ui.components.LocalMorphProgress
 import com.garrietta.haven.ui.components.LocalHiddenCardId
 import com.garrietta.haven.ui.components.LocalHiddenHeroId
 import com.garrietta.haven.ui.components.LocalMorphCardAlpha
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.controls.sensorDisplayName
-import com.garrietta.haven.ui.components.morphCloseBackgroundAlpha
-import com.garrietta.haven.ui.components.morphCloseContentAlpha
-import com.garrietta.haven.ui.components.morphEnterContentAlpha
-import com.garrietta.haven.ui.components.morphCornerTop
+import com.garrietta.haven.ui.components.morphPanelContainerAlphaClose
 import com.garrietta.haven.ui.components.weatherConditionColor
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.heroHeaderAlpha
@@ -313,25 +309,18 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
  * at open (null = the card never reported bounds, e.g. a board card;
  * the sheet then morphs from the graceful fallback rect — the target
  * shifted 80dp down — never an instant appearance, never a crash).
- * [targetSize] is filled by the one-frame measurement pass. The
- * overlay always prefers the card's CURRENT bounds over this captured
+ * The overlay always prefers the card's CURRENT bounds over this captured
  * rect (cards re-report on relayout), so rotation mid-morph and cards
  * that moved between open and dismiss track correctly; this captured
  * rect is only the fallback.
  */
-private class SheetAnim(val id: String, val source: Rect?) {
-    var targetSize by mutableStateOf<IntSize?>(null)
-}
+private class SheetAnim(val id: String, val source: Rect?)
 
 /** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
-private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?) {
-    var targetSize by mutableStateOf<IntSize?>(null)
-}
+private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?)
 
 /** Open thermostat pop-out morph: the climate entity plus its source card rect (same fallback rule as sheets). */
-private class PopoutAnim(val id: String, val source: Rect?) {
-    var targetSize by mutableStateOf<IntSize?>(null)
-}
+private class PopoutAnim(val id: String, val source: Rect?)
 
 @Composable
 fun HavenApp(vm: HavenViewModel) {
@@ -805,19 +794,33 @@ fun HavenApp(vm: HavenViewModel) {
                 // (see CameraQuadrant): its rect anchors the panel
                 // morph, and the opaque panel covers it while open,
                 // so the snapshot never doubles the video.
-                LocalHiddenCardId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id ?: vm.cameraDialogId),
+                // Round 6: NO source card or tile ever hides for a
+                // morph, on enter or on exit. hideWhenMorphSource /
+                // hideBodyWhenMorphSource are gated on this id, so
+                // null makes them no-ops everywhere: the grid card
+                // stays rendered and stationary at all times (the
+                // missing-Humidity close-frame defect was a hide
+                // local blanking the slot). The panel surface
+                // covers it with the reconciled container curves
+                // (see MorphOverlay: fade in over the first 15%
+                // of open from the source card's color, fade out
+                // over the final 25% of close), so no pitch-black
+                // box ever cuts across adjacent cards.
+                LocalHiddenCardId provides null,
                 LocalHeroBounds provides heroBounds,
                 LocalArcBounds provides arcBounds,
-                // Round 5: no card header ever hides for a morph.
-                // The traveling header is badge-only, and the
-                // opaque panel (PanelOverlay: background opaque
-                // from frame 0 on enter, through p >= 0.20 on
-                // close) always covers the source card's rect —
-                // the interpolated rect always contains the source
-                // rect — so the stationary card header underneath
-                // can never double anything visible. Null here
-                // disables hideHeroWhenMorphSource everywhere.
-                LocalHiddenHeroId provides null,
+                // Round 6 badge-only hide: while a panel with a
+                // traveling header is open (sheet, detail, or
+                // pop-out — NOT the camera panel, which has no
+                // traveler), the SOURCE card's badge icon hides via
+                // hideHeroWhenMorphSource, so the traveling badge
+                // is the only badge on screen during flight. The
+                // card's name, state, and body NEVER hide (see
+                // LocalHiddenCardId above): the badge sites were
+                // split from the header-row/text sites for exactly
+                // this, so hiding the badge cannot blank a card.
+                // At rest the id is null and every badge shows.
+                LocalHiddenHeroId provides (sheetAnim?.id ?: detailAnim?.entityId ?: popoutAnim?.id),
                 // Shape picker state (2026-10-30): badges and card
                 // outlines resolve through this; re-read from the
                 // store whenever a picker save bumps the version.
@@ -827,42 +830,22 @@ fun HavenApp(vm: HavenViewModel) {
                     vm.settingsStore.badgeShapeOverrides(),
                     vm.settingsStore.cardShapeOverrides(),
                 ),
-                // Round 5 source-card rule (Google Home container
-                // transform — SUPERSEDES Round 4's exit-curve
-                // approach, where the card hid until progress
-                // 0.85 and faded back): the card NEVER hides or
-                // fades, on enter or on exit. It stays rendered
-                // and stationary at all times, and the panel's
-                // opaque surface does the covering (PanelOverlay:
-                // background alpha 1 from frame 0 on enter,
-                // through p >= 0.20 on close, fading only over
-                // [0.20, 0]). Because the interpolated panel rect
-                // always contains the source card rect, the opaque
-                // surface hides the card exactly where it would
-                // otherwise double — no blanked card, no redraw
-                // flash, and no frame with two visible copies.
-                // Reconciliation (verified in code): the old hide
-                // path was not what kept the Security / eufy /
-                // Greenhouse cards looking stationary — every
-                // morph-source card, including those, wears
-                // hideWhenMorphSource gated on LocalHiddenCardId
-                // and faded on this alpha. What kept their panels
-                // clean is that their panel surfaces are opaque at
-                // rest and their travelers are badge-only, so the
-                // card underneath was never the visible problem;
-                // the flash came from the card itself fading out
-                // and back. Making every card behave that way
-                // (stay rendered, let the opaque surface cover)
-                // removes the flash for Forecast Home, Ecobee
-                // Thermostat, Temperature, Humidity, and
-                // Standing Lamp alike. The one place a visible
+                // Round 6 source-card rule (Google Home container
+                // transform, reconciled curves — see MorphOverlay):
+                // the card NEVER hides or fades, on enter or on
+                // exit (LocalHiddenCardId is null above, and this
+                // alpha is 1f). It stays rendered and stationary
+                // at all times; the panel surface does the
+                // covering, fading in over the first 15% of open
+                // from the source card's color and out over the
+                // final 25% of close. The one place a visible
                 // double could still form is the close tail: the
                 // traveler returns to the source badge rect while
-                // the panel background fades (p < 0.20) and the
+                // the panel container fades (p < 0.25) and the
                 // card badge shows through — so the traveler
-                // fades with the panel background on close (see
-                // TravelingHeader's alphaScale), landing as a
-                // short crossfade onto the coincident card badge
+                // fades with the container on close (see
+                // TravelingHeader's isClosing curve), landing as
+                // a short crossfade onto the coincident card badge
                 // instead of a doubled badge.
                 LocalMorphCardAlpha provides 1f,
             ) {
@@ -886,13 +869,22 @@ fun HavenApp(vm: HavenViewModel) {
             // this Row) covers it exactly as today's pill-exit rule
             // covers the pill.
             Row(Modifier.fillMaxSize()) {
-            if (LocalWideLayout.current && isTopLevel(current)) {
-                val barItems = pillBarItems(vm.userTabs)
-                VerticalSidePill(
-                    items = barItems,
-                    selectedIndex = selectedNavIndex(current, barItems, vm.userTabs),
-                    onSelect = goTop,
-                )
+            // Round 6 posture key boundary: the rail is keyed on
+            // the wide flag, so a fold/unfold switch unmounts the
+            // old navigation chrome completely before the new
+            // layout paints — no "Haven Good evening" header
+            // ghosting, no rail + pill layer stacking. The
+            // Scaffold below is deliberately NOT keyed (its
+            // screens keep scroll state across postures).
+            key(LocalWideLayout.current) {
+                if (LocalWideLayout.current && isTopLevel(current)) {
+                    val barItems = pillBarItems(vm.userTabs)
+                    VerticalSidePill(
+                        items = barItems,
+                        selectedIndex = selectedNavIndex(current, barItems, vm.userTabs),
+                        onSelect = goTop,
+                    )
+                }
             }
             Scaffold(
                 modifier = if (LocalWideLayout.current) Modifier.weight(1f) else Modifier,
@@ -917,6 +909,9 @@ fun HavenApp(vm: HavenViewModel) {
             bottomBar = {
                 // Folded only: unfolded shows the rail instead, so
                 // no bottom bar is reserved or rendered there.
+                // Round 6: keyed like the rail above, so posture
+                // switches unmount the pill cleanly.
+                key(LocalWideLayout.current) {
                 if (!LocalWideLayout.current && isTopLevel(current)) {
                     val barItems = pillBarItems(vm.userTabs)
                     val selectedIndex = selectedNavIndex(current, barItems, vm.userTabs)
@@ -946,6 +941,7 @@ fun HavenApp(vm: HavenViewModel) {
                                 translationY = 96.dp.toPx() * pillExit
                             },
                     )
+                }
                 }
             },
         ) { padding ->
@@ -1035,34 +1031,23 @@ fun HavenApp(vm: HavenViewModel) {
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
                 BackHandler { dismissSheet() }
-                val sheetP = sheetProgress.value.coerceIn(0f, 1f)
-                // Measurement frame (panel geometry, below the
-                // panel): the panel content, invisible, laid out once
-                // at its final full-screen size so its header can
-                // report the traveling header's target rect. The hero
-                // provider lives ONLY here: the live panel's header
-                // sits at the interpolated morph rect mid-animation
-                // and must never overwrite the target.
-                if (anim.targetSize == null) {
-                    PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
-                        CompositionLocalProvider(
-                            LocalHeroTarget provides { r -> heroTarget = anim.id to r },
-                            LocalArcTarget provides { r -> arcTarget = anim.id to r },
-                        ) {
-                            EntityPopupSheetContent(
-                                vm, navigate, anim.id, panelBounds = sheetPanelBounds,
-                                onDetails = { dismissSheetInstant() },
-                            )
-                        }
-                    }
-                }
+                // Round 6: no measurement frame — the panel is
+                // composed ONCE, at target geometry, and the live
+                // header reports the travel target from its
+                // untransformed layout bounds (PanelOverlay
+                // provides the hero/arc targets around the live
+                // content). Progress is a lambda: nothing in this
+                // block reads the Animatable during composition.
                 PanelOverlay(
-                    progress = sheetP,
+                    progress = { sheetProgress.value },
                     source = cardBounds[anim.id] ?: anim.source,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
+                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     onDismiss = { dismissSheet() },
                     isClosing = sheetExiting,
+                    heroTarget = { r -> heroTarget = anim.id to r },
+                    arcTarget = { r -> arcTarget = anim.id to r },
                     onPanelPlaced = { sheetPanelBounds = it },
                 ) {
                     EntityPopupSheetContent(
@@ -1071,23 +1056,23 @@ fun HavenApp(vm: HavenViewModel) {
                     )
                 }
                 // Traveling header, above the panel: the card's
-                // badge/state travel to the panel's header as ONE
+                // badge travels to the panel's header as ONE
                 // element. Renders at the source rect until the
-                // measurement frame reports the target (see
-                // TravelingHeader) — never a gap, never a pop.
+                // live header reports the target — never a gap,
+                // never a pop.
                 TravelingHeader(
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
-                    sheetP, overlayOrigin,
+                    progress = { sheetProgress.value }, overlayOrigin,
                     onDismiss = { dismissSheet() },
-                    alphaScale = if (sheetExiting) morphCloseBackgroundAlpha(sheetP) else 1f,
+                    isClosing = sheetExiting,
                 )
                 // Traveling arc, above the panel (see TravelingArc).
                 TravelingArc(
                     vm, anim.id, arcBounds[anim.id],
                     arcTarget?.takeIf { it.first == anim.id }?.second,
-                    sheetP, overlayOrigin,
-                    alphaScale = if (sheetExiting) morphCloseBackgroundAlpha(sheetP) else 1f,
+                    progress = { sheetProgress.value }, overlayOrigin,
+                    isClosing = sheetExiting,
                 )
             }
             // Detail panel overlay: FULL-SCREEN PANEL (2026-11-01
@@ -1102,45 +1087,39 @@ fun HavenApp(vm: HavenViewModel) {
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 BackHandler { dismissDetail() }
-                val detailP = detailProgress.value.coerceIn(0f, 1f)
                 // Round 4: the thermostat detail special-case is
                 // gone with Screen.Thermostat — every detail panel
                 // content is dialog-owned (plain column, no own
                 // scroll), so the panel's scroll wrapper owns
                 // scrolling for all of them. The #92 inDialog crash
-                // fix for the deleted route is moot.
-                if (anim.targetSize == null) {
-                    PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
-                        CompositionLocalProvider(
-                            LocalHeroTarget provides { r -> heroTarget = anim.entityId to r },
-                            LocalArcTarget provides { r -> arcTarget = anim.entityId to r },
-                        ) {
-                            content(anim.screen)
-                        }
-                    }
-                }
+                // fix for the deleted route is moot. Round 6: no
+                // measurement frame here either (see the sheet
+                // block); progress is a lambda.
                 PanelOverlay(
-                    progress = detailP,
+                    progress = { detailProgress.value },
                     source = cardBounds[anim.entityId] ?: anim.source,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
+                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     onDismiss = { dismissDetail() },
                     isClosing = detailExiting,
+                    heroTarget = { r -> heroTarget = anim.entityId to r },
+                    arcTarget = { r -> arcTarget = anim.entityId to r },
                 ) {
                     content(anim.screen)
                 }
                 TravelingHeader(
                     vm, anim.entityId, heroBounds[anim.entityId],
                     heroTarget?.takeIf { it.first == anim.entityId }?.second,
-                    detailP, overlayOrigin,
+                    progress = { detailProgress.value }, overlayOrigin,
                     onDismiss = { dismissDetail() },
-                    alphaScale = if (detailExiting) morphCloseBackgroundAlpha(detailP) else 1f,
+                    isClosing = detailExiting,
                 )
                 TravelingArc(
                     vm, anim.entityId, arcBounds[anim.entityId],
                     arcTarget?.takeIf { it.first == anim.entityId }?.second,
-                    detailP, overlayOrigin,
-                    alphaScale = if (detailExiting) morphCloseBackgroundAlpha(detailP) else 1f,
+                    progress = { detailProgress.value }, overlayOrigin,
+                    isClosing = detailExiting,
                 )
             }
             // Thermostat pop-out panel (Round 4: the ONLY
@@ -1153,27 +1132,18 @@ fun HavenApp(vm: HavenViewModel) {
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
                 BackHandler { dismissPopout() }
-                val popoutP = popoutProgress.value.coerceIn(0f, 1f)
-                if (anim.targetSize == null) {
-                    PanelMeasureFrame(onMeasured = { anim.targetSize = it }) {
-                        CompositionLocalProvider(
-                            LocalHeroTarget provides { r -> heroTarget = anim.id to r },
-                            LocalArcTarget provides { r -> arcTarget = anim.id to r },
-                        ) {
-                            ThermostatPopoutContent(
-                                vm, anim.id,
-                                onClose = { dismissPopout() },
-                            )
-                        }
-                    }
-                }
+                // Round 6: no measurement frame here either (see
+                // the sheet block); progress is a lambda.
                 PanelOverlay(
-                    progress = popoutP,
+                    progress = { popoutProgress.value },
                     source = cardBounds[anim.id] ?: anim.source,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
+                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     onDismiss = { dismissPopout() },
                     isClosing = popoutExiting,
+                    heroTarget = { r -> heroTarget = anim.id to r },
+                    arcTarget = { r -> arcTarget = anim.id to r },
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
@@ -1181,14 +1151,14 @@ fun HavenApp(vm: HavenViewModel) {
                     )
                 }
                 // Traveling header, above the panel (see the sheet
-                // block): the climate card's badge/state travel to
-                // the panel's title row as ONE element.
+                // block): the climate card's badge travels to the
+                // panel's title row as ONE element.
                 TravelingHeader(
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
-                    popoutP, overlayOrigin,
+                    progress = { popoutProgress.value }, overlayOrigin,
                     onDismiss = { dismissPopout() },
-                    alphaScale = if (popoutExiting) morphCloseBackgroundAlpha(popoutP) else 1f,
+                    isClosing = popoutExiting,
                 )
             }
             // Camera live-feed panel (2026-11-01 panels round): the
@@ -1210,7 +1180,7 @@ fun HavenApp(vm: HavenViewModel) {
                 val camStates by vm.states.collectAsState()
                 val camEntity = camStates[camId]
                 PanelOverlay(
-                    progress = camP,
+                    progress = { cameraDialogProgress.value },
                     // Captured-at-open quadrant rect (live map as
                     // first-frame fallback): never the sourceless
                     // fallback, so the close lands on the quadrant.
@@ -1503,42 +1473,50 @@ private fun EntityPopupSheetContent(
 }
 
 /**
- * The full-screen panel overlay (2026-11-01 panels round —
- * SUPERSEDES the 2026-10-30 centered dialog): every device detail
- * opens as a panel morphing from its source card rect to
- * full-screen, on BOTH folded and unfolded postures. No centered
- * device dialog remains; the only dialog left is the shape picker
- * (see ShapePickerDialog, intentionally preserved).
- * - Container: NO scrim — the panel is opaque at rest (scheme
- *   background, or black for cameras) and covers the page, so no
- *   dimmed page shows around it. A touch interceptor fills the
- *   screen behind the morphing rect so taps outside the still-
- *   small panel mid-flight never reach the page below; it takes
- *   no action itself (dismiss is Back / the back arrow / the
- *   panel's own Close or badge, never an outside tap).
+ * The full-screen panel overlay, Round 6 (120Hz pipeline +
+ * reconciled curves — SUPERSEDES the Round 5 opaque-cover rule
+ * and the measurement frame, both deleted this round):
+ * every device detail opens as a panel morphing from its source
+ * card rect to full-screen, on BOTH folded and unfolded postures.
+ * No centered device dialog remains; the only dialog left is the
+ * shape picker (see ShapePickerDialog, intentionally preserved).
+ * - Container: NO scrim — the panel covers the page at rest. A
+ *   touch interceptor fills the screen behind the morphing rect
+ *   so taps outside the still-small panel mid-flight never reach
+ *   the page below; it takes no action itself (dismiss is Back /
+ *   the back arrow / the panel's own Close or badge, never an
+ *   outside tap).
  * - Morph: the panel rect lerps from the source card rect (or the
  *   graceful fallback rect, target shifted 80dp down, when the
  *   card never reported bounds) to the full overlay rect on the
- *   caller-supplied morph [progress] — the SAME Animatable +
- *   springBounds progress that drove the old dialog, so an
- *   appear interrupted by a dismiss reverses cleanly mid-flight
- *   instead of jumping (an Animatable's animateTo cancels and
- *   restarts from the current value). The rect and corners
- *   (28dp -> 0dp via [morphCornerTop]) come from MorphOverlay
- *   helpers via [MorphSurface]; no parallel morph system.
- *   Round 5 opaque-cover rule: the surface background is opaque
- *   from the panel's first frame on enter, and stays opaque
- *   through the first 80% of a close, fading only over p = 0.20
- *   down to 0 ([morphCloseBackgroundAlpha]) — the opaque surface
- *   is what covers the stationary source card, so the card never
- *   needs to hide. Content is laid out once at full size and
- *   clipped to the growing rect (never scaled); it fades in
- *   symmetrically on enter ([morphEnterContentAlpha]: invisible
- *   through p = 0.15, in by p = 0.50) and out early on close
- *   ([morphCloseContentAlpha]), so no panel content ever appears
- *   at full opacity over the card on the first frame.
+ *   caller-supplied morph [progress] LAMBDA — the SAME Animatable
+ *   + springBounds progress that drove the old dialog, read ONLY
+ *   inside MorphSurface's graphicsLayer/draw blocks, so an appear
+ *   interrupted by a dismiss reverses cleanly mid-flight instead
+ *   of jumping, and no morph frame costs a Compose Measure/Layout
+ *   pass. The rect, corners, background color, and alphas all come
+ *   from MorphOverlay helpers via [MorphSurface]; no parallel
+ *   morph system. The background lerps from [sourceCardColor]
+ *   (the source card's container color) to the panel background
+ *   over the first 35% of the morph, and the container alpha
+ *   follows the reconciled curves (fade in over the first 15% of
+ *   open, fade out over the final 25% of close) — the surface,
+ *   not a card hide, is what covers the stationary card, and
+ *   because the card stays visible and the surface starts
+ *   card-colored and transparent, no pitch-black box can slice
+ *   across adjacent cards. Content is laid out once at full size
+ *   and scales with the surface via graphicsLayer (Round 6 change
+ *   from Round 5's clip-reveal); it fades in symmetrically on
+ *   enter (invisible through p = 0.15, in by p = 0.50) and out
+ *   early on close (gone by p = 0.85), so no panel content ever
+ *   appears at full opacity over the card on the first frame.
  *   Destination headers hide only their badge while traveling
  *   (see TravelingHeader), never their text.
+ * - Travel targets: [heroTargetReporter]/[arcTargetReporter] are
+ *   provided around the LIVE content (never a measurement frame):
+ *   the content is laid out at target geometry, so its header's
+ *   untransformed layout bounds ARE the travel target. The camera
+ *   panel passes neither (it has no traveling header).
  * - Chrome: status-bar padding + a back arrow row above the
  *   content (suppressed only for the camera panel, whose own
  *   header row carries Close). No drag-to-dismiss: Back and the
@@ -1551,13 +1529,14 @@ private fun EntityPopupSheetContent(
  *   that owns its own full-size layout (the camera panel's video
  *   body), where a fillMaxSize child inside a scroll container
  *   would have no definite height to fill.
- * [onPanelPlaced] reports the panel's full-screen root rect once
- * it reaches rest (the camera-rise origin for sheet Details
- * actions); at rest the rect is exact where it is used.
+ * [onPanelPlaced] reports the panel's full-screen root rect (the
+ * camera-rise origin for sheet Details actions); the layout
+ * bounds are the target rect from the first frame, so this fires
+ * on placement rather than waiting for rest.
  */
 @Composable
 private fun PanelOverlay(
-    progress: Float,
+    progress: () -> Float,
     source: Rect?,
     overlayOrigin: Offset,
     panelBackground: Color,
@@ -1570,10 +1549,16 @@ private fun PanelOverlay(
     // morphCloseContentAlpha) instead of shrinking at full opacity
     // over the grid — the thermostat dial bleed-through fix.
     isClosing: Boolean = false,
+    // The source card's container color (sheet/detail/pop-out pass
+    // surfaceContainerHighest; cameras pass null and keep black).
+    // The panel background lerps from this at p = 0 to
+    // panelBackground at p = 0.35 (see MorphSurface).
+    sourceCardColor: Color? = null,
+    heroTargetReporter: ((Rect) -> Unit)? = null,
+    arcTargetReporter: ((Rect) -> Unit)? = null,
     onPanelPlaced: ((Rect) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    val p = progress.coerceIn(0f, 1f)
     Box(Modifier.fillMaxSize()) {
         // Touch interceptor (see the KDoc): consumes taps outside
         // the still-small morph rect mid-flight, takes no action.
@@ -1595,99 +1580,51 @@ private fun PanelOverlay(
                 overlayOrigin.y + targetHeightPx,
             )
             val from = source ?: fallbackFromRect(target, with(density) { 80.dp.toPx() })
-            if (p >= 1f && onPanelPlaced != null) {
-                LaunchedEffect(Unit) { onPanelPlaced(target) }
-            }
             MorphSurface(
-                rect = lerpRect(from, target, p),
+                source = from,
+                target = target,
                 overlayOrigin = overlayOrigin,
-                targetSize = IntSize(targetWidthPx.roundToInt(), targetHeightPx.roundToInt()),
-                cornerTop = morphCornerTop(p),
-                cornerAll = morphCornerTop(p),
                 background = panelBackground,
-                // Round 5 opaque cover: opaque from frame 0 on
-                // enter, opaque through p >= 0.20 on close, fading
-                // only over [0.20, 0] — the surface, not a card
-                // hide, is what covers the stationary card.
-                backgroundAlpha = if (isClosing) morphCloseBackgroundAlpha(p) else 1f,
-                // Symmetric content curve (Round 5): enter fades in
-                // over [0.15, 0.50] via morphEnterContentAlpha, so
-                // no inner content (e.g. the giant "Disarmed" text)
-                // appears at 100% opacity over the card on the
-                // first frame; close fades out early via
-                // morphCloseContentAlpha so the shrinking surface
-                // never carries full-opacity panel content over
-                // the grid tiles.
-                contentAlpha = if (isClosing) morphCloseContentAlpha(p) else morphEnterContentAlpha(p),
-                progress = p,
+                fromBackground = sourceCardColor,
+                progress = progress,
+                isClosing = isClosing,
+                onPlaced = onPanelPlaced,
             ) {
-                if (scrollContent) {
-                    Box(
-                        Modifier.fillMaxSize().statusBarsPadding()
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Column(Modifier.fillMaxWidth()) {
-                            if (showBackBar) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    IconButton(onClick = onDismiss) {
-                                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                CompositionLocalProvider(
+                    LocalHeroTarget provides heroTargetReporter,
+                    LocalArcTarget provides arcTargetReporter,
+                ) {
+                    if (scrollContent) {
+                        Box(
+                            Modifier.fillMaxSize().statusBarsPadding()
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                if (showBackBar) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        IconButton(onClick = onDismiss) {
+                                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                                        }
                                     }
                                 }
+                                content()
                             }
+                        }
+                    } else {
+                        // Full-size content (camera video): no scroll
+                        // wrapper, so fillMaxSize resolves against the
+                        // panel's definite size, not an unbounded scroll
+                        // height. No back bar here either (callers that
+                        // skip scrolling carry their own header).
+                        Box(Modifier.fillMaxSize().statusBarsPadding()) {
                             content()
                         }
                     }
-                } else {
-                    // Full-size content (camera video): no scroll
-                    // wrapper, so fillMaxSize resolves against the
-                    // panel's definite size, not an unbounded scroll
-                    // height. No back bar here either (callers that
-                    // skip scrolling carry their own header).
-                    Box(Modifier.fillMaxSize().statusBarsPadding()) {
-                        content()
-                    }
                 }
             }
-        }
-    }
-}
-
-/**
- * The panel's one-frame measurement pass: the same content, laid
- * out once at final full-screen geometry (status-bar padding
- * included, matching PanelOverlay), invisible and below the panel,
- * so its header/arc rows can report the traveling elements'
- * target rects. The live panel must never provide the hero/arc
- * targets: its header sits at the interpolated morph rect
- * mid-animation. [onMeasured] fires once (the caller stores it as
- * the measured flag and drops this frame); the content may compose
- * twice for one frame, which is safe — history refreshes dedupe
- * in the view model.
- */
-@Composable
-private fun PanelMeasureFrame(
-    onMeasured: (IntSize) -> Unit,
-    content: @Composable () -> Unit,
-) {
-    Box(
-        Modifier.fillMaxSize()
-            .alpha(0f)
-            .onGloballyPositioned { onMeasured(it.size) },
-    ) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            // Round 4 header-badge alignment fix: the live panel
-            // sits below a 48dp back-bar row (IconButton) +
-            // status-bar padding, but this measurement frame had
-            // status-bar padding only — so every measured header
-            // target rect sat ~48dp too high, roughly where the
-            // back arrow sits, and the final-2% handoff read as
-            // "spawn over the back arrow and drop into place".
-            // The spacer aligns measured targets with live ones.
-            Spacer(Modifier.height(48.dp))
-            content()
         }
     }
 }
@@ -1736,16 +1673,19 @@ private fun TravelingHeader(
     entityId: String,
     source: Rect?,
     target: Rect?,
-    progress: Float,
+    progress: () -> Float,
     overlayOrigin: Offset,
     onDismiss: () -> Unit,
-    // Round 5 close-tail fade: on close, the traveler fades with
-    // the panel background (morphCloseBackgroundAlpha), so that in
-    // the final p < 0.20 window — when the stationary card badge
-    // shows through the fading panel — the traveler crossfades
-    // onto the coincident card badge instead of doubling it.
-    // 1f on enter (no effect).
-    alphaScale: Float = 1f,
+    // Round 6 close-tail fade (reconciled curve): on close, the
+    // traveler fades with the panel CONTAINER
+    // (morphPanelContainerAlphaClose: opaque until p = 0.25, then
+    // out over the final 25%), so that in the close window — when
+    // the stationary card badge shows through the fading panel —
+    // the traveler crossfades onto the coincident card badge
+    // instead of doubling it. 1f on enter (no effect). The old
+    // alphaScale parameter is gone: the curve is computed here,
+    // inside graphicsLayer, from the progress lambda.
+    isClosing: Boolean = false,
 ) {
     // Snapshot-first (see the ViewModel KDoc): the live flow is
     // only the first-frame fallback before the open effect
@@ -1758,15 +1698,13 @@ private fun TravelingHeader(
     // so a zero-size source renders nothing instead of a badge
     // that appears to spawn at the origin and drop into place.
     if (source.width <= 0f || source.height <= 0f) return
-    // No target yet (measurement frame pending): sit exactly on
-    // the source badge rect instead of vanishing — the card
-    // header hides from frame 0, so returning early here left a
-    // gap where no header showed at all, then the traveler popped
-    // in mid-path (the 2026-10-30 verdict's icon jump). Once the
-    // target arrives the same lerp carries it continuously to
-    // the dialog header.
+    // No target yet (live header not yet reported): sit exactly on
+    // the source badge rect instead of vanishing — returning early
+    // here left a gap where no header showed at all, then the
+    // traveler popped in mid-path (the 2026-10-30 verdict's icon
+    // jump). Once the target arrives the same lerp carries it
+    // continuously to the dialog header.
     val targetRect = target ?: source
-    val p = progress.coerceIn(0f, 1f)
     val density = LocalDensity.current
     // Tile sources report their square badge rect; card sources
     // report their wide header row. A near-square source is a
@@ -1779,38 +1717,53 @@ private fun TravelingHeader(
     val sourceBadge = if (tileSource) source
         else badgeRectInRow(source, with(density) { 56.dp.toPx() })
     val targetBadge = badgeRectInRow(targetRect, with(density) { 48.dp.toPx() })
-    val rect = lerpRect(sourceBadge, targetBadge, p)
     val accent = accentFor(entity.entityId)
-    val headerAlpha = heroHeaderAlpha(p) * alphaScale.coerceIn(0f, 1f)
     // Badge only (2026-11-01 polish round): the name/state text
     // used to ride beside the badge here, but the destination
     // header now shows its own text from frame 0 — keeping the
     // traveler's text would double it through the flight.
+    // Round 6 placement: the Box is laid out ONCE at the TARGET
+    // badge rect (static offset/size — these change only when the
+    // live header first reports, never per frame); ALL per-frame
+    // motion is the graphicsLayer transform below, driven by the
+    // progress lambda, so the flight costs no Measure/Layout pass.
     Box(
         Modifier
             .offset {
                 IntOffset(
-                    (rect.left - overlayOrigin.x).roundToInt(),
-                    (rect.top - overlayOrigin.y).roundToInt(),
+                    (targetBadge.left - overlayOrigin.x).roundToInt(),
+                    (targetBadge.top - overlayOrigin.y).roundToInt(),
                 )
             }
-            .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
-            .graphicsLayer { alpha = headerAlpha },
+            .size(with(density) { targetBadge.width.toDp() }, with(density) { targetBadge.height.toDp() })
+            .graphicsLayer {
+                val p = progress().coerceIn(0f, 1f)
+                val rect = lerpRect(sourceBadge, targetBadge, p)
+                transformOrigin = TransformOrigin(0f, 0f)
+                translationX = rect.left - targetBadge.left
+                translationY = rect.top - targetBadge.top
+                scaleX = if (targetBadge.width > 0f) rect.width / targetBadge.width else 1f
+                scaleY = if (targetBadge.height > 0f) rect.height / targetBadge.height else 1f
+                alpha = heroHeaderAlpha(p) * (if (isClosing) morphPanelContainerAlphaClose(p) else 1f)
+            },
         contentAlignment = Alignment.Center,
     ) {
+        // Always dismiss-tappable: at rest the traveler is
+        // invisible (alpha 0) but sits exactly over the destination
+        // badge, whose own tap also dismisses — so the tap target
+        // is identical either way, and no per-frame alpha read in
+        // composition is needed to gate it.
         TravelingBadge(
             entity,
             domainIcon(entity),
             accent,
-            p,
+            progress,
             tileSource,
-            modifier = Modifier.size(with(density) { rect.width.toDp() })
-                .then(
-                    if (headerAlpha > 0f) Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { onDismiss() } else Modifier,
-                ),
+            modifier = Modifier.size(with(density) { targetBadge.width.toDp() })
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onDismiss() },
         )
     }
 }
@@ -1821,23 +1774,25 @@ private fun TravelingHeader(
  * panel as ONE element — the arc visibly moves, never doubles.
  * Mirrors TravelingHeader exactly: the card-side panel rect
  * (reported by WeatherControl via reportArcBounds) lerps to the
- * measurement frame's panel rect on the same progress, the panel
- * content (condition-tinted box + Dial) fills the lerped rect, and
- * the traveler hands off to the destination panel in the final
- * 2% window (heroHeaderAlpha) while the destination panel dissolves in
- * on the inverse curve (dissolveIntoTraveler) — so at every frame
- * exactly one arc is visible. Non-weather entities return early
- * (their arc bounds are never reported); a missing source renders
- * nothing (the destination's late fade still shows the arc at
- * rest); a missing target renders at the source rect until the
- * measurement frame reports, same as the header. The panel keeps
- * its 16dp padding at every
- * size, so the Dial diameter is the lerped panel width minus 32dp
- * — at both ends that is the 220dp default, and mid-travel the
- * dial scales with the panel instead of clipping. The humidity
- * line and timeline are destination-only layout and fade in late
- * with the rest of the pop-up content; the badge + arc panel are
- * the traveling elements.
+ * live panel's panel rect on the same progress, the panel content
+ * (condition-tinted box + Dial) fills the target rect and scales
+ * with it via graphicsLayer, and the traveler hands off to the
+ * destination panel in the final 2% window (heroHeaderAlpha) while
+ * the destination panel dissolves in on the inverse curve
+ * (dissolveIntoTraveler) — so at every frame exactly one arc is
+ * visible. Non-weather entities return early (their arc bounds are
+ * never reported); a missing source renders nothing (the
+ * destination's late fade still shows the arc at rest); a missing
+ * target renders at the source rect until the live header reports,
+ * same as the header. The panel keeps its 16dp padding at every
+ * size, so the Dial diameter is the target panel width minus 32dp
+ * — at both ends that is the 220dp default. The humidity line and
+ * timeline are destination-only layout and fade in late with the
+ * rest of the pop-up content; the badge + arc panel are the
+ * traveling elements. Round 6: placement is static at the target
+ * rect; only the graphicsLayer transform animates (see
+ * TravelingHeader), and the close-tail fade follows the same
+ * reconciled container curve.
  */
 @Composable
 private fun TravelingArc(
@@ -1845,22 +1800,16 @@ private fun TravelingArc(
     entityId: String,
     source: Rect?,
     target: Rect?,
-    progress: Float,
+    progress: () -> Float,
     overlayOrigin: Offset,
-    // Round 5 close-tail fade, mirroring TravelingHeader's
-    // alphaScale: on close the arc fades with the panel
-    // background so it crossfades onto the stationary card's arc
-    // panel instead of doubling it. 1f on enter (no effect).
-    alphaScale: Float = 1f,
+    isClosing: Boolean = false,
 ) {
     val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
     if (entity.domain != "weather") return
     if (source == null) return
     // Same no-target rule as TravelingHeader: sit on the source
-    // rect until the measurement frame reports, never a gap.
+    // rect until the live panel reports, never a gap.
     val targetRect = target ?: source
-    val p = progress.coerceIn(0f, 1f)
-    val rect = lerpRect(source, targetRect, p)
     val density = LocalDensity.current
     val temp = entity.attrDouble("temperature") ?: 0.0
     val conditionColor = weatherConditionColor(entity.state)
@@ -1868,12 +1817,21 @@ private fun TravelingArc(
         Modifier
             .offset {
                 IntOffset(
-                    (rect.left - overlayOrigin.x).roundToInt(),
-                    (rect.top - overlayOrigin.y).roundToInt(),
+                    (targetRect.left - overlayOrigin.x).roundToInt(),
+                    (targetRect.top - overlayOrigin.y).roundToInt(),
                 )
             }
-            .size(with(density) { rect.width.toDp() }, with(density) { rect.height.toDp() })
-            .graphicsLayer { alpha = heroHeaderAlpha(p) * alphaScale.coerceIn(0f, 1f) }
+            .size(with(density) { targetRect.width.toDp() }, with(density) { targetRect.height.toDp() })
+            .graphicsLayer {
+                val p = progress().coerceIn(0f, 1f)
+                val rect = lerpRect(source, targetRect, p)
+                transformOrigin = TransformOrigin(0f, 0f)
+                translationX = rect.left - targetRect.left
+                translationY = rect.top - targetRect.top
+                scaleX = if (targetRect.width > 0f) rect.width / targetRect.width else 1f
+                scaleY = if (targetRect.height > 0f) rect.height / targetRect.height else 1f
+                alpha = heroHeaderAlpha(p) * (if (isClosing) morphPanelContainerAlphaClose(p) else 1f)
+            }
             .background(conditionColor.copy(alpha = 0.14f), MaterialTheme.shapes.extraLarge)
             .padding(16.dp),
         contentAlignment = Alignment.Center,
@@ -1885,7 +1843,7 @@ private fun TravelingArc(
             centerText = temp.formatTemp(),
             centerSub = formatCondition(entity.state),
             accent = conditionColor,
-            diameter = with(density) { (rect.width.toDp() - 32.dp).coerceAtLeast(0.dp) },
+            diameter = with(density) { (targetRect.width.toDp() - 32.dp).coerceAtLeast(0.dp) },
         )
     }
 }
@@ -2070,6 +2028,23 @@ private fun FrontDoorCameraPanel(
         }
     }
 
+    // Round 6 teardown serialization: every fallback to MJPEG is
+    // POSTED to the main handler (fallBackToMjpeg below) instead of
+    // flipping phase inline. An inline flip disposes this effect
+    // (session.close) while the signaling-thread observer callback
+    // that caused the flip is still on the stack AND while the
+    // AndroidView/SurfaceViewRenderer is unmounting — the
+    // re-entrant teardown that, combined with #101's
+    // factory.dispose() without pc.dispose(), is the native-abort
+    // shape behind the Front Door process death. Posting defers the
+    // flip by one main-loop pass, so the observer callback finishes
+    // first and DisposableEffect.onDispose tears the session down
+    // exactly once, on the main thread, in RingWebRtcSession's
+    // strict order. No onRelease is added to the AndroidView:
+    // session.close() is the single teardown owner, so the renderer
+    // can never be released twice from two paths.
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val fallBackToMjpeg = { mainHandler.post { phase = FrontDoorLivePhase.MJPEG } }
     // WebRTC session: created in this effect, closed in its onDispose,
     // so leaving a WebRTC phase (fallback, background stop, tab flip)
     // always tears the peer connection down. The renderer is held in
@@ -2096,7 +2071,7 @@ private fun FrontDoorCameraPanel(
                         if (answer.error != null || answer.answerSdp.isNullOrEmpty()) {
                             Log.w("Haven", "FrontDoorLive: webrtc answer EMPTY/failed: ${answer.error ?: "no SDP"}")
                             webrtcOutcome = "empty answer (${answer.error ?: "no SDP"})"
-                            phase = FrontDoorLivePhase.MJPEG
+                            fallBackToMjpeg()
                         } else {
                             // Round 5 Bug A fix: the old code logged
                             // "answer usable" here but never invoked
@@ -2128,7 +2103,7 @@ private fun FrontDoorCameraPanel(
                     if (webrtcAttempt != attemptAtStart) return@start
                     Log.w("Haven", "FrontDoorLive: webrtc failed stage=$stage")
                     webrtcOutcome = "failed ($stage)"
-                    phase = FrontDoorLivePhase.MJPEG
+                    fallBackToMjpeg()
                 },
             )
             onDispose {
@@ -2146,7 +2121,7 @@ private fun FrontDoorCameraPanel(
         delay(20_000)
         Log.w("Haven", "FrontDoorLive: webrtc offer timed out (20s, no answer)")
         webrtcOutcome = "timed out (no answer in 20s)"
-        phase = FrontDoorLivePhase.MJPEG
+        fallBackToMjpeg()
     }
 
     // Round 5 honesty: mjpegFrames here is fed ONLY by the 69a1
@@ -2603,14 +2578,22 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
         animationSpec = indicatorSpec,
         label = "sidePillTop",
     )
+    // Round 6 rail width: the 88dp rail (76dp after its 12dp start
+    // margin) forced 80dp items into 76dp, so 12sp semibold labels
+    // ellipsized ("Garage Do...", "Living Roo..."). At 120dp wide
+    // (108dp after margin) with 104dp items, "Garage Door" and
+    // "Living Room" fit whole; longer custom titles still ellipsis
+    // as a last resort. The enter slide is halved to -8dp: the old
+    // -16dp slide pushed the pill past its margin in the first
+    // frames, reading as a white strip at the far left edge.
     Box(
         modifier
-            .width(88.dp)
+            .width(120.dp)
             .fillMaxHeight()
             .padding(start = 12.dp, top = 24.dp, bottom = 24.dp)
             .graphicsLayer {
                 alpha = pillEnter.value
-                translationX = -16.dp.toPx() * (1f - pillEnter.value)
+                translationX = -8.dp.toPx() * (1f - pillEnter.value)
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -2649,7 +2632,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                         val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         Box(
-                            modifier = Modifier.width(80.dp).height(72.dp)
+                            modifier = Modifier.width(104.dp).height(72.dp)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,

@@ -5,11 +5,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
@@ -18,14 +19,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
-import kotlin.math.roundToInt
 
 /** Centered target rect for the thermostat pop-out: the measured panel
  * size, centered in the overlay on both axes, clamped inside the
@@ -84,15 +82,17 @@ fun centerTargetRect(overlayOrigin: Offset, overlaySize: IntSize, panelSize: Int
  *    back. Exit is the smooth reverse of enter on the same bounds
  *    spring — the #62 synchronous removal read on device as "a sudden
  *    smack back to the previous state" and is gone.
- * 3. NO SCALING: content is laid out once at its target size and
- *    clipped to the interpolated rect, pinned top-left (revealed as
- *    the surface grows, never stretched, per the recorded Koda
- *    language — with the content itself fading in late per
- *    [morphContentAlpha], so no full-size content ever appears inside
- *    a still-small rect). Sheet target sizes come from a single
- *    invisible measurement frame (alpha 0, below the scrim, so it can
- *    neither flash nor take touches); detail targets are the overlay
- *    size and need no measurement.
+ * 3. NO SCALING (Round 6 change — see [MorphSurface]): content is
+ *    laid out once at its target size and position, and the surface
+ *    now SCALES via graphicsLayer (translation + scale about the
+ *    top-left origin) instead of being clipped to the growing rect.
+ *    The measurement frame is GONE: the live panel's own header
+ *    reports the travel target from its untransformed layout bounds
+ *    (PanelOverlay provides LocalHeroTarget/LocalArcTarget around
+ *    the live content), so no panel is ever composed twice.
+ *    Content still fades in late per the reconciled curves, so no
+ *    full-size content ever appears at full opacity inside a
+ *    still-small rect.
  * 4. SHEET GEOMETRY UNCHANGED (stated deviation from the spec sample):
  *    the sample's centered floating card (16dp/48dp/20dp margins,
  *    24→32dp corners) is NOT adopted — Haven's sheets stay
@@ -147,14 +147,21 @@ val LocalArcBounds = staticCompositionLocalOf<MutableMap<String, Rect>> { mutabl
 val LocalArcTarget = staticCompositionLocalOf<((Rect) -> Unit)?> { null }
 
 /**
- * The active morph surface's clamped progress, when the content is
- * rendered inside one. Null everywhere else (cards, measurement
- * frames, ordinary pages) — destination content that must dissolve
- * in sync with a traveling element reads this instead of assuming a
- * morph is running. Provided by [MorphSurface] from its [progress]
- * parameter.
+ * The active morph surface's progress READER, when the content is
+ * rendered inside one. Null everywhere else (cards, ordinary pages)
+ * — destination content that must dissolve in sync with a traveling
+ * element reads this instead of assuming a morph is running.
+ * Provided by [MorphSurface] from its [progress] parameter.
+ *
+ * Round 6: this is a lambda, not a Float, on purpose. Callers must
+ * invoke it ONLY inside a graphicsLayer or draw block, never during
+ * composition: reading the Animatable's value during composition
+ * recomposes the whole panel subtree every frame, which is exactly
+ * the per-frame Measure/Layout cost the 120Hz pipeline removes.
+ * Inside graphicsLayer/draw blocks the read invalidates only the
+ * layer, and the morph runs on the RenderThread.
  */
-val LocalMorphProgress = staticCompositionLocalOf<Float?> { null }
+val LocalMorphProgress = staticCompositionLocalOf<(() -> Float)?> { null }
 
 /**
  * Alpha for the active morph source card (see
@@ -230,7 +237,7 @@ fun Modifier.reportArcBounds(id: String): Modifier = composed {
 fun Modifier.dissolveIntoTraveler(): Modifier = composed {
     val progress = LocalMorphProgress.current
     graphicsLayer {
-        alpha = if (progress != null) 1f - heroHeaderAlpha(progress) else 1f
+        alpha = if (progress != null) 1f - heroHeaderAlpha(progress()) else 1f
     }
 }
 
@@ -458,7 +465,7 @@ fun heroHeaderAlpha(progress: Float): Float =
 fun Modifier.hideWhileTraveling(): Modifier = composed {
     val progress = LocalMorphProgress.current
     graphicsLayer {
-        alpha = if (progress == null) 1f else 1f - heroHeaderAlpha(progress)
+        alpha = if (progress == null) 1f else 1f - heroHeaderAlpha(progress())
     }
 }
 
@@ -625,93 +632,126 @@ fun morphCloseBackgroundAlpha(progress: Float): Float =
     (progress.coerceIn(0f, 1f) / 0.20f).coerceIn(0f, 1f)
 
 /**
- * The single morphing surface. [rect] is the interpolated rect in root
- * pixels; [overlayOrigin] is the overlay root's own root-coordinate
- * origin, subtracted so the surface lands correctly regardless of where
- * the overlay Box sits. [targetSize] is the content's laid-out size in
- * pixels; the content is placed top-left inside the surface at exactly
- * that size and clipped to the surface (never scaled, never reflowed).
- * [cornerTop] is the surface's top corner radius (sheets: constant 28dp;
- * detail pages: 28dp → 0dp over the morph). It is coerced to >= 0.dp
- * at the clip site: no caller can ever hand this surface a negative
- * corner again (see [morphCornerTop]). [cornerAll], when non-null,
- * replaces the top-only clip with a uniform all-corner radius —
- * the pop-up shelves clip all four corners, and the radius itself
- * morphs via [morphPopupCorner], so the window's corners transition
- * smoothly across the whole animation instead of snapping in.
- * [contentAlpha] fades the
- * surface's content (1 = fully visible); every morph passes
- * [morphContentAlpha] of its progress, so content materializes only
- * once the panel is nearly full size instead of popping to full size
- * inside a still-small rect (see [morphContentAlpha]).
- * [fromBackground] + [backgroundBlend] blend the surface's background
- * from the source card's color to [background] over the first 30% of
- * the morph (callers pass [morphBackgroundBlend] of their progress),
- * so the growing panel reads as the card growing rather than a new
- * surface flashing in — the enter white flash from the 2026-10-29
- * verdict videos. When [fromBackground] is null the surface uses
- * [background] directly (backward-compatible default). [backgroundAlpha]
- * fades the surface's background itself (callers pass
- * [morphBackgroundAlpha] of their progress): transparent at the card,
- * opaque once grown — so no solid rect ever replaces the card in a
- * single frame at open, and the surface dissolves onto the card on
- * exit instead of vanishing from under it. [dragOffsetY] shifts the
- * surface down for the sheet drag gesture without touching the rect
- * math. [onPlaced] reports the surface's window bounds (the sheet's
- * Details action uses them as the camera rise origin, as before).
+ * Round 6 reconciled panel-container curves (the SINGLE curve set
+ * for items 2 + 3 of the round — this supersedes Round 5's
+ * [morphCloseBackgroundAlpha] window on close and Round 5's
+ * frame-0-opaque rule on open; the old function is retained as a
+ * pure function for its unit tests, but no panel code uses it
+ * anymore):
+ * - OPEN: the container fades in over the first 15% of the open,
+ *   (p / 0.15) clamped. At p = 0 the panel is invisible and the
+ *   stationary source card shows through it — no black box can
+ *   cut across adjacent cards on the first frame, because there
+ *   is no opaque surface yet, only the card itself.
+ * - CLOSE: the container stays opaque until p = 0.25, then fades
+ *   out over the final 25% of the close, (p / 0.25) clamped. This
+ *   replaces Round 5's [0.20, 0] window: the wider window is what
+ *   item 3 specifies, and the traveler close-tail crossfade
+ *   follows this same curve so traveler and container land
+ *   together on the source badge.
+ * - CONTENT (unchanged from Round 5, kept so the set is complete):
+ *   enter [morphEnterContentAlpha] — invisible through p = 0.15,
+ *   in by p = 0.50; close [morphCloseContentAlpha] — out early,
+ *   gone by p = 0.85, long before the container starts fading.
+ *   Traveler handoff [heroHeaderAlpha] — final 2% — is untouched.
+ * - COLOR: the panel background lerps from the source card's
+ *   color to the panel background over the first 35% of the morph
+ *   ([morphPanelBackgroundBlend], smoothstep over [0, 0.35]),
+ *   replacing Round 5's [morphBackgroundBlend] [0, 0.30] window.
+ *   Together with the alpha ramp, the growing surface reads as
+ *   the card itself growing, never as a new surface flashing in.
+ * Pure, unit-tested.
+ */
+fun morphPanelContainerAlphaOpen(progress: Float): Float =
+    (progress.coerceIn(0f, 1f) / 0.15f).coerceIn(0f, 1f)
+
+fun morphPanelContainerAlphaClose(progress: Float): Float =
+    (progress.coerceIn(0f, 1f) / 0.25f).coerceIn(0f, 1f)
+
+fun morphPanelBackgroundBlend(progress: Float): Float =
+    smoothstep(0f, 0.35f, progress)
+
+/**
+ * The single morphing surface, Round 6 (120Hz pipeline).
+ *
+ * The content is laid out ONCE at the target size and position
+ * (the panel's full-screen geometry). ALL per-frame motion lives
+ * strictly inside [graphicsLayer] / draw blocks driven by the
+ * [progress] lambda: the interpolated rect becomes translationX /
+ * translationY / scaleX / scaleY about the top-left origin, the
+ * corner clip becomes the graphicsLayer shape, the background
+ * color + container alpha are drawn in [drawBehind], and the
+ * content alpha is a graphicsLayer alpha. No Modifier.size or
+ * Modifier.offset animates in composition anymore, so a morph
+ * frame costs no Compose Measure/Layout pass — the RenderThread
+ * carries it. The one deliberate visual change vs Round 5: the
+ * content now SCALES with the surface (graphicsLayer scale) instead
+ * of being clipped to the growing rect; the end states (full-size
+ * panel at rest, card-sized surface at p = 0) are identical.
+ *
+ * [source] is the captured source card rect (or the graceful
+ * fallback rect); [target] is the panel's full-screen rect in the
+ * same root coordinates. [fromBackground] is the source card's
+ * container color (PanelOverlay's sourceCardColor): the surface
+ * background lerps from it to [background] over the first 35% of
+ * the morph, and its alpha follows the reconciled container curves
+ * (open: first 15% in; close: final 25% out). When [fromBackground]
+ * is null the surface uses [background] directly. [progress] is a
+ * lambda reading the caller's Animatable; it is invoked ONLY inside
+ * graphicsLayer/draw blocks (see [LocalMorphProgress]). [onPlaced]
+ * reports the surface's layout bounds (the target rect, since the
+ * layout itself sits at target geometry) for the camera rise
+ * origin; layout bounds are transform-independent, so this fires
+ * correctly from the first frame.
  */
 @Composable
 fun MorphSurface(
-    rect: Rect,
+    source: Rect,
+    target: Rect,
     overlayOrigin: Offset,
-    targetSize: IntSize,
-    cornerTop: Dp,
     background: Color,
     modifier: Modifier = Modifier,
-    dragOffsetY: Float = 0f,
-    contentAlpha: Float = 1f,
     fromBackground: Color? = null,
-    backgroundBlend: Float = 1f,
-    backgroundAlpha: Float = 1f,
-    cornerAll: Dp? = null,
+    progress: (() -> Float)? = null,
+    isClosing: Boolean = false,
     onPlaced: ((Rect) -> Unit)? = null,
-    // Clamped morph progress, when the caller knows it: provided to
-    // content as LocalMorphProgress so destination elements that must
-    // dissolve in sync with a traveling element (the weather dial
-    // panel) can read it. Null means content is not in a morph.
-    progress: Float? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
-    val widthDp = with(density) { rect.width.toDp() }
-    val heightDp = with(density) { rect.height.toDp() }
-    val targetWidthDp = with(density) { targetSize.width.toDp() }
-    val targetHeightDp = with(density) { targetSize.height.toDp() }
-    val blendedBackground = if (fromBackground != null) {
-        lerp(fromBackground, background, backgroundBlend.coerceIn(0f, 1f))
-    } else {
-        background
-    }
-    // Multiply, never replace: a Transparent surface (the pop-out)
-    // must stay transparent at every alpha, and an opaque surface
-    // ramps 0 -> 1 with the morph.
-    val effectiveBackground = blendedBackground.copy(
-        alpha = blendedBackground.alpha * backgroundAlpha.coerceIn(0f, 1f),
-    )
+    val targetWidthDp = with(density) { target.width.toDp() }
+    val targetHeightDp = with(density) { target.height.toDp() }
+    // NOTE: overlayOrigin is retained in the signature for callers
+    // that already pass it; the transform below is target-relative,
+    // so the origin cancels (target.left IS the overlay origin for
+    // full-screen panels) and no origin arithmetic is needed here.
     Box(
         modifier
-            .offset {
-                IntOffset(
-                    (rect.left - overlayOrigin.x).roundToInt(),
-                    (rect.top - overlayOrigin.y + dragOffsetY).roundToInt(),
-                )
+            .fillMaxSize()
+            .graphicsLayer {
+                val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
+                val rect = lerpRect(source, target, p)
+                transformOrigin = TransformOrigin(0f, 0f)
+                translationX = rect.left - target.left
+                translationY = rect.top - target.top
+                scaleX = if (target.width > 0f) rect.width / target.width else 1f
+                scaleY = if (target.height > 0f) rect.height / target.height else 1f
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(morphCornerTop(p))
+                clip = true
             }
-            .size(widthDp, heightDp)
-            .clip(
-                if (cornerAll != null) androidx.compose.foundation.shape.RoundedCornerShape(cornerAll.coerceAtLeast(0.dp))
-                else androidx.compose.foundation.shape.RoundedCornerShape(topStart = cornerTop.coerceAtLeast(0.dp), topEnd = cornerTop.coerceAtLeast(0.dp)),
-            )
-            .background(effectiveBackground)
+            .drawBehind {
+                val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
+                val blended = if (fromBackground != null) {
+                    lerp(fromBackground, background, morphPanelBackgroundBlend(p))
+                } else {
+                    background
+                }
+                val containerAlpha = if (isClosing) {
+                    morphPanelContainerAlphaClose(p)
+                } else {
+                    morphPanelContainerAlphaOpen(p)
+                }
+                drawRect(blended.copy(alpha = blended.alpha * containerAlpha))
+            }
             .then(
                 if (onPlaced != null) Modifier.onGloballyPositioned { onPlaced(it.boundsInWindow()) }
                 else Modifier,
@@ -719,7 +759,13 @@ fun MorphSurface(
     ) {
         Box(
             Modifier.size(targetWidthDp, targetHeightDp)
-                .graphicsLayer { alpha = contentAlpha },
+                .graphicsLayer {
+                    alpha = when {
+                        progress == null -> 1f
+                        isClosing -> morphCloseContentAlpha(progress())
+                        else -> morphEnterContentAlpha(progress())
+                    }
+                },
             contentAlignment = Alignment.TopStart,
         ) {
             if (progress != null) {

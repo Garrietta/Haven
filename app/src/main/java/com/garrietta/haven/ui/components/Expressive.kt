@@ -16,7 +16,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -53,13 +52,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Path
 import androidx.graphics.shapes.RoundedPolygon
+import androidx.graphics.shapes.Morph
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -233,38 +231,28 @@ data class ShapePrefs(
 val LocalShapePrefs = compositionLocalOf { ShapePrefs(null, null, emptyMap(), emptyMap()) }
 
 /**
- * A dialog header name that fits its MEASURED width (2026-10-30
- * verdict round): the old char-count sizing (dialogNameSize)
- * still truncated "Thermostat Current Temperature" (30 chars) in
- * a 90%-width dialog, because 15sp × 30 chars ≈ 248dp exceeds the
- * ~200–224dp a 48dp badge + close leave on a folded phone.
- * This measures the real available width (BoxWithConstraints on
- * the title column) and picks the largest of 20/17/15/13sp that
- * fits on one line; if none fits, the name wraps to two lines at
- * 13sp — the full name always shows, with ellipsis only as the
- * last resort for names longer than two lines at 13sp. The
- * traveling header keeps its char-count interpolation (its end
- * size is dialogNameSize), but names longer than 28 chars travel
- * on two lines, so the handoff to this measured layout is a small
- * size step, never an ellipsis-to-full reflow.
+ * A dialog header name, Round 6: a SINGLE Text at
+ * [dialogNameSize] (char-count sizing), one line, ellipsis. The
+ * 2026-10-30 BoxWithConstraints + 4x TextMeasurer.measure loop is
+ * deleted: measuring the name four times per title per frame is
+ * layout work on the morph path, and the measured two-line
+ * fallback reflowed titles mid-flight. Trade-off, stated plainly:
+ * a name too long for one line at its char-count size now
+ * ellipsizes instead of wrapping to a second line — the traveling
+ * header's end size is dialogNameSize, so title and traveler now
+ * agree exactly, with no size step at the handoff.
  */
 @Composable
 fun DialogTitleText(name: String, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier) {
-        val measurer = rememberTextMeasurer()
-        val density = LocalDensity.current
-        val maxWidthPx = with(density) { maxWidth.toPx() }
-        val sizes = listOf(20.sp, 17.sp, 15.sp, 13.sp)
-        val chosen = sizes.firstOrNull { size ->
-            val style = TextStyle(fontSize = size, fontWeight = FontWeight.Bold)
-            measurer.measure(AnnotatedString(name), style).size.width <= maxWidthPx
-        }
-        if (chosen != null) {
-            Text(name, fontSize = chosen, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        } else {
-            Text(name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-    }
+    Text(
+        name,
+        fontSize = dialogNameSize(name),
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
 }
 
 /**
@@ -429,17 +417,17 @@ fun badgeColors(
  * The traveling badge (2026-10-29 verdict-fix round): the icon that
  * moves with the traveling header, MORPHING ITS SHAPE across the
  * morph — not just sliding and scaling a fixed polygon. [progress]
- * 0 = the source card's polygon, 1 = the pop-up header badge's state
- * polygon ([travelBadgeDestinationShape]). Tile sources render the
- * domain's expressive polygon ([shapeForDomain]) while header
- * badges render state polygons, so a tile icon visibly transforms
- * into the header shape as it travels; card sources already render
- * the state polygon, so their morph is correctly the identity
- * (same polygon, only size + position change). The interpolation is
- * the proven Morph + forEachCubic path ([MorphPolygon], the Koda
- * #143 pattern): vertices interpolate, art is never inset inside a
- * mask — the polygon fills its box exactly at every progress, so no
- * crescent gaps appear mid-morph. Colors come from [badgeColors],
+ * is a lambda: 0 = the source card's polygon, 1 = the pop-up header
+ * badge's state polygon ([travelBadgeDestinationShape]). Tile
+ * sources render the domain's expressive polygon ([shapeForDomain])
+ * while header badges render state polygons, so a tile icon visibly
+ * transforms into the header shape as it travels; card sources
+ * already render the state polygon, so their morph is correctly the
+ * identity (same polygon, only size + position change). Round 6:
+ * the Morph + forEachCubic path (the Koda #143 pattern) runs
+ * inside this Canvas's draw block, reading progress() there — so
+ * the shape morph, like the traveler placement, costs no
+ * recomposition per frame. Colors come from [badgeColors],
  * identical to [DomainBadge]. Ambient badge motion (alert rotation,
  * playing rotation, cover lift) is deliberately NOT carried into
  * travel: the destination badge resumes it at rest, and a spinning
@@ -450,7 +438,7 @@ fun TravelingBadge(
     entity: HaEntity,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     accent: Color,
-    progress: Float,
+    progress: () -> Float,
     tileSource: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -469,7 +457,29 @@ fun TravelingBadge(
     val to = overridePolygon
         ?: stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
     Box(modifier, contentAlignment = Alignment.Center) {
-        MorphPolygon(from, to, progress.coerceIn(0f, 1f), bg, Modifier.fillMaxSize())
+        Canvas(Modifier.fillMaxSize()) {
+            val morph = Morph(from, to)
+            val scale = minOf(size.width, size.height) / 2f
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val path = Path()
+            var first = true
+            morph.forEachCubic(progress().coerceIn(0f, 1f)) { cubic ->
+                val ax0 = cx + cubic.anchor0X * scale
+                val ay0 = cy + cubic.anchor0Y * scale
+                if (first) {
+                    path.moveTo(ax0, ay0)
+                    first = false
+                }
+                path.cubicTo(
+                    cx + cubic.control0X * scale, cy + cubic.control0Y * scale,
+                    cx + cubic.control1X * scale, cy + cubic.control1Y * scale,
+                    cx + cubic.anchor1X * scale, cy + cubic.anchor1Y * scale,
+                )
+            }
+            path.close()
+            drawPath(path, bg)
+        }
         Icon(
             icon,
             contentDescription = null,

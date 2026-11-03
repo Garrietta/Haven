@@ -3,6 +3,8 @@ package com.garrietta.haven.data
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import java.util.Collections
+import java.util.WeakHashMap
 import org.json.JSONObject
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
@@ -96,8 +98,9 @@ fun parseWebRtcAnswer(msg: JSONObject): WebRtcAnswer {
  * HLS-live path, never to the recording.
  *
  * There is no confirmed `camera/webrtc/close` WS command in HA, so
- * close() only tears down locally (peer connection, factory, EGL);
- * the HA-side session expires on its own.
+ * close() only tears down locally (sink, renderer, peer connection);
+ * the shared factory/EGL base outlive every session and the HA-side
+ * session expires on its own.
  *
  * Callbacks are posted to the main thread inside the session, so the
  * caller can touch Compose state directly. onFailed fires at most once.
@@ -107,8 +110,13 @@ class RingWebRtcSession(
     private val sendOffer: (offerSdp: String, onAnswer: (WebRtcAnswer) -> Unit) -> Unit,
     private val sendCandidate: (sessionId: String, candidateSdp: String) -> Unit,
 ) {
-    private var egl: EglBase? = null
-    private var factory: PeerConnectionFactory? = null
+    // Round 6: NO per-session EGL/factory fields. The PeerConnectionFactory
+    // and its EglBase are application-scoped singletons owned by the
+    // Companion (see sharedFactory): a panel close must never dispose
+    // them, because the native PeerConnection still references the
+    // factory's threads while a session tears down — disposing the
+    // factory under a live native peer connection is the native-abort
+    // vector (SIGABRT/SIGSEGV in libjingle, uncatchable from Kotlin).
     private var pc: PeerConnection? = null
     private var sessionId: String? = null
     private var failed = false
@@ -165,23 +173,19 @@ class RingWebRtcSession(
         onFirstFrame: () -> Unit,
         onFailed: (String) -> Unit,
     ) {
-        synchronized(Companion) {
-            if (!factoryInitialized) {
-                PeerConnectionFactory.initialize(
-                    PeerConnectionFactory.InitializationOptions.builder(appContext)
-                        .createInitializationOptions(),
-                )
-                factoryInitialized = true
-            }
+        val (eglBase, factory) = sharedFactory(appContext)
+        // Round 6 init guard: renderer.init must never run twice on
+        // the same SurfaceViewRenderer instance (a second init on an
+        // already-initialized native renderer is a second native-abort
+        // vector). A fresh renderer per attempt still inits normally;
+        // a reused view (effect re-run, Retry racing the old session)
+        // skips the second init and renders into the existing context.
+        // The guard is cleared in close() after renderer.release(), so
+        // a genuinely released view can init again on a later session.
+        if (!isRendererInitialized(renderer)) {
+            renderer.init(eglBase.eglBaseContext, null)
+            markRendererInitialized(renderer)
         }
-        val eglBase = EglBase.create()
-        egl = eglBase
-        renderer.init(eglBase.eglBaseContext, null)
-        val factory = PeerConnectionFactory.builder()
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
-            .createPeerConnectionFactory()
-        this.factory = factory
 
         var firstFrameFired = false
         val sink = VideoSink { frame: VideoFrame ->
@@ -280,12 +284,42 @@ class RingWebRtcSession(
         }, MediaConstraints())
     }
 
-    /** Tears down locally: peer connection, factory, EGL, renderer. */
+    /**
+     * Tears down locally, on the main thread, in strict order.
+     * Round 6 (Front Door process death ~3s after engaging live, on
+     * the WebRTC handshake/fallback path): the #101 close() called
+     * pc.close() then factory.dispose() with NO pc.dispose(), on
+     * whatever thread the caller ran on, while the panel's
+     * DisposableEffect.onDispose fired concurrently with the
+     * SurfaceViewRenderer unmounting. That is the native-abort
+     * shape: the native PeerConnection still referencing factory
+     * threads when the factory is disposed, and the EGL context
+     * released mid-detach — no Kotlin try/catch can catch it.
+     *
+     * The new order, all on the main handler: (1) remove the sink
+     * from the video track, drop the track; (2) renderer.clearImage()
+     * + renderer.release(); (3) pc.close() AND pc.dispose();
+     * (4) the shared factory is NEVER disposed here; (5) the shared
+     * EGL base is NEVER released here. Both live for the life of
+     * the app (see sharedFactory). If close() is called off the main
+     * thread (a signaling-thread observer path), the teardown is
+     * posted to the main handler instead of running inline, so the
+     * observer callback finishes before anything is torn down.
+     */
     fun close(renderer: SurfaceViewRenderer) {
         if (closed) return
         closed = true
-        // Detach the sink FIRST: a decoded frame landing on a released
-        // renderer after close is a use-after-release crash vector.
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { closeOnMain(renderer) }
+            return
+        }
+        closeOnMain(renderer)
+    }
+
+    private fun closeOnMain(renderer: SurfaceViewRenderer) {
+        // (1) Detach the sink FIRST: a decoded frame landing on a
+        // released renderer after close is a use-after-release
+        // crash vector.
         val detachedSink = sink
         if (detachedSink != null) {
             try {
@@ -295,28 +329,87 @@ class RingWebRtcSession(
         }
         videoTrack = null
         sink = null
+        // (2) Clear the last frame, then release the renderer.
         try {
-            pc?.close()
+            renderer.clearImage()
         } catch (_: Exception) {
         }
-        pc = null
-        try {
-            factory?.dispose()
-        } catch (_: Exception) {
-        }
-        factory = null
         try {
             renderer.release()
         } catch (_: Exception) {
         }
+        markRendererReleased(renderer)
+        // (3) Close AND dispose the peer connection. The missing
+        // dispose() in #101 left the native PeerConnection alive
+        // while its factory was disposed underneath it.
         try {
-            egl?.release()
+            pc?.close()
         } catch (_: Exception) {
         }
-        egl = null
+        try {
+            pc?.dispose()
+        } catch (_: Exception) {
+        }
+        pc = null
+        // (4)(5) Deliberately absent: sharedFactory/sharedEgl are
+        // application-scoped and are never disposed or released on
+        // a panel close. Disposing them here was the crash vector.
     }
 
     companion object {
         private var factoryInitialized = false
+        private var sharedEgl: EglBase? = null
+        private var sharedFactory: PeerConnectionFactory? = null
+
+        /**
+         * One lazy application-scoped factory + EGL base, shared by
+         * every session for the life of the app. The encoder/decoder
+         * factories are built against the shared EGL context, so
+         * every session's renderer inits against the same context
+         * and no session teardown can pull the context out from
+         * under another session's native peer connection.
+         */
+        private fun sharedFactory(appContext: Context): Pair<EglBase, PeerConnectionFactory> {
+            synchronized(Companion) {
+                val existingFactory = sharedFactory
+                val existingEgl = sharedEgl
+                if (existingFactory != null && existingEgl != null) {
+                    return existingEgl to existingFactory
+                }
+                if (!factoryInitialized) {
+                    PeerConnectionFactory.initialize(
+                        PeerConnectionFactory.InitializationOptions.builder(appContext)
+                            .createInitializationOptions(),
+                    )
+                    factoryInitialized = true
+                }
+                val eglBase = EglBase.create()
+                val factory = PeerConnectionFactory.builder()
+                    .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
+                    .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
+                    .createPeerConnectionFactory()
+                sharedEgl = eglBase
+                sharedFactory = factory
+                return eglBase to factory
+            }
+        }
+
+        // Renderers whose native init has already run. A WeakHashMap
+        // set: entries vanish with their view, so this can never pin
+        // a dead renderer — and it is the init-twice guard, not a
+        // lifetime manager.
+        private val initializedRenderers =
+            Collections.newSetFromMap(WeakHashMap<SurfaceViewRenderer, Boolean>())
+
+        private fun isRendererInitialized(renderer: SurfaceViewRenderer): Boolean =
+            synchronized(Companion) { renderer in initializedRenderers }
+
+        private fun markRendererInitialized(renderer: SurfaceViewRenderer) {
+            synchronized(Companion) { initializedRenderers.add(renderer) }
+        }
+
+        private fun markRendererReleased(renderer: SurfaceViewRenderer) {
+            synchronized(Companion) { initializedRenderers.remove(renderer) }
+        }
     }
 }

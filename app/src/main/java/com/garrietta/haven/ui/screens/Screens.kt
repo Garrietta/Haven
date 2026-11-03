@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -432,7 +431,10 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
     val wide = LocalWideLayout.current
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
-            Modifier.widthIn(max = 1200.dp).fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp),
+            // Round 6: no max-width cap — Today spans the full
+            // inner-fold width on wide layouts instead of stopping
+            // at 1200dp and stranding the lower screen.
+            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp),
             contentPadding = PaddingValues(bottom = if (wide) 16.dp else pillClearanceBottom()),
         ) {
             // Greeting FIRST, then the hero (2026-10-30 verdict):
@@ -807,7 +809,7 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity, navigate: (Screen
                 // full name is one ellipsis away, never sliced.
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.hideHeroWhenMorphSource(entity.entityId),
+                modifier = Modifier,
             )
             Text(
                 homeCardStatus(display),
@@ -815,7 +817,7 @@ private fun HomeRoomCard(vm: HavenViewModel, entity: HaEntity, navigate: (Screen
                 color = statusColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.hideHeroWhenMorphSource(entity.entityId),
+                modifier = Modifier,
             )
             } // text-zone Column
         }
@@ -958,11 +960,12 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
                     onLongClick = { vm.openPopup(weather.entityId) },
                 )
                 .padding(16.dp)
-                .reportHeroBounds(weather.entityId)
-                .hideHeroWhenMorphSource(weather.entityId),
+                .reportHeroBounds(weather.entityId),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            DomainBadge(display, domainIcon(display), accent, Modifier.size(56.dp))
+            // Round 6 badge-only hide: the row reports the hero
+            // bounds, only this badge hides while traveling.
+            DomainBadge(display, domainIcon(display), accent, Modifier.size(56.dp).hideHeroWhenMorphSource(weather.entityId))
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(display.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)

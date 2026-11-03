@@ -116,6 +116,42 @@ class MorphMathTest {
     }
 
     @Test
+    fun morphPanelContainerAlphaOpen_fadesInOverFirstFifteenPercent() {
+        // Round 6 reconciled open curve: invisible at p = 0 (the
+        // stationary card shows through), opaque from p = 0.15.
+        assertEquals(0f, morphPanelContainerAlphaOpen(0f), 0.001f)
+        assertEquals(0.5f, morphPanelContainerAlphaOpen(0.075f), 0.001f)
+        assertEquals(1f, morphPanelContainerAlphaOpen(0.15f), 0.001f)
+        assertEquals(1f, morphPanelContainerAlphaOpen(1f), 0.001f)
+        assertEquals(0f, morphPanelContainerAlphaOpen(-0.5f), 0.001f)
+        assertEquals(1f, morphPanelContainerAlphaOpen(2f), 0.001f)
+    }
+
+    @Test
+    fun morphPanelContainerAlphaClose_fadesOutOverFinalTwentyFivePercent() {
+        // Round 6 reconciled close curve: opaque until p = 0.25,
+        // then out to transparent at p = 0 (supersedes Round 5's
+        // [0.20, 0] window).
+        assertEquals(1f, morphPanelContainerAlphaClose(1f), 0.001f)
+        assertEquals(1f, morphPanelContainerAlphaClose(0.25f), 0.001f)
+        assertEquals(0.5f, morphPanelContainerAlphaClose(0.125f), 0.001f)
+        assertEquals(0f, morphPanelContainerAlphaClose(0f), 0.001f)
+        assertEquals(1f, morphPanelContainerAlphaClose(2f), 0.001f)
+        assertEquals(0f, morphPanelContainerAlphaClose(-0.5f), 0.001f)
+    }
+
+    @Test
+    fun morphPanelBackgroundBlend_reachesPanelColorAtThirtyFivePercent() {
+        // Round 6 color lerp: source card color at p = 0, panel
+        // background from p = 0.35 (smoothstep, so the midpoint is
+        // exactly 0.5 at p = 0.175).
+        assertEquals(0f, morphPanelBackgroundBlend(0f), 0.001f)
+        assertEquals(0.5f, morphPanelBackgroundBlend(0.175f), 0.001f)
+        assertEquals(1f, morphPanelBackgroundBlend(0.35f), 0.001f)
+        assertEquals(1f, morphPanelBackgroundBlend(1f), 0.001f)
+    }
+
+    @Test
     fun fallbackFromRect_morphStaysInTargetAtEnd() {
         // Lerping from the fallback to the target ends exactly on the
         // target at every edge, so no snap on arrival.

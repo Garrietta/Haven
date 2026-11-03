@@ -458,7 +458,11 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 // replaces it exactly at the same rect, never beside
                 // it. Only morph sources report: nested/detail-inner
                 // cards are destinations, never sources.
-                val heroMods = if (morphSource) Modifier.reportHeroBounds(entity.entityId).hideHeroWhenMorphSource(entity.entityId) else Modifier
+                // Round 6 badge-only hide: the ROW reports the
+                // hero bounds, but only the BADGE hides while its
+                // traveler flies (LocalHiddenHeroId) — the name and
+                // state stay visible, so the card can never blank.
+                val heroMods = if (morphSource) Modifier.reportHeroBounds(entity.entityId) else Modifier
                 Row(
                     Modifier.fillMaxWidth().then(heroMods),
                     verticalAlignment = Alignment.CenterVertically,
@@ -470,7 +474,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                     // rotation never touch the name (2026-10-29
                     // verdict: "the text overlaps [the] — this
                     // expressive shape background should be larger").
-                    DomainBadge(display, domainIcon(display), accent, Modifier.size(56.dp).then(badgeClick))
+                    DomainBadge(display, domainIcon(display), accent, Modifier.size(56.dp).then(if (morphSource) Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier).then(badgeClick))
                     Spacer(Modifier.width(16.dp))
                     Row(
                         Modifier.weight(1f).then(detailClick),

@@ -107,7 +107,11 @@ fun TabTileGrid(
     fallbackCard: @Composable (String) -> Unit,
 ) {
     LazyVerticalGrid(
-        columns = if (LocalWideLayout.current) GridCells.Adaptive(minSize = 180.dp) else GridCells.Adaptive(minSize = 160.dp),
+        // Round 6: wide layouts flow at 220dp minimum tiles, so
+        // domain tabs (Thermostat/Cameras/Garage) spread across the
+        // full inner-fold width instead of jamming into a narrow
+        // 2-column strip with a stranded single tile.
+        columns = if (LocalWideLayout.current) GridCells.Adaptive(minSize = 220.dp) else GridCells.Adaptive(minSize = 160.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = pillClearanceBottom()),
@@ -445,10 +449,10 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                 // return and read as clipped text.
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                // Traveling header: the tile's name hides with its
-                // badge while the morph is open, so the overlay's
-                // single traveling header is the only copy on screen.
-                modifier = if (entity.domain != "camera") Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier,
+                // Round 6 badge-only hide: the tile's name stays
+                // visible while the morph is open; only its badge
+                // hides while the traveler flies.
+                modifier = Modifier,
             )
             if (entity.domain == "climate") {
                 ClimateTileBody(vm, entity)
@@ -458,7 +462,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    modifier = if (entity.domain != "camera") Modifier.hideHeroWhenMorphSource(entity.entityId) else Modifier,
+                    modifier = Modifier,
                 )
             }
             } // text-zone Column
