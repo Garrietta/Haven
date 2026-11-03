@@ -66,6 +66,21 @@ fun <T> springMorph(): FiniteAnimationSpec<T> =
 fun <T> springSpatial(): FiniteAnimationSpec<T> =
     spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
 
+/**
+ * Follow-up B (2026-11-03): Koda's bar spring, pinned as a local
+ * token. Koda reads MaterialTheme.motionScheme.fastSpatialSpec()
+ * with an expressive scheme (its theme sets
+ * motionScheme = MotionScheme.expressive() on material3
+ * 1.5.0-alpha29, where MotionScheme is public). Haven stays on
+ * material3 1.4.0 STABLE, where MotionScheme is internal, so the
+ * theme cannot pin the scheme — the expressive fast spatial
+ * numbers are pinned here instead (ExpressiveMotionTokens:
+ * damping 0.6, stiffness 800), giving identical motion with no
+ * dependency move. Bar ports use this token, never a copy.
+ */
+fun <T> kodaBarSpec(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.6f, stiffness = 800f)
+
 /** Emphasized bounds: the spec's EmphasizedBounds, for container transforms. */
 fun <T> springBounds(): FiniteAnimationSpec<T> =
     spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)

@@ -66,6 +66,23 @@ fun pillBarItems(): List<NavItem> = listOf(
     NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
+/**
+ * Follow-up B (2026-11-03): Koda's directional tab-slide rule,
+ * pure so it is unit-testable. Rank = index in bar order
+ * (Home, Scenes, Energy, Settings — Koda's visualTabOrder
+ * rule, Haven's bar order). Returns +1 when the incoming tab
+ * sits to the RIGHT of the outgoing tab (the new page enters
+ * from the right), -1 when it sits to the LEFT, and null when
+ * either screen is not a bar tab (the caller keeps the fixed
+ * slide) or both are the same tab (no transition runs).
+ */
+fun tabSlideDirection(barScreens: List<Screen>, from: Screen, to: Screen): Int? {
+    val fromRank = barScreens.indexOf(from)
+    val toRank = barScreens.indexOf(to)
+    if (fromRank < 0 || toRank < 0 || fromRank == toRank) return null
+    return if (toRank > fromRank) 1 else -1
+}
+
 /** One choosable pill icon: key (stored), label (picker), icon pair. */
  data class TabIconOption(
     val key: String,

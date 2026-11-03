@@ -880,72 +880,6 @@ private fun homeCardStatus(entity: HaEntity): String = when (entity.domain) {
 fun homeCardShapeByIndex(index: Int): RoundedCornerShape = generalCardShape(index)
 
 /**
- * Feedback round, item 7: the Home Status panel's entity tile —
- * the same 136dp card language as room grids (44dp badge, 16sp
- * bold title, 13sp subtitle, general card shape by index, custom
- * title/icon/color/shape honored, preset-driven badge tints per
- * item 5), rendered in a 2-column (50/50) grid. Tap goes to the
- * entity detail page, exactly as the old plain rows did — no
- * popup, no toggle. Title matches the old row (custom title or
- * friendly name); subtitle is the humanized state text.
- */
-@Composable
-fun HomeStatusTile(vm: HavenViewModel, entity: HaEntity, gridIndex: Int, navigate: (Screen) -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    val isDark = isDarkBackdrop(scheme.background)
-    val cardColors = domainCardColors(entity, isDark)
-    val tileCustom = rememberCardCustom(vm)
-    val preset = tilePresetFor(tileCustom.tilePresets, entity.entityId)
-    val container = tilePresetColor(preset, isDark)
-        ?: cardColors?.container ?: scheme.surfaceContainerLow
-    val (badgeBg, badgeGlyph) = if (preset != null) {
-        presetBadgeColors(preset, isDark)
-    } else if (cardColors != null) {
-        cardColors.badgeBg to cardColors.badgeGlyph
-    } else {
-        badgeColors(scheme, entity, accentFor(entity.entityId))
-    }
-    val title = customTitleFor(tileCustom.titles, entity.entityId, entity.friendlyName)
-    val icon = cardIconForKey(customIconKeyFor(tileCustom.iconKeys, entity.entityId, CARD_ICON_KEYS))
-        ?: domainIcon(entity)
-    Surface(
-        shape = LocalShapePrefs.current.cardShape(entity.entityId) ?: generalCardShape(gridIndex),
-        color = container,
-        modifier = Modifier.fillMaxWidth().height(136.dp)
-            .clickable { navigate(Screen.EntityDetail(entity.entityId)) },
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Box(
-                Modifier.size(44.dp).background(
-                    badgeBg,
-                    LocalShapePrefs.current.badgeShape(entity.entityId)
-                        ?: polygonShape(shapeForDomain(entity.domain)),
-                ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, contentDescription = null, tint = badgeGlyph, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                title,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = ensureContrast(scheme.onSurface, container, 4.5f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                entity.stateText(),
-                fontSize = 13.sp,
-                color = ensureContrast(scheme.onSurfaceVariant, container, 4.5f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-/**
  * Visual-fidelity round §1: the wide (2x1) media card — the
  * mockup's Sonos Arc row. Fixed 136dp like the standard cards, so
  * a media row never unbalances its neighbors. Layout: a 48dp
@@ -1161,7 +1095,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
  * which beats this alternating default.
  */
 @Composable
-fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0) {
+fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, onOpenPanel: (() -> Unit)? = null) {
     // Entity-scoped state (§6): this card recomposes only when
     // its own entity changes. An entity that vanished from state
     // renders nothing (membership rebuilds without it).
@@ -1181,7 +1115,17 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // vertical pill + status cards); every other domain keeps the
     // sheet/popup path. Climate opens the primary dial panel on
     // BOTH tap and long-press.
-    val openPanel: () -> Unit = {
+    // Follow-up A (2026-11-03): an explicit onOpenPanel override
+    // replaces the routing wholesale (surface tap, surface
+    // long-press, badge long-press). The Home Status panel passes
+    // navigate-to-detail so panel cards never open a sheet UNDER
+    // the opaque detail panel (the sheet block renders before the
+    // detail block, so a sheet opened from inside a panel would
+    // paint underneath it and read as a dead tap until back
+    // reveals it). Badge-zone taps (toggle/toggleCover) and the
+    // switch stay live as on the home page. Default null keeps
+    // every existing call site byte-identical.
+    val openPanel: () -> Unit = onOpenPanel ?: {
         if (display.domain == "climate") vm.openClimatePopout(entity.entityId)
         else if (isBinary) navigate(Screen.EntityDetail(entity.entityId))
         else vm.openPopup(entity.entityId)

@@ -1,5 +1,153 @@
 # Haven Changelog
 
+## Follow-up round (2026-11-03, videos 71 + 63 — folded into the feedback round)
+
+Two narrated follow-up videos arrived minutes after the feedback
+round's push (commit `9c2358ad`, CI Build APKs run #107 green) and
+were folded into the SAME round before building — no separate
+round, one commit on top of `9c2358ad`. 322 unit tests, 0
+failures (318 baseline + 4 new `TabSlideTest` cases). Local APK:
+`haven-followup-debug.apk`.
+
+### Follow-up A — video-71 (unfolded, ~68s)
+
+1. **Rail/nav never disappear during panels.** The demo (Front
+   Door 69A1 Mute detail, Home Status "Lights on" panel) was
+   recorded on the pre-feedback build, but the feedback round's
+   rail fix left one residual gap: `unfoldedBottomClearance`
+   (20dp + nav-bars inset) was gated on `isTopLevel`, so the
+   underlying page — VISIBLE behind the unfolded centered popup
+   — jumped 20dp on panel open and back on close. The gate is
+   now wide-only, not top-level: the page never moves on panel
+   open/close, and exiting restores the exact prior view with no
+   pop-back, no displacement, no rail re-entry animation (the
+   rail stays mounted throughout — it remounts only on
+   fold/unfold). The folded clearance gate is unchanged: folded
+   panels are opaque full-screen, so the shift underneath is
+   invisible. Boundaries, unchanged: the camera dialog (incl.
+   the Front Door panel) is a full-screen opaque overlay and
+   covers the rail while open — the video-surface case the
+   feedback round kept full-screen; rail taps during a centered
+   popup hit the scrim and dismiss the popup (visible and
+   stationary were the requirements, not interactivity while a
+   popup is open). Rail scrub semantics untouched (the video's
+   tail drew no complaint).
+2. **Home Status panel shows the real home cards.**
+   `HomeStatusTile` is deleted; the panel renders actual
+   `HomeRoomCard`s (the home page's card: 136dp, 44dp badge,
+   16sp bold title, 13sp subtitle, shape rotation, custom
+   title/icon/color/shape, preset-driven badge tints) in a
+   left-aligned flow underneath the panel header — each card
+   (maxWidth − 12dp) / 2 wide with 12dp spacing, so a lone card
+   hugs the left edge and two cards sit side-by-side butted
+   against the side. The 50/50 split is relaxed per his words
+   ("maybe not even split down the middle... left oriented and
+   just butted up against the side"); full two-card rows
+   necessarily measure 50/50, but the home card design is the
+   rule, not the split. Tap → detail exactly as the old rows
+   did, via a new optional `onOpenPanel` override on
+   `HomeRoomCard` (default null keeps every existing call site
+   byte-identical): without it, a sheet opened from inside a
+   panel would paint UNDER the opaque detail panel and read as
+   a dead tap. Badge-zone taps (toggle/toggleCover) and the
+   switch stay live as on the home page.
+
+### Follow-up B — video-63 (Koda's pill bar as the tab reference)
+
+Koda's values were measured from the Koda repo source
+(`podcasts` branch, head `12c47f64`), not from video eyeballing
+— and from the M3 library sources Koda builds against for the
+component defaults Koda does not override. Koda is the reference
+only; no Koda code changed.
+
+Measured Koda values (folded `HorizontalFloatingToolbar` item,
+HomeScreen.kt; rail, HomeNavigationRail.kt; transition,
+HomeScreen.kt `AnimatedContent`):
+- Bar container: M3 default — fully round (`CornerFull`), 64dp
+  tall, 8dp edge padding, 4dp item gap. Placement: BottomCenter
+  + navigationBarsPadding + 20dp bottom padding; hides on scroll
+  (`exitAlwaysScrollBehavior`).
+- Bar item: 48dp tall, `CircleShape`, horizontal padding
+  animated 12dp (unselected) ↔ 20dp (selected) on
+  `fastSpatialSpec`, 24dp icon (filled when selected, outlined
+  otherwise), label `labelLarge` Bold with an 8dp icon–label gap,
+  label `AnimatedVisibility` fade + expand/shrink horizontally
+  on `fastSpatialSpec`, container/content colors animated on
+  tween 200.
+- Rail item (`VerticalFloatingToolbar`): 72dp toolbar held 12dp
+  off the edge (84dp total — exactly Haven's rail width);
+  56dp-wide items, 28dp corners, 16dp vertical padding, 24dp
+  icon, label below the icon ONLY when selected (fade +
+  expand/shrink vertically, `fastSpatialSpec`, 4dp gap),
+  colors tween 200; never hides on scroll.
+- Page transition: directional by `visualTabOrder` rank (music
+  mode: AI DJ, Home, Explore, Library — AI DJ left of Home).
+  Forward: new page enters full-width from the right + fade,
+  old leaves one-third to the left + fade. Backward: new page
+  enters one-third from the left + fade, old leaves full-width
+  to the right + fade. No explicit animationSpec in either
+  branch (AnimatedContent defaults).
+- Bar spring: Koda's theme sets
+  `motionScheme = MotionScheme.expressive()` on material3
+  1.5.0-alpha29 (where MotionScheme is public), so its
+  `fastSpatialSpec()` is the EXPRESSIVE fast spatial spring:
+  damping 0.6, stiffness 800 (vs the standard scheme's 0.9 /
+  1400, and vs Haven's house `springSpatial` at LowBouncy 0.75 /
+  MediumLow 400). Haven stays on material3 1.4.0 STABLE, where
+  MotionScheme is internal — the first build failed on exactly
+  that — so the numbers are pinned as the local `kodaBarSpec()`
+  token instead of a theme scheme: identical motion, no
+  dependency move.
+
+Ported to Haven (tabs only — details keep the unfolded centered
+popup / folded full-screen morph):
+- Bar spring pinned as a local token `kodaBarSpec()` (damping
+  0.6, stiffness 800 — see the "Bar spring" note below for why
+  it is a token, not a theme scheme). No other animation moves:
+  Haven previously read motionScheme nowhere, and the token is
+  used only at the bar call sites.
+- Folded `PillNav`: one item composable (no selected/unselected
+  branch swap) — padding animates 12dp ↔ 20dp on
+  `kodaBarSpec`, label fades + expands/shrinks horizontally
+  on `kodaBarSpec` with `animateContentSize` on the item
+  row, capsule/glyph colors cross-fade on tween 200. Resting
+  geometry otherwise unchanged (44dp item, 22dp icon, 8dp gap,
+  14sp bold label, #9BF67C capsule on #161D17, unselected
+  #D7E2D4) except selected padding 16dp → 20dp (Koda's value).
+  Haven's container radii (32dp Floating / 26dp Compact),
+  heights (64dp / 52dp), row edge padding (18dp / 12dp), and 4dp
+  item gap are kept: they are Haven's own Floating/Compact
+  style distinction, and Haven's container/item radius
+  relationship already matches Koda's (large container radius +
+  fully-round item pills). The Floating/Compact setting still
+  visibly changes bar height and padding.
+- Unfolded rail: icon glyph colors cross-fade on tween 200
+  (Koda's rail color animation); the selection indicator glide
+  moves to `kodaBarSpec` (Koda has no sliding indicator, so
+  Haven keeps its indicator and takes Koda's spec for it). The
+  rail stays icon-only (Round 8 law): Koda's labeled 28dp-corner
+  rail items are NOT copied — on an icon-only rail a 28dp radius
+  on a 32dp-tall pill is a full round anyway, and the labels
+  were removed by directive. Rail scrub semantics untouched.
+- Tab page transition: `AnimatedContent` (`topLevelScreen`)
+  now slides directionally by bar rank (Home 0, Scenes 1,
+  Energy 2, Settings 3) — forward/backward exactly as Koda's
+  branches, defaults for the spec, non-tab screens keep Round
+  4's fixed slide, reduce-motion stays instant. Direction logic
+  is the pure, unit-tested `tabSlideDirection` (4 new tests).
+- Collision rule, unchanged and reported: a tab tap while a
+  panel is open clears the panel INSTANTLY via `goTop`
+  (pre-existing), then the directional slide runs — no
+  panel/tab animation collision, because the panel is gone
+  before the slide starts.
+
+Not device-verified for this follow-up: install/launch; rail
+staying visible + stationary on unfolded panel open/close for
+both video-71 demo cases; Home Status real cards left-oriented;
+Koda-style bar padding/radii/bounce on the folded bar and the
+rail; directional tab slides in both directions; plus the
+standing front-door wave test.
+
 ## Feedback backlog round (2026-11-03, from the 13:08 videos)
 
 Eight items from Garrett's 13:08 feedback videos (transcripts

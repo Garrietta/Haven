@@ -15,17 +15,25 @@ import com.garrietta.haven.ui.components.NavPillGeometry
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.navPillGeometry
 import com.garrietta.haven.ui.components.pillBarItems
+import com.garrietta.haven.ui.components.tabSlideDirection
 import com.garrietta.haven.ui.components.selectedNavIndex
 import com.garrietta.haven.ui.theme.FloatingCorner
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -204,6 +212,7 @@ import com.garrietta.haven.ui.components.selectedPillGlyph
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.heroHeaderAlpha
 import com.garrietta.haven.ui.theme.springBounds
+import com.garrietta.haven.ui.theme.kodaBarSpec
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.dialogHeaderState
@@ -990,8 +999,18 @@ fun HavenApp(vm: HavenViewModel) {
             val navBottom = with(density) {
                 WindowInsets.navigationBars.getBottom(density).toDp()
             }
+            // Follow-up A (2026-11-03): the unfolded clearance is
+            // gated on WIDE ONLY, not on isTopLevel. The old gate
+            // dropped the 20dp + nav inset the moment a detail or
+            // panel screen left the top level, so the underlying
+            // page — VISIBLE behind the unfolded centered popup —
+            // jumped 20dp on open and back on close. With the
+            // wide-only gate the page never moves on panel
+            // open/close, so exiting restores the exact prior view.
+            // Folded keeps its gate: folded panels are opaque
+            // full-screen, so the shift underneath is invisible.
             val unfoldedBottomClearance =
-                if (LocalWideLayout.current && isTopLevel(current)) 20.dp + navBottom else 0.dp
+                if (LocalWideLayout.current) 20.dp + navBottom else 0.dp
             val foldedNavClearance =
                 if (!LocalWideLayout.current && isTopLevel(current)) navBottom else 0.dp
             val contentPadding = PaddingValues(
@@ -1029,10 +1048,33 @@ fun HavenApp(vm: HavenViewModel) {
                     else -> current
                 }
                 // Round 4: top-level tab switches use a shared-axis
-                // transition (horizontal slide + fade on the house
-                // spring) instead of an instant swap; panel morphs
-                // are untouched (they already use springBounds).
-                // Under reduce-motion the switch stays instant.
+                // transition (horizontal slide + fade) instead of
+                // an instant swap; panel morphs are untouched (they
+                // already use springBounds). Under reduce-motion
+                // the switch stays instant.
+                // Follow-up B (2026-11-03): Koda-directional tab
+                // slides. Rank = index in the locked 4-tab bar
+                // order (Home, Scenes, Energy, Settings — Koda's
+                // visualTabOrder rule, Haven's bar order). When
+                // BOTH the outgoing and incoming screens are tabs,
+                // the slide direction follows the rank delta:
+                // forward (target rank higher) — the new page
+                // enters full-width from the right while the old
+                // leaves one-third to the left; backward — the new
+                // page enters one-third from the left while the old
+                // leaves full-width to the right. Any switch
+                // involving a non-tab screen keeps Round 4's fixed
+                // slide (enter one-third from the right, exit
+                // one-third to the left). Koda passes no explicit
+                // animationSpec in either branch (AnimatedContent
+                // defaults), so this port does neither. Tab tap
+                // while a panel is open: goTop clears the panel
+                // INSTANTLY first (pre-existing), then the
+                // directional slide runs — no panel/tab animation
+                // collision, because the panel is gone before the
+                // slide starts. Details keep their own mechanisms
+                // (unfolded centered popup, folded full-screen
+                // morph); this spec touches tab switches only.
                 val reduceMotionTop = LocalReduceMotion.current
                 if (reduceMotionTop) {
                     content(base)
@@ -1040,9 +1082,15 @@ fun HavenApp(vm: HavenViewModel) {
                     AnimatedContent(
                         targetState = base,
                         transitionSpec = {
-                            ((slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn()) togetherWith
-                                (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut()))
-                                .using(SizeTransform(clip = false))
+                            val barScreens = pillBarItems().map { it.screen }
+                            when (tabSlideDirection(barScreens, initialState, targetState)) {
+                                1 -> ((slideInHorizontally(initialOffsetX = { it }) + fadeIn()) togetherWith
+                                    (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut()))
+                                -1 -> ((slideInHorizontally(initialOffsetX = { -it / 3 }) + fadeIn()) togetherWith
+                                    (slideOutHorizontally(targetOffsetX = { it }) + fadeOut()))
+                                else -> ((slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn()) togetherWith
+                                    (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut()))
+                            }.using(SizeTransform(clip = false))
                         },
                         label = "topLevelScreen",
                     ) { screen -> content(screen) }
@@ -3136,8 +3184,16 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     val scrubIndex = scrub.hoveredTab ?: currentIndex
     val targetIconRect = iconRects[scrubIndex]
     val density = LocalDensity.current
+    // Follow-up B (2026-11-03): the rail's selection glide uses
+    // Koda's bar spec (expressive fast spatial) instead of the
+    // house spring — the rail IS a bar, so its selection motion
+    // matches the folded bar's. Koda's rail has no sliding
+    // indicator (each item animates its own container color), so
+    // there is no Koda indicator spec to copy; the glide keeps
+    // Haven's indicator and takes Koda's spec. Reduce-motion
+    // keeps the stiff snap.
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
-        else springSpatial()
+        else kodaBarSpec()
     // Icon is 24dp tall, pill is 32dp: center the pill on the icon
     // (4dp overhang top and bottom).
     val indicatorTop by animateFloatAsState(
@@ -3208,8 +3264,21 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                 ) {
                     for ((index, item) in items.withIndex()) {
                         val highlighted = index == scrubIndex
-                        val contentColor = if (highlighted) selectedPillGlyph(scheme, isDark)
-                            else pillUnselectedGlyph(scheme, isDark)
+                        // Follow-up B (2026-11-03): Koda's rail
+                        // items cross-fade their glyph color on
+                        // tween 200 (same as the folded bar's
+                        // glyph port); the rail keeps its icon-only
+                        // form and its sliding indicator (Round 8
+                        // law), so only the tint animation is
+                        // ported — Koda's labeled 28dp-corner rail
+                        // items are NOT copied, because Haven's
+                        // rail is icon-only by directive.
+                        val contentColor by animateColorAsState(
+                            if (highlighted) selectedPillGlyph(scheme, isDark)
+                            else pillUnselectedGlyph(scheme, isDark),
+                            animationSpec = tween(200),
+                            label = "railGlyphColor",
+                        )
                         // Folded-pill item geometry (48dp tall), so
                         // the rail and the bar share one item rhythm.
                         Box(
@@ -3268,10 +3337,14 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
 /**
  * UI rewrite round (2026-11-03): the folded pill bar. The ACTIVE
  * destination renders ONE unified capsule (44dp tall, CircleShape,
- * 16dp horizontal padding, #9BF67C fill) wrapping BOTH the filled
- * 22dp icon AND the 14sp bold label, both #0A2005 inside the capsule
- * — this fixes the two flagged bugs (black label outside the green
- * oval against the black bar; capsule wrapping only the icon).
+ * #9BF67C fill) wrapping BOTH the filled 22dp icon AND the 14sp
+ * bold label, both #0A2005 inside the capsule — this fixes the two
+ * flagged bugs (black label outside the green oval against the
+ * black bar; capsule wrapping only the icon). Follow-up B
+ * (2026-11-03): Koda's bar animation — item padding animates
+ * 12dp ↔ 20dp, the label fades + expands/shrinks horizontally,
+ * colors cross-fade on tween 200, all on the expressive fast
+ * spatial spring (see the item block).
  * Unselected destinations are a 22dp outlined icon, no label. The
  * container is #161D17 in both themes with light-sage unselected
  * icons (#D7E2D4); no blue anywhere. The old measured sliding
@@ -3321,62 +3394,97 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                                 onSelect(item.screen)
                             }
                         }
-                        if (highlighted) {
-                            // ONE unified capsule: icon + label inside the lime fill.
-                            Row(
-                                modifier = Modifier.height(geometry.itemHeight)
-                                    .pillScrubItem(scrub, index)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                    ) { onTap() }
-                                    .background(PillBarActiveCapsule, CircleShape)
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-                                    Icon(item.icon, contentDescription = item.label, tint = PillBarActiveGlyph, modifier = Modifier.size(22.dp))
-                                    // Stage E §9: a condition dot on the
-                                    // icon's corner — never a count.
-                                    if (item.screen in badgedScreens) {
-                                        Box(
-                                            Modifier.align(Alignment.TopEnd)
-                                                .size(8.dp)
-                                                .background(alertDotColor(false), CircleShape)
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    item.label,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = PillBarActiveGlyph,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
+                        // Follow-up B (2026-11-03): Koda's bar
+                        // treatment, ported from Koda's
+                        // HorizontalFloatingToolbar item code
+                        // (HomeScreen.kt): the item's horizontal
+                        // padding animates 12dp (unselected) ↔ 20dp
+                        // (selected) on the fast spatial spring,
+                        // the label fades + expands/shrinks
+                        // horizontally on the same spec, and the
+                        // capsule/glyph colors cross-fade on tween
+                        // 200. ONE item composable (no branch swap)
+                        // so selection animates instead of popping.
+                        // Resting geometry is unchanged except the
+                        // selected padding 16dp → 20dp (Koda's
+                        // selected value): 44dp item, 22dp icon, 8dp
+                        // icon–label gap, 14sp bold label, #9BF67C
+                        // capsule on #161D17, unselected #D7E2D4.
+                        // Bar container radii (32dp Floating /
+                        // 26dp Compact) and heights (64dp / 52dp)
+                        // are Haven's own Floating/Compact style
+                        // distinction, kept: Koda's container is
+                        // the M3 default (fully round, 64dp tall,
+                        // 8dp edge padding, 4dp item gap), and
+                        // Haven's container/item radius
+                        // relationship already matches it (large
+                        // container radius + fully-round item
+                        // pills). Haven's row edge padding (18dp /
+                        // 12dp) and 4dp item gap are kept likewise.
+                        val itemPadding by animateDpAsState(
+                            if (highlighted) 20.dp else 12.dp,
+                            animationSpec = kodaBarSpec(),
+                            label = "pillItemPadding",
+                        )
+                        val capsuleColor by animateColorAsState(
+                            if (highlighted) PillBarActiveCapsule else Color.Transparent,
+                            animationSpec = tween(200),
+                            label = "pillItemColor",
+                        )
+                        val glyphColor by animateColorAsState(
+                            if (highlighted) PillBarActiveGlyph else PillBarUnselectedGlyph,
+                            animationSpec = tween(200),
+                            label = "pillGlyphColor",
+                        )
+                        Row(
+                            modifier = Modifier.height(geometry.itemHeight)
+                                .pillScrubItem(scrub, index)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) { onTap() }
+                                .background(capsuleColor, CircleShape)
+                                .padding(horizontal = itemPadding)
+                                .animateContentSize(kodaBarSpec()),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    if (highlighted) item.icon else item.outlinedIcon,
+                                    contentDescription = item.label,
+                                    tint = glyphColor,
+                                    modifier = Modifier.size(22.dp),
                                 )
+                                // Stage E §9: a condition dot on the
+                                // icon's corner — never a count.
+                                if (item.screen in badgedScreens) {
+                                    Box(
+                                        Modifier.align(Alignment.TopEnd)
+                                            .size(8.dp)
+                                            .background(alertDotColor(!highlighted), CircleShape)
+                                    )
+                                }
                             }
-                        } else {
-                            Box(
-                                modifier = Modifier.height(geometry.itemHeight)
-                                    .pillScrubItem(scrub, index)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                    ) { onTap() }
-                                    .padding(horizontal = 12.dp),
-                                contentAlignment = Alignment.Center,
+                            AnimatedVisibility(
+                                visible = highlighted,
+                                enter = fadeIn() + expandHorizontally(
+                                    animationSpec = kodaBarSpec()
+                                ),
+                                exit = fadeOut() + shrinkHorizontally(
+                                    animationSpec = kodaBarSpec()
+                                ),
                             ) {
-                                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-                                    Icon(item.outlinedIcon, contentDescription = item.label, tint = PillBarUnselectedGlyph, modifier = Modifier.size(22.dp))
-                                    if (item.screen in badgedScreens) {
-                                        Box(
-                                            Modifier.align(Alignment.TopEnd)
-                                                .size(8.dp)
-                                                .background(alertDotColor(true), CircleShape)
-                                        )
-                                    }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        item.label,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PillBarActiveGlyph,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
                         }

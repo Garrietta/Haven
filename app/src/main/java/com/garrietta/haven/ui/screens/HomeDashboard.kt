@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -225,25 +226,41 @@ fun HomeStatusPanelScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        // Feedback round, item 7: entities as 50/50 TILE cards,
-        // not plain rows — the same card language as room grids
-        // (see HomeStatusTile in Screens.kt), tap → detail exactly
-        // as the rows did. Plain Rows of two tiles (not a lazy
-        // grid): the panel content already scrolls in PanelOverlay's
-        // wrapper, and a lazy grid inside it cannot measure.
-        for ((rowIndex, pair) in item.entities.chunked(2).withIndex()) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                for ((colIndex, entity) in pair.withIndex()) {
-                    Box(Modifier.weight(1f)) {
-                        HomeStatusTile(vm, entity, rowIndex * 2 + colIndex, navigate)
+        // Follow-up A (2026-11-03), refining feedback item 7:
+        // the panel shows the ACTUAL home-page cards for its
+        // entities — real HomeRoomCards, not a simplified tile
+        // (HomeStatusTile is deleted) — placed underneath the
+        // panel header, left-oriented and butted against the
+        // side. A left-aligned flow, not stretched weights: each
+        // card is (maxWidth − 12dp) / 2 wide with 12dp spacing, so
+        // a lone card hugs the left edge and two cards sit
+        // side-by-side against the side; full two-card rows
+        // necessarily measure 50/50, but the split is not the
+        // rule — the home card design is. Tap → detail exactly
+        // as the old rows did (via the onOpenPanel override, so
+        // no sheet ever opens under this panel). Plain Rows
+        // (not a lazy grid): the panel content already scrolls
+        // in PanelOverlay's wrapper, and a lazy grid inside it
+        // cannot measure.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val cardWidth = (maxWidth - 12.dp) / 2
+            for ((rowIndex, pair) in item.entities.chunked(2).withIndex()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    for ((colIndex, entity) in pair.withIndex()) {
+                        Box(Modifier.width(cardWidth)) {
+                            HomeRoomCard(
+                                vm,
+                                entity.entityId,
+                                navigate,
+                                rowIndex * 2 + colIndex,
+                            ) { navigate(Screen.EntityDetail(entity.entityId)) }
+                        }
                     }
                 }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(12.dp))
         }
     }
 }
