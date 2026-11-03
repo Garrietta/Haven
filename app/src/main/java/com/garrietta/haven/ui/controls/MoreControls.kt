@@ -74,6 +74,10 @@ import com.garrietta.haven.ui.components.dissolveIntoTraveler
 import com.garrietta.haven.ui.components.reportArcBounds
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.weatherConditionColor
+import com.garrietta.haven.ui.components.weatherConditionColorThemed
+import com.garrietta.haven.ui.components.weatherChipGlyphColor
+import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.ui.components.legibleSecondary
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.FloatingCorner
 import com.garrietta.haven.ui.theme.polygonShape
@@ -249,6 +253,11 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
     val temp = entity.attrDouble("temperature") ?: 0.0
     val humidity = entity.attrDouble("humidity")
     val forecast = rememberForecast(entity, vm, showForecast)
+    // Round 8: theme-aware condition color (dark greys brightened)
+    // + secondary text floored to 4.5:1 — hoisted here because both
+    // the dial block and the forecast rows below use them.
+    val scheme = MaterialTheme.colorScheme
+    val isDark = isDarkBackdrop(scheme.background)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         if (showDial) {
             // The dial sits on a condition-tinted panel: the condition
@@ -263,7 +272,7 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
             // pop-up instead of vanishing and fading back in as a
             // second copy. The humidity line below is destination
             // layout and fades in late with the rest of the content.
-            val conditionColor = weatherConditionColor(entity.state)
+            val conditionColor = weatherConditionColorThemed(entity.state, isDark)
             Box(
                 Modifier.reportArcBounds(entity.entityId).dissolveIntoTraveler()
                     .background(conditionColor.copy(alpha = 0.14f), MaterialTheme.shapes.extraLarge).padding(16.dp),
@@ -279,7 +288,7 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                 )
             }
             if (humidity != null) {
-                Text("Humidity ${humidity.toInt()}%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Humidity ${humidity.toInt()}%", fontSize = 13.sp, color = legibleSecondary(scheme))
             }
         }
         // Home hides the forecast rows (showForecast = false): the dial,
@@ -300,9 +309,11 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     // Expressive chip: the hour's condition as a small
                     // condition-colored polygon badge (sun / wave /
-                    // cloud by condition family) with a white glyph —
-                    // not a bare monochrome icon. Tight 8dp spacing.
-                    val chipColor = weatherConditionColor(condition)
+                    // cloud by condition family) with a glyph tinted
+                    // for its fill (Round 8: dark glyph on light
+                    // fills in dark theme) — not a bare monochrome
+                    // icon. Tight 8dp spacing.
+                    val chipColor = weatherConditionColorThemed(condition, isDark)
                     Box(
                         Modifier.size(28.dp).background(chipColor, polygonShape(forecastChipKind(condition))),
                         contentAlignment = Alignment.Center,
@@ -310,14 +321,14 @@ fun WeatherControl(entity: HaEntity, vm: HavenViewModel, showForecast: Boolean =
                         Icon(
                             conditionIcon(condition),
                             contentDescription = condition,
-                            tint = Color.White,
+                            tint = weatherChipGlyphColor(chipColor, isDark),
                             modifier = Modifier.size(16.dp),
                         )
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(whenLabel, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text(formatCondition(condition), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(formatCondition(condition), fontSize = 13.sp, color = legibleSecondary(scheme), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (fTemp != null) {
                     Spacer(Modifier.width(8.dp))
                     Text(fTemp.formatTemp(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
@@ -374,7 +385,8 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
             val whenLabel = timelineHourLabel(whenRaw)
             val fTemp = (item["temperature"] as? Number)?.toDouble()
             val condition = (item["condition"] as? String) ?: ""
-            val chipColor = weatherConditionColor(condition)
+            val nodeIsDark = isDarkBackdrop(MaterialTheme.colorScheme.background)
+            val chipColor = weatherConditionColorThemed(condition, nodeIsDark)
             Column(
                 Modifier.width(72.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -393,7 +405,7 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
                         Icon(
                             conditionIcon(condition),
                             contentDescription = condition,
-                            tint = Color.White,
+                            tint = weatherChipGlyphColor(chipColor, nodeIsDark),
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -402,7 +414,7 @@ fun ForecastTimeline(entity: HaEntity, vm: HavenViewModel) {
                 if (fTemp != null) {
                     Text(fTemp.formatTemp(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 }
-                Text(formatCondition(condition), fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(formatCondition(condition), fontSize = 9.sp, color = legibleSecondary(MaterialTheme.colorScheme), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -724,7 +736,10 @@ fun AlarmControl(entity: HaEntity, vm: HavenViewModel) {
  */
 @Composable
 fun WeatherHeroCard(entity: HaEntity, vm: HavenViewModel) {
-    val conditionColor = weatherConditionColor(entity.state)
+    // Round 8: theme-aware condition color + floored secondary text.
+    val heroScheme = MaterialTheme.colorScheme
+    val heroIsDark = isDarkBackdrop(heroScheme.background)
+    val conditionColor = weatherConditionColorThemed(entity.state, heroIsDark)
     val temp = entity.attrDouble("temperature")
     val humidity = entity.attrDouble("humidity")
     val forecast = rememberForecast(entity, vm, enabled = true)
@@ -743,7 +758,7 @@ fun WeatherHeroCard(entity: HaEntity, vm: HavenViewModel) {
                     Icon(
                         conditionIcon(entity.state),
                         contentDescription = entity.state,
-                        tint = Color.White,
+                        tint = weatherChipGlyphColor(conditionColor, heroIsDark),
                         modifier = Modifier.size(28.dp),
                     )
                 }
@@ -761,7 +776,7 @@ fun WeatherHeroCard(entity: HaEntity, vm: HavenViewModel) {
                         formatCondition(entity.state),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = legibleSecondary(heroScheme),
                     )
                 }
             }
@@ -774,7 +789,7 @@ fun WeatherHeroCard(entity: HaEntity, vm: HavenViewModel) {
             }
             if (humidity != null) {
                 Spacer(Modifier.height(4.dp))
-                Text("Humidity ${humidity.toInt()}%", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Humidity ${humidity.toInt()}%", fontSize = 14.sp, color = legibleSecondary(heroScheme))
             }
         }
     }

@@ -16,6 +16,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.CornerSize
@@ -173,11 +174,27 @@ fun HavenTheme(
 ) {
     val context = LocalContext.current
     val scheme = if (darkTheme) {
-        try {
+        val base = try {
             dynamicDarkColorScheme(context)
         } catch (e: Exception) {
             darkColorScheme()
         }
+        // Round 8 dark pass: true-black background (the Koda dark
+        // reference) with stepped surfaceContainers, so cards,
+        // grouped panels, and the pill bar separate from the
+        // background without turning grey. Only the container
+        // steps are pinned — every on-color stays dynamic, and
+        // near-white on-colors keep their contrast against black.
+        // Light theme is untouched (this branch is dark-only).
+        base.copy(
+            background = Color.Black,
+            surface = Color(0xFF121212),
+            surfaceContainerLowest = Color.Black,
+            surfaceContainerLow = Color(0xFF161616),
+            surfaceContainer = Color(0xFF1E1E1E),
+            surfaceContainerHigh = Color(0xFF2B2B2B),
+            surfaceContainerHighest = Color(0xFF383838),
+        )
     } else {
         try {
             dynamicLightColorScheme(context)

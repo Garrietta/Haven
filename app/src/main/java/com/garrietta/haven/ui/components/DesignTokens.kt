@@ -3,6 +3,7 @@ package com.garrietta.haven.ui.components
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import kotlin.math.pow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
@@ -34,10 +35,10 @@ import com.garrietta.haven.ui.theme.StateShape
  * switch (the old selected-only / 10-character rule made the
  * selected item wider than its siblings, so the whole bar
  * stretched and jumped on every switch). The parameters are kept
- * so call sites are untouched; both are ignored. The unfolded
- * side pill does NOT use this function — its labels are always
- * shown below the icon (see VerticalSidePill) — so this change
- * cannot hide side-pill labels.
+ * so call sites are untouched; both are ignored. Round 8: the
+ * unfolded side pill is icon-only too (see VerticalSidePill) —
+ * neither chrome variant shows labels anymore, so truncation is
+ * gone by construction on both postures.
  */
 fun pillLabelVisible(label: String, isSelected: Boolean): Boolean = false
 
@@ -417,3 +418,86 @@ fun weatherConditionColor(condition: String?): Color = when (condition?.lowercas
     "windy", "windy-variant" -> Color(0xFF80CBC4)
     else -> Color(0xFF90A4AE)
 }
+
+// ---------------------------------------------------------------------------
+// Round 8 dark-theme pass (audit vs the Koda dark reference: true-black
+// background, white primary text, blue selected pill, colorful content)
+// ---------------------------------------------------------------------------
+
+/**
+ * True when [color] is a dark backdrop (luminance below 0.5). Call
+ * sites derive dark from the scheme's background luminance rather
+ * than isSystemInDarkTheme(), so the user's explicit Light/Dark
+ * theme-mode override is honored, not just the system setting.
+ */
+fun isDarkBackdrop(color: Color): Boolean = color.luminance() < 0.5f
+
+/**
+ * Dark-theme condition colors. The saturated hues (sunny amber,
+ * rainy blue, snowy sky, lightning purple) are already bright
+ * against black and are kept identical to light — same semantic
+ * colors, not a second palette. Only the grey family changes: the
+ * light greys (partly-cloudy blue-grey, cloudy blue-grey, fog
+ * grey) read as flat grey blobs on black at light values, so
+ * their dark variants are brightened to clear the background
+ * while staying grey (a cloud is still grey, just legible grey).
+ * Pure, unit-tested.
+ */
+fun weatherConditionColorDark(condition: String?): Color = when (condition?.lowercase()) {
+    "partlycloudy", "partly-cloudy" -> Color(0xFFB0BEC5)
+    "cloudy" -> Color(0xFFA7BAC2)
+    "fog" -> Color(0xFFBDBDBD)
+    else -> weatherConditionColor(condition)
+}
+
+/** Theme-aware condition color: dark variants in dark, light values otherwise. */
+fun weatherConditionColorThemed(condition: String?, isDark: Boolean): Color =
+    if (isDark) weatherConditionColorDark(condition) else weatherConditionColor(condition)
+
+/**
+ * Glyph color for a condition chip/badge fill. Light theme keeps
+ * the historical white glyph everywhere (unchanged). Dark theme:
+ * light fills (sunny amber, brightened cloudy greys, rainy blue,
+ * snowy sky) take a near-black glyph, because a white glyph on a
+ * mid-grey/amber chip fails the 3:1 large-glyph floor and the icon
+ * dissolves into the chip — the "grey blob" defect. Dark fills
+ * (clear-night indigo, lightning purple) keep white. Every branch
+ * clears 3:1 against its fill. Pure, unit-tested.
+ */
+fun weatherChipGlyphColor(fill: Color, isDark: Boolean): Color {
+    if (!isDark) return Color.White
+    return if (relativeLuminance(fill) > 0.22f) Color(0xFF102027) else Color.White
+}
+
+/**
+ * Secondary text floored to 4.5:1 against its backdrop — the #92
+ * badge-contrast discipline applied to secondary text. Identity
+ * when the scheme's onSurfaceVariant already passes, so light
+ * theme (and any passing dark pair) is untouched; only dim pairs
+ * are lifted toward white/black. Pure, unit-tested.
+ */
+fun legibleSecondaryOn(scheme: ColorScheme, backdrop: Color): Color =
+    ensureContrast(scheme.onSurfaceVariant, backdrop, 4.5f)
+
+/** [legibleSecondaryOn] against the scheme background (the common case). */
+fun legibleSecondary(scheme: ColorScheme): Color =
+    legibleSecondaryOn(scheme, scheme.background)
+
+/**
+ * Selected-pill fill and glyph, shared by the folded PillNav and
+ * the unfolded VerticalSidePill so the two chrome variants can
+ * never disagree. Light: secondaryContainer / onSecondaryContainer
+ * (unchanged). Dark: Haven's ACCENTS blue (0xFF3B82F6 — the same
+ * value as the blue entry in Expressive.kt's ACCENTS list, and
+ * the Koda selected-pill blue reference), because dynamic-dark
+ * secondaryContainer is a dim desaturated tone that reads as a
+ * grey blob on black. The dark glyph is white: 4.2:1 against the
+ * blue fill, above the 3:1 large-glyph floor. Pure, unit-tested.
+ */
+val SelectedPillBlue = Color(0xFF3B82F6)
+
+fun selectedPillFill(scheme: ColorScheme, isDark: Boolean): Color =
+    if (isDark) SelectedPillBlue else scheme.secondaryContainer
+
+fun selectedPillGlyph(scheme: ColorScheme, isDark: Boolean): Color =
+    if (isDark) Color.White else scheme.onSecondaryContainer

@@ -177,7 +177,10 @@ import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.lerpRect
 import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.components.morphPanelContainerAlphaClose
-import com.garrietta.haven.ui.components.weatherConditionColor
+import com.garrietta.haven.ui.components.weatherConditionColorThemed
+import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.ui.components.selectedPillFill
+import com.garrietta.haven.ui.components.selectedPillGlyph
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.heroHeaderAlpha
 import com.garrietta.haven.ui.theme.springBounds
@@ -1828,7 +1831,8 @@ private fun TravelingArc(
     val targetRect = target ?: effectiveSource
     val density = LocalDensity.current
     val temp = entity.attrDouble("temperature") ?: 0.0
-    val conditionColor = weatherConditionColor(entity.state)
+    val conditionColor = weatherConditionColorThemed(
+        entity.state, isDarkBackdrop(MaterialTheme.colorScheme.background))
     Box(
         Modifier
             .offset {
@@ -2596,6 +2600,8 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     // pill remounts whenever the window crosses the wide
     // threshold, so this is also the fold/unfold transition).
     // Snapped under reduce-motion, like every other spring.
+    // Round 7 (kept): slide only, never fade — icons stay mounted
+    // and visible from frame 0 on every posture-switch remount.
     val pillEnter = remember { Animatable(if (reduceMotion) 1f else 0f) }
     LaunchedEffect(Unit) {
         if (!reduceMotion) pillEnter.animateTo(1f, springSpatial())
@@ -2619,17 +2625,25 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
         animationSpec = indicatorSpec,
         label = "sidePillTop",
     )
-    // Round 6 rail width: the 88dp rail (76dp after its 12dp start
-    // margin) forced 80dp items into 76dp, so 12sp semibold labels
-    // ellipsized ("Garage Do...", "Living Roo..."). At 120dp wide
-    // (108dp after margin) with 104dp items, "Garage Door" and
-    // "Living Room" fit whole; longer custom titles still ellipsis
-    // as a last resort. The enter slide is halved to -8dp: the old
-    // -16dp slide pushed the pill past its margin in the first
-    // frames, reading as a white strip at the far left edge.
+    // Round 8: ICON-ONLY, Koda-style. The labels are gone entirely
+    // — this kills the truncation defect by construction (there is
+    // no label text left to truncate: "Living Room lights" can no
+    // longer render as "Living Room li..."). The rail therefore
+    // NARROWS from Round 6's 120dp label width to an icon-only
+    // width: 12dp start margin + a 72dp pill container (the 56dp
+    // icon oval + 8dp padding each side) = 84dp total, matching
+    // Koda's unfolded icon-only rail. The enter slide stays halved
+    // at -8dp: the old -16dp slide pushed the pill past its margin
+    // in the first frames, reading as a strip at the far left edge.
+    // The selected highlight is the same fixed 56x32dp pill behind
+    // the icon as the folded PillNav (see selectedPillFill), so the
+    // two chrome variants can never disagree. Labels survive only
+    // as icon contentDescriptions for accessibility.
+    val scheme = MaterialTheme.colorScheme
+    val isDark = isDarkBackdrop(scheme.background)
     Box(
         modifier
-            .width(120.dp)
+            .width(84.dp)
             .fillMaxHeight()
             .padding(start = 12.dp, top = 24.dp, bottom = 24.dp)
             // Round 7: slide only, never fade. The old alpha ramp
@@ -2654,32 +2668,32 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                 Modifier.onGloballyPositioned { pillOrigin = it.boundsInWindow().top },
             ) {
                 // The indicator: one fixed 56dp x 32dp pill around
-                // the selected icon, behind the items.
+                // the selected icon, behind the items. Centered on
+                // the column (the column is 56dp of icons + 8dp
+                // padding each side, so TopCenter is the icon
+                // center); strictly bounded to the icon oval, never
+                // stretching to row height, never clipping the rail.
                 if (targetIconRect != null) {
                     Box(
                         Modifier.align(Alignment.TopCenter)
                             .offset { IntOffset(0, indicatorTop.roundToInt()) }
                             .size(56.dp, 32.dp)
-                            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                            .background(selectedPillFill(scheme, isDark), CircleShape),
                     )
                 }
                 Column(
-                    Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
+                    Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     for ((index, item) in items.withIndex()) {
                         val highlighted = index == currentIndex
-                        // Side-pill labels are ALWAYS shown below
-                        // the icon: the pill's selected-only / 10-char
-                        // rule does not apply here — the side pill
-                        // has room for every destination's label, and
-                        // icon-only destinations (Garage Door, Living
-                        // Room lights) were unreadable.
-                        val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
+                        val contentColor = if (highlighted) selectedPillGlyph(scheme, isDark)
                             else MaterialTheme.colorScheme.onSurfaceVariant
+                        // Folded-pill item geometry (48dp tall), so
+                        // the rail and the bar share one item rhythm.
                         Box(
-                            modifier = Modifier.width(104.dp).height(72.dp)
+                            modifier = Modifier.width(56.dp).height(48.dp)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
@@ -2691,38 +2705,25 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                // Ripple lives ONLY on the 56x32dp
-                                // icon oval (clipped to CircleShape);
-                                // the label above/below it taps
-                                // through the indication-null box.
-                                Box(
-                                    Modifier.size(56.dp, 32.dp).clip(CircleShape)
-                                        .clickable {
-                                            if (index != currentIndex) {
-                                                haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                                onSelect(item.screen)
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        if (highlighted) item.icon else item.outlinedIcon,
-                                        contentDescription = item.label,
-                                        tint = contentColor,
-                                        modifier = Modifier.size(24.dp)
-                                            .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
-                                    )
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    item.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = contentColor,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
+                            // Ripple lives ONLY on the 56x32dp
+                            // icon oval (clipped to CircleShape);
+                            // the item box taps through it.
+                            Box(
+                                Modifier.size(56.dp, 32.dp).clip(CircleShape)
+                                    .clickable {
+                                        if (index != currentIndex) {
+                                            haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                            onSelect(item.screen)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    if (highlighted) item.icon else item.outlinedIcon,
+                                    contentDescription = item.label,
+                                    tint = contentColor,
+                                    modifier = Modifier.size(24.dp)
+                                        .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
                                 )
                             }
                         }
@@ -2743,7 +2744,8 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
  * horizontal padding), so its width is constant across every tab
  * switch — no label ever widens the selected item, and the old
  * "Living Room lig" truncation is gone by construction (there is no
- * label text to truncate). Labels live on the unfolded side pill.
+ * label text to truncate). Round 8: the unfolded side pill is
+ * icon-only too, so neither chrome variant shows labels.
  * The shell is a floating island: 32dp corners, surfaceContainer, subtle
  * shadow, 16dp horizontal and 12dp bottom padding at the call site.
  * Dragging along the bar still scrubs the highlight (haptic
@@ -2810,12 +2812,17 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
             // centered in the bar; only its horizontal center
             // animates, so the highlight glides tab to tab without
             // ever resizing into the label's bounding box.
+            // Round 8: the selected fill/glyph come from the shared
+            // tokens (dark = Koda-blue pill, light = secondaryContainer
+            // unchanged), so folded and unfolded chrome agree.
+            val pillScheme = MaterialTheme.colorScheme
+            val pillIsDark = isDarkBackdrop(pillScheme.background)
             if (targetRect != null) {
                 Box(
                     Modifier.align(Alignment.CenterStart)
                         .offset { IntOffset((indicatorCenterX - with(density) { 28.dp.toPx() }).roundToInt(), 0) }
                         .size(56.dp, 32.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                        .background(selectedPillFill(pillScheme, pillIsDark), CircleShape),
                 )
             }
             // Scrolls horizontally once tabs overflow; short bars stay centered.
@@ -2844,7 +2851,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, onSelect: (Screen
                     // false; the side pill carries labels instead.
                     val highlighted = (scrub.hoveredTab ?: currentIndex) == index
                     val showLabel = pillLabelVisible(item.label, index == currentIndex)
-                    val contentColor = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
+                    val contentColor = if (highlighted) selectedPillGlyph(pillScheme, pillIsDark)
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     Box(
                         modifier = Modifier.height(48.dp)

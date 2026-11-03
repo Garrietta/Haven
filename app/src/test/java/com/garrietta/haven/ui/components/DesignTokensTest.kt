@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.components
 
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
@@ -17,8 +18,9 @@ class DesignTokensTest {
     fun pillLabelVisibleNeverShowsOnFoldedBar() {
         // Round 5: the folded bottom PillNav is icon-only, so the
         // token is false for every label, selected or not — the bar
-        // width can never jump on a tab switch. The unfolded side
-        // pill does not use this token (its labels are unconditional).
+        // width can never jump on a tab switch. Round 8: the
+        // unfolded side pill is icon-only too, so neither chrome
+        // variant shows labels anymore.
         assertFalse(pillLabelVisible("Bedroom", true))
         assertFalse(pillLabelVisible("1234567890", true))
         assertFalse(pillLabelVisible("Living Room", true))
@@ -307,5 +309,71 @@ class DesignTokensTest {
         assertEquals(Color(0xFFEF5350), sensorCardTint(SensorKind.TEMPERATURE))
         assertEquals(Color(0xFF29B6F6), sensorCardTint(SensorKind.HUMIDITY))
         assertEquals(null, sensorCardTint(SensorKind.OTHER))
+    }
+
+    // ------------------------------------------------------------------
+    // Round 8 dark-theme pass
+    // ------------------------------------------------------------------
+
+    @Test
+    fun darkConditionColorsBrightenOnlyGreyFamily() {
+        // Saturated hues are identical in both themes (same semantic
+        // colors, not a second palette); only the grey family lifts.
+        assertEquals(Color(0xFFB0BEC5), weatherConditionColorThemed("partlycloudy", true))
+        assertEquals(Color(0xFFA7BAC2), weatherConditionColorThemed("cloudy", true))
+        assertEquals(Color(0xFFBDBDBD), weatherConditionColorThemed("fog", true))
+        assertEquals(Color(0xFFFFB300), weatherConditionColorThemed("sunny", true))
+        assertEquals(Color(0xFF1E88E5), weatherConditionColorThemed("rainy", true))
+        assertEquals(Color(0xFF7E57C2), weatherConditionColorThemed("lightning", true))
+        // Light theme is exactly the historical values.
+        assertEquals(weatherConditionColor("partlycloudy"), weatherConditionColorThemed("partlycloudy", false))
+        assertEquals(weatherConditionColor("cloudy"), weatherConditionColorThemed("cloudy", false))
+        assertEquals(weatherConditionColor("fog"), weatherConditionColorThemed("fog", false))
+        // Dark fills separate from true-black background.
+        for (condition in listOf("partlycloudy", "cloudy", "fog", "sunny", "rainy", "snowy", "lightning", "clear-night")) {
+            assertTrue(contrastRatio(weatherConditionColorThemed(condition, true), Color.Black) >= 3.0f)
+        }
+    }
+
+    @Test
+    fun chipGlyphIsDarkOnLightFillsInDarkThemeOnly() {
+        // Light theme keeps the historical white glyph everywhere.
+        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFFFFB300), false))
+        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFFB0BEC5), false))
+        // Dark theme: light fills take a near-black glyph so the icon
+        // reads instead of dissolving into the chip; dark fills keep white.
+        assertEquals(Color(0xFF102027), weatherChipGlyphColor(Color(0xFFFFB300), true))
+        assertEquals(Color(0xFF102027), weatherChipGlyphColor(Color(0xFFB0BEC5), true))
+        assertEquals(Color(0xFF102027), weatherChipGlyphColor(Color(0xFF1E88E5), true))
+        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFF5C6BC0), true))
+        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFF7E57C2), true))
+        // Every dark-theme glyph clears the 3:1 large-glyph floor.
+        for (condition in listOf("sunny", "partlycloudy", "cloudy", "fog", "rainy", "snowy", "lightning", "clear-night", "windy", "hail")) {
+            val fill = weatherConditionColorThemed(condition, true)
+            assertTrue(contrastRatio(weatherChipGlyphColor(fill, true), fill) >= 3.0f)
+        }
+    }
+
+    @Test
+    fun legibleSecondaryLiftsDimPairsAndPreservesPassing() {
+        val dimScheme = scheme.copy(onSurfaceVariant = Color(0xFF666666))
+        val lifted = legibleSecondaryOn(dimScheme, Color.Black)
+        assertTrue(contrastRatio(lifted, Color.Black) >= 4.5f)
+        assertTrue(lifted != Color(0xFF666666))
+        // A passing pair is returned unchanged (light theme untouched).
+        assertEquals(scheme.onSurfaceVariant, legibleSecondaryOn(scheme, scheme.background))
+        // Backdrop detection honors explicit theme overrides via luminance.
+        assertTrue(isDarkBackdrop(Color.Black))
+        assertFalse(isDarkBackdrop(Color.White))
+        assertTrue(isDarkBackdrop(darkColorScheme().background))
+    }
+
+    @Test
+    fun selectedPillIsBlueInDarkAndUnchangedInLight() {
+        assertEquals(scheme.secondaryContainer, selectedPillFill(scheme, false))
+        assertEquals(scheme.onSecondaryContainer, selectedPillGlyph(scheme, false))
+        assertEquals(SelectedPillBlue, selectedPillFill(scheme, true))
+        assertEquals(Color.White, selectedPillGlyph(scheme, true))
+        assertTrue(contrastRatio(Color.White, SelectedPillBlue) >= 3.0f)
     }
 }

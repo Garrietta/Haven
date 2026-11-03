@@ -92,7 +92,9 @@ import com.garrietta.haven.isLive
 import com.garrietta.haven.data.isHomeRoomEntity
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.components.weatherConditionColor
+import com.garrietta.haven.ui.components.weatherConditionColorThemed
+import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.ui.components.legibleSecondaryOn
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
@@ -940,14 +942,17 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
     val accent = accentFor(weather.entityId)
     val snap = vm.travelSnapshots[weather.entityId]
     val display = snap ?: weather
+    // Round 8: theme-aware condition tint; the state line is floored
+    // to 4.5:1 against this card's own container color.
+    val homeWeatherContainer = lerp(
+        MaterialTheme.colorScheme.surfaceContainer,
+        weatherConditionColorThemed(display.state, isDarkBackdrop(MaterialTheme.colorScheme.background)),
+        0.20f,
+    )
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
-            containerColor = lerp(
-                MaterialTheme.colorScheme.surfaceContainer,
-                weatherConditionColor(display.state),
-                0.20f,
-            ),
+            containerColor = homeWeatherContainer,
         ),
         modifier = Modifier.fillMaxWidth()
             .reportCardBounds(weather.entityId)
@@ -969,7 +974,7 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(display.friendlyName, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(display.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(display.dialogHeaderState(), fontSize = 13.sp, color = legibleSecondaryOn(MaterialTheme.colorScheme, homeWeatherContainer), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Icon(Icons.Filled.ChevronRight, contentDescription = "Details", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }

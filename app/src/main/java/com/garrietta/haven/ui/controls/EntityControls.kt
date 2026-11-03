@@ -100,7 +100,8 @@ import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.sensorCardTint
 import com.garrietta.haven.ui.components.sensorKind
 import com.garrietta.haven.ui.components.lightColorTempTint
-import com.garrietta.haven.ui.components.weatherConditionColor
+import com.garrietta.haven.ui.components.weatherConditionColorThemed
+import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.hideBodyWhenMorphSource
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
@@ -380,7 +381,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
             containerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
             else if (display.domain == "weather") lerp(
                 MaterialTheme.colorScheme.surfaceContainer,
-                weatherConditionColor(display.state),
+                weatherConditionColorThemed(display.state, isDarkBackdrop(MaterialTheme.colorScheme.background)),
                 0.20f,
             )
             else if (display.domain == "climate") lerp(
