@@ -1,5 +1,93 @@
 # Haven Changelog
 
+## Feedback round 12 (2026-11-04, launcher icon rebuild only)
+
+User verdict on the shipped round-10 icon (2026-11-04 morning,
+device screenshot + reference): INCORRECT. The target was
+never in doubt — the approved no-curve image (reference
+minus the dark green curved band from the top left, and
+minus the dark rectangle at the bottom center; bottom is
+light green left + green right) — but round 10 traced it as
+SOLID FLAT OPAQUE facets, and on device that reads as hard
+flat shapes, not the reference's depth. Round 10's error was
+the construction, not the target. This round rebuilds the
+foreground vector the way the user specified it (his words):
+"a series of layered semiopaque polygons."
+
+### Layer stack (bottom to top, all in ic_launcher_foreground.xml)
+
+  L1 shell        #3FA85E alpha 1.00 — full house silhouette
+  L2 roof         #8EE059 alpha 0.55 — roof polygon
+  L3 golden band  #E8B93B alpha 0.78 — broad center band
+  L4 golden core  #F5C542 alpha 0.55 — inner blob
+  L5 door         #F0D67E alpha 0.92 — pale arch, LEFT
+  L6 bottom wash  #8EE059 alpha 0.35 — full-width bottom
+  L7 bottom lime  #8EE059 alpha 0.85 — bottom-left
+  L8 bottom teal  #1E7A4C alpha 0.25 — bottom from x=56
+  L9 bottom teal  #1E7A4C alpha 0.30 — bottom from x=68
+  L10 sparkle     #F8C230 alpha 1.00 — star
+  L11 sparkle pale #FFFBEA alpha 0.55 — pale quadrant hint
+
+The overlaps — not opaque color boundaries — create the
+blends: golden center over green shell, bright roof over
+shell, lime-to-teal grade across the bottom (three teal
+steps, not one flat block). No layer is dark where the
+removed dark band or dark bottom block were; the bottom
+center below the band is shell green with the lime/teal
+split, exactly as in the approved preview. Geometry is
+unchanged from round 10 (house 30..78 x 31..76 apex, door
+left, sparkle at (70,33)), so the monochrome variant (same
+silhouette + evenOdd door cutout + sparkle) and the cream
+background layer are untouched.
+
+### Verification before pushing (not claimed from CI alone)
+
+The new vector was rasterized locally (render_vector.py
+parses the vector file itself) and pixel-compared against
+the user-approved preview image: 71.8% of house-region
+pixels within per-channel tolerance 45, and every sampled
+tone within ~35/channel (roof #6AC75B vs preview #6BC462,
+golden center #DEBE42 vs #F2BF3A, door #ECD379 vs #F5CC60,
+bottom grade lime -> teal tracked at all five stations).
+Zero dark-green pixels in the house region; bottom-center
+brightness 123 (a dark block would read < 60). The residual
+is the preview's continuous gradients vs. finite polygon
+steps — inherent to the vector medium, and the steps are
+within one green/gold family, not unrelated opaque facets.
+Legacy PNGs are rasterized from the vector file itself
+(make-legacy-icon-round12.py), so they match the vector
+layer for layer; the 192x192 PNG carries cream 83.7%,
+roof 3.9%, center 1.6%, door 2.4%, sparkle 0.3%, zero
+dark-green pixels.
+
+### Hard constraints and the open risk
+
+ZERO <gradient> elements in the vector (element count
+after stripping comments, local and remote). Round 7
+proved the Fold8 adaptive-icon path does not render
+gradient-filled vector paths (the house vanished). Alpha
+fills are NOT gradients and are used here instead — but
+whether that same path honors fillAlpha is UNPROVEN: it
+may render the translucency, or it may flatten the layers
+to opaque (which would read close to round 10 again).
+Only the device test settles it. The legacy PNGs render
+alpha correctly by construction (local rasterization), so
+the launcher grid (PNG path) and the recents pane (vector
+path) may differ on device — the device checklist below
+asks for that comparison explicitly, and a flat recents
+rendering must be reported as a finding, not hidden.
+
+### Device checklist (owed — needs the Fold8 pass)
+
+1. Icon house visible on the launcher grid.
+2. Icon house visible in the unfolded recents pane — the
+   acceptance case.
+3. Grid vs recents compared: if recents looks flat/opaque
+   while the grid shows the blends, the device dropped
+   alpha — report it, do not adjust the vector blindly.
+4. Nothing else changed: no Kotlin, dial, morph, drag,
+   scroll, or theme code was touched in this round.
+
 ## Feedback round 11 (2026-11-03, morph behavior + icon resolution only)
 
 Device verdict on the round-9 build (2026-11-03 21:36 video,
