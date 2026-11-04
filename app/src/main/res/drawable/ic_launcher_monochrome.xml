@@ -3,17 +3,31 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Single-color variant of the feedback-round Haven mark for
-         themed icons (Android 13+): the house + leaf spark
-         silhouette only, in the same safe-zone geometry as the
-         foreground. The system tints this one color; the lime door
-         is deliberately omitted because it would vanish in one
-         tint, and the off-white tile is omitted because the system
-         supplies the themed field. -->
+    <!-- Haven round 6, launcher icon ONLY (worker C): single-color
+         variant of the line-art Haven mark for themed icons
+         (Android 13+). Same stroke geometry as the foreground —
+         pitched roof, body, door opening, 4.5dp strokes, same
+         66dp safe-zone placement (outermost ink under ~30.7dp
+         from center 54,54) — drawn in one color; the system tints
+         it and supplies the themed field. The old filled house +
+         spark silhouette is replaced, not recolored: themed icons
+         must match the color icon's line-art construction. -->
     <path
-        android:fillColor="#000000"
-        android:pathData="M40,54 L52,40 Q54,38 56,40 L68,54 V70 H58 V56 H50 V70 H40 Z" />
+        android:strokeColor="#000000"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M30,52 L54,30 L78,52" />
     <path
-        android:fillColor="#000000"
-        android:pathData="M70,29 L72,34 L77,36 L72,38 L70,43 L68,38 L63,36 L68,34 Z" />
+        android:strokeColor="#000000"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M36,52 H72 V76 H36 Z" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M48,76 V64 Q48,62 50,62 H58 Q60,62 60,64 V76" />
 </vector>

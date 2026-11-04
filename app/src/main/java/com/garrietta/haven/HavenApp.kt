@@ -3210,7 +3210,27 @@ private fun CameraLiveBody(
     )
 }
 
-/** ExoPlayer HLS playback on a bare SurfaceView (no media3-ui). */
+/** ExoPlayer HLS playback on a bare SurfaceView (no media3-ui).
+ *
+ * Letterboxing (round 6, camera item): a bare SurfaceView at
+ * fillMaxSize STRETCHES. MediaCodec's SCALE_TO_FIT (the player
+ * default, and what createHlsPlayer leaves unset) means "scaled
+ * to the surface dimensions" — it does NOT letterbox by itself;
+ * the AOSP doc is explicit that a SCALE_TO_FIT surface must
+ * itself be positioned at the proper final display aspect
+ * ratio. Here the surface was the whole portrait screen, so a
+ * 16:9 Tapo frame was pulled vertically to fill it. The MJPEG
+ * body never had this bug: its Image uses ContentScale.Fit.
+ * The fix sizes the SURFACE itself to the video's display
+ * aspect (from onVideoSizeChanged, pixel aspect applied),
+ * centered in the black Box, so the stretch-to-surface lands
+ * undistorted and the leftover Box area is the black bars.
+ * PlayerView does the same job via its AspectRatioFrameLayout;
+ * this body has no media3-ui, so it does it by hand. The
+ * explicit videoScalingMode below only pins the default — it
+ * is NOT the letterboxing mechanism, and must not be mistaken
+ * for one if this sizing is ever touched.
+ */
 @Composable
 private fun CameraHlsPlayerBody(
     vm: HavenViewModel,
@@ -3222,9 +3242,21 @@ private fun CameraHlsPlayerBody(
 ) {
     val context = LocalContext.current
     var rendered by remember(cameraId, playlistUrl) { mutableStateOf(false) }
+    var videoAspect by remember(cameraId, playlistUrl) { mutableStateOf<Float?>(null) }
     val player = remember(cameraId, playlistUrl) {
         vm.client.createHlsPlayer(context, playlistUrl).apply {
+            // Pinned default only — see the doc comment above.
+            videoScalingMode = androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT
             addListener(object : Player.Listener {
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    val w = videoSize.width
+                    val h = videoSize.height
+                    if (w > 0 && h > 0) {
+                        val aspect = w * videoSize.pixelWidthHeightRatio / h
+                        if (aspect > 0f && aspect.isFinite()) videoAspect = aspect
+                    }
+                }
+
                 override fun onRenderedFirstFrame() {
                     if (!rendered) {
                         rendered = true
@@ -3256,17 +3288,31 @@ private fun CameraHlsPlayerBody(
                 Text("Loading camera…", color = Color.White, fontSize = 16.sp)
             }
         }
-        AndroidView(
-            factory = { ctx -> SurfaceView(ctx).also { player.setVideoSurfaceView(it) } },
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                // Same enter curve as the MJPEG body.
-                val p = enterProgress().coerceIn(0f, 1f)
-                val s = 0.94f + 0.06f * p
-                scaleX = s
-                scaleY = s
-                alpha = 0.7f + 0.3f * p
-            },
-        )
+        // Fit: the largest rect of the video aspect inside the
+        // Box, centered, so the black Box area becomes the bars.
+        // Aspect unknown yet -> full-size surface (black until
+        // the size event, which precedes the first frame).
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            val aspect = videoAspect
+            val surfaceModifier = if (aspect == null) {
+                Modifier.fillMaxSize()
+            } else if (maxWidth / maxHeight < aspect) {
+                Modifier.size(width = maxWidth, height = maxWidth / aspect)
+            } else {
+                Modifier.size(width = maxHeight * aspect, height = maxHeight)
+            }
+            AndroidView(
+                factory = { ctx -> SurfaceView(ctx).also { player.setVideoSurfaceView(it) } },
+                modifier = surfaceModifier.graphicsLayer {
+                    // Same enter curve as the MJPEG body.
+                    val p = enterProgress().coerceIn(0f, 1f)
+                    val s = 0.94f + 0.06f * p
+                    scaleX = s
+                    scaleY = s
+                    alpha = 0.7f + 0.3f * p
+                },
+            )
+        }
     }
 }
 

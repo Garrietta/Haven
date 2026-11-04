@@ -265,23 +265,27 @@ class ThermostatLogicTest {
 
     @Test
     fun dial240MapsEndpointsMidpointAndGap() {
+        // Round 6: 270-degree sweep, start 135, end 405 = 45.
         val range = 50f..90f
-        assertEquals(50f, dial240ValueFromAngle(150f, range)!!, 0.001f)
+        assertEquals(50f, dial240ValueFromAngle(135f, range)!!, 0.001f)
         assertEquals(70f, dial240ValueFromAngle(270f, range)!!, 0.001f)
-        assertEquals(90f, dial240ValueFromAngle(30f, range)!!, 0.001f)
-        assertEquals(90f, dial240ValueFromAngle(390f, range)!!, 0.001f)
-        // The 120-degree bottom gap (30 -> 150 through 90) maps to nothing.
+        assertEquals(90f, dial240ValueFromAngle(45f, range)!!, 0.001f)
+        assertEquals(90f, dial240ValueFromAngle(405f, range)!!, 0.001f)
+        // The 90-degree bottom gap (45 -> 135 through 90) maps to nothing.
         assertNull(dial240ValueFromAngle(90f, range))
-        assertNull(dial240ValueFromAngle(100f, range))
-        assertNull(dial240ValueFromAngle(140f, range))
+        assertNull(dial240ValueFromAngle(60f, range))
+        assertNull(dial240ValueFromAngle(120f, range))
+        // Just past the start is back on the arc (140 was in the old
+        // 120-degree gap; the round-6 sweep reaches further down).
+        assertEquals(50.74f, dial240ValueFromAngle(140f, range)!!, 0.01f)
     }
 
     @Test
     fun dial240AngleForValueRoundTrips() {
         val range = 50f..90f
-        assertEquals(150f, dial240AngleForValue(50f, range), 0.001f)
+        assertEquals(135f, dial240AngleForValue(50f, range), 0.001f)
         assertEquals(270f, dial240AngleForValue(70f, range), 0.001f)
-        assertEquals(390f, dial240AngleForValue(90f, range), 0.001f)
+        assertEquals(405f, dial240AngleForValue(90f, range), 0.001f)
         assertEquals(70f, dial240ValueFromAngle(dial240AngleForValue(70f, range), range)!!, 0.001f)
     }
 
@@ -300,9 +304,10 @@ class ThermostatLogicTest {
     fun dial240SnapsToWholeDegreesUnderneath() {
         // The dial drags continuously, but the applied value snaps (the 1-degree
         // rule): a raw 67.4 from the angle snaps to 67, and the clamp pair
-        // still holds heat <= cool.
+        // still holds heat <= cool. Round 6 angle for 67.4 on the
+        // 270-degree sweep: 135 + (17.4 / 40) * 270 = 252.45.
         val range = 50f..90f
-        val raw = dial240ValueFromAngle(254.4f, range)!!
+        val raw = dial240ValueFromAngle(252.45f, range)!!
         assertEquals(67.4f, raw, 0.01f)
         assertEquals(67.0, snapToDegree(raw.toDouble()), 0.001)
         assertEquals(67.0, clampHeatSetpoint(67.0, 50.0, 70.0), 0.001)
@@ -349,39 +354,125 @@ class ThermostatLogicTest {
         assertTrue(mid > 0f && mid < 31.5f)
     }
 
-    // Round 4: the dial maps 55-85F by default, so 67/69 thumbs
-    // Feedback round 2, item 4: the display range is DYNAMIC —
-    // it brackets the current setpoints with a 10°F margin,
-    // clamped to [40, 100]. 67/69 with a 45–95 HA range gives
-    // 57–79 (his example bands); the max never exceeds 100, the
-    // min never drops below 40. HA ranges outside [40, 100] fall
-    // back untouched, and setpoint values are never rewritten
-    // (only the display range).
+    // Round 6: the display range follows the DECADE formula —
+    // lowAxis = max(40, floor(low/10)*10 - 10), highAxis =
+    // min(100, ceil(high/10)*10 + 10) — SUPERSEDING the round-2
+    // flat 10°F bracket (67/69 used to read 57–79; it now reads
+    // 50–80). The 40/100 clamps are hard, HA ranges entirely
+    // outside [40, 100] fall back untouched, and setpoint values
+    // are never rewritten (only the display range).
     @Test
-    fun thermostatDisplayRange_bracketsSetpointsWithMargin() {
-        assertEquals(57f..79f, thermostatDisplayRange(45f, 95f, listOf(67f, 69f)))
-        assertEquals(57f..79f, thermostatDisplayRange(40f, 100f, listOf(67f, 69f)))
-        // Single setpoint brackets the same way.
+    fun thermostatDisplayRange_bracketsSetpointsByDecade() {
+        assertEquals(50f..80f, thermostatDisplayRange(45f, 95f, listOf(67f, 69f)))
+        assertEquals(50f..80f, thermostatDisplayRange(40f, 100f, listOf(67f, 69f)))
+        // Single setpoint brackets the same way: 70 → 60–80.
         assertEquals(60f..80f, thermostatDisplayRange(40f, 100f, listOf(70f)))
     }
 
     @Test
+    fun thermostatDisplayRange_round6Acceptance_66_67Reads50_80() {
+        assertEquals(50f..80f, thermostatDisplayRange(45f, 95f, listOf(66f, 67f)))
+        assertEquals(50f..80f, thermostatDisplayRange(40f, 100f, listOf(66f, 67f)))
+    }
+
+    @Test
     fun thermostatDisplayRange_clampsTo40_100() {
-        // High setpoints: the top clamps at 100, the bracket
-        // tightens below rather than inverting.
-        assertEquals(85f..100f, thermostatDisplayRange(40f, 100f, listOf(95f)))
-        // Low setpoints: the bottom clamps at 40.
-        assertEquals(40f..62f, thermostatDisplayRange(30f, 100f, listOf(50f, 52f)))
+        // High setpoints: the top clamps at 100 (95 → 80–100:
+        // floor(95/10)*10 - 10 = 80, ceil to 100 capped at 100).
+        assertEquals(80f..100f, thermostatDisplayRange(40f, 100f, listOf(95f)))
+        // Low setpoints: the bottom clamps at 40 (50/52 → 40–70).
+        assertEquals(40f..70f, thermostatDisplayRange(30f, 100f, listOf(50f, 52f)))
         // No setpoints reported: HA range intersected with [40, 100].
         assertEquals(45f..95f, thermostatDisplayRange(45f, 95f, emptyList()))
     }
 
     @Test
+    fun thermostatDisplayRange_clampsAt40ForLowSetpoint() {
+        // 41°: floor(41/10)*10 - 10 = 30, clamped up to the hard 40.
+        assertEquals(40f..60f, thermostatDisplayRange(40f, 100f, listOf(41f)))
+    }
+
+    @Test
+    fun thermostatDisplayRange_clampsAt100ForHighSetpoint() {
+        // 99°: ceil(99/10)*10 + 10 = 110, clamped down to the hard 100.
+        assertEquals(80f..100f, thermostatDisplayRange(40f, 100f, listOf(99f)))
+    }
+
+    @Test
+    fun thermostatDisplayRange_decadeBoundaries() {
+        // Setpoints exactly on decades still get a full decade of
+        // headroom on each side: 60/70 → 50–80.
+        assertEquals(50f..80f, thermostatDisplayRange(40f, 100f, listOf(60f, 70f)))
+    }
+
+    @Test
     fun thermostatDisplayRange_fallsBackWhenNoOverlap() {
-        // A Celsius thermostat (e.g. 10-30C) has no overlap with
+        // A Celsius thermostat (e.g. 10-30C) sits entirely outside
         // [40, 100], so the HA range is used as-is.
         assertEquals(10f..30f, thermostatDisplayRange(10f, 30f, listOf(21f)))
         assertEquals(10f..30f, thermostatDisplayRange(10f, 30f, emptyList()))
+    }
+
+    // Round 6: the Settings override, resolved by the ONE shared
+    // function every surface uses (popout, sheet, detail).
+
+    @Test
+    fun resolveThermostatDisplayRange_overridePinsAxisRegardlessOfSetpoints() {
+        // Explicit 50/80 pins the axis even for far-away setpoints.
+        assertEquals(
+            50f..80f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(66f, 67f), 50f, 80f),
+        )
+        assertEquals(
+            50f..80f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(70f, 72f), 50f, 80f),
+        )
+    }
+
+    @Test
+    fun resolveThermostatDisplayRange_clearReturnsToFormula() {
+        // Both unset → the decade formula governs.
+        assertEquals(
+            50f..80f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(66f, 67f), null, null),
+        )
+    }
+
+    @Test
+    fun resolveThermostatDisplayRange_partialOverrideFallsBackToFormula() {
+        // Either value unset → the formula governs, never a
+        // half-override.
+        assertEquals(
+            50f..80f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(66f, 67f), 50f, null),
+        )
+        assertEquals(
+            50f..80f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(66f, 67f), null, 80f),
+        )
+    }
+
+    @Test
+    fun resolveThermostatDisplayRange_invertedOverrideFallsBackToFormula() {
+        // Min above max → never inverted, never a crash: formula.
+        assertEquals(
+            50f..80f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(66f, 67f), 90f, 50f),
+        )
+        // Equal ends are equally invalid.
+        assertEquals(
+            50f..80f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(66f, 67f), 70f, 70f),
+        )
+    }
+
+    @Test
+    fun resolveThermostatDisplayRange_overrideClampsTo40_100() {
+        // Out-of-band override ends clamp into [40, 100].
+        assertEquals(
+            40f..100f,
+            resolveThermostatDisplayRange(40f, 100f, listOf(66f, 67f), 30f, 110f),
+        )
     }
 
     @Test
@@ -409,10 +500,10 @@ class ThermostatLogicTest {
     @Test
     fun separatedDualAngles_spreadsClosePairTo18Degrees() {
         val range = 55f..85f
-        // 67/69 on the 240-degree dial: 16 degrees apart, under the
-        // 18-degree floor — the reported overlap case.
+        // Round 6: on the 270-degree sweep 1°F = 9° of arc, so
+        // 67/68 sits 9 degrees apart, under the 18-degree floor.
         val heat = dial240AngleForValue(67f, range)
-        val cool = dial240AngleForValue(69f, range)
+        val cool = dial240AngleForValue(68f, range)
         val (h, c) = separatedDualAngles(heat, cool)
         assertEquals(18f, c - h, 0.001f)
         // Symmetric about the pair midpoint, values untouched.
@@ -422,17 +513,28 @@ class ThermostatLogicTest {
     }
 
     @Test
+    fun separatedDualAngles_67_69NowExactly18PassesThrough() {
+        // Round 6: 2°F = 18° on the 270-degree sweep, exactly the
+        // floor — the old reported overlap case needs no spreading.
+        val range = 55f..85f
+        val heat = dial240AngleForValue(67f, range)
+        val cool = dial240AngleForValue(69f, range)
+        assertEquals(18f, cool - heat, 0.001f)
+        assertEquals(heat to cool, separatedDualAngles(heat, cool))
+    }
+
+    @Test
     fun separatedDualAngles_clampsIntoArcAtTheEnds() {
         // A pair hard against the arc start still ends separated
-        // and inside [150, 390].
-        val (h, c) = separatedDualAngles(150f, 152f)
+        // and inside [135, 405] (round-6 sweep).
+        val (h, c) = separatedDualAngles(135f, 137f)
         assertEquals(18f, c - h, 0.001f)
-        assertTrue(h >= 150f)
-        assertTrue(c <= 390f)
-        val (h2, c2) = separatedDualAngles(388f, 390f)
+        assertTrue(h >= 135f)
+        assertTrue(c <= 405f)
+        val (h2, c2) = separatedDualAngles(403f, 405f)
         assertEquals(18f, c2 - h2, 0.001f)
-        assertTrue(h2 >= 150f)
-        assertTrue(c2 <= 390f)
+        assertTrue(h2 >= 135f)
+        assertTrue(c2 <= 405f)
     }
 
     @Test

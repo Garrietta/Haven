@@ -1,5 +1,168 @@
 # Haven Changelog
 
+## Feedback round 6 (2026-11-03, screenshots + icon example)
+
+Three items against the feedback-round-5 build (`c71572c3`, CI
+Build APKs run #113 green). Baseline proven green first
+(339 tests, 0 failures — confirming round 5's expected total,
+and the sandbox Gradle daemon works again after round 5's IPC
+breakage). Final: 349 tests, 0 failures (339 + 10 new:
+thermostat axis acceptance/clamp/decade cases + 5 Settings
+resolver cases). Local APK built this round (daemon healthy).
+
+### 1. Camera letterboxing (Living Room + Garage)
+
+Root cause, verified in code: the stretch lived in the HLS
+path only. `CameraMjpegBody` already renders every stage with
+`ContentScale.Fit` and cannot stretch. Stream-capable non-Ring
+cameras (the Tapo cameras, when they advertise the
+`SUPPORT_STREAM` bit) take the HLS attempt chain into
+`CameraHlsPlayerBody`, which rendered on a bare `SurfaceView`
+at `fillMaxSize()`; MediaCodec's `SCALE_TO_FIT` — the player
+default, which `createHlsPlayer` leaves unset — means "scaled
+to the surface dimensions", not "fit inside with bars", and
+AOSP requires the surface itself to be positioned at the
+proper display aspect ratio. The surface was the whole screen,
+so a 16:9 Tapo frame was pulled vertically to fill it. Fix
+sizes the surface itself, the way `PlayerView` does:
+`onVideoSizeChanged` (width × pixel aspect / height) drives a
+centered `BoxWithConstraints` rect of the video aspect inside
+the black fullscreen `Box`, which becomes the top/bottom
+bars; the scaling mode is pinned to `SCALE_TO_FIT` only as
+belt-and-braces (the doc comment says explicitly that the
+mode line is NOT the letterboxing mechanism, so a future
+cleanup does not delete the sizing and reintroduce the
+stretch). Covers both entry points (`CameraFullscreen` and
+the centered live-feed dialog funnel through
+`CameraLiveBody`). Untouched: MJPEG body, Outdoor path, Ring
+recording path/labels, hero quadrants, WebRTC (still gated
+off). Coordinator fix during integration: the scaling-mode
+constant lives on `androidx.media3.common.C`, not `Player`
+(one-line fix, first integration build failed to compile
+on it). Residual: which transport each Tapo camera negotiates
+at runtime cannot be proven from code — if a camera's HLS
+request fails it falls terminally to the already-letterboxed
+MJPEG body; rotated-stream metadata (90°/270°) is not
+specially handled (out of scope).
+
+### 2. Thermostat arc — geometry + axis function + Settings override
+
+(a) Axis function: `thermostatDisplayRange` no longer uses
+the flat ±10°F bracket (65/67 read 55°/77°). Approved
+formula, implemented literally: lowAxis = max(40,
+floor(low/10)*10 − 10), highAxis = min(100,
+ceil(high/10)*10 + 10). Acceptance: 66/67 reads 50°/80°.
+Clamps are hard: axis never below 40 or above 100, extremes
+only when the formula would otherwise exceed them. Step size
+(arc degrees per °F) follows from the axis. Applies
+everywhere the display range is used (popout, sheet, detail
+via the popout). Judgment call: the formula is NOT
+intersected with the HA min/max range (round 2 intersected);
+the axis is exactly what the formula says, which matches the
+approved spec literally and is identical for typical Ecobee
+HA ranges (45–95); it diverges only if an HA range is
+narrower than the formula window. Guards kept: degenerate HA
+range passes through; HA range entirely outside [40,100]
+(Celsius) keeps its HA range; empty setpoints keep the
+HA∩[40,100] fallback.
+
+(b) Arc geometry: sweep 240° → 270° (start 150° → 135°,
+end 45°; gap 90° centered at the bottom), chosen over
+280°/300° to keep a clear bottom gap for the inside-tap zone
+and gap-strain logic; a 2°F pair now spans exactly 18° of
+arc, the dual-thumb separation floor. Track inset 20dp →
+16dp in `trackRadiusPx` (smallest safe value: grabbed stroke
+outer edge 5dp inside the canvas, pill rect 1dp inside at
+the 180° west point; 14dp would clip). All arc consumers
+flow through the constants (drag mapping, thumbs, segments);
+the drag handler's gap-strain block was the one hardcoded
+consumer (literal 30°/120°) and is now derived from the
+constants. End labels are the `SpaceBetween` row below the
+dial, now sitting directly under the lower arc ends, clear
+of the steppers (still below the disc/dial block per round
+5). Scallop background untouched. `dualNumberGapPx`
+follow-through: its 20dp assumption lived at the
+`ThermostatDialBlock` call site (`diameter − 56dp`), updated
+to `diameter − 48dp` (= 2×(16dp inset + 8dp half-stroke));
+the popout pair now clears the ring by ~7dp total instead of
+kissing it.
+
+(c) Settings override (user refinement, addition not
+reversal): the formula is the AUTOMATIC default, and
+Settings gains explicit min/max controls that override it.
+New "Thermostat" section in `SettingsScreen` (after
+"Shapes", before "Browse"), reading `vm.settingsStore`
+directly (signature unchanged). Prefs
+`thermostat_display_min` / `thermostat_display_max`
+(presence = set; null = Automatic). One shared resolver,
+`resolveThermostatDisplayRange`, used by all three surfaces:
+both values set → clamped to [40,100] and pinned; clamping
+to min ≥ max → formula governs (never inverted, never a
+crash); either unset → formula governs. Settings rows:
+"Dial range" status, "Display minimum" / "Display maximum"
+(value or "Automatic", −/+ steppers, 1°F, clamped [40,100],
+first tap on an unset value starts at 50°/80°), "Reset to
+Automatic" clearing both. Status text always names the
+effective state ("Override (50–80°) — pinned…" vs
+"Automatic (50–80° from setpoints) — …", with explicit
+fallback lines for invalid and half-set states). Display
+range only — no setpoint writes. Note: popout/sheet read
+the prefs at composition, so an override takes effect when
+the thermostat surface next composes, not live while a dial
+is already open. `ThermostatHero` has no live call sites; a
+future caller must pass the resolver's result. Hard rules
+kept throughout: visual changes never rewrite setpoints, 1°F
+snap, 32dp handle-grab-only nearest-wins, inside-tap
+toggles heat↔cool, clamps/gap-proofing, round-5 number gap.
+Acceptance: explicit 50/80 pins the axis at 50/80 regardless
+of setpoints; clearing returns to formula behavior.
+
+### 3. Launcher icon — Haven green line art
+
+Dark-render finding, verified from the actual round-5
+resources: the device path breaks the BACKGROUND layer —
+the round-5 comments record the Fold8 recents pane
+blackening the solid lime `#9BF67C` field (One UI forced
+dark icons / Android auto-theming) while the foreground
+rendered intact. The round-5 fix (bright off-white tile +
+charcoal house) kept the launcher grid legible but did not
+cure the unfolded recents pane, the acceptance case, because
+the construction still depended on a light field carrying a
+near-black (`#161D17`) mark: blacken the field and the dark
+mark vanishes into it. Round 6 removes the failure mode:
+no tile/plate and no dark mark anywhere. Field: full-bleed
+Haven leaf green `#3E6B2F` (light-theme primary in
+`Theme.kt`, round-5 spark color). Mark: WHITE line art only
+— roof `M30,52 L54,30 L78,52`, body rect outline, arch-top
+door opening; 4.5dp strokes, round caps/joins, no fills; the
+filled leaf spark is dropped (it does not translate to
+stroke at 48dp). Contrast (WCAG): white on `#3E6B2F` =
+6.27:1 (AA pass); white on pale lime `#9BF67C` = 1.32:1
+(rejected, as briefed); `#1B3708` forest = 13.15:1 but
+rejected because at icon sizes it reads as near-black,
+defeating the green identity. Safe zone: outermost ink
+under ~30.7dp from center 54,54 (radius 33), so all standard
+masks survive; even if a device path blackens the field
+outright, white-on-black still reads (21:1). Monochrome
+variant carries the same stroke geometry in a single color
+for themed icons. Adaptive wrappers (v26/v33) verified, no
+change needed; manifest icon references unchanged. All 10
+legacy mipmap PNGs regenerated from the same vector
+geometry (4× supersampled, LANCZOS; corners pixel-verified
+`#3E6B2F`, roof white, at every density). Device checks
+owed: mask rendering on the Fold8 (especially the unfolded
+recents pane), small-size legibility, themed-icon
+appearance.
+
+### Still open (not in this round)
+
+Front Door wave test (blocked on his device action);
+trigger-button identification (awaiting his answer);
+garage-door actuation (deliberately untested). Live
+thermostat state untouched (his screenshot showed Heat 65° /
+Cool 67°; no setpoint writes in this round).
+
+
 ## Feedback round 5 (2026-11-03, videos new1 + new2 + new3)
 
 Three narrated videos against the feedback-round-4 build

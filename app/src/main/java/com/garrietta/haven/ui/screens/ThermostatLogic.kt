@@ -1,6 +1,8 @@
 package com.garrietta.haven.ui.screens
 
 import com.garrietta.haven.data.HaEntity
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /**
@@ -131,24 +133,33 @@ fun dialValueFromAngle(deg: Float, range: ClosedFloatingPointRange<Float>): Floa
 }
 
 // ---------------------------------------------------------------------------
-// The spec's 240-degree dial (ThermostatDial). The shared Dial above stays
-// at 270 degrees — its tests are untouched — while this dial carries the
-// spec: a 240-degree sweep with a 120-degree gap centered on the bottom
-// (start 150 degrees, end 390 degrees = 30 degrees), dual pill thumbs,
-// rubber-banding past the ends, and 1-degree snapping underneath.
+// The spec's dial (ThermostatDial). The shared Dial above stays
+// at 270 degrees — its tests are untouched — while this dial carries
+// the spec: a 270-degree sweep with a 90-degree gap centered on the
+// bottom (start 135 degrees, end 405 degrees = 45 degrees), dual pill
+// thumbs, rubber-banding past the ends, and 1-degree snapping
+// underneath. Round 6 moved the sweep from 240 to 270 degrees (the
+// arc reaches further down both sides) and the track inset from
+// 20dp to 16dp (see ThermostatDial's trackRadiusPx); the constant
+// names keep their DIAL240 prefix so existing call sites are
+// untouched — only the values changed, and every consumer reads
+// these constants, so drag mapping, ticks, thumbs, and end labels
+// stay consistent. A 2°F pair now spans exactly 18° of arc
+// (270° / 30°F = 9° per °F), which is the dual-thumb separation
+// floor — close pairs no longer need angular spreading.
 // ---------------------------------------------------------------------------
 
-/** Start angle of the 240-degree sweep, in screen degrees (0 = east, clockwise). */
-const val DIAL240_START_DEG = 150f
+/** Start angle of the dial sweep, in screen degrees (0 = east, clockwise). */
+const val DIAL240_START_DEG = 135f
 
-/** Sweep of the 240-degree dial; the remaining 120 degrees is the bottom gap. */
-const val DIAL240_SWEEP_DEG = 240f
+/** Sweep of the dial; the remaining 90 degrees is the bottom gap. */
+const val DIAL240_SWEEP_DEG = 270f
 
 /**
  * Maps a screen angle (degrees, 0 = east, clockwise, y down) to a dial value
- * on the 240-degree sweep, or null when the angle falls in the bottom gap.
- * Unlike the 270-degree dial, this does NOT clamp: a gap angle is a gap
- * angle, and the caller keeps the previous value.
+ * on the dial sweep, or null when the angle falls in the bottom gap.
+ * Unlike the 270-degree shared Dial, this does NOT clamp: a gap angle is a
+ * gap angle, and the caller keeps the previous value.
  */
 fun dial240ValueFromAngle(deg: Float, range: ClosedFloatingPointRange<Float>): Float? {
     val rel = (deg - DIAL240_START_DEG + 360f) % 360f
@@ -157,21 +168,30 @@ fun dial240ValueFromAngle(deg: Float, range: ClosedFloatingPointRange<Float>): F
 }
 
 /**
- * The dial's DISPLAY range (feedback round 2, item 4 — SUPERSEDES
- * the fixed 55–85°F range from Round 4): it brackets the CURRENT
- * setpoints with a 10°F margin, clamped to [40, 100]°F, so two
- * close setpoints (67°/69°) stay visibly distinct and near the bar
- * ends instead of crowding on a wide range. E.g. 67/69 with a
- * 45–95 HA range gives 57–79 (his example bands: max ~75–80,
- * min ~55–60); the max never exceeds 100, the min never drops
- * below 40. This narrows only the drawn arc: setpoint values
- * themselves are never rewritten — a value outside the display
- * range still clamps to the arc end for drawing (see
- * dial240AngleForValue) and the caller flags it. When the HA
- * range does not overlap [40, 100] at all (e.g. a Celsius
- * thermostat), the HA range is used as-is, never an empty or
- * inverted range. With no setpoints reported, the HA range
- * intersected with [40, 100] is the fallback (same guards).
+ * The dial's DISPLAY range (round 6 — SUPERSEDES the round-2
+ * flat 10°F bracket, which read 55°/77° for 65°/67° setpoints):
+ * the axis snaps to decade boundaries around the CURRENT
+ * setpoints, one decade of headroom on each side —
+ *   lowAxis  = max(40, floor(lowSetpoint / 10) * 10 - 10)
+ *   highAxis = min(100, ceil(highSetpoint / 10) * 10 + 10)
+ * so 66°/67° reads 50°/80° and 67°/69° reads 50°/80° as well.
+ * The 40/100 clamps are hard: the axis never drops below 40 or
+ * above 100, and those extremes appear only when the formula
+ * would otherwise exceed them (e.g. a 41° low still reads 40°,
+ * a 99° high still reads 100°). This narrows only the drawn
+ * arc: setpoint values themselves are never rewritten — a value
+ * outside the display range still clamps to the arc end for
+ * drawing (see dial240AngleForValue) and the caller flags it.
+ * Guards, unchanged from round 2: a degenerate HA range passes
+ * through; when the HA range does not overlap [40, 100] at all
+ * (e.g. a Celsius thermostat, 10–30), the HA range is used
+ * as-is, never an empty or inverted range; with no setpoints
+ * reported, the HA range intersected with [40, 100] is the
+ * fallback. Note the formula is NOT intersected with the HA
+ * range for Fahrenheit thermostats: the axis is exactly what
+ * the formula says, even if it extends slightly past HA's
+ * min_temp/max_temp (the thumbs sit inside the window either
+ * way, and the steppers still reach the full HA range).
  * KNOWN LIMIT (pre-existing architecture, window changed, not
  * mechanism): the dial's drag handler maps pointer angles through
  * this display range, so drags are limited to the dynamic window;
@@ -185,14 +205,46 @@ fun thermostatDisplayRange(min: Float, max: Float, setpoints: List<Float>): Clos
         val hi = minOf(100f, max)
         return if (lo < hi) lo..hi else min..max
     }
+    if (max < 40f || min > 100f) return min..max
     val low = setpoints.min()
     val high = setpoints.max()
-    val lo = maxOf(40f, min, low - 10f)
-    val hi = minOf(100f, max, high + 10f)
-    return if (lo < hi) lo..hi else min..max
+    val lo = maxOf(40f, (floor(low.toDouble() / 10.0) * 10.0 - 10.0).toFloat())
+    val hi = minOf(100f, (ceil(high.toDouble() / 10.0) * 10.0 + 10.0).toFloat())
+    if (lo < hi) return lo..hi
+    // Defensive only: with low <= high the decade formula cannot
+    // invert, but never return an inverted range if it ever did.
+    val fLo = maxOf(40f, min)
+    val fHi = minOf(100f, max)
+    return if (fLo < fHi) fLo..fHi else min..max
 }
 
-/** The screen angle for a dial value on the 240-degree sweep. */
+/**
+ * Round 6: the ONE shared resolution for the thermostat display
+ * range, used by all three surfaces — the popout, the sheet dial,
+ * and detail (detail renders the popout, so it inherits this).
+ * A Settings override pins the axis ONLY when BOTH override
+ * values are set: they are clamped to [40, 100], and if clamping
+ * would make min >= max the override is dropped and the formula
+ * governs (never inverted, never a crash). If either override
+ * value is unset, the formula governs. Display-range only, like
+ * the formula: live setpoints are never touched.
+ */
+fun resolveThermostatDisplayRange(
+    min: Float,
+    max: Float,
+    setpoints: List<Float>,
+    overrideMin: Float?,
+    overrideMax: Float?,
+): ClosedFloatingPointRange<Float> {
+    if (overrideMin != null && overrideMax != null) {
+        val lo = overrideMin.coerceIn(40f, 100f)
+        val hi = overrideMax.coerceIn(40f, 100f)
+        if (lo < hi) return lo..hi
+    }
+    return thermostatDisplayRange(min, max, setpoints)
+}
+
+/** The screen angle for a dial value on the dial sweep. */
 fun dial240AngleForValue(value: Float, range: ClosedFloatingPointRange<Float>): Float {
     val fraction = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
     return DIAL240_START_DEG + fraction * DIAL240_SWEEP_DEG
@@ -240,9 +292,10 @@ const val DUAL_THUMB_MIN_ARC_SEPARATION_DEG = 18f
 /**
  * Visual-fidelity round §5: spreads the DRAWN heating/cooling thumb
  * angles to at least [minSeparationDeg] of dial arc apart (18° on the
- * 240° sweep over a 30°F display range ≈ 2.25°F of arc — the thumbs
+ * round-6 270° sweep over a 30°F display range = 2°F of arc — the thumbs
  * clear each other at the top of the dial without touching the
- * values). VISUAL ONLY: the returned angles are draw positions and
+ * values; a 2°F pair now sits exactly at the floor and passes
+ * through untouched). VISUAL ONLY: the returned angles are draw positions and
  * grab-test positions; the heating/cooling setpoints themselves are
  * never rewritten, the dial model is untouched, and a drag still
  * reports the value under the finger (the grab test uses these same
@@ -275,7 +328,7 @@ fun separatedDualAngles(
         heat -= cool - arcEnd
         cool = arcEnd
     }
-    // A range narrower than the separation cannot occur on the 240°
+    // A range narrower than the separation cannot occur on the
     // arc, but never return an inverted pair if it ever did.
     if (heat > cool) {
         val m = (heat + cool) / 2f

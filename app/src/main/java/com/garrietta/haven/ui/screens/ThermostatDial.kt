@@ -57,15 +57,16 @@ import kotlin.math.sqrt
 /**
  * The spec's thermostat dial. It reworks run #38's dial under the standing
  * 1-degree rule (Garrett's 2026-10-29 decision): the finger drags
- * continuously around a 240-degree sweep, but the APPLIED value always
+ * continuously around a 270-degree sweep, but the APPLIED value always
  * snaps to whole degrees; steppers move ±1; an inside-face tap still
  * toggles the heating↔cooling selector; only drags that start on a thumb
  * change values.
  *
- * - 240-degree sweep with a 120-degree gap centered on the bottom (start
- *   150 degrees, end 390 = 30 degrees). The shared [Dial] stays at 270
- *   degrees for the sheet dial and the weather dial; its tests are
- *   untouched.
+ * - 270-degree sweep with a 90-degree gap centered on the bottom (start
+ *   135 degrees, end 405 = 45 degrees; round 6 moved the sweep from
+ *   240 to 270 so the arc reaches further down both sides of the
+ *   scallop). The shared [Dial] stays at 270 degrees for the sheet
+ *   dial and the weather dial; its tests are untouched.
  * - Dual floating pill thumbs on the same track in heat_cool mode, with
  *   the range between them shaded via the dynamic container blend
  *   (tertiaryContainer -> primaryContainer). Single modes get one thumb.
@@ -169,9 +170,15 @@ fun ThermostatDial(
     // The phase is read only inside the Canvas draw block below, so the
     // infinite transition redraws the dial without recomposing the page.
     // Feedback round 2, item 4: the bar protrudes more — 16dp idle
-    // (was 12dp), 22dp grabbed (was 18dp). With the inset below
-    // (20dp, was 22dp) the bar's outer edge moves out 4dp while its
-    // inner edge stays put, so the numbers keep their clearance.
+    // (was 12dp), 22dp grabbed (was 18dp). Round 6 moves the track
+    // inset below from 20dp to 16dp: the grabbed stroke's outer edge
+    // then sits 5dp inside the canvas (16dp inset − 11dp half-stroke)
+    // and the pill rect still clears the square canvas (its worst
+    // coordinate is track radius + 15dp half-width = 1dp inside at
+    // the 180° west point); 14dp would clip the pill by 1dp there,
+    // so 16dp is the smallest safe inset. The track's inner edge
+    // moves out 4dp, so the dual-number row gains 8dp of inner
+    // width (see ThermostatDialBlock's 48dp subtraction).
     val trackStroke by animateDpAsState(
         if (grabbed != null) 22.dp else 16.dp,
         animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springMorph(),
@@ -214,7 +221,7 @@ fun ThermostatDial(
     val animatedCoolAngle by animateFloatAsState(separatedCoolAngle, needleSpec, label = "coolAngle")
     val animatedSingleAngle by animateFloatAsState(dial240AngleForValue(drawnSingle, range), needleSpec, label = "singleAngle")
 
-    fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 20.dp.toPx() }
+    fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 16.dp.toPx() }
 
     fun thumbCenter(angleDeg: Float, radius: Float, cx: Float, cy: Float): Offset {
         val a = Math.toRadians(angleDeg.toDouble()).toFloat()
@@ -404,14 +411,20 @@ fun ThermostatDial(
                             }
                         } else {
                             // Bottom gap: strain past the nearer end instead
-                            // of jumping. The gap spans 120 degrees from the
-                            // max end (30) around the bottom to the min end
-                            // (150); its midpoint (90) splits the sides.
-                            val gapAngle = (angleDeg - 30f + 360f) % 360f
-                            val overshoot = if (gapAngle <= 60f) {
+                            // of jumping. The gap runs from the max end
+                            // ((START + SWEEP) % 360 = 45) around the bottom
+                            // (90) to the min end (135); its midpoint (90)
+                            // splits the sides. All three numbers derive
+                            // from the DIAL240 constants — nothing here
+                            // hardcodes the old 30°/120° gap — so a future
+                            // sweep change keeps the strain symmetric.
+                            val arcEnd = (DIAL240_START_DEG + DIAL240_SWEEP_DEG) % 360f
+                            val gapDeg = 360f - DIAL240_SWEEP_DEG
+                            val gapAngle = (angleDeg - arcEnd + 360f) % 360f
+                            val overshoot = if (gapAngle <= gapDeg / 2f) {
                                 gapAngle / DIAL240_SWEEP_DEG * span
                             } else {
-                                -(120f - gapAngle) / DIAL240_SWEEP_DEG * span
+                                -(gapDeg - gapAngle) / DIAL240_SWEEP_DEG * span
                             }
                             val base = if (overshoot >= 0f) range.endInclusive else range.start
                             strain = rubberBandedValue(base + overshoot, range)
@@ -521,10 +534,10 @@ fun ThermostatDial(
                 TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant),
             )
             // Round 4: the label lives at the BOTTOM of the ring
-            // interior, inside the 120° bottom gap where no thumb
+            // interior, inside the 90° bottom gap where no thumb
             // can ever travel (gap-proofing) — the old top-of-ring
             // slot collided with the 67°/69° thumbs, whose arc
-            // positions sit near the top of a 55–85° display range.
+            // positions sit near the top of the display range.
             drawText(
                 layout,
                 topLeft = Offset(

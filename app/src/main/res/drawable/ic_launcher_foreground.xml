@@ -3,33 +3,62 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Feedback round, item 1 (icon dark-render redesign): the
-         foreground is now SELF-SUFFICIENT — a bright off-white
-         #FAF7F0 tile (52x52, rect 28..80, radius 16) carrying the
-         charcoal house, so the mark survives even when the device
-         path renders the background layer black (Garrett's Fold8
-         recents pane showed exactly that: black field, intact
-         charcoal house + white door + green spark). The door is
-         now lime #9BF67C, not off-white: against the charcoal house
-         AND the off-white tile it must pop, and an off-white door
-         would merge with the tile. House geometry stays inside
-         the 66dp safe zone (center 54,54, radius 33): base corners
-         at ~21.3dp, apex 14dp, spark tips ~29.7dp from center.
-         The tile corners sit ~36.8dp out — past the safe-zone
-         circle — but the tile is a plate, not critical content:
-         circle/squircle/square/rectangle masks may nick a corner
-         tip, never the house. Background (solid lime) lives in
-         ic_launcher_background.xml. -->
+    <!-- Haven round 6, launcher icon ONLY (worker C).
+         DARK-RENDER FINDING (verified from the actual round-5
+         resources, not assumed): the device path breaks the
+         BACKGROUND layer — the round-5 comments record that
+         Garrett's Fold8 recents pane blackened the solid lime
+         #9BF67C field (One UI forced dark icons / Android
+         auto-theming) while the foreground rendered intact. The
+         round-5 fix (bright off-white tile + charcoal house) kept
+         the launcher grid legible, but it did not cure the
+         unfolded recents task pane — the acceptance case — because
+         the construction still depended on a light field carrying
+         a near-black (#161D17) mark: blacken the field and the
+         dark mark vanishes into it. This redesign removes that
+         failure mode entirely: there is no tile/plate and no dark
+         mark anywhere. The field is a deep green and the mark is
+         WHITE line art, so even if a device path blackens the
+         field outright, white-on-black still reads (21:1).
+         FIELD: full-bleed Haven leaf green #3E6B2F — the light
+         theme primary in Theme.kt, and the round-5 spark color.
+         CONTRAST (WCAG relative luminance): white on #3E6B2F =
+         6.27:1, passing AA for normal text. White on pale lime
+         #9BF67C is 1.32:1 and was rejected for exactly that
+         reason. #1B3708 forest (13.15:1) was rejected because at
+         icon sizes it reads as near-black, defeating the green
+         identity; #3E6B2F is the deepest green that still reads
+         unambiguously green.
+         MARK: white line-art house, same geometry family as the
+         round-5 mark (pitched roof, body, door opening), drawn as
+         strokes (4.5dp, round caps/joins) — not a filled
+         silhouette, not a tile. The filled leaf spark is dropped:
+         a filled accent does not translate to stroke at 48dp and
+         the roof/body/door alone carry the Haven house.
+         SAFE ZONE (center 54,54, radius 33): roof corners
+         (30,52)/(78,52) sit ~24.1dp out, apex (54,30) 24dp out,
+         body corners (36,76)/(72,76) ~28.4dp out; with a 2.25dp
+         half-stroke the outermost ink stays under ~30.7dp, so
+         circle, squircle, square, rectangle, and expressive
+         masks (including Samsung's default shape) never clip
+         critical content. Roof overhangs the body eaves line by
+         6dp per side, as a real roofline should. -->
     <path
-        android:fillColor="#FAF7F0"
-        android:pathData="M28,44 Q28,28 44,28 H64 Q80,28 80,44 V64 Q80,80 64,80 H44 Q28,80 28,64 Z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M30,52 L54,30 L78,52" />
     <path
-        android:fillColor="#161D17"
-        android:pathData="M40,54 L52,40 Q54,38 56,40 L68,54 V70 H58 V56 H50 V70 H40 Z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M36,52 H72 V76 H36 Z" />
     <path
-        android:fillColor="#9BF67C"
-        android:pathData="M50,70 V56 H58 V70 Z" />
-    <path
-        android:fillColor="#3E6B2F"
-        android:pathData="M70,29 L72,34 L77,36 L72,38 L70,43 L68,38 L63,36 L68,34 Z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M48,76 V64 Q48,62 50,62 H58 Q60,62 60,64 V76" />
 </vector>

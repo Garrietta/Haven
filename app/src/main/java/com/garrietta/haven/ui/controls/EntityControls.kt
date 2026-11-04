@@ -101,7 +101,7 @@ import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
 import com.garrietta.haven.ui.screens.rememberCardCustom
-import com.garrietta.haven.ui.screens.thermostatDisplayRange
+import com.garrietta.haven.ui.screens.resolveThermostatDisplayRange
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.data.domainCardColors
@@ -759,20 +759,25 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = nu
     val heatCool = high != null && low != null
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
-    // Feedback round 3, item 5: the sheet dial uses the SAME dynamic
-    // display window as the popout (round 2 item 4) — a 10°F bracket
-    // around the current setpoints, clamped [40, 100] — NOT the full
-    // HA min..max. The popout already had this; the sheet was the
-    // surface that still showed the full range, so its bar stayed
-    // compressed and its thumbs crowded. State coercion stays in
-    // HA range exactly like the popout (out-of-window values pin
-    // at the ends); only the drawn bar + slider window change.
+    // Round 6: the sheet dial uses the SAME resolved display
+    // window as the popout — the decade formula around the current
+    // setpoints (66/67° → 50–80°), or the Settings override when
+    // both override values are set (see
+    // resolveThermostatDisplayRange) — NOT the full HA min..max.
+    // State coercion stays in HA range exactly like the popout
+    // (out-of-window values pin at the ends); only the drawn bar
+    // + slider window change. Display-range only: the override
+    // never touches live setpoints.
     val displaySetpoints = if (heatCool) {
         listOfNotNull(low?.toFloat(), high?.toFloat())
     } else {
         listOfNotNull(entity.attrDouble("temperature")?.toFloat())
     }
-    val displayRange = thermostatDisplayRange(min, max, displaySetpoints)
+    val displayRange = resolveThermostatDisplayRange(
+        min, max, displaySetpoints,
+        vm.settingsStore.thermostatDisplayMin,
+        vm.settingsStore.thermostatDisplayMax,
+    )
     var heat by remember(low) { mutableStateOf(low?.toFloat()?.coerceIn(min, max) ?: min) }
     var cool by remember(high) { mutableStateOf(high?.toFloat()?.coerceIn(min, max) ?: max) }
     var single by remember(entity.attrDouble("temperature")) {

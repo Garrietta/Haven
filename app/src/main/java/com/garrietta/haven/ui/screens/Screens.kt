@@ -112,6 +112,7 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Wifi
 import com.garrietta.haven.data.updatesSummary
 import com.garrietta.haven.ui.components.KodaMenuDivider
@@ -1826,6 +1827,151 @@ fun SettingsScreen(
                     title = "Card shape",
                     subtitle = shapeLabel(vm.settingsStore.globalCardShape) ?: "Default corners",
                     onClick = { vm.openShapePicker(null, true) },
+                    flat = true,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            // Round 6: thermostat display-range override. The dial
+            // axis normally follows the decade formula in
+            // thermostatDisplayRange (66/67° setpoints → 50–80°);
+            // these two values, when BOTH set, pin the axis instead
+            // on the popout, the sheet dial, and detail (all three
+            // read resolveThermostatDisplayRange). Display-range
+            // only: live setpoints are never touched. State is kept
+            // locally here and written straight to
+            // vm.settingsStore, so SettingsScreen's signature is
+            // unchanged.
+            KodaMenuSection("Thermostat")
+            var thermoMin by remember { mutableStateOf(vm.settingsStore.thermostatDisplayMin) }
+            var thermoMax by remember { mutableStateOf(vm.settingsStore.thermostatDisplayMax) }
+            val thermoClampedMin = thermoMin?.coerceIn(40f, 100f)
+            val thermoClampedMax = thermoMax?.coerceIn(40f, 100f)
+            val thermoOverrideText = if (thermoClampedMin != null && thermoClampedMax != null && thermoClampedMin < thermoClampedMax) {
+                "${thermoClampedMin.toInt()}–${thermoClampedMax.toInt()}°"
+            } else {
+                null
+            }
+            // The Automatic range, when exactly one climate entity
+            // is present, so the status line can name the effective
+            // window; with zero or several climates the status stays
+            // generic rather than guessing which thermostat it means.
+            val thermoFormulaText: String? = run {
+                val climates = updateStates.values.filter { it.domain == "climate" }
+                if (climates.size != 1) return@run null
+                val climate = climates.first()
+                val cMin = climate.attrDouble("min_temp")?.toFloat() ?: 10f
+                val cMax = climate.attrDouble("max_temp")?.toFloat() ?: 30f
+                val low = climate.attrDouble("target_temp_low")?.toFloat()
+                val high = climate.attrDouble("target_temp_high")?.toFloat()
+                val setpoints = if (low != null && high != null) {
+                    listOf(low, high)
+                } else {
+                    listOfNotNull(climate.attrDouble("temperature")?.toFloat())
+                }
+                val r = thermostatDisplayRange(cMin, cMax, setpoints)
+                "${r.start.toInt()}–${r.endInclusive.toInt()}°"
+            }
+            val thermoStatus = when {
+                thermoOverrideText != null ->
+                    "Override ($thermoOverrideText) — pinned on the thermostat dial, sheet, and detail, whatever the setpoints are."
+                thermoMin != null && thermoMax != null ->
+                    "Override values do not form a valid range (minimum must be below maximum) — using Automatic" +
+                        (thermoFormulaText?.let { " ($it from setpoints)" } ?: "") + "."
+                thermoMin != null || thermoMax != null ->
+                    "Only one override value is set — Automatic governs until both minimum and maximum are set" +
+                        (thermoFormulaText?.let { " ($it from setpoints)" } ?: "") + "."
+                thermoFormulaText != null ->
+                    "Automatic ($thermoFormulaText from setpoints) — the dial range follows your setpoints."
+                else ->
+                    "Automatic — the dial range follows your setpoints."
+            }
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "thermostat-range",
+                    badgeKind = ExpressiveKind.SUNNY,
+                    icon = Icons.Filled.Thermostat,
+                    title = "Dial range",
+                    subtitle = thermoStatus,
+                    onClick = null,
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "thermostat-min",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.Thermostat,
+                    title = "Display minimum",
+                    subtitle = "Low end of the dial axis. Tap −/+ to set an override (starts at 50°); 1° steps, clamped to 40–100°.",
+                    onClick = null,
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                val base = thermoMin
+                                val next = if (base == null) 50f else (base - 1f).coerceIn(40f, 100f)
+                                thermoMin = next
+                                vm.settingsStore.thermostatDisplayMin = next
+                            }) { Text("−") }
+                            Text(
+                                thermoMin?.let { "${it.toInt()}°" } ?: "Automatic",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            TextButton(onClick = {
+                                val base = thermoMin
+                                val next = if (base == null) 50f else (base + 1f).coerceIn(40f, 100f)
+                                thermoMin = next
+                                vm.settingsStore.thermostatDisplayMin = next
+                            }) { Text("+") }
+                        }
+                    },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "thermostat-max",
+                    badgeKind = ExpressiveKind.WAVE,
+                    icon = Icons.Filled.Thermostat,
+                    title = "Display maximum",
+                    subtitle = "High end of the dial axis. Tap −/+ to set an override (starts at 80°); 1° steps, clamped to 40–100°.",
+                    onClick = null,
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                val base = thermoMax
+                                val next = if (base == null) 80f else (base - 1f).coerceIn(40f, 100f)
+                                thermoMax = next
+                                vm.settingsStore.thermostatDisplayMax = next
+                            }) { Text("−") }
+                            Text(
+                                thermoMax?.let { "${it.toInt()}°" } ?: "Automatic",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            TextButton(onClick = {
+                                val base = thermoMax
+                                val next = if (base == null) 80f else (base + 1f).coerceIn(40f, 100f)
+                                thermoMax = next
+                                vm.settingsStore.thermostatDisplayMax = next
+                            }) { Text("+") }
+                        }
+                    },
+                    flat = true,
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "thermostat-reset",
+                    badgeKind = ExpressiveKind.CLOUD,
+                    icon = Icons.Filled.Thermostat,
+                    title = "Reset to Automatic",
+                    subtitle = "Clear the minimum/maximum override; the dial range follows your setpoints again.",
+                    onClick = {
+                        thermoMin = null
+                        thermoMax = null
+                        vm.settingsStore.thermostatDisplayMin = null
+                        vm.settingsStore.thermostatDisplayMax = null
+                    },
                     flat = true,
                 )
             }

@@ -3,20 +3,19 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Feedback round, item 1 (icon dark-render redesign): SOLID
-         bright lime field, full bleed — no gradient vector. The
-         customization round's gradient background verified intact
-         in the built APK, yet Garrett's Fold8 recents pane rendered
-         the icon as a black house on a black background: the device
-         path blackened the background layer (consistent with system
-         dark-icon treatment — One UI 8.5 forced dark icons /
-         Android 16 QPR2 auto-theming) while the foreground rendered
-         intact. A solid field removes the gradient-vector variable
-         from that equation; the foreground below is now ALSO
-         self-sufficient (bright off-white tile carrying the mark),
-         so the icon stays legible even when a device path forces
-         the background to black. Tokens: capsule lime #9BF67C. -->
+    <!-- Haven round 6, launcher icon ONLY (worker C): FULL-BLEED
+         Haven leaf green #3E6B2F field — no gradient, no tile,
+         no dark/black layer anywhere in the construction. This is
+         the field itself, not a background behind a plate: the
+         foreground carries only white line art (see
+         ic_launcher_foreground.xml), so there is nothing for a
+         device dark-icon path to strand. White on #3E6B2F is
+         6.27:1; even if a device path blackens this field, the
+         white mark still reads at 21:1 on black. Pale lime
+         #9BF67C (1.32:1 under white) was the round-5 field and is
+         deliberately not reused here. Token: light theme primary
+         in Theme.kt. -->
     <path
-        android:fillColor="#9BF67C"
+        android:fillColor="#3E6B2F"
         android:pathData="M0,0 H108 V108 H0 Z" />
 </vector>

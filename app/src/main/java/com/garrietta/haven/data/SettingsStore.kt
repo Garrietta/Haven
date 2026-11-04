@@ -50,6 +50,41 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("reduce_motion", false)
         set(value) = prefs.edit().putBoolean("reduce_motion", value).apply()
 
+    // ---- Round 6: thermostat display-range override ----
+    // Explicit dial-axis ends (°F) for the thermostat popout,
+    // sheet dial, and detail. Null = unset = Automatic: the
+    // decade formula in thermostatDisplayRange governs. The
+    // override is display-range only — it never touches live
+    // setpoints. Presence (contains) distinguishes "unset" from a
+    // stored value; the resolver clamps to [40, 100] and drops
+    // the pair if clamping would invert it, so the stored value
+    // itself needs no validation here beyond whole degrees.
+    /** Explicit thermostat dial-axis minimum, or null = Automatic. */
+    var thermostatDisplayMin: Float?
+        get() = if (prefs.contains("thermostat_display_min")) {
+            prefs.getFloat("thermostat_display_min", 50f)
+        } else {
+            null
+        }
+        set(value) = if (value == null) {
+            prefs.edit().remove("thermostat_display_min").apply()
+        } else {
+            prefs.edit().putFloat("thermostat_display_min", value).apply()
+        }
+
+    /** Explicit thermostat dial-axis maximum, or null = Automatic. */
+    var thermostatDisplayMax: Float?
+        get() = if (prefs.contains("thermostat_display_max")) {
+            prefs.getFloat("thermostat_display_max", 80f)
+        } else {
+            null
+        }
+        set(value) = if (value == null) {
+            prefs.edit().remove("thermostat_display_max").apply()
+        } else {
+            prefs.edit().putFloat("thermostat_display_max", value).apply()
+        }
+
     /** The dashboard url_path last loaded (null = the default dashboard, sent with no url_path). */
     var selectedDashboardPath: String?
         get() = prefs.getString("selected_dashboard_path", null)

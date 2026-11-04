@@ -124,10 +124,12 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
-    // Feedback round 2, item 4: the dial range is computed HERE,
-    // in the popout — a DYNAMIC bracket around the current
-    // setpoints (see thermostatDisplayRange), so 67/69 setpoints
-    // get clear arc separation instead of crowding. Values
+    // Round 6: the dial range is computed HERE, in the popout,
+    // through the ONE shared resolver (see
+    // resolveThermostatDisplayRange): the decade formula around
+    // the current setpoints (66/67° → 50–80°) unless Settings
+    // pins both override values, in which case the override wins
+    // on this surface exactly as on the sheet and detail. Values
     // themselves are never rewritten; out-of-range thumbs clamp
     // to the arc end and the Hero flags it. The Hero takes this
     // range as a parameter, so the popout surface cannot silently
@@ -140,7 +142,11 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     } else {
         listOfNotNull(singleAttr)
     }
-    val displayRange = thermostatDisplayRange(min, max, displaySetpoints)
+    val displayRange = resolveThermostatDisplayRange(
+        min, max, displaySetpoints,
+        vm.settingsStore.thermostatDisplayMin,
+        vm.settingsStore.thermostatDisplayMax,
+    )
     // UI rewrite round §6: the dial state is hoisted here so the
     // popout renders the dial INSIDE the scallop disc and the
     // Heat/Cool bar BELOW it (see rememberThermostatDialState).
@@ -199,22 +205,19 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
         // 0.72 x radius = 115.2dp, but the 240dp dial's outer bloom
         // reaches 134dp — so bloom crossed the border at the top,
         // where 67/69 thumbs sit near the valleys. THERMOSTAT_SCALLOP
-        // valleys sit at 0.88 x radius = 140.8dp. Feedback round 2,
-        // item 4: the bar protrudes more (track inset 22dp -> 20dp,
-        // stroke 12dp -> 16dp idle / 18dp -> 22dp grabbed), so with
-        // the 240dp dial everything still clears: track outer
-        // 111dp grabbed (29.8 margin), pill outer 122dp (18.8),
-        // idle bloom 136dp (4.8), pulse bloom 140dp (0.8 — the
-        // absolute worst case of full stagger + peak pulse + a
-        // valley-aligned thumb; the bloom is a soft alpha fade,
-        // so it kisses the scallop, never crosses it as a hard
-        // edge). The bar's inner edge is unchanged (92dp), so the
-        // dual-number row keeps its clearance.
-        // The brief's alternative — shrinking the track 24dp — was
-        // NOT taken: it would push the ring's inner edge to 80dp,
-        // inside the 169dp dual-number row (84.5dp half-width), a
-        // constant 4.5dp overlap (17dp at kinetic peak scale) — a
-        // regression. Thumb sizes and grab targets are untouched.
+        // valleys sit at 0.88 x radius = 140.8dp. Round 6 moves the
+        // track inset 20dp -> 16dp and the sweep 240° -> 270° (see
+        // ThermostatDial), so with the 240dp dial the hard-edged
+        // elements still clear the valley: track outer 115dp
+        // grabbed (25.8 margin), pill outer 126dp (14.8, full
+        // stagger + pill half-height), track inner edge 96dp idle
+        // (was 92dp), so the dual-number row GAINS clearance: its
+        // inner width is now 192dp (was 184dp) against a ~185dp
+        // row, 7dp of daylight instead of a 2dp box kiss. The
+        // bloom is a soft alpha fade, unchanged in kind from round
+        // 5; its peak-pulse extent past the valley is a fade, never
+        // a hard edge, and the scallop itself is untouched (the
+        // user likes it). Thumb sizes and grab targets are untouched.
         Box(
             Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.THERMOSTAT_SCALLOP)),
             contentAlignment = Alignment.Center,
@@ -540,8 +543,14 @@ private fun ThermostatDialBlock(
     // range-end legend row below it (min at the bar's left end,
     // max at its right end, spread to the dial width) — the popout
     // dial used the dynamic range since round 2 but never SHOWED
-    // the window's ends. The inner Box (dial + centered overlay)
-    // is unchanged; only the legend row is added beneath it.
+    // the window's ends. Round 6: with the 270° sweep the arc ends
+    // sit lower (135° lower-left, 45° lower-right), so this
+    // left=min/right=max row now sits directly under the arc ends
+    // it labels — no angle-positioned labels were needed, and the
+    // row stays clear of the steppers (which live below the disc /
+    // below the dial block, never in this row). The inner Box
+    // (dial + centered overlay) is unchanged; only the legend row
+    // is added beneath it.
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
     Box(contentAlignment = Alignment.Center) {
         ThermostatDial(
@@ -581,19 +590,20 @@ private fun ThermostatDialBlock(
                 // numbers is COMPUTED from dial geometry, never a
                 // fixed guess — the measured label widths plus the
                 // track's inner width (diameter minus twice the
-                // 20dp track inset and the 8dp idle half-stroke;
-                // see ThermostatDial's trackRadiusPx/trackStroke)
-                // feed dualNumberGapPx, which spreads the pair to
-                // fill the inner width with 8dp of clearance per
-                // side, floored at an ample 32dp. The 240dp popout
-                // dial cannot fit 32dp plus full clearance at
-                // 52.sp (its inner width is 184dp against ~153dp
-                // of labels), so there the floor wins and the pair
-                // kisses the ring's inner edge by ~2dp of label
-                // BOX per side — the drawn glyphs stay clear on
-                // their side bearings; the 300dp hero dial gets
-                // the full computed spread. Visual only: setpoints
-                // are never touched, only label positions.
+                // 16dp track inset and the 8dp idle half-stroke =
+                // diameter − 48dp; see ThermostatDial's
+                // trackRadiusPx/trackStroke) feed dualNumberGapPx,
+                // which spreads the pair to fill the inner width
+                // with 8dp of clearance per side, floored at an
+                // ample 32dp. Round 6's 16dp inset widens the inner
+                // width (240dp popout: 192dp, was 184dp; 300dp hero:
+                // 252dp, was 244dp), so the popout pair at 52.sp
+                // (~153dp of labels + the 32dp floor = ~185dp)
+                // now clears the ring by ~7dp total instead of
+                // kissing it by ~2dp of label BOX per side, and
+                // the hero dial gets the full computed spread.
+                // Visual only: setpoints are never touched, only
+                // label positions.
                 val numberStyle = TextStyle(
                     fontSize = 52.sp,
                     fontWeight = FontWeight.Bold,
@@ -605,7 +615,7 @@ private fun ThermostatDialBlock(
                 val coolLabelWidth = textMeasurer.measure(
                     state.cool.value.toDouble().formatTemp(), numberStyle,
                 ).size.width.toFloat()
-                val innerWidthPx = with(density) { (diameter - 56.dp).toPx() }
+                val innerWidthPx = with(density) { (diameter - 48.dp).toPx() }
                 val dualGap = with(density) {
                     dualNumberGapPx(
                         heatLabelWidth, coolLabelWidth, innerWidthPx,
@@ -715,10 +725,9 @@ private fun ThermostatBelowDial(state: ThermostatDialState) {
  * with the bar (the 2026-10-29 verdict video's circled 67°/70°).
  * At 52.sp with the feedback-round-5 computed gap the row spans
  * labels + gap: ~185dp at rest on the 240dp pop-out dial (inner
- * width 184dp — the 32dp floor costs ~2dp of label BOX per side,
- * drawn glyphs stay clear on their side bearings) and ~231dp on
- * the 300dp hero dial (inner width 244dp, full 8dp clearance per
- * side). The kinetic peak scale (1.15x, outgoing text only, sliding
+ * width 192dp since round 6's 16dp inset — ~7dp of daylight total,
+ * no kiss) and ~236dp on the 300dp hero dial (inner width 252dp,
+ * full 8dp clearance per side). The kinetic peak scale (1.15x, outgoing text only, sliding
  * vertically away) can transiently touch the ring during a value
  * change; at rest the pair is clear. The single number stays
  * 72.sp: ~108dp wide, no overlap.
