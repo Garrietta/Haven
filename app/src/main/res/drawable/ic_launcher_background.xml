@@ -3,19 +3,25 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Haven round 6, launcher icon ONLY (worker C): FULL-BLEED
-         Haven leaf green #3E6B2F field — no gradient, no tile,
-         no dark/black layer anywhere in the construction. This is
-         the field itself, not a background behind a plate: the
-         foreground carries only white line art (see
-         ic_launcher_foreground.xml), so there is nothing for a
-         device dark-icon path to strand. White on #3E6B2F is
-         6.27:1; even if a device path blackens this field, the
-         white mark still reads at 21:1 on black. Pale lime
-         #9BF67C (1.32:1 under white) was the round-5 field and is
-         deliberately not reused here. Token: light theme primary
-         in Theme.kt. -->
+    <!-- Haven round 7, launcher icon ONLY (folds the user's
+         "Fold into 7" icon redesign into round 7). REPLACES round
+         6's full-bleed Haven leaf green #3E6B2F field: the field
+         is now cream/off-white #FAF7F0 (the app's light-theme
+         background), full-bleed. The squircle shape itself comes
+         from the launcher mask (adaptive icon), not from this
+         layer: this layer is the cream fill the mask crops.
+         RECENTS (round 6's finding, re-applied): the Fold8
+         recents pane can blacken the BACKGROUND layer while the
+         foreground survives. If this cream field blackens, the
+         foreground house still reads — its mark is BRIGHT
+         (lime facets, yellow-orange center, yellow sparkle,
+         cream doorway), the inverse of round 5's failure mode
+         (a dark mark vanishing into a blackened light field).
+         The darkest facet (#3E6B2F) is bounded by bright
+         neighbors on both sides, so the silhouette survives
+         even where that facet alone goes soft on black. See
+         ic_launcher_foreground.xml for the full reasoning. -->
     <path
-        android:fillColor="#3E6B2F"
+        android:fillColor="#FAF7F0"
         android:pathData="M0,0 H108 V108 H0 Z" />
 </vector>

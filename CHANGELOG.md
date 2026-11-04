@@ -198,6 +198,75 @@ risk; the spec only requires BackHandler wired, which is
 done. If it lands cleanly later, the recommended peek is
 0.82 (Koda's video source).
 
+### 4. Launcher icon redesign (folded into 7, user's words)
+
+The user's icon direction, folded into round 7 instead of a
+later round, REPLACES round 6's construction outright
+(full-bleed Haven leaf green #3E6B2F field + white line-art
+house): no green field and no white line art remains in any
+icon resource. New construction, from the user's reference
+image: a cream/off-white squircle field (the squircle shape
+itself comes from the launcher mask — the background layer
+is a full-bleed cream fill the mask crops) carrying a house
+built from gradient segments, colorful and bright, not line
+art. Facets, in the same 30..78 x 30..76 envelope as round 6
+(same safe-zone discipline): roof left/right triangles
+grading deep leaf #3E6B2F at the eaves to light lime
+#9BF67C at the ridge and back; body left/right grading
+deep leaf at the outer edges to mid green #66BB6A at the
+center; center panel (50..62) grading yellow #FFD54F at
+the top to orange #FF8F00 at the bottom; arched door
+segment on the LEFT (39..47, arch apex ~61, base 76) in
+cream #FAF7F0, the field color, so it reads as a doorway
+against every body facet; small yellow #FFD54F 4-point
+sparkle centered (71,37), clear of the roof edge (roof edge
+at y=37 is x~61.6; sparkle starts x=65). The vectors use
+real linear gradients (minSdk 26, so VectorDrawable
+gradients, API 24+, are safe — verified by the local build
+compiling them, not assumed). Monochrome variant: same
+geometry, single color — the facets merge into one black
+silhouette, the door is an evenOdd cutout so it still reads
+as an opening, the sparkle stays a separate filled star;
+the round-6 line-art monochrome is replaced, not recolored.
+Adaptive wrappers (mipmap-anydpi-v26/v33) unchanged. All 10
+legacy mipmap PNGs regenerated from the new artwork
+(`make-legacy-icon-round7.py`: 4x supersample, LANCZOS;
+square and round PNGs identical files, the repo
+convention); the roof diagonals are approximated as
+horizontal gradients in the PNGs (the adaptive vector
+carries the true diagonals). Pixel-verified on all
+densities: corners cream (250,247,240); roof apex lime;
+center panel yellow-to-orange top-to-bottom; door cream;
+sparkle yellow; body facets green blends; door-arch and
+sparkle-roof gaps cream.
+Gradient direction, deliberate: outer edges are deep
+green, the interior grades toward lime/yellow — so the
+house boundary on cream is crisp everywhere (deep leaf on
+cream 5.86:1), while the light-lime facet never carries an
+outer edge against cream (light lime on cream 1.24:1, a
+soft edge by design — the light facet is an interior
+highlight bounded by darker facets). Safe zone: roof eaves
+~24.1dp out, apex 24dp, body corners ~28.4dp, sparkle
+extremes ~28.6dp — all outermost ink under ~30.7dp from
+center (54,54), so circle, squircle, square, rectangle,
+and expressive masks (including Samsung's default shape)
+never clip critical content. RECENTS, the stated
+acceptance case, reasoned explicitly: round 6 proved the
+Fold8 recents pane can blacken the BACKGROUND layer while
+the foreground survives. If this cream field blackens, the
+bright foreground survives — lime on black 15.87:1,
+yellow on black 14.88:1, mid green on black 8.88:1, cream
+doorway on black 19.63:1 — and the softest element, deep
+leaf on black (3.35:1), is bounded by bright neighbors on
+both sides, so the silhouette survives. This inverts round
+5's failure mode (a dark mark vanishing into a blackened
+light field) instead of repeating it: blackening the field
+IMPROVES bright-mark contrast. The one element that goes
+soft on black (deep leaf) never carries the silhouette
+alone. No app-name or theme changes (per the addition's
+scope guard). Files: the three drawable vectors + all 10
+mipmap PNGs; no Kotlin changes for this item.
+
 ### Reduce-motion, and what was not done
 
 Under reduce-motion the drag never engages (Back/dismiss

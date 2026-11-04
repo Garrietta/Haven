@@ -3,31 +3,27 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Haven round 6, launcher icon ONLY (worker C): single-color
-         variant of the line-art Haven mark for themed icons
-         (Android 13+). Same stroke geometry as the foreground —
-         pitched roof, body, door opening, 4.5dp strokes, same
-         66dp safe-zone placement (outermost ink under ~30.7dp
-         from center 54,54) — drawn in one color; the system tints
-         it and supplies the themed field. The old filled house +
-         spark silhouette is replaced, not recolored: themed icons
-         must match the color icon's line-art construction. -->
+    <!-- Haven round 7, launcher icon ONLY: single-color variant
+         of the new gradient-segment house for themed icons
+         (Android 13+). Same geometry as the color foreground —
+         pitched roof, body, arched door on the left, sparkle at
+         the upper right, same 66dp safe-zone placement
+         (outermost ink under ~30.7dp from center 54,54) —
+         drawn in one color; the system tints it and supplies
+         the themed field. The facets merge into one silhouette
+         (there are no colors to separate them); the door is an
+         evenOdd cutout so it still reads as an opening, and the
+         sparkle stays a separate filled star. The round-6
+         line-art monochrome is replaced, not recolored: themed
+         icons must match the color icon's filled construction. -->
     <path
-        android:strokeColor="#000000"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M30,52 L54,30 L78,52" />
+        android:fillColor="#000000"
+        android:pathData="M30,52 L54,30 L78,52 Z" />
     <path
-        android:strokeColor="#000000"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M36,52 H72 V76 H36 Z" />
+        android:fillColor="#000000"
+        android:fillType="evenOdd"
+        android:pathData="M36,52 H72 V76 H36 Z M39,76 V65 Q43,57 47,65 V76 Z" />
     <path
-        android:strokeColor="#000000"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M48,76 V64 Q48,62 50,62 H58 Q60,62 60,64 V76" />
+        android:fillColor="#000000"
+        android:pathData="M71,31 L73,35 L77,37 L73,39 L71,43 L69,39 L65,37 L69,35 Z" />
 </vector>

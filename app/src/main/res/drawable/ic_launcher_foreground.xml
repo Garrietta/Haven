@@ -3,62 +3,124 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Haven round 6, launcher icon ONLY (worker C).
-         DARK-RENDER FINDING (verified from the actual round-5
-         resources, not assumed): the device path breaks the
-         BACKGROUND layer — the round-5 comments record that
-         Garrett's Fold8 recents pane blackened the solid lime
-         #9BF67C field (One UI forced dark icons / Android
-         auto-theming) while the foreground rendered intact. The
-         round-5 fix (bright off-white tile + charcoal house) kept
-         the launcher grid legible, but it did not cure the
-         unfolded recents task pane — the acceptance case — because
-         the construction still depended on a light field carrying
-         a near-black (#161D17) mark: blacken the field and the
-         dark mark vanishes into it. This redesign removes that
-         failure mode entirely: there is no tile/plate and no dark
-         mark anywhere. The field is a deep green and the mark is
-         WHITE line art, so even if a device path blackens the
-         field outright, white-on-black still reads (21:1).
-         FIELD: full-bleed Haven leaf green #3E6B2F — the light
-         theme primary in Theme.kt, and the round-5 spark color.
-         CONTRAST (WCAG relative luminance): white on #3E6B2F =
-         6.27:1, passing AA for normal text. White on pale lime
-         #9BF67C is 1.32:1 and was rejected for exactly that
-         reason. #1B3708 forest (13.15:1) was rejected because at
-         icon sizes it reads as near-black, defeating the green
-         identity; #3E6B2F is the deepest green that still reads
-         unambiguously green.
-         MARK: white line-art house, same geometry family as the
-         round-5 mark (pitched roof, body, door opening), drawn as
-         strokes (4.5dp, round caps/joins) — not a filled
-         silhouette, not a tile. The filled leaf spark is dropped:
-         a filled accent does not translate to stroke at 48dp and
-         the roof/body/door alone carry the Haven house.
-         SAFE ZONE (center 54,54, radius 33): roof corners
-         (30,52)/(78,52) sit ~24.1dp out, apex (54,30) 24dp out,
-         body corners (36,76)/(72,76) ~28.4dp out; with a 2.25dp
-         half-stroke the outermost ink stays under ~30.7dp, so
-         circle, squircle, square, rectangle, and expressive
-         masks (including Samsung's default shape) never clip
-         critical content. Roof overhangs the body eaves line by
-         6dp per side, as a real roofline should. -->
+    <!-- Haven round 7, launcher icon ONLY (the user's "Fold into
+         7" redesign). REPLACES round 6's white line-art house on
+         a green field — no green field, no white line art
+         remains anywhere in this construction.
+         CONSTRUCTION (user's reference image, 2026-11-03): a
+         house built from gradient segments on a cream field
+         (see ic_launcher_background.xml), colorful and bright,
+         not line art. The gradient runs light lime through deep
+         green across the facets, with a yellow-orange center
+         panel, an arched door segment on the LEFT, and a small
+         yellow 4-point sparkle at the upper right.
+         FACETS (same 30..78 x 30..76 envelope as round 6, so
+         the safe-zone discipline carries over unchanged):
+         - Roof left: apex (54,30), eave (30,52), ridge foot
+           (54,52); gradient deep leaf #3E6B2F at the eave to
+           light lime #9BF67C at the ridge.
+         - Roof right: apex (54,30), eave (78,52), ridge foot
+           (54,52); gradient light lime at the ridge to deep
+           leaf at the eave.
+         - Body left (36..50, 52..76): horizontal gradient
+           deep leaf at the outer edge to mid green #66BB6A
+           at the center.
+         - Center panel (50..62, 52..76): vertical gradient
+           yellow #FFD54F at the top to orange #FF8F00 at the
+           bottom — the warm center.
+         - Body right (62..72, 52..76): horizontal gradient
+           mid green at the center to deep leaf at the outer
+           edge.
+         - Door (39..47, arch apex ~61, base 76): cream
+           #FAF7F0, the field color — it reads as a doorway
+           against every body facet, and stays cream (not
+           blackened) if the background layer blackens, because
+           the foreground survives intact (round 6's finding).
+         - Sparkle: yellow #FFD54F 4-point star centered
+           (71,37), half-size 6, clear of the roof edge
+           (roof edge at y=37 is x~61.6; sparkle starts x=65).
+         GRADIENT DIRECTION (deliberate): the silhouette's
+         OUTER edges are deep green, the interior grades
+         toward lime/yellow — so the house boundary on the
+         cream field is crisp everywhere (deep leaf on cream
+         is ~6:1), while the light-lime facet never has to
+         carry an outer edge against cream (light lime on
+         cream would be ~1.3:1, a soft edge). The light facet
+         is an interior highlight, bounded by darker facets.
+         SAFE ZONE (center 54,54, radius 33 — the adaptive
+         66dp safe zone): roof eaves ~24.1dp out, apex 24dp,
+         body corners ~28.4dp, sparkle extremes ~28.6dp — all
+         outermost ink stays under ~30.7dp, so circle,
+         squircle, square, rectangle, and expressive masks
+         (including Samsung's default shape) never clip
+         critical content. Roof overhangs the body eaves line
+         by 6dp per side, as a real roofline should.
+         RECENTS (the stated acceptance case): if a device
+         path blackens the cream background layer, the bright
+         foreground survives — lime facets, yellow-orange
+         center, yellow sparkle, and cream doorway all read on
+         black, and the deep-green facets are bounded by bright
+         neighbors. This inverts round 5's failure (dark mark
+         on blackened field) instead of repeating it.
+         Vectors use real linear gradients (minSdk 26, so
+         VectorDrawable gradients, API 24+, are safe); the
+         legacy mipmap PNGs render the same facets, with the
+         roof diagonals approximated as horizontal gradients
+         (see make-legacy-icon-round7.py). -->
+    <path android:pathData="M54,30 L30,52 L54,52 Z">
+        <gradient
+            android:type="linear"
+            android:startX="30"
+            android:startY="52"
+            android:endX="54"
+            android:endY="30"
+            android:startColor="#3E6B2F"
+            android:endColor="#9BF67C" />
+    </path>
+    <path android:pathData="M54,30 L78,52 L54,52 Z">
+        <gradient
+            android:type="linear"
+            android:startX="54"
+            android:startY="30"
+            android:endX="78"
+            android:endY="52"
+            android:startColor="#9BF67C"
+            android:endColor="#3E6B2F" />
+    </path>
+    <path android:pathData="M36,52 H50 V76 H36 Z">
+        <gradient
+            android:type="linear"
+            android:startX="36"
+            android:startY="64"
+            android:endX="50"
+            android:endY="64"
+            android:startColor="#3E6B2F"
+            android:endColor="#66BB6A" />
+    </path>
+    <path android:pathData="M50,52 H62 V76 H50 Z">
+        <gradient
+            android:type="linear"
+            android:startX="50"
+            android:startY="52"
+            android:endX="50"
+            android:endY="76"
+            android:startColor="#FFD54F"
+            android:endColor="#FF8F00" />
+    </path>
+    <path android:pathData="M62,52 H72 V76 H62 Z">
+        <gradient
+            android:type="linear"
+            android:startX="62"
+            android:startY="64"
+            android:endX="72"
+            android:endY="64"
+            android:startColor="#66BB6A"
+            android:endColor="#3E6B2F" />
+    </path>
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M30,52 L54,30 L78,52" />
+        android:fillColor="#FAF7F0"
+        android:pathData="M39,76 V65 Q43,57 47,65 V76 Z" />
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M36,52 H72 V76 H36 Z" />
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M48,76 V64 Q48,62 50,62 H58 Q60,62 60,64 V76" />
+        android:fillColor="#FFD54F"
+        android:pathData="M71,31 L73,35 L77,37 L73,39 L71,43 L69,39 L65,37 L69,35 Z" />
 </vector>
