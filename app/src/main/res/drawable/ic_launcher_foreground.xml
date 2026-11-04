@@ -3,80 +3,66 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Haven round 9, launcher icon ONLY. REPLACES round 7's
-         gradient foreground outright — same segmented-house
-         design, same 30..78 x 30..76 envelope, but SOLID FLAT
-         facet colors and NO <gradient> elements anywhere.
-         WHY (device-proven, 2026-11-03 20:34 video): on the
-         user's Fold8, the round-7 adaptive icon rendered the
-         cream field + solid yellow sparkle ONLY — the five
-         gradient-filled house paths did not render in the
-         device's adaptive-icon path (the shipped legacy PNGs
-         DID contain the house, pixel-verified, so the failure
-         is vector-gradient-specific, not a missing resource).
-         Solid fills are the renderer-proof construction: every
-         path here is a flat fillColor, exactly like the
-         sparkle that did render.
-         FACETS (same envelope as round 7, so the safe-zone
-         discipline carries over unchanged):
-         - Roof, each side split into TWO flats along the
-           y=41 midline: lime #9BF67C ridge triangle at the
-           apex, deep leaf #3E6B2F eave trapezoid below. The
-           outer edges stay deep leaf (crisp on cream, ~6:1);
-           lime never touches cream directly — it is an
-           interior highlight bounded by deep leaf, exactly as
-           round 7's gradient direction intended.
-         - Body left (36..50) and right (62..72): mid green
-           #66BB6A flats.
-         - Center panel (50..62): TWO flats — yellow #FFD54F
-           top half (52..64), orange #FF8F00 bottom half
-           (64..76) — the warm center, no vertical gradient.
-         - Door (39..47, arch apex ~61, base 76): cream
-           #FAF7F0, drawn after the body so it reads as a
-           doorway; on the LEFT, as the reference.
-         - Sparkle: yellow #FFD54F 4-point star centered
-           (71,37), half-size 6, clear of the roof edge.
-         SAFE ZONE (center 54,54): outermost ink unchanged
-         from round 7 (under ~30.7dp), so circle, squircle,
-         square, rectangle, and expressive masks (including
-         Samsung's default shape) never clip critical content.
-         RECENTS (the stated acceptance case): if a device
-         path blackens the cream background layer, the bright
-         flat facets still read — lime, yellow, orange, and
-         cream doorway on black, deep-leaf eaves bounded by
-         bright neighbors. The legacy mipmap PNGs render the
-         same flats (see make-legacy-icon-round9.py).
-         Monochrome (ic_launcher_monochrome.xml) is unchanged:
-         it was already solid fills and merges the facets into
-         one silhouette. Background (cream field) is unchanged. -->
+    <!-- Haven round 10, launcher icon ONLY. User-approved
+         reference (2026-11-03, "Yes use that"): the generated
+         icon image (imagine_media/media-generation-haven-
+         icon-no-curve-0-...webp) — cream squircle field, rounded
+         house with a smooth green-to-yellow roof, pale arched
+         door on the LEFT, yellow sparkle upper right, and NO
+         dark green curved seam down the middle from the top
+         left (that line was deliberately removed from the
+         reference and must not reappear here).
+         CONSTRUCTION — SOLID FLAT COLORS ONLY, ZERO <gradient>
+         elements. Round 9 proved why (device-proven, 2026-11-03
+         20:34 video): the round-7 vector's gradient-filled house
+         paths did not render in the Fold8 adaptive-icon path
+         (only the solid sparkle did), while the shipped legacy
+         PNGs contained the house. Every path below is a flat
+         fillColor, exactly like the sparkle that did render.
+         The reference's gradients are approximated with flats
+         sampled from the reference image itself:
+         - Roof #72C75F (sampled roof peak).
+         - Center #E8B93B (golden yellow, sampled center).
+         - Door #F0D67E (pale gold, lightened vs the sampled
+           mid-tone so the arch still reads against the
+           golden center).
+         - Bottom-left #8EE059 (sampled bright lime).
+         - Body green #3FA85E (sampled bottom-right green).
+         - Sparkle #F8C230 (sampled sparkle yellow).
+         GEOMETRY (same safe envelope discipline as rounds 7/9,
+         house within 30..78 x 26..76, sparkle inside the 66dp
+         safe-zone circle): rounded house silhouette (rounded
+         peak, rounded bottom corners); roof as one flat whose
+         lower edge is the golden band's top edge — NO internal
+         seam, so the removed dark curve cannot reappear;
+         center as a BROAD golden band (top ~43-44, bottom
+         ~62-64 at center, measured from the reference image
+         itself, closing at the right tip x~61 where the green
+         body takes over); bottom band split lime-left /
+         green-right with a vertical seam (that seam is in the
+         reference and is NOT the removed curve); door arch on
+         the LEFT; sparkle centered (70,33), half-size 6, clear
+         of the roof slope (bottom point 2dp+ clear at x=70)
+         and of the peak.
+         The legacy mipmap PNGs render the same flats (see
+         make-legacy-icon-round10.py). Background (cream field)
+         is unchanged. Monochrome is rebuilt to this geometry. -->
     <path
-        android:fillColor="#9BF67C"
-        android:pathData="M54,30 L42,41 L54,41 Z" />
+        android:fillColor="#3FA85E"
+        android:pathData="M30,52 L42,36 Q54,26 66,36 L78,52 L78,66 Q78,76 68,76 L40,76 Q30,76 30,66 Z" />
     <path
-        android:fillColor="#3E6B2F"
-        android:pathData="M42,41 L30,52 L54,52 L54,41 Z" />
+        android:fillColor="#72C75F"
+        android:pathData="M30,52 L42,36 Q54,26 66,36 L78,52 Q70,48 61,47 Q58,44 54,43 Q42,43 30,44 Z" />
     <path
-        android:fillColor="#9BF67C"
-        android:pathData="M54,30 L66,41 L54,41 Z" />
+        android:fillColor="#E8B93B"
+        android:pathData="M30,44 Q42,43 54,43 Q58,44 61,47 Q58,56 54,62 Q42,65 30,64 Z" />
     <path
-        android:fillColor="#3E6B2F"
-        android:pathData="M66,41 L78,52 L54,52 L54,41 Z" />
+        android:fillColor="#8EE059"
+        android:pathData="M30,64 Q38,65 46,63.5 L46,76 L40,76 Q30,76 30,66 Z" />
     <path
-        android:fillColor="#66BB6A"
-        android:pathData="M36,52 H50 V76 H36 Z" />
+        android:fillColor="#F0D67E"
+        android:pathData="M31,65 L31,52 Q31,43 38,43 Q45,43 45,52 L45,65 Z" />
     <path
-        android:fillColor="#FFD54F"
-        android:pathData="M50,52 H62 V64 H50 Z" />
-    <path
-        android:fillColor="#FF8F00"
-        android:pathData="M50,64 H62 V76 H50 Z" />
-    <path
-        android:fillColor="#66BB6A"
-        android:pathData="M62,52 H72 V76 H62 Z" />
-    <path
-        android:fillColor="#FAF7F0"
-        android:pathData="M39,76 V65 Q43,57 47,65 V76 Z" />
-    <path
-        android:fillColor="#FFD54F"
-        android:pathData="M71,31 L73,35 L77,37 L73,39 L71,43 L69,39 L65,37 L69,35 Z" />
+        android:fillColor="#F8C230"
+        android:pathData="M70,27 L72,31 L76,33 L72,35 L70,39 L68,35 L64,33 L68,31 Z" />
 </vector>

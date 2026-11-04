@@ -1,5 +1,74 @@
 # Haven Changelog
 
+## Feedback round 10 (2026-11-03/04, app icon only — user-approved generated image)
+
+The user approved a generated icon image as the new app icon
+(2026-11-03, "Yes use that"): cream squircle field, rounded
+house with a smooth green-to-yellow roof, pale arched door on
+the LEFT, yellow sparkle upper right, and NO dark green curved
+seam down the middle from the top left (that line was
+deliberately removed from the reference and must not reappear).
+Baseline proven green first (357 tests, 0 failures on the
+round-9 tree). Icon files only — no Kotlin, no dial, morph,
+drag, scroll, or theme code touched.
+
+### The trace: raster reference into a vector foreground
+
+The generated image is a raster reference, not a drop-in
+asset: the adaptive icon needs a vector foreground, so the
+reference was traced into
+`ic_launcher_foreground.xml` as flat facets sampled from
+the reference image itself — roof #72C75F (sampled roof
+peak), center #E8B93B (sampled golden center), door #F0D67E
+(pale gold, lightened vs the sampled mid-tone so the arch
+still reads against the golden center), bottom-left #8EE059
+(sampled bright lime), body #3FA85E (sampled bottom-right
+green), sparkle #F8C230 (sampled sparkle yellow). Band
+boundaries were measured from the reference image (warm
+band ~0.43..0.66 of image height at center, closing at the
+right tip), not guessed: the golden center is a BROAD band
+(top ~43-44, bottom ~62-64 at center), not the thin wedge
+an early draft produced. The roof is ONE flat with its lower
+edge shared with the golden band's top edge — no internal
+seam, so the removed dark curve cannot reappear. The bottom
+band's vertical lime/green seam is in the reference and is
+kept (it is not the removed curve). Geometry
+simplifications, stated: the reference's gradients become
+flats; the sparkle is a single solid yellow (the reference
+has yellow + pale quadrants); the house is normalized to
+the rounds 7/9 safe envelope (30..78 x 26..76, sparkle
+inside the 66dp safe-zone circle) rather than the
+reference render's wider framing. The monochrome variant
+is rebuilt to the same rounded geometry (silhouette +
+evenOdd door cutout + sparkle). All 10 legacy mipmap PNGs
+are regenerated from the same geometry
+(`make-legacy-icon-round10.py`, 4x supersample, LANCZOS)
+and pixel-verified (cream corners, all six house colors,
+sparkle present).
+
+### No-gradients constraint (why flats, again)
+
+Round 9 proved on-device that the Fold8 adaptive-icon path
+does not render gradient-filled vector paths (round 7's
+house vanished, leaving only the solid sparkle, while the
+shipped PNGs contained the house). The round-10 vectors
+therefore contain ZERO `<gradient>` elements (verified by
+element count after stripping comments). The background
+layer (cream field) is unchanged.
+
+### Verification notes
+
+Local Gradle build could not run in this session (the
+Android Gradle Plugin failed to resolve in this
+environment, both online and offline) — CI is the verifier
+for compilation and tests, as in round 5. What was verified
+locally before pushing: aapt2 compiles all three icon
+vectors cleanly; both vectors contain zero gradient
+elements; the regenerated PNGs carry every facet color;
+`webrtcEnabled = false`; no negative padding (vectors
+contain no padding); signing files byte-identical to
+616e3a96; round-9 dial/morph/drag/scroll code untouched.
+
 ## Feedback round 9 (2026-11-03/04, drag-down fix + Home scroll restore + flat icon)
 
 The user's 2026-11-03 20:34 video (44s, no audio, frames

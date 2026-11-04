@@ -3,27 +3,25 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Haven round 7, launcher icon ONLY: single-color variant
-         of the new gradient-segment house for themed icons
-         (Android 13+). Same geometry as the color foreground —
-         pitched roof, body, arched door on the left, sparkle at
-         the upper right, same 66dp safe-zone placement
-         (outermost ink under ~30.7dp from center 54,54) —
+    <!-- Haven round 10, launcher icon ONLY: single-color variant
+         of the round-10 approved icon (user-approved generated
+         image, 2026-11-03) for themed icons (Android 13+).
+         Same geometry as the new color foreground — rounded
+         house silhouette, pale arched door on the left,
+         sparkle upper right, same safe-zone placement —
          drawn in one color; the system tints it and supplies
          the themed field. The facets merge into one silhouette
          (there are no colors to separate them); the door is an
          evenOdd cutout so it still reads as an opening, and the
-         sparkle stays a separate filled star. The round-6
-         line-art monochrome is replaced, not recolored: themed
-         icons must match the color icon's filled construction. -->
-    <path
-        android:fillColor="#000000"
-        android:pathData="M30,52 L54,30 L78,52 Z" />
+         sparkle stays a separate filled star. The round-9
+         segmented-house monochrome is replaced, not recolored:
+         themed icons must match the color icon's rounded
+         construction. No gradients anywhere. -->
     <path
         android:fillColor="#000000"
         android:fillType="evenOdd"
-        android:pathData="M36,52 H72 V76 H36 Z M39,76 V65 Q43,57 47,65 V76 Z" />
+        android:pathData="M30,52 L42,36 Q54,26 66,36 L78,52 L78,66 Q78,76 68,76 L40,76 Q30,76 30,66 Z M31,65 L31,52 Q31,43 38,43 Q45,43 45,52 L45,65 Z" />
     <path
         android:fillColor="#000000"
-        android:pathData="M71,31 L73,35 L77,37 L73,39 L71,43 L69,39 L65,37 L69,35 Z" />
+        android:pathData="M70,27 L72,31 L76,33 L72,35 L70,39 L68,35 L64,33 L68,31 Z" />
 </vector>
