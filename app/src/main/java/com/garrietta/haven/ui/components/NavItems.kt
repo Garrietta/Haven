@@ -42,6 +42,9 @@ import com.garrietta.haven.data.parseCardYaml
  * hidden/visible index math are pinned by tests instead of by eye.
  */
 
+/** Feedback round 15, item 3: the bar holds at most two pinned custom tabs (six tabs total). */
+const val MAX_PINNED_TABS = 2
+
 /** One pill-bar / side-rail destination. */
  data class NavItem(
     val screen: Screen,
@@ -51,20 +54,61 @@ import com.garrietta.haven.data.parseCardYaml
 )
 
 /**
- * UI rewrite round (2026-11-03): the pill bar and the side rail are
- * LOCKED to exactly four destinations — Home, Scenes, Energy, Settings.
- * Custom user tabs are NOT bar destinations anymore (they used to push
- * Settings off-screen when starter tabs were seeded); they live under
- * Settings -> Browse as User Tabs / Manage Tabs and stay fully
- * functional there. A screen that is not one of the four shows the
- * bar/rail with nothing selected (same as Boards/Areas/Search).
+ * Feedback round 15, item 3 — SUPERSEDES the 2026-11-03 four-destination
+ * lock: Home and Settings are LOCKED and always present (first and
+ * last, so the user can never strand themselves on a screen with no
+ * way back to Settings), but Scenes and Energy are now hideable
+ * ([showScenes]/[showEnergy] from the Settings store, both on by
+ * default), and up to two user tabs may be PINNED to the bar
+ * ([pinnedTabs], already filtered to pinned and capped to two by
+ * the caller — this function trusts the cap and takes the first
+ * two in user-tab order, never more). Pinned tabs sit between
+ * Energy and Settings. A screen that is not in the bar shows the
+ * bar/rail with nothing selected (same as Boards/Areas/Search),
+ * except Settings submenus, which map back to Settings via
+ * [navActiveScreen] (feedback round 15, item 4).
  */
-fun pillBarItems(): List<NavItem> = listOf(
-    NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home),
-    NavItem(Screen.Scenes, "Scenes", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome),
-    NavItem(Screen.Energy, "Energy", Icons.Filled.Bolt, Icons.Outlined.Bolt),
-    NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
-)
+fun pillBarItems(
+    showScenes: Boolean = true,
+    showEnergy: Boolean = true,
+    pinnedTabs: List<UserTab> = emptyList(),
+): List<NavItem> {
+    val items = mutableListOf(
+        NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home),
+    )
+    if (showScenes) items += NavItem(Screen.Scenes, "Scenes", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
+    if (showEnergy) items += NavItem(Screen.Energy, "Energy", Icons.Filled.Bolt, Icons.Outlined.Bolt)
+    for (tab in pinnedTabs.take(2)) {
+        val (icon, outlined) = tabIcons(tab)
+        items += NavItem(Screen.UserTab(tab.id), tab.title, icon, outlined)
+    }
+    items += NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
+    return items
+}
+
+/**
+ * Feedback round 15, item 4: the rail/bar active screen for a
+ * destination. Settings-owned submenus — the editors and builders
+ * reached from Settings — map back to Settings, so the Settings
+ * rail icon keeps its active highlight while the user is inside
+ * any Settings submenu (the 2026-11-04 video showed it dropping
+ * off). Browse destinations (Dashboards, Areas, Search, UserTabs,
+ * DashboardEdit, AreaDetail, CameraClips) deliberately do NOT map:
+ * they keep the existing nothing-selected rule, so a Browse page
+ * never reads as Settings. Every other screen maps to itself.
+ */
+fun navActiveScreen(current: Screen): Screen = when (current) {
+    Screen.HomeEditor,
+    Screen.RoomManager,
+    Screen.TabManager,
+    Screen.AutomationBuilder,
+    Screen.SceneBuilder,
+    Screen.ScriptBuilder,
+    Screen.HelperBuilder,
+    Screen.UpdatesPanel,
+    -> Screen.Settings
+    else -> current
+}
 
 /**
  * Follow-up B (2026-11-03): Koda's directional tab-slide rule,

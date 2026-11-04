@@ -239,6 +239,11 @@ data class CardCustomSnapshot(
     val titles: Map<String, String>,
     val iconKeys: Map<String, String>,
     val tilePresets: Map<String, String>,
+    // Feedback round 15, item 5: domain defaults resolve after
+    // per-entity presets (see tilePresetFor); a domain color
+    // drives badge/icon tints as dark versions of itself through
+    // the same presetBadgeColors derivation as a per-entity color.
+    val domainTilePresets: Map<String, String> = emptyMap(),
 )
 
 @Composable
@@ -247,6 +252,6 @@ fun rememberCardCustom(vm: HavenViewModel): CardCustomSnapshot {
     val version = vm.cardCustomVersion
     val store = vm.settingsStore
     return remember(version) {
-        CardCustomSnapshot(store.customTitles(), store.customIconKeys(), store.customTilePresets())
+        CardCustomSnapshot(store.customTitles(), store.customIconKeys(), store.customTilePresets(), store.domainTilePresets())
     }
 }

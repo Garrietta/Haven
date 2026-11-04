@@ -79,7 +79,7 @@ class DomainCardColorsTest {
         assertEquals(Color(0xFFB8F397), onDark.badgeBg)
         // Off is the inactive row, not the light row.
         val off = domainCardColors(entity("light.living_room", "off"), false)!!
-        assertEquals(Color(0xFFEFF1E8), off.container)
+        assertEquals(Color(0xFFE6EBD3), off.container)
         assertEquals(Color(0xFF52564E), off.badgeBg)
         assertEquals(Color.White, off.badgeGlyph)
         val offDark = domainCardColors(entity("light.living_room", "off"), true)!!
@@ -92,10 +92,10 @@ class DomainCardColorsTest {
 
     @Test
     fun climateLockMediaPowerFamiliesMatchDirectiveTable() {
-        assertEquals(Color(0xFFFFDBD0), domainCardColors(entity("climate.greenhouse", "heat"), false)!!.container)
+        assertEquals(Color(0xFFFFD1B9), domainCardColors(entity("climate.greenhouse", "heat"), false)!!.container)
         assertEquals(Color(0xFF532215), domainCardColors(entity("climate.greenhouse", "heat"), true)!!.container)
-        assertEquals(Color(0xFFDCE1FF), domainCardColors(entity("lock.front_door", "locked"), false)!!.container)
-        assertEquals(Color(0xFFEFE0FF), domainCardColors(entity("media_player.sonos", "playing"), false)!!.container)
+        assertEquals(Color(0xFFCCD7FF), domainCardColors(entity("lock.front_door", "locked"), false)!!.container)
+        assertEquals(Color(0xFFEFCEFF), domainCardColors(entity("media_player.sonos", "playing"), false)!!.container)
         assertEquals(Color(0xFFFFE082), domainCardColors(entity("switch.workbench", "on", mapOf("current_power_w" to 320.0)), false)!!.container)
     }
 
@@ -110,7 +110,7 @@ class DomainCardColorsTest {
     @Test
     fun unavailableIsInactiveGreyInBothThemes() {
         val light = domainCardColors(entity("light.a", "unavailable"), false)!!
-        assertEquals(Color(0xFFEFF1E8), light.container)
+        assertEquals(Color(0xFFE6EBD3), light.container)
         val dark = domainCardColors(entity("climate.a", "unavailable"), true)!!
         assertEquals(Color(0xFF1C201B), dark.container)
     }
@@ -129,27 +129,27 @@ class DomainCardColorsTest {
     fun stateRowsFollowTheMatrix() {
         // Cooling and heat_cool differ from heating; unlocked/open
         // differ from locked/closed; armed differs from disarmed.
-        assertEquals(Color(0xFFD4E3FF), domainCardColors(entity("climate.a", "cool", mapOf("hvac_action" to "cooling")), false)!!.container)
+        assertEquals(Color(0xFFBDDEFF), domainCardColors(entity("climate.a", "cool", mapOf("hvac_action" to "cooling")), false)!!.container)
         assertEquals(Color(0xFF1A304E), domainCardColors(entity("climate.a", "cool", mapOf("hvac_action" to "cooling")), true)!!.container)
         assertEquals(Color(0xFF3E2723), domainCardColors(entity("climate.a", "heat_cool", mapOf("hvac_action" to "idle")), true)!!.container)
-        assertEquals(Color(0xFFFFDAD6), domainCardColors(entity("lock.a", "unlocked"), false)!!.container)
+        assertEquals(Color(0xFFFFCDC4), domainCardColors(entity("lock.a", "unlocked"), false)!!.container)
         assertEquals(Color(0xFF5C1916), domainCardColors(entity("lock.a", "unlocked"), true)!!.container)
         assertEquals(Color(0xFF222C61), domainCardColors(entity("cover.a", "closed"), true)!!.container)
         assertEquals(Color(0xFF532215), domainCardColors(entity("alarm_control_panel.a", "armed_away"), true)!!.container)
         assertEquals(Color(0xFF2B4E14), domainCardColors(entity("vacuum.a", "cleaning"), true)!!.container)
         assertEquals(Color(0xFF1F3D0C), domainCardColors(entity("automation.greenhouse_brain", "on"), true)!!.container)
-        assertEquals(Color(0xFFD4E3FF), domainCardColors(entity("weather.a", "sunny"), false)!!.container)
+        assertEquals(Color(0xFFBDDEFF), domainCardColors(entity("weather.a", "sunny"), false)!!.container)
         // Active dark glyphs are tonal ink, not white.
         assertEquals(Color(0xFF111D52), domainCardColors(entity("lock.a", "unlocked"), true)!!.badgeGlyph)
         assertEquals(Color(0xFF0A2005), domainCardColors(entity("vacuum.a", "cleaning"), true)!!.badgeGlyph)
         // Feedback round 4, item 3 (SUPERSEDES the rewrite's white
         // rule): active light glyphs are the pastel container.
-        assertEquals(Color(0xFFFFDAD6), domainCardColors(entity("lock.a", "unlocked"), false)!!.badgeGlyph)
+        assertEquals(Color(0xFFFFCDC4), domainCardColors(entity("lock.a", "unlocked"), false)!!.badgeGlyph)
         assertEquals(Color(0xFFC8F5A6), domainCardColors(entity("light.a", "on"), false)!!.badgeGlyph)
         // Climate keeps its climate rows even for greenhouse names.
-        assertEquals(Color(0xFFFFDBD0), domainCardColors(entity("climate.greenhouse", "heat"), false)!!.container)
+        assertEquals(Color(0xFFFFD1B9), domainCardColors(entity("climate.greenhouse", "heat"), false)!!.container)
         // Idle climate keeps the Heating row (previous CLIMATE family).
-        assertEquals(Color(0xFFFFDBD0), domainCardColors(entity("climate.a", "heat", mapOf("hvac_action" to "idle")), false)!!.container)
+        assertEquals(Color(0xFFFFD1B9), domainCardColors(entity("climate.a", "heat", mapOf("hvac_action" to "idle")), false)!!.container)
     }
 
     // Feedback round 4, item 3: in the light theme, every ACTIVE
@@ -208,7 +208,7 @@ class DomainCardColorsTest {
     fun unmappedDomainsFallThroughToExistingPipeline() {
         // Docked vacuum is Inactive (off) per the matrix; binary
         // sensors have no matrix row and keep the old pipeline.
-        assertEquals(Color(0xFFEFF1E8), domainCardColors(entity("vacuum.t2292", "docked"), false)!!.container)
+        assertEquals(Color(0xFFE6EBD3), domainCardColors(entity("vacuum.t2292", "docked"), false)!!.container)
         assertNull(domainCardColors(entity("binary_sensor.door", "off", mapOf("device_class" to "door")), false))
     }
 }

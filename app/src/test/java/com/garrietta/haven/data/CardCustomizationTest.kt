@@ -26,10 +26,28 @@ class CardCustomizationTest {
     @Test
     fun tilePresetResolvesBothThemesAndUnknownReadsAsDefault() {
         val preset = tilePresetFor(mapOf("light.lamp" to "media"), "light.lamp")
-        assertEquals(Color(0xFFEFE0FF), tilePresetColor(preset, false))
+        assertEquals(Color(0xFFEFCEFF), tilePresetColor(preset, false))
         assertEquals(Color(0xFF3B2554), tilePresetColor(preset, true))
         assertNull(tilePresetFor(mapOf("light.lamp" to "nope"), "light.lamp"))
         assertNull(tilePresetColor(null, false))
+    }
+
+    @Test
+    fun tilePresetDomainDefaultAppliesButPerEntityWins() {
+        // Feedback round 15, item 5: a domain default covers every
+        // entity of that domain (a socket-named lamp is still a
+        // light); a per-entity preset still wins over it; an
+        // unknown domain or an unknown key reads as default.
+        val domainPresets = mapOf("light" to "amber")
+        val lamp = tilePresetFor(emptyMap(), "light.lamp_socket_1", domainPresets, "light")
+        assertEquals(Color(0xFFFFE082), tilePresetColor(lamp, false))
+        val overridden = tilePresetFor(
+            mapOf("light.lamp_socket_1" to "media"), "light.lamp_socket_1", domainPresets, "light",
+        )
+        assertEquals(Color(0xFFEFCEFF), tilePresetColor(overridden, false))
+        assertNull(tilePresetFor(emptyMap(), "switch.x", domainPresets, "switch"))
+        assertNull(tilePresetFor(emptyMap(), "light.lamp", domainPresets, null))
+        assertNull(tilePresetFor(emptyMap(), "light.lamp", mapOf("light" to "nope"), "light"))
     }
 
     @Test

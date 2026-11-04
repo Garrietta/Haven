@@ -28,6 +28,7 @@ import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.data.DEFAULT_HIDDEN_HOME_SECTIONS
 import com.garrietta.haven.data.HOME_SECTION_ORDER_DEFAULT
 import com.garrietta.haven.data.TokenStore
+import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.navStyleFromKey
 import com.garrietta.haven.data.isNetworkAvailable
@@ -132,6 +133,18 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openShapePicker(entityId: String?, forCard: Boolean) { shapePickerTarget = ShapePickerTarget(entityId, forCard) }
     fun closeShapePicker() { shapePickerTarget = null }
+
+    /**
+     * Feedback round 15, item 5: the Domain defaults dialog
+     * (Settings -> Shapes) — one dialog for all three per-domain
+     * defaults, so a domain's badge shape, card shape, and tile
+     * color are set in one place instead of three pickers.
+     */
+    var domainDefaultsOpen by mutableStateOf(false)
+        private set
+
+    fun openDomainDefaults() { domainDefaultsOpen = true }
+    fun closeDomainDefaults() { domainDefaultsOpen = false }
 
     /**
      * Customization round, item 2: bumped whenever Card settings
@@ -714,6 +727,38 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Feedback round 15, item 3: pins the tab onto the bar/rail
+     * (between Energy and Settings). At most [MAX_PINNED_TABS]
+     * tabs may be pinned; pinning past the cap is ignored (the UI
+     * disables the Pin action at the cap, this is the backstop).
+     * Unpinning always succeeds. Pinned and hidden are independent:
+     * a pinned tab shows on the bar even while hidden.
+     */
+    fun setTabPinned(tabId: String, pinned: Boolean) {
+        if (pinned && userTabs.count { it.pinned } >= MAX_PINNED_TABS &&
+            userTabs.firstOrNull { it.id == tabId }?.pinned != true
+        ) return
+        mutateTab(tabId) { it.copy(pinned = pinned) }
+    }
+
+    /** Feedback round 15, item 3: Scenes/Energy bar visibility, persisted like badgeNav. */
+    private var navShowScenesState by mutableStateOf(settingsStore.navShowScenes)
+    var navShowScenes: Boolean
+        get() = navShowScenesState
+        set(value) {
+            navShowScenesState = value
+            settingsStore.navShowScenes = value
+        }
+
+    private var navShowEnergyState by mutableStateOf(settingsStore.navShowEnergy)
+    var navShowEnergy: Boolean
+        get() = navShowEnergyState
+        set(value) {
+            navShowEnergyState = value
+            settingsStore.navShowEnergy = value
+        }
+
+    /**
      * Folded pill style, owned here so TabManager writes recompose the
      * chrome. The setter persists too (a separate setNavStyle function
      * would clash with the property setter on the JVM), so callers
@@ -729,12 +774,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Resets navigation preferences to defaults WITHOUT deleting tabs:
-     * floating style, automatic icons, all tabs shown. Tab deletion stays
-     * an explicit per-tab action — a reset must never destroy tabs.
+     * floating style, automatic icons, all tabs shown, Scenes and
+     * Energy back on the bar, all pins cleared (feedback round 15,
+     * item 3: the reset is the default-bar restore). Tab deletion
+     * stays an explicit per-tab action — a reset must never
+     * destroy tabs.
      */
     fun resetNavigation() {
         navStyle = NavStyle.FLOATING
-        userTabs = userTabs.map { it.copy(icon = null, hidden = false) }
+        navShowScenes = true
+        navShowEnergy = true
+        userTabs = userTabs.map { it.copy(icon = null, hidden = false, pinned = false) }
         tabsStore.saveTabs(userTabs)
     }
 

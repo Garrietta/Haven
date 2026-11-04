@@ -115,6 +115,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Thermostat
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
 import com.garrietta.haven.data.updatesSummary
 import com.garrietta.haven.ui.components.KodaMenuDivider
@@ -927,7 +928,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
     // Feedback round 2, item 1: the preset is an ON-state color —
     // a preset media card whose player is off/unavailable renders
     // the matrix INACTIVE gray, never the custom on-color.
-    val mediaPreset = tilePresetFor(mediaCustom.tilePresets, entity.entityId)
+    val mediaPreset = tilePresetFor(mediaCustom.tilePresets, entity.entityId, mediaCustom.domainTilePresets, entity.domain)
     val mediaPresetActive = mediaPreset != null && presetAppliesForState(display.domain, display.state)
     val container = (if (mediaPresetActive) tilePresetColor(mediaPreset, isDark) else null)
         ?: (if (mediaPreset != null) inactiveCardColors(isDark).container else null)
@@ -970,7 +971,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
     )
     // Feedback round 11, item 2: the outline is a named value so
     // the morph landing can report this exact shape.
-    val mediaCardOutline = LocalShapePrefs.current.cardShape(entity.entityId)
+    val mediaCardOutline = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain)
         ?: homeCardShapeByIndex(gridIndex)
     Surface(
         shape = mediaCardOutline,
@@ -994,7 +995,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
                 Box(
                     Modifier.size(48.dp).background(
                         badgeBg,
-                        LocalShapePrefs.current.badgeShape(entity.entityId)
+                        LocalShapePrefs.current.badgeShapeFor(entity.entityId, entity.domain)
                             ?: polygonShape(shapeForDomain(entity.domain)),
                     )
                         .reportHeroBounds(entity.entityId)
@@ -1190,7 +1191,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // whose entity is off renders the matrix INACTIVE gray, never
     // the custom on-color. (The display snapshot's state, so a
     // morph-open card keeps the color it opened with.)
-    val roomPreset = tilePresetFor(roomCustom.tilePresets, entity.entityId)
+    val roomPreset = tilePresetFor(roomCustom.tilePresets, entity.entityId, roomCustom.domainTilePresets, entity.domain)
     val presetActive = roomPreset != null && presetAppliesForState(display.domain, display.state)
     val container = (if (presetActive) tilePresetColor(roomPreset, isDark) else null)
         ?: (if (roomPreset != null) inactiveCardColors(isDark).container else null)
@@ -1264,7 +1265,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // Bottom padding alone cannot move top-anchored content — the
     // spacer reduction is the mechanism; the padding growth keeps
     // the total height (and the Surface's internal layout) intact.
-    val cardOutline = LocalShapePrefs.current.cardShape(entity.entityId)
+    val cardOutline = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain)
         ?: homeCardShapeByIndex(gridIndex)
     val isPolygonCard = cardOutline !is RoundedCornerShape
     var confirmUnlock by remember { mutableStateOf(false) }
@@ -1346,7 +1347,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                         // Tile badge shape (2026-10-30 picker): a
                         // per-entity override beats the global
                         // default; without either, the domain shape.
-                        LocalShapePrefs.current.badgeShape(entity.entityId)
+                        LocalShapePrefs.current.badgeShapeFor(entity.entityId, entity.domain)
                             ?: polygonShape(shapeForDomain(entity.domain)),
                     )
                         .graphicsLayer(scaleX = badgeScale, scaleY = badgeScale)
@@ -1849,6 +1850,21 @@ fun SettingsScreen(
                     onClick = { vm.openShapePicker(null, true) },
                     flat = true,
                 )
+                KodaMenuDivider()
+                // Feedback round 15, item 5: per-domain defaults —
+                // badge shape, card shape, and tile color for one
+                // entity type (e.g. light), applying to every
+                // entity of that domain unless it has its own
+                // Card settings. Per-entity settings still win.
+                KodaMenuRow(
+                    badgeKey = "shapes-domain",
+                    badgeKind = ExpressiveKind.SUNNY,
+                    icon = Icons.Filled.Tune,
+                    title = "Domain defaults",
+                    subtitle = "Default shapes and colors by entity type",
+                    onClick = { vm.openDomainDefaults() },
+                    flat = true,
+                )
             }
             Spacer(Modifier.height(16.dp))
             // Round 6: thermostat display-range override. The dial
@@ -2043,7 +2059,7 @@ fun SettingsScreen(
                     badgeKind = ExpressiveKind.BURST,
                     icon = Icons.Filled.List,
                     title = "Manage tabs",
-                    subtitle = "Create, rename, reorder, hide, and delete your custom tabs. Home, Scenes, Energy, and Settings always stay on the bar.",
+                    subtitle = "Create, rename, reorder, hide, and delete your custom tabs. Home and Settings always stay on the bar; Scenes and Energy can be hidden, and up to two custom tabs can be pinned to it.",
                     onClick = { navigate(Screen.TabManager) },
                     flat = true,
                 )

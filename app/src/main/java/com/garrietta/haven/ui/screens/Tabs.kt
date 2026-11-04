@@ -36,10 +36,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.garrietta.haven.ui.controls.DialogActionButtons
+import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
@@ -198,10 +200,12 @@ private val TAB_CARD_TYPES = listOf(
 @Composable
 /**
  * UI rewrite round: the custom-tabs browse list (Settings -> Browse ->
- * User Tabs). The bar shows only Home/Scenes/Energy/Settings, so user
- * tabs live here: every VISIBLE tab as a row (title + card count),
- * tap opens the tab. Hidden tabs stay in Manage Tabs with a Show
- * button; the empty state points at Manage Tabs to create one.
+ * User Tabs). The bar shows Home, Settings, and (unless hidden)
+ * Scenes/Energy, plus up to two pinned custom tabs (feedback round
+ * 15, item 3); every VISIBLE tab also lives here as a row (title +
+ * card count), tap opens the tab. Hidden tabs stay in Manage Tabs
+ * with a Show button; the empty state points at Manage Tabs to
+ * create one.
  */
 fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val visibleTabs = vm.userTabs.filter { !it.hidden }
@@ -272,6 +276,27 @@ fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
             // hidden or removed, by construction in pillBarItems.
             Text("Navigation", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
+            // Feedback round 15, item 3: Scenes and Energy are
+            // hideable from the bar/rail; Home and Settings are
+            // locked and have no switch. A hidden built-in tab
+            // stays reachable from Settings -> Browse.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Show Scenes on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Switch(checked = vm.navShowScenes, onCheckedChange = { vm.navShowScenes = it })
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Show Energy on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Switch(checked = vm.navShowEnergy, onCheckedChange = { vm.navShowEnergy = it })
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Up to two custom tabs can be pinned to the bar (Pin below each tab). Pinned tabs sit " +
+                    "between Energy and Settings; Home and Settings always stay on the bar.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Pill style", fontSize = 14.sp, modifier = Modifier.weight(1f))
                 var styleExpanded by remember { mutableStateOf(false) }
@@ -297,7 +322,8 @@ fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Reset navigation restores the floating pill, automatic icons, and shows all tabs. " +
+                    "Reset navigation restores the floating pill, automatic icons, shows all tabs, " +
+                        "puts Scenes and Energy back on the bar, and clears all pins. " +
                         "Your tabs are never deleted by a reset.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -420,6 +446,26 @@ private fun TabEditorCard(
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = { vm.setTabHidden(tab.id, !tab.hidden) }) {
                     Text(if (tab.hidden) "Show" else "Hide")
+                }
+                // Feedback round 15, item 3: pin the tab onto the
+                // bar (at most two). The button disables at the
+                // cap for unpinned tabs; the ViewModel setter is
+                // the backstop for the same cap.
+                Spacer(Modifier.width(8.dp))
+                val pinnedCount = vm.userTabs.count { it.pinned }
+                OutlinedButton(
+                    enabled = tab.pinned || pinnedCount < MAX_PINNED_TABS,
+                    onClick = { vm.setTabPinned(tab.id, !tab.pinned) },
+                ) {
+                    Text(if (tab.pinned) "Unpin" else "Pin")
+                }
+                if (tab.pinned) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Pinned to bar",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 if (tab.hidden) {
                     Spacer(Modifier.width(8.dp))

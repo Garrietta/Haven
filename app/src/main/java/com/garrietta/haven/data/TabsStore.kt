@@ -13,6 +13,12 @@ import org.json.JSONObject
  * tab from the pill bar while keeping it listed in TabManager, so it can
  * always be shown again. Both fields are migration-safe: older JSON
  * without them loads as icon=null, hidden=false.
+ * Feedback round 15, item 3: [pinned] places the tab ON the bar/rail
+ * (between Energy and Settings) — at most two tabs may be pinned, a
+ * cap enforced by the ViewModel setter, not by this store. Pinned
+ * and hidden are independent: a pinned tab shows on the bar even
+ * while hidden from the Browse list's bar section. Older JSON
+ * without it loads as pinned=false.
  */
 data class UserTab(
     val id: String,
@@ -20,6 +26,7 @@ data class UserTab(
     val cards: List<String>,
     val icon: String? = null,
     val hidden: Boolean = false,
+    val pinned: Boolean = false,
 )
 
 /**
@@ -63,6 +70,7 @@ class TabsStore(context: Context) {
                         cards,
                         icon = obj.optString("icon").ifEmpty { null },
                         hidden = obj.optBoolean("hidden"),
+                        pinned = obj.optBoolean("pinned"),
                     )
                 )
             }
@@ -82,6 +90,7 @@ class TabsStore(context: Context) {
                 .put("title", tab.title)
                 .put("cards", cardsArr)
                 .put("hidden", tab.hidden)
+                .put("pinned", tab.pinned)
             // Icon keys are written only when set, so older readers
             // (and older JSON) keep seeing the auto-derived icon.
             if (tab.icon != null) obj.put("icon", tab.icon)

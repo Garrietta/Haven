@@ -31,19 +31,85 @@ class NavItemsTest {
         cards: List<String> = emptyList(),
         icon: String? = null,
         hidden: Boolean = false,
-    ) = UserTab(id, title, cards, icon, hidden)
+        pinned: Boolean = false,
+    ) = UserTab(id, title, cards, icon, hidden, pinned)
 
     @Test
-    fun barLockedToExactlyFourDestinations() {
-        // UI rewrite round: the bar/rail show ONLY Home, Scenes,
-        // Energy, Settings — user tabs live under Settings -> Browse
-        // and can never push Settings off-screen again.
+    fun barDefaultsToFourDestinations() {
+        // Feedback round 15, item 3: the DEFAULT bar is still Home,
+        // Scenes, Energy, Settings — Home first, Settings last and
+        // always present, so the user can never strand themselves
+        // on a screen with no way back to Settings. Scenes/Energy
+        // hideability and pinned tabs are covered below.
         val items = pillBarItems()
         assertEquals(listOf("Home", "Scenes", "Energy", "Settings"), items.map { it.label })
         assertEquals(Screen.Today, items[0].screen)
         assertEquals(Screen.Scenes, items[1].screen)
         assertEquals(Screen.Energy, items[2].screen)
         assertEquals(Screen.Settings, items[3].screen)
+    }
+
+    @Test
+    fun hideableBuiltInsDropButHomeAndSettingsNeverDo() {
+        assertEquals(
+            listOf("Home", "Energy", "Settings"),
+            pillBarItems(showScenes = false).map { it.label },
+        )
+        assertEquals(
+            listOf("Home", "Scenes", "Settings"),
+            pillBarItems(showEnergy = false).map { it.label },
+        )
+        assertEquals(
+            listOf("Home", "Settings"),
+            pillBarItems(showScenes = false, showEnergy = false).map { it.label },
+        )
+    }
+
+    @Test
+    fun pinnedTabsSitBetweenEnergyAndSettingsCappedAtTwo() {
+        val a = tab("a", "Cameras", pinned = true)
+        val b = tab("b", "Lights", pinned = true)
+        val c = tab("c", "Garage", pinned = true)
+        // Two pins: Home, Scenes, Energy, pins in user-tab order, Settings.
+        val two = pillBarItems(pinnedTabs = listOf(a, b))
+        assertEquals(listOf("Home", "Scenes", "Energy", "Cameras", "Lights", "Settings"), two.map { it.label })
+        assertEquals(Screen.UserTab("a"), two[3].screen)
+        assertEquals(Screen.UserTab("b"), two[4].screen)
+        // A third pin is dropped by the cap (the ViewModel setter
+        // backstops the same cap; this function trusts the caller
+        // and takes the first two).
+        val three = pillBarItems(pinnedTabs = listOf(a, b, c))
+        assertEquals(listOf("Home", "Scenes", "Energy", "Cameras", "Lights", "Settings"), three.map { it.label })
+        // Pins combine with hidden built-ins: six tabs max means the
+        // cap, not the built-ins, bounds the bar.
+        val hidden = pillBarItems(showScenes = false, showEnergy = false, pinnedTabs = listOf(a, b))
+        assertEquals(listOf("Home", "Cameras", "Lights", "Settings"), hidden.map { it.label })
+    }
+
+    @Test
+    fun settingsSubmenusMapToSettingsForRailHighlight() {
+        // Feedback round 15, item 4: every Settings submenu keeps
+        // the Settings rail highlight.
+        for (screen in listOf(
+            Screen.HomeEditor, Screen.RoomManager, Screen.TabManager,
+            Screen.AutomationBuilder, Screen.SceneBuilder, Screen.ScriptBuilder,
+            Screen.HelperBuilder, Screen.UpdatesPanel,
+        )) {
+            assertEquals(Screen.Settings, navActiveScreen(screen))
+        }
+        // Browse destinations keep the nothing-selected rule.
+        assertEquals(Screen.Dashboards, navActiveScreen(Screen.Dashboards))
+        assertEquals(Screen.Areas, navActiveScreen(Screen.Areas))
+        assertEquals(Screen.Search, navActiveScreen(Screen.Search))
+        assertEquals(Screen.UserTabs, navActiveScreen(Screen.UserTabs))
+        assertEquals(Screen.DashboardEdit, navActiveScreen(Screen.DashboardEdit))
+        assertEquals(Screen.AreaDetail("area.bedroom"), navActiveScreen(Screen.AreaDetail("area.bedroom")))
+        // Ordinary destinations map to themselves.
+        assertEquals(Screen.Today, navActiveScreen(Screen.Today))
+        assertEquals(Screen.Scenes, navActiveScreen(Screen.Scenes))
+        assertEquals(Screen.Energy, navActiveScreen(Screen.Energy))
+        assertEquals(Screen.Settings, navActiveScreen(Screen.Settings))
+        assertEquals(Screen.UserTab("a"), navActiveScreen(Screen.UserTab("a")))
     }
 
     @Test

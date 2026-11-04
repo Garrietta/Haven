@@ -897,6 +897,49 @@ fun popupSideAnchor(sourceCenterX: Float?, overlayLeft: Float, overlayWidth: Flo
     }
 }
 
+/**
+ * Feedback round 15, item 2: the unfolded popup's morph-from-tile
+ * transform, pure so unit tests pin it. SUPERSEDES the old rule
+ * that unfolded popups "enter from the pressed tile's direction"
+ * ([centeredPopupEnter]'s side slide + fade): the surface now
+ * interpolates its own rect from the source tile's rect to its
+ * placed popup rect — the same container transform the folded
+ * morph and Koda's player use — so the panel grows out of the
+ * tapped tile and shrinks back onto it on exit. At progress 0 the
+ * rect IS the tile rect; at progress 1 it IS the placed rect.
+ * Progress is clamped first (spring overshoot must never push the
+ * surface past the tile or past full size, and never divide by a
+ * degenerate target). A null source keeps the old
+ * [centeredPopupEnter] fallback at the call site; this helper is
+ * only called with a real tile rect.
+ */
+data class TileMorph(
+    val translationX: Float,
+    val translationY: Float,
+    val scaleX: Float,
+    val scaleY: Float,
+)
+
+fun tileMorphTransform(source: Rect, target: Rect, progress: Float): TileMorph {
+    val p = progress.coerceIn(0f, 1f)
+    val rect = lerpRect(source, target, p)
+    return TileMorph(
+        translationX = rect.left - target.left,
+        translationY = rect.top - target.top,
+        scaleX = if (target.width > 0f) rect.width / target.width else 1f,
+        scaleY = if (target.height > 0f) rect.height / target.height else 1f,
+    )
+}
+
+/**
+ * Feedback round, item 3 (SUPERSEDED for sourced popups by round
+ * 15's [tileMorphTransform], KEPT as the sourceless fallback): the
+ * unfolded centered popup's enter transform. The popup enters FROM
+ * the pressed tile's direction: at progress 0 it sits [distancePx]
+ * along the unit vector from the popup center toward the source
+ * tile's center, at 0.92 scale and 0 alpha; at progress 1 it is
+ * centered, full scale, opaque.
+ */
 fun centeredPopupEnter(
     progress: Float,
     sourceCenter: Offset?,

@@ -45,6 +45,22 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("badge_room", true)
         set(value) = prefs.edit().putBoolean("badge_room", value).apply()
 
+    /**
+     * Feedback round 15, item 3: Scenes and Energy are hideable
+     * from the bar/rail (Home and Settings are locked and have no
+     * flag). Both on by default, so existing installs see the bar
+     * they already know; hiding one drops it from pillBarItems and
+     * from the rail, while its screen stays reachable from
+     * Settings → Browse.
+     */
+    var navShowScenes: Boolean
+        get() = prefs.getBoolean("nav_show_scenes", true)
+        set(value) = prefs.edit().putBoolean("nav_show_scenes", value).apply()
+
+    var navShowEnergy: Boolean
+        get() = prefs.getBoolean("nav_show_energy", true)
+        set(value) = prefs.edit().putBoolean("nav_show_energy", value).apply()
+
     /** When on, spring animations are replaced with instant state changes. */
     var reduceMotion: Boolean
         get() = prefs.getBoolean("reduce_motion", false)
@@ -354,4 +370,27 @@ class SettingsStore(context: Context) {
     /** Records or clears one per-entity card-outline shape override; null clears back to the default. */
     fun setCardShapeOverride(entityId: String, shapeKey: String?) =
         setShapeOverride("shape_card_overrides_json", cardShapeOverrides(), entityId, shapeKey)
+
+    // ---- Domain defaults (feedback round 15, item 5) ----
+    // What "Domain default" means, per domain (e.g. "light" — a
+    // socket-named lamp is still a light, so defaults key off
+    // domain, never entity name). Resolution everywhere is:
+    // per-entity override > domain default > global > built-in.
+    // Same JSON-object pattern as the shape overrides: corrupt
+    // data loads as empty, never a crash; null clears the default.
+
+    /** Per-domain default badge shape keys (domain -> shape key). */
+    fun domainBadgeShapes(): Map<String, String> = shapeOverrides("shape_domain_badge_json")
+    fun setDomainBadgeShape(domain: String, shapeKey: String?) =
+        setShapeOverride("shape_domain_badge_json", domainBadgeShapes(), domain, shapeKey)
+
+    /** Per-domain default card-outline shape keys (domain -> shape key). */
+    fun domainCardShapes(): Map<String, String> = shapeOverrides("shape_domain_card_json")
+    fun setDomainCardShape(domain: String, shapeKey: String?) =
+        setShapeOverride("shape_domain_card_json", domainCardShapes(), domain, shapeKey)
+
+    /** Per-domain default tile-color preset keys (domain -> TILE_PRESETS key). */
+    fun domainTilePresets(): Map<String, String> = stringMap("card_domain_tiles_json")
+    fun setDomainTilePreset(domain: String, presetKey: String?) =
+        setStringMap("card_domain_tiles_json", domainTilePresets(), domain, presetKey)
 }

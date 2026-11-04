@@ -766,7 +766,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     // Feedback round 5, item 4: the panel's action pills carry the vacuum's tile color
     // (ungated — see detailPageAccent; a docked vacuum's panel still shows its sage).
     val vacuumPanelCustom = rememberCardCustom(vm)
-    val vacuumPanelAccent = detailPageAccent(vacuumPanelCustom.tilePresets, vacuum, isDarkBackdrop(MaterialTheme.colorScheme.background))
+    val vacuumPanelAccent = detailPageAccent(vacuumPanelCustom.tilePresets, vacuum, isDarkBackdrop(MaterialTheme.colorScheme.background), vacuumPanelCustom.domainTilePresets)
     val vacuumPanelPillContent = if (vacuumPanelAccent != null) MaterialTheme.colorScheme.onSurface else null
     // Lidar map: the map camera's latest snapshot, cache-first like
     // the camera hero — a snapshot, never claimed as a live render.
@@ -940,10 +940,11 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     // Feedback round 5, item 4: the panel's action pill + volume slider carry the player's
     // tile color (container for the pill, badge ink for the slider, as on the sheet).
     val mediaPanelCustom = rememberCardCustom(vm)
-    val mediaPanelAccent = detailPageAccent(mediaPanelCustom.tilePresets, entity, isDarkBackdrop(MaterialTheme.colorScheme.background))
+    val mediaPanelAccent = detailPageAccent(mediaPanelCustom.tilePresets, entity, isDarkBackdrop(MaterialTheme.colorScheme.background), mediaPanelCustom.domainTilePresets)
     val mediaPanelBadge = com.garrietta.haven.data.detailBadgeOverride(
         mediaPanelCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
+        mediaPanelCustom.domainTilePresets,
     )
     val mediaPanelPillContent = if (mediaPanelAccent != null) MaterialTheme.colorScheme.onSurface else null
     Column(Modifier.padding(horizontal = 16.dp)) {

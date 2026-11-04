@@ -49,7 +49,7 @@ fun semanticVisual(state: SemanticState, isDark: Boolean): SemanticVisual = when
     SemanticState.LockUnlocked -> if (isDark) SemanticVisual(Color(0xFF5A3E00), Color(0xFFF5E0B8))
         else SemanticVisual(Color(0xFFF5E0B8), Color(0xFF5A3E00))
     SemanticState.LockFault, SemanticState.AlarmFault, SemanticState.EnergyCritical ->
-        if (isDark) SemanticVisual(Color(0xFF93000A), Color(0xFFFFDAD6))
+        if (isDark) SemanticVisual(Color(0xFF93000A), Color(0xFFFFCDC4))
         else SemanticVisual(Color(0xFFF9DEDC), Color(0xFF410E0B))
     SemanticState.OpenAlert, SemanticState.HeatingActive ->
         if (isDark) SemanticVisual(Color(0xFF7A2E22), Color(0xFFF8D7CF))
@@ -258,19 +258,19 @@ private enum class MatrixRow(
     val darkInk: Color,
 ) {
     LIGHT_ON(Color(0xFFC8F5A6), Color(0xFF2B4E14), Color(0xFF1B3708), Color(0xFFB8F397), Color(0xFF0A2005)),
-    HEATING(Color(0xFFFFDBD0), Color(0xFF532215), Color(0xFF8C1D00), Color(0xFFFFB59E), Color(0xFF111D52)),
-    COOLING(Color(0xFFD4E3FF), Color(0xFF1A304E), Color(0xFF001C3A), Color(0xFFA5C8FF), Color(0xFF111D52)),
-    HEAT_COOL(Color(0xFFFFDBD0), Color(0xFF3E2723), Color(0xFF8C1D00), Color(0xFFFFCCBC), Color(0xFF111D52)),
-    LOCKED(Color(0xFFDCE1FF), Color(0xFF222C61), Color(0xFF111D52), Color(0xFFB9C3FF), Color(0xFF111D52)),
-    UNLOCKED(Color(0xFFFFDAD6), Color(0xFF5C1916), Color(0xFF410002), Color(0xFFFFB4AB), Color(0xFF111D52)),
-    DISARMED(Color(0xFFDCE1FF), Color(0xFF222C61), Color(0xFF111D52), Color(0xFFB9C3FF), Color(0xFF111D52)),
-    ARMED(Color(0xFFFFDBD0), Color(0xFF532215), Color(0xFF8C1D00), Color(0xFFFFB59E), Color(0xFF111D52)),
-    MEDIA(Color(0xFFEFE0FF), Color(0xFF3B2554), Color(0xFF2B1246), Color(0xFFDAB9FF), Color(0xFF111D52)),
+    HEATING(Color(0xFFFFD1B9), Color(0xFF532215), Color(0xFF8C1D00), Color(0xFFFFB59E), Color(0xFF111D52)),
+    COOLING(Color(0xFFBDDEFF), Color(0xFF1A304E), Color(0xFF001C3A), Color(0xFFA5C8FF), Color(0xFF111D52)),
+    HEAT_COOL(Color(0xFFFFD1B9), Color(0xFF3E2723), Color(0xFF8C1D00), Color(0xFFFFCCBC), Color(0xFF111D52)),
+    LOCKED(Color(0xFFCCD7FF), Color(0xFF222C61), Color(0xFF111D52), Color(0xFFB9C3FF), Color(0xFF111D52)),
+    UNLOCKED(Color(0xFFFFCDC4), Color(0xFF5C1916), Color(0xFF410002), Color(0xFFFFB4AB), Color(0xFF111D52)),
+    DISARMED(Color(0xFFCCD7FF), Color(0xFF222C61), Color(0xFF111D52), Color(0xFFB9C3FF), Color(0xFF111D52)),
+    ARMED(Color(0xFFFFD1B9), Color(0xFF532215), Color(0xFF8C1D00), Color(0xFFFFB59E), Color(0xFF111D52)),
+    MEDIA(Color(0xFFEFCEFF), Color(0xFF3B2554), Color(0xFF2B1246), Color(0xFFDAB9FF), Color(0xFF111D52)),
     POWER(Color(0xFFFFE082), Color(0xFF4D3800), Color(0xFF261900), Color(0xFFFFE082), Color(0xFF111D52)),
     VACUUM_ACTIVE(Color(0xFFC8F5A6), Color(0xFF2B4E14), Color(0xFF1B3708), Color(0xFFB8F397), Color(0xFF0A2005)),
     GREENHOUSE(Color(0xFFC8F5A6), Color(0xFF1F3D0C), Color(0xFF143800), Color(0xFFA6F285), Color(0xFF0A2005)),
-    WEATHER(Color(0xFFD4E3FF), Color(0xFF1A304E), Color(0xFF001C3A), Color(0xFFA5C8FF), Color(0xFF111D52)),
-    INACTIVE(Color(0xFFEFF1E8), Color(0xFF1C201B), Color(0xFF52564E), Color(0xFF2A2F28), Color(0xFF111D52)),
+    WEATHER(Color(0xFFBDDEFF), Color(0xFF1A304E), Color(0xFF001C3A), Color(0xFFA5C8FF), Color(0xFF111D52)),
+    INACTIVE(Color(0xFFE6EBD3), Color(0xFF1C201B), Color(0xFF52564E), Color(0xFF2A2F28), Color(0xFF111D52)),
 }
 
 /** A matrix row as card colors, with the glyph rule applied. */

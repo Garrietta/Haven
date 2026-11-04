@@ -20,6 +20,41 @@ class MorphMathTest {
     }
 
     @Test
+    fun tileMorphTransform_coversSourceAtZeroAndTargetAtOne() {
+        // Feedback round 15, item 2: at p=0 the surface rect IS the
+        // tile rect (translation + scale map target back onto the
+        // tile); at p=1 it IS the placed rect (identity).
+        val atZero = tileMorphTransform(from, to, 0f)
+        assertEquals(100f, atZero.translationX, 0.001f)
+        assertEquals(-400f, atZero.translationY, 0.001f)
+        assertEquals(400f / 1080f, atZero.scaleX, 0.001f)
+        assertEquals(200f / 1200f, atZero.scaleY, 0.001f)
+        val atOne = tileMorphTransform(from, to, 1f)
+        assertEquals(0f, atOne.translationX, 0.001f)
+        assertEquals(0f, atOne.translationY, 0.001f)
+        assertEquals(1f, atOne.scaleX, 0.001f)
+        assertEquals(1f, atOne.scaleY, 0.001f)
+        // Midpoint: rect halfway between tile and target.
+        val mid = tileMorphTransform(from, to, 0.5f)
+        assertEquals(50f, mid.translationX, 0.001f)
+        assertEquals(-200f, mid.translationY, 0.001f)
+        assertEquals(740f / 1080f, mid.scaleX, 0.001f)
+        assertEquals(700f / 1200f, mid.scaleY, 0.001f)
+    }
+
+    @Test
+    fun tileMorphTransform_clampsOvershoot() {
+        // Spring overshoot past 0 or 1 must never push the surface
+        // past the tile or past full size (never negative padding
+        // territory): progress clamps to [0, 1].
+        val below = tileMorphTransform(from, to, -0.5f)
+        assertEquals(100f, below.translationX, 0.001f)
+        val above = tileMorphTransform(from, to, 1.5f)
+        assertEquals(0f, above.translationX, 0.001f)
+        assertEquals(1f, above.scaleX, 0.001f)
+    }
+
+    @Test
     fun centeredPopupEnter_comesFromTileDirection() {
         // Tile left of center → offset points left at p=0, gone at p=1.
         val left = centeredPopupEnter(0f, Offset(100f, 500f), Offset(500f, 500f), 96f)

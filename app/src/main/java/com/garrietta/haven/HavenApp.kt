@@ -7,7 +7,10 @@ import com.garrietta.haven.ui.components.PopupDismissConnection
 import com.garrietta.haven.ui.components.LocalCardShapes
 import com.garrietta.haven.ui.components.PopupSideAnchor
 import com.garrietta.haven.ui.components.centeredPopupEnter
+import com.garrietta.haven.ui.components.morphCloseContentAlpha
+import com.garrietta.haven.ui.components.morphEnterContentAlpha
 import com.garrietta.haven.ui.components.morphPopupShape
+import com.garrietta.haven.ui.components.tileMorphTransform
 import com.garrietta.haven.ui.components.dragProgressAfterDelta
 import com.garrietta.haven.ui.components.dragRangeForCenteredPopup
 import com.garrietta.haven.ui.components.dragRangeForPanelOverlay
@@ -29,6 +32,7 @@ import com.garrietta.haven.data.hasImportantAlert
 import com.garrietta.haven.ui.components.NavItem
 import com.garrietta.haven.ui.components.NavPillGeometry
 import com.garrietta.haven.ui.components.NavStyle
+import com.garrietta.haven.ui.components.navActiveScreen
 import com.garrietta.haven.ui.components.navPillGeometry
 import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.tabSlideDirection
@@ -260,6 +264,7 @@ import com.garrietta.haven.ui.screens.ScriptBuilderScreen
 import com.garrietta.haven.ui.screens.SearchScreen
 import com.garrietta.haven.ui.screens.RoomManagerScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
+import com.garrietta.haven.ui.screens.DomainDefaultsDialog
 import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.CardSettingsSheet
 import com.garrietta.haven.ui.screens.CardSettingsPencil
@@ -1201,6 +1206,11 @@ fun HavenApp(vm: HavenViewModel) {
                     vm.settingsStore.globalCardShape,
                     vm.settingsStore.badgeShapeOverrides(),
                     vm.settingsStore.cardShapeOverrides(),
+                    // Feedback round 15, item 5: domain defaults
+                    // resolve between per-entity overrides and
+                    // the globals (see ShapePrefs).
+                    vm.settingsStore.domainBadgeShapes(),
+                    vm.settingsStore.domainCardShapes(),
                 ),
                 // Round 6 source-card rule (Google Home container
                 // transform, reconciled curves — see MorphOverlay):
@@ -1288,7 +1298,11 @@ fun HavenApp(vm: HavenViewModel) {
                 // behavior (null), and dialogs never change
                 // current, so they never need the fallback.
                 if (LocalWideLayout.current) {
-                    val barItems = pillBarItems()
+                    // Feedback round 15, items 3–4: the rail shows
+                    // the user's bar (hideable Scenes/Energy, up to
+                    // two pinned tabs); Settings submenus resolve
+                    // to Settings for the active highlight below.
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }.take(2))
                     // Stage E §9: the Home dot lights only for a real
                     // important alert (unlocked lock, open door/window,
                     // triggered alarm) — never a count, never for
@@ -1296,7 +1310,11 @@ fun HavenApp(vm: HavenViewModel) {
                     // recomposes on state changes, not the whole app.
                     val chromeStates by vm.states.collectAsState()
                     val badged = if (vm.badgeNav && hasImportantAlert(chromeStates.values.toList())) setOf(Screen.Today) else emptySet()
-                    val onTabIndex = selectedNavIndex(current, barItems)
+                    // Feedback round 15, item 4: Settings submenus
+                    // resolve to Settings, so the rail highlight
+                    // persists inside them (and the lastRailTabIndex
+                    // fallback below then holds Settings too).
+                    val onTabIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     if (onTabIndex != null) lastRailTabIndex = onTabIndex
                     val railSelectedIndex = if (sheetAnim != null || detailAnim != null || popoutAnim != null) {
                         onTabIndex ?: lastRailTabIndex
@@ -1498,7 +1516,7 @@ fun HavenApp(vm: HavenViewModel) {
                         modifier = Modifier.fillMaxSize(),
                         targetState = base,
                         transitionSpec = {
-                            val barScreens = pillBarItems().map { it.screen }
+                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }.take(2)).map { it.screen }
                             when (val direction = tabSlideDirection(barScreens, initialState, targetState)) {
                                 1, -1 -> ((slideInHorizontally(initialOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).first }) + fadeIn()) togetherWith
                                     (slideOutHorizontally(targetOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).second }) + fadeOut()))
@@ -1539,8 +1557,8 @@ fun HavenApp(vm: HavenViewModel) {
             // unmount it cleanly.
             key(LocalWideLayout.current) {
                 if (!LocalWideLayout.current && isTopLevel(current)) {
-                    val barItems = pillBarItems()
-                    val selectedIndex = selectedNavIndex(current, barItems)
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }.take(2))
+                    val selectedIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     // Stage E §9: same Home dot as the rail.
                     // Collected here so only the bar recomposes on
                     // state changes, not the whole app.
@@ -1599,6 +1617,7 @@ fun HavenApp(vm: HavenViewModel) {
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissSheet() },
                         dragHandle = sheetHandle,
+                        isClosing = sheetExiting && !sheetDrag.settling,
                         onPanelPlaced = { sheetPanelBounds = it },
                         landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                     ) {
@@ -1708,6 +1727,7 @@ fun HavenApp(vm: HavenViewModel) {
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissDetail() },
                         dragHandle = detailHandle,
+                        isClosing = detailExiting && !detailDrag.settling,
                         landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
@@ -1789,6 +1809,7 @@ fun HavenApp(vm: HavenViewModel) {
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissPanelDetail() },
                         dragHandle = panelDetailHandle,
+                        isClosing = panelDetailExiting && !panelDetailDrag.settling,
                         landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
@@ -1835,6 +1856,7 @@ fun HavenApp(vm: HavenViewModel) {
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissPopout() },
                         dragHandle = popoutHandle,
+                        isClosing = popoutExiting && !popoutDrag.settling,
                         landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                     ) {
                         ThermostatPopoutContent(
@@ -1986,6 +2008,11 @@ fun HavenApp(vm: HavenViewModel) {
             // entity sheet (per-entity override).
             if (vm.shapePickerTarget != null) {
                 ShapePickerDialog(vm, vm.shapePickerTarget!!, onClose = { vm.closeShapePicker() })
+            }
+            // Feedback round 15, item 5: Domain defaults dialog,
+            // same overlay layer as the shape picker.
+            if (vm.domainDefaultsOpen) {
+                DomainDefaultsDialog(vm, onClose = { vm.closeDomainDefaults() })
             }
             // Customization round, item 2: Card settings sheet,
             // above every other overlay like the shape picker.
@@ -2144,6 +2171,7 @@ private fun EntityPopupSheetContent(
                 val sheetBadgeOverride = detailBadgeOverride(
                     sheetCustom.tilePresets, entity,
                     isDarkBackdrop(MaterialTheme.colorScheme.background),
+                    sheetCustom.domainTilePresets,
                 )
                 // Feedback round 5, item 4: the sheet's controls carry
                 // the assigned tile color itself (ungated — see
@@ -2153,6 +2181,7 @@ private fun EntityPopupSheetContent(
                 val sheetAccent = detailPageAccent(
                     sheetCustom.tilePresets, entity,
                     isDarkBackdrop(MaterialTheme.colorScheme.background),
+                    sheetCustom.domainTilePresets,
                 )
                 Row(
                     Modifier.fillMaxWidth()
@@ -2516,6 +2545,10 @@ private fun CenteredPopup(
     // Feedback round 11, item 2: the source tile's outline, for the
     // exit corner morph (see the Surface graphicsLayer below).
     landingShape: androidx.compose.ui.graphics.Shape? = null,
+    // Feedback round 15, item 2: true while a dismiss animation
+    // runs (mirrors PanelOverlay's isClosing), so the content
+    // fades out early on close instead of late.
+    isClosing: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     // Feedback round 7: the surface's placed rect in root
@@ -2590,21 +2623,52 @@ private fun CenteredPopup(
                     .graphicsLayer {
                         // Round 7 rule: progress read ONLY here.
                         // Feedback round 11, item 1: NO drag
-                        // rect-lerp — the enter transform owns
-                        // every frame, so the popup stays put
-                        // under the finger and only the release
-                        // dismisses it. Item 2: the clip lerps
-                        // from the popup's 28dp corners into the
-                        // source tile's corners (polygon tiles
-                        // keep soft 28dp — this popup scale-fades
-                        // and never lands on the tile rect).
-                        val enter = centeredPopupEnter(progress(), source?.center, popupCenter, distancePx)
-                        translationX = enter.offset.x
-                        translationY = enter.offset.y
-                        scaleX = enter.scale
-                        scaleY = enter.scale
-                        alpha = enter.alpha
-                        shape = morphPopupShape(progress(), landingShape)
+                        // rect-lerp — the release rule owns the
+                        // drag, so the popup stays put under the
+                        // finger and only the release dismisses
+                        // it. Feedback round 15, item 2: the
+                        // enter transform is a rect morph from
+                        // the source tile (tileMorphTransform),
+                        // NOT the old side slide + fade — the
+                        // surface grows out of the tapped tile
+                        // and shrinks back onto it on exit. The
+                        // target rect is analytic (anchor +
+                        // overlay geometry + this layer's own
+                        // untransformed size), never the placed
+                        // rect, so the transform cannot feed
+                        // back on itself. A sourceless popup
+                        // keeps the old fade + scale in place.
+                        // Item 2 (round 11): the clip lerps from
+                        // the popup's 28dp corners into the
+                        // source tile's corners, so the exit
+                        // lands on the tile's own outline.
+                        val p = progress()
+                        if (source != null) {
+                            val targetLeft = when (anchor) {
+                                PopupSideAnchor.START -> overlayOrigin.x + sideMarginPx
+                                PopupSideAnchor.END -> overlayOrigin.x + overlayWidthPx - sideMarginPx - size.width
+                                PopupSideAnchor.CENTER -> overlayOrigin.x + (overlayWidthPx - size.width) / 2f
+                            }
+                            val targetTop = overlayOrigin.y + (overlayHeightPx - size.height) / 2f
+                            val target = androidx.compose.ui.geometry.Rect(
+                                targetLeft, targetTop,
+                                targetLeft + size.width, targetTop + size.height,
+                            )
+                            val morph = tileMorphTransform(source, target, p)
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                            translationX = morph.translationX
+                            translationY = morph.translationY
+                            scaleX = morph.scaleX
+                            scaleY = morph.scaleY
+                        } else {
+                            val enter = centeredPopupEnter(p, null, popupCenter, distancePx)
+                            translationX = enter.offset.x
+                            translationY = enter.offset.y
+                            scaleX = enter.scale
+                            scaleY = enter.scale
+                            alpha = enter.alpha
+                        }
+                        shape = morphPopupShape(p, landingShape)
                         clip = true
                     }
                     .onGloballyPositioned { coords ->
@@ -2652,7 +2716,18 @@ private fun CenteredPopup(
                                     Modifier
                                 },
                             )
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(rememberScrollState())
+                            // Feedback round 15, item 2: the
+                            // Koda reveal rule for the morph —
+                            // content stays invisible while the
+                            // surface is still growing and fades
+                            // in late (out early on close), so no
+                            // full-size content ever appears
+                            // inside a still-small rect.
+                            .graphicsLayer {
+                                alpha = if (isClosing) morphCloseContentAlpha(progress())
+                                else morphEnterContentAlpha(progress())
+                            },
                     ) {
                         content()
                     }
@@ -2770,6 +2845,7 @@ private fun TravelingHeader(
     val travelerBadgeOverride = detailBadgeOverride(
         travelerCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
+        travelerCustom.domainTilePresets,
     )
     // Badge only (2026-11-01 polish round): the name/state text
     // used to ride beside the badge here, but the destination

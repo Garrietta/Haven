@@ -22,16 +22,23 @@ import androidx.compose.ui.graphics.Color
  */
 data class TilePreset(val key: String, val label: String, val light: Color, val dark: Color)
 
-/** Preset list: the app's own palette (sage/lime/charcoal/warm off-white) plus the domain matrix card colors. */
+/**
+ * Preset list: the app's own palette (sage/lime/charcoal/warm off-white) plus the domain matrix card colors.
+ * Feedback round 15, item 1: the six pale light values carry a little more saturation than the matrix
+ * originally shipped (heating/cooling/lock/alert/media/sage), so pale tiles read against the cream
+ * background; lime and amber were already vivid and are untouched, as are all dark values and the
+ * background itself. The matrix rows in SemanticColors.kt move with these hues so presets and
+ * defaults never diverge.
+ */
 val TILE_PRESETS: List<TilePreset> = listOf(
     TilePreset("lime", "Lime", Color(0xFFC8F5A6), Color(0xFF2B4E14)),
-    TilePreset("heating", "Heating coral", Color(0xFFFFDBD0), Color(0xFF532215)),
-    TilePreset("cooling", "Cooling blue", Color(0xFFD4E3FF), Color(0xFF1A304E)),
-    TilePreset("lock", "Lock indigo", Color(0xFFDCE1FF), Color(0xFF222C61)),
-    TilePreset("alert", "Alert red", Color(0xFFFFDAD6), Color(0xFF5C1916)),
-    TilePreset("media", "Media lavender", Color(0xFFEFE0FF), Color(0xFF3B2554)),
+    TilePreset("heating", "Heating coral", Color(0xFFFFD1B9), Color(0xFF532215)),
+    TilePreset("cooling", "Cooling blue", Color(0xFFBDDEFF), Color(0xFF1A304E)),
+    TilePreset("lock", "Lock indigo", Color(0xFFCCD7FF), Color(0xFF222C61)),
+    TilePreset("alert", "Alert red", Color(0xFFFFCDC4), Color(0xFF5C1916)),
+    TilePreset("media", "Media lavender", Color(0xFFEFCEFF), Color(0xFF3B2554)),
     TilePreset("amber", "Amber", Color(0xFFFFE082), Color(0xFF4D3800)),
-    TilePreset("sage", "Sage neutral", Color(0xFFEFF1E8), Color(0xFF1C201B)),
+    TilePreset("sage", "Sage neutral", Color(0xFFE6EBD3), Color(0xFF1C201B)),
 )
 
 /** Corner-shape option keys for card outlines (customization round, item 1). */
@@ -60,9 +67,20 @@ fun customIconKeyFor(iconKeys: Map<String, String>, entityId: String, knownKeys:
     return if (key in knownKeys) key else null
 }
 
-/** Tile preset for an entity, or null for "default" (unknown keys read as default, never crash). */
-fun tilePresetFor(presets: Map<String, String>, entityId: String): TilePreset? {
-    val key = presets[entityId] ?: return null
+/**
+ * Tile preset for an entity, or null for "default" (unknown keys read as default, never crash).
+ * Feedback round 15, item 5: resolution is per-entity first, then the DOMAIN default
+ * ([domainPresets] keyed by domain, e.g. "light" covers light.lamp_socket_1 — a socket-named
+ * lamp is still a light), then default. Callers that do not know the domain pass nothing and
+ * keep the old per-entity-only behavior.
+ */
+fun tilePresetFor(
+    presets: Map<String, String>,
+    entityId: String,
+    domainPresets: Map<String, String> = emptyMap(),
+    domain: String? = null,
+): TilePreset? {
+    val key = presets[entityId] ?: domain?.let { domainPresets[it] } ?: return null
     return TILE_PRESETS.firstOrNull { it.key == key }
 }
 
@@ -129,8 +147,9 @@ fun detailBadgeOverride(
     presets: Map<String, String>,
     entity: HaEntity,
     isDark: Boolean,
+    domainPresets: Map<String, String> = emptyMap(),
 ): Pair<Color, Color>? {
-    val preset = tilePresetFor(presets, entity.entityId) ?: return null
+    val preset = tilePresetFor(presets, entity.entityId, domainPresets, entity.domain) ?: return null
     if (!presetAppliesForState(entity.domain, entity.state)) return null
     return presetBadgeColors(preset, isDark)
 }
@@ -164,8 +183,9 @@ fun detailPageAccent(
     presets: Map<String, String>,
     entity: HaEntity,
     isDark: Boolean,
+    domainPresets: Map<String, String> = emptyMap(),
 ): Color? {
-    val preset = tilePresetFor(presets, entity.entityId) ?: return null
+    val preset = tilePresetFor(presets, entity.entityId, domainPresets, entity.domain) ?: return null
     return tilePresetColor(preset, isDark)
 }
 

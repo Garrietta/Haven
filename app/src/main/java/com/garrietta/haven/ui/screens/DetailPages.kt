@@ -155,6 +155,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val detailBadge = detailBadgeOverride(
         detailCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
+        detailCustom.domainTilePresets,
     )
     // Feedback round 5, items 2 + 4: the assigned tile color itself (preset container), gated
     // by the same active rules as the badge pair — the detail toggle track (item 2) and the
@@ -162,6 +163,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val detailAccent = detailPageAccent(
         detailCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
+        detailCustom.domainTilePresets,
     )
     // Climate safety net (Round 4): any path still landing on an
     // EntityDetail for climate renders the primary dial panel
@@ -215,6 +217,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
     val weatherBadge = detailBadgeOverride(
         weatherCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
+        weatherCustom.domainTilePresets,
     )
     Column(
         Modifier.padding(horizontal = 16.dp),
@@ -1118,7 +1121,11 @@ private fun LightStatusCard(entity: HaEntity, vm: HavenViewModel) {
                     Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(value, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                 }
-                if ((label to value) != rows.last()) Spacer(Modifier.height(8.dp))
+                // Feedback round 15, item 6: light detail-panel
+                // rows share the thermostat panel's 12dp block
+                // rhythm (was 8dp) — one default vertical
+                // padding for all entity rows.
+                if ((label to value) != rows.last()) Spacer(Modifier.height(12.dp))
             }
         }
     }

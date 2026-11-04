@@ -246,7 +246,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         if (entity.domain == "sensor") sensorDisplayName(display) else displayCameraName(display))
     // Feedback round 11, item 3: the one icon path.
     val tileIcon = entityIcon(tileCustom.iconKeys, entity)
-    val tilePreset = tilePresetFor(tileCustom.tilePresets, entity.entityId)
+    val tilePreset = tilePresetFor(tileCustom.tilePresets, entity.entityId, tileCustom.domainTilePresets, entity.domain)
     // Feedback round 2, item 1: same ON-state gating as Home cards
     // — a preset tile whose entity is off renders INACTIVE gray.
     val tilePresetActive = tilePreset != null && presetAppliesForState(display.domain, display.state)
@@ -256,7 +256,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     // cards — polygon outlines cut into the bottom text zone, so
     // polygon tiles shift their text block up 12dp (spacer 16->4,
     // bottom padding 16->28, height unchanged).
-    val tileOutline = LocalShapePrefs.current.cardShape(entity.entityId) ?: generalCardShape(gridIndex)
+    val tileOutline = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain) ?: generalCardShape(gridIndex)
     val tileIsPolygon = tileOutline !is RoundedCornerShape
     // The tile's window bounds feed the camera rise origin (and are
     // kept for it). Detail/sheet morphs use the root bounds reported
@@ -428,7 +428,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                         // Tile badge shape (2026-10-30 picker): a
                         // per-entity override beats the global
                         // default; without either, the domain shape.
-                        LocalShapePrefs.current.badgeShape(entity.entityId)
+                        LocalShapePrefs.current.badgeShapeFor(entity.entityId, entity.domain)
                             ?: polygonShape(shapeForDomain(entity.domain)),
                     )
                         .graphicsLayer(scaleX = badgeScale, scaleY = badgeScale)
@@ -652,7 +652,7 @@ private fun CameraTileVisual(vm: HavenViewModel, entity: HaEntity, accent: Color
                 accent.copy(alpha = 0.18f),
                 // Camera placeholder shape (2026-10-30 picker):
                 // override beats the global default, else FLOWER.
-                LocalShapePrefs.current.badgeShape(entity.entityId)
+                LocalShapePrefs.current.badgeShapeFor(entity.entityId, entity.domain)
                     ?: polygonShape(ExpressiveKind.FLOWER),
             ),
             contentAlignment = Alignment.Center,

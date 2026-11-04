@@ -112,12 +112,14 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     val popoutBadge = detailBadgeOverride(
         popoutCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
+        popoutCustom.domainTilePresets,
     )
     // Feedback round 5, item 4: the tile preset accent tints the
     // stepper pills below the disc, like the other popup elements.
     val popoutAccent = detailPageAccent(
         popoutCustom.tilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
+        popoutCustom.domainTilePresets,
     )
     // Feedback round 4, item 4: with the traveler suppressed
     // (detail from a sub-panel), the badge renders from frame 0.

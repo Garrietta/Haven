@@ -424,7 +424,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
     // Card-outline shape (2026-10-30 picker): a per-entity
     // override beats the global default; without either, the
     // token extraLarge corners are unchanged.
-    val cardShape = LocalShapePrefs.current.cardShape(entity.entityId)
+    val cardShape = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain)
         ?: generalCardShape(0)
     Card(
         shape = cardShape,
