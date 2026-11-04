@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -347,7 +349,17 @@ fun LoginScreen(vm: HavenViewModel) {
 }
 
 @Composable
-fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired: () -> Unit) {
+fun TodayScreen(
+    vm: HavenViewModel,
+    // Feedback round 9, item 2: scroll states hoisted in HavenApp
+    // above the AnimatedContent/direct branch swap (see there).
+    // Before the lambda params (round 5 lesson).
+    homeListState: LazyListState,
+    homeLeftScrollState: ScrollState,
+    homeRightScrollState: ScrollState,
+    navigate: (Screen) -> Unit,
+    onSignInExpired: () -> Unit,
+) {
     val states by vm.states.collectAsState()
     val connection by vm.connection.collectAsState()
     // Read so Home editor saves recompose this screen from the store.
@@ -536,6 +548,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             LazyColumn(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp),
+                state = homeListState,
                 contentPadding = PaddingValues(bottom = 16.dp),
             ) {
                 // Greeting FIRST (2026-10-30 verdict: the hero is no
@@ -591,7 +604,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
             Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
         ) {
             Column(
-                Modifier.weight(0.42f).verticalScroll(rememberScrollState()),
+                Modifier.weight(0.42f).verticalScroll(homeLeftScrollState),
             ) {
                 GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
                 RoomFilterChips(roomChips, roomFilter) { roomFilter = it }
@@ -617,7 +630,7 @@ fun TodayScreen(vm: HavenViewModel, navigate: (Screen) -> Unit, onSignInExpired:
                 // 175dp/card — the measurement decides.
                 val gridColumns = if (maxWidth >= 364.dp) 2 else 1
                 Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    Modifier.fillMaxSize().verticalScroll(homeRightScrollState),
                 ) {
                     if (showSection("favorites")) {
                         FavoritesSection(vm, states, navigate, columnsOverride = gridColumns, spacing = 14.dp)

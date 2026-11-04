@@ -59,6 +59,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -350,6 +353,28 @@ fun HavenApp(vm: HavenViewModel) {
         val backstack = remember {
             mutableStateListOf<Screen>(Screen.Today)
         }
+        // Feedback round 9, item 2 (ROOT CAUSE of Home losing its
+        // scroll offset on detail return): the scaffold renders its
+        // base page through TWO different parents — directly via
+        // content(base) while a detail overlay is open, and inside
+        // AnimatedContent(targetState = base) otherwise (round 4,
+        // item 4's bleed/flash rule). Swapping parents DISPOSES
+        // the base content, and with it any scroll state remembered
+        // inside TodayScreen (the folded LazyColumn's implicit
+        // LazyListState, the unfolded panes' rememberScrollState),
+        // so Home recomposed at offset 0 on every detail return.
+        // Hoisting the three Home scroll states HERE, above the
+        // branch swap, keeps the state objects alive across it:
+        // the list/panes reattach to the same state on return and
+        // land on the exact pre-open offset. Consequence, stated
+        // deliberately: the offset now also survives tab switches
+        // (previously a switch disposed Home and reset it); the
+        // branch-swap rule itself is untouched. Sign-out still
+        // resets: these remembers live below the auth early-return,
+        // so they dispose with the post-login composition.
+        val homeListState = rememberLazyListState()
+        val homeLeftScrollState = rememberScrollState()
+        val homeRightScrollState = rememberScrollState()
         val current = backstack.last()
         // Panel state machine (2026-11-01 morphing-panels round,
         // superseding the 2026-10-30 centered-dialog round): the
@@ -1045,6 +1070,9 @@ fun HavenApp(vm: HavenViewModel) {
                 ScreenContent(
                     screen = screen,
                     vm = vm,
+                    homeListState = homeListState,
+                    homeLeftScrollState = homeLeftScrollState,
+                    homeRightScrollState = homeRightScrollState,
                     navigate = navigate,
                     goBack = goBack,
                     // Feedback round 5, item 1: panel cards open the stacked panel-detail
@@ -1957,6 +1985,13 @@ fun HavenApp(vm: HavenViewModel) {
 private fun ScreenContent(
     screen: Screen,
     vm: HavenViewModel,
+    // Feedback round 9, item 2: Home's scroll states, hoisted in
+    // HavenApp above the AnimatedContent/direct branch swap so
+    // Home keeps its offset across detail returns. Before the
+    // lambda params (round 5 lesson: never append after a lambda).
+    homeListState: LazyListState,
+    homeLeftScrollState: ScrollState,
+    homeRightScrollState: ScrollState,
     navigate: (Screen) -> Unit,
     goBack: () -> Unit,
     // Feedback round 5, item 1: panel cards open the stacked panel-detail layer. Default is a
@@ -1972,7 +2007,7 @@ private fun ScreenContent(
     onSignOut: () -> Unit,
 ) {
     when (screen) {
-        Screen.Today -> TodayScreen(vm, navigate, onSignInExpired = onSignOut)
+        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onSignInExpired = onSignOut)
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)
@@ -2341,9 +2376,22 @@ private fun PanelOverlay(
                     // top-edge travel from target to source tile.
                     val dragRangePx = dragRangeForPanelOverlay(source?.top, target.top, target.height)
                     if (scrollContent) {
+                        // Feedback round 9, item 1 (ROOT CAUSE of
+                        // round 7's dead drag): a NestedScrollConnection
+                        // receives events ONLY from scrolling
+                        // DESCENDANTS — it must be an ANCESTOR of the
+                        // scrollable. Round 7 put nestedScroll AFTER
+                        // verticalScroll, i.e. INSIDE the scrollable's
+                        // own node, so the scrollable's post-scroll
+                        // leftovers (the at-top downward drag) went
+                        // to its ancestors and never reached this
+                        // connection — onDragDelta never fired, no
+                        // scrub, no dismiss, on every scrollContent
+                        // surface. The connection goes OUTSIDE
+                        // (before) verticalScroll. Do not "tidy"
+                        // this order back: it is the fix.
                         Box(
                             Modifier.fillMaxSize().statusBarsPadding()
-                                .verticalScroll(rememberScrollState())
                                 .then(
                                     if (dragHandle != null) {
                                         Modifier.nestedScroll(
@@ -2356,7 +2404,8 @@ private fun PanelOverlay(
                                     } else {
                                         Modifier
                                     },
-                                ),
+                                )
+                                .verticalScroll(rememberScrollState()),
                         ) {
                             Column(Modifier.fillMaxWidth()) {
                                 content()
@@ -2557,8 +2606,13 @@ private fun CenteredPopup(
                         source?.center?.y,
                         placedRect?.height ?: overlayHeightPx,
                     )
+                    // Feedback round 9, item 1: same ancestor
+                    // rule as PanelOverlay's scroll branch — the
+                    // connection must sit OUTSIDE (before)
+                    // verticalScroll, or the scrollable's leftover
+                    // never reaches it and the drag is dead.
                     Column(
-                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                        Modifier.fillMaxWidth()
                             .then(
                                 if (dragHandle != null) {
                                     Modifier.nestedScroll(
@@ -2571,7 +2625,8 @@ private fun CenteredPopup(
                                 } else {
                                     Modifier
                                 },
-                            ),
+                            )
+                            .verticalScroll(rememberScrollState()),
                     ) {
                         content()
                     }

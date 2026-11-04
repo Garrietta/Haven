@@ -1,5 +1,120 @@
 # Haven Changelog
 
+## Feedback round 9 (2026-11-03/04, drag-down fix + Home scroll restore + flat icon)
+
+The user's 2026-11-03 20:34 video (44s, no audio, frames
+reviewed at 1fps) on the round-7 signed build reported three
+fails: finger drag-down to close does nothing on the detail
+surfaces he used (lamp detail from the Lights panel,
+thermostat detail); Home returns to the top on exit from
+detail instead of its pre-open scroll position; and the
+launcher icon renders as a cream squircle + sparkle only —
+the house is missing (circled by him in the recents pane).
+Baseline proven green first (357 tests, 0 failures on the
+round-8 tree).
+
+### Item 1 — finger drag-down to close: ROOT CAUSE, the nested-scroll modifier order
+
+Root cause, found by reading the gesture chain (not by
+guessing): a `NestedScrollConnection` receives events ONLY
+from scrolling DESCENDANTS — it must be an ANCESTOR of the
+scrollable. Round 7 attached it the wrong way round in both
+drag wrappers: `verticalScroll(...)` first, then
+`.nestedScroll(PopupDismissConnection(...))` — i.e. the
+connection sat INSIDE the scrollable's own node. The
+scrollable's post-scroll leftovers (the at-top downward
+drag that should start a pull) dispatch to ANCESTORS, so
+they never reached the connection: `onDragDelta` never
+fired, no scrub, no dismiss, on EVERY scrollContent
+surface — sheet, detail, panel-detail, popout, folded and
+unfolded alike. The camera branch was unaffected (it uses
+the direct `popupDragDetector`, no scroll competition),
+which is why the mechanism looked right in review: the
+plumbing existed everywhere, but the scrollContent path
+could never deliver a delta. The detail content itself
+was exonerated first: `DetailPageContent` is a plain
+Column with no own scroll, the pill toggle is
+clickable-only, and the thermostat dial consumes only
+on-thumb drags — nothing in the content swallows the
+gesture; the wrapper order was the whole failure.
+Fix: in `PanelOverlay`'s scroll branch and in
+`CenteredPopup`'s inner Column (`HavenApp.kt`), the
+connection now sits OUTSIDE (before) `verticalScroll`.
+Both sites carry a comment stating the ancestor rule so
+a future tidy-up cannot silently revert it. No change to
+the drag controller, the release rule (velocity ±120 px/s
+first, else 40dp travel), the calm settle spring (0.95 /
+350, no visible bounce), scroll-at-top gating, dial /
+toggle / slider gesture ownership, or reduce-motion
+behavior — all of round 7's behavior, now actually
+reachable by a finger.
+
+### Item 2 — Home scroll position restored on detail return
+
+Root cause: the scaffold renders its base page through
+TWO different parents — directly via `content(base)`
+while a detail overlay is open, and inside
+`AnimatedContent(targetState = base)` otherwise (round 4,
+item 4's bleed/flash rule: the base must not slide/fade
+under an open morph). Swapping parents DISPOSES the base
+content, and with it any scroll state remembered inside
+`TodayScreen` (the folded `LazyColumn`'s implicit
+`LazyListState`, the unfolded panes'
+`rememberScrollState`), so Home recomposed at offset 0
+on every detail return — twice per visit, once on open
+and once on close. Fix: the three Home scroll states are
+hoisted into `HavenApp` scope beside the backstack
+(`homeListState`, `homeLeftScrollState`,
+`homeRightScrollState`), threaded through `ScreenContent`
+(new params before the lambda params, round-5 lesson) into
+`TodayScreen`, and attached to the folded `LazyColumn`
+and both unfolded panes. The state objects now outlive
+the branch swap, so Home lands on its exact pre-open
+offset after exiting any detail or panel, on both
+postures. The branch-swap rule itself is untouched, and
+Home's layout, content order, and pill behavior are
+untouched. Two stated consequences: the offset now also
+survives tab switches (previously a switch disposed Home
+and reset it) — the same retain-position principle, not
+a second feature; and sign-out still resets, because
+these remembers live below the auth early-return and
+dispose with the post-login composition. Other tabs'
+scroll states have the same branch-swap disposal
+mechanism and are NOT hoisted here — Home only, per the
+complaint; a later round can hoist them the same way.
+
+### Item 3 — launcher icon rebuilt with solid flat facets (no gradients)
+
+Root cause, narrowed by elimination: the shipped round-7
+APK's legacy PNGs DID contain the house (pixel-verified
+by the parent: cream corners, yellow-orange centers, all
+5 densities × 2), and the device rendered the cream
+field + solid yellow sparkle — so the failure is
+specifically the VECTOR foreground's five
+gradient-filled house paths not rendering in the
+device's adaptive-icon path, while solid fills render.
+Fix: `ic_launcher_foreground.xml` is rebuilt with SOLID
+FLAT facet colors and zero `<gradient>` elements, same
+segmented-house design and same 30..78 x 30..76 envelope
+(safe-zone discipline unchanged, outermost ink still
+under ~30.7dp from center): each roof side split into a
+lime #9BF67C ridge triangle + deep leaf #3E6B2F eave
+trapezoid (outer edges stay deep leaf, crisp on cream;
+lime never touches cream directly, exactly as round 7's
+gradient direction intended), mid green #66BB6A body,
+center panel as two flats (yellow #FFD54F top,
+orange #FF8F00 bottom), cream arched door on the LEFT,
+yellow sparkle upper right. Background (cream field)
+and monochrome (already solid fills) are unchanged.
+All 10 legacy mipmap PNGs regenerated from the new
+vector (`make-legacy-icon-round9.py`) and pixel-verified
+(cream corners, lime ridge, deep-leaf eaves, mid-green
+body, yellow/orange center, cream door, yellow sparkle).
+The recents pane on the user's device remains the
+acceptance case — this round cannot device-test it, so
+the icon still needs his eyes on the launcher grid and
+the unfolded recents pane.
+
 ## Feedback round 8 (2026-11-03/04, thermostat radial + set-temp size)
 
 The user's 2026-11-03 screenshot + words: "The radial is too
