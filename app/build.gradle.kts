@@ -16,9 +16,26 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        // Release signing comes from the environment (CI repo secrets).
+        // When KEYSTORE_PATH is absent (local builds), no signing config is
+        // applied and release builds stay unsigned instead of failing.
+        create("release") {
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (System.getenv("KEYSTORE_PATH") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

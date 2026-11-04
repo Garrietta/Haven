@@ -20,10 +20,19 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --stacktrace
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
-      - name: Upload debug APK
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/haven-release-keystore.jks"
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/haven-release-keystore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Upload signed release APK
         uses: actions/upload-artifact@v4
         with:
-          name: haven-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: haven-release
+          path: app/build/outputs/apk/release/app-release.apk
