@@ -88,9 +88,6 @@ import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.components.cardIconForKey
-import com.garrietta.haven.ui.components.CARD_ICON_KEYS
-import com.garrietta.haven.data.customIconKeyFor
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
 import com.garrietta.haven.ui.components.isDarkBackdrop
@@ -115,7 +112,7 @@ import com.garrietta.haven.ui.controls.VacuumControl
 import com.garrietta.haven.ui.controls.WeatherControl
 import com.garrietta.haven.ui.controls.WeatherHeroCard
 import com.garrietta.haven.ui.controls.SensorTile
-import com.garrietta.haven.ui.controls.domainIcon
+import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
 import java.util.Locale
@@ -257,6 +254,9 @@ private fun DetailPageContent(
     pageAccent: Color? = null,
 ) {
     val accent = accentFor(entity.entityId)
+    // Feedback round 11, item 3: the detail hero badge resolves
+    // through the one icon path, like the tile and the header.
+    val heroIcon = entityIcon(rememberCardCustom(vm).iconKeys, entity)
     val hero: @Composable () -> Unit = {
         // Lights get a brightness-tinted hero panel (kelvin + brightness
         // scaled, same token as the tiles): the page's color is
@@ -265,7 +265,7 @@ private fun DetailPageContent(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DomainBadge(
                     entity,
-                    domainIcon(entity),
+                    heroIcon,
                     accent,
                     modifier = Modifier.size(52.dp),
                     badgeOverride = badgeOverride,
@@ -592,7 +592,8 @@ private fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Triple<Str
     val custom = rememberCardCustom(vm)
     val base = if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity)
     val title = customTitleFor(custom.titles, entity.entityId, base)
-    val icon = cardIconForKey(customIconKeyFor(custom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
+    // Feedback round 11, item 3: the one icon path.
+    val icon = entityIcon(custom.iconKeys, entity)
     return Triple(title, icon) { vm.openCardSettings(entity.entityId) }
 }
 

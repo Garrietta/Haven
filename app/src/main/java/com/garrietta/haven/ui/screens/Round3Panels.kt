@@ -134,6 +134,7 @@ import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.detailPageAccent
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.reportCardShape
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.controls.MediaSquircle
 import com.garrietta.haven.ui.controls.MediaTransportRow
@@ -363,7 +364,7 @@ private fun SecurityBannerSection(alarm: HaEntity, vm: HavenViewModel, onOpen: (
     Round3SectionTitle("Security")
     Box(
         Modifier.fillMaxWidth()
-            .reportCardBounds(ALARM_ID)
+            .reportCardBounds(ALARM_ID).reportCardShape(ALARM_ID, generalCardShape(0))
             .hideWhenMorphSource(ALARM_ID)
             .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.primaryContainer)
@@ -412,7 +413,7 @@ private fun VacuumTileSection(
     val battery = states[VACUUM_BATTERY_ID]?.state?.toIntOrNull()?.toString()
     Box(
         Modifier.fillMaxWidth()
-            .reportCardBounds(VACUUM_ID)
+            .reportCardBounds(VACUUM_ID).reportCardShape(VACUUM_ID, generalCardShape(0))
             .hideWhenMorphSource(VACUUM_ID)
             .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -475,7 +476,7 @@ private fun MediaTile(entity: HaEntity, vm: HavenViewModel, onOpen: () -> Unit) 
     val accent = accentFor(entity.entityId)
     Box(
         Modifier.width(172.dp)
-            .reportCardBounds(entity.entityId)
+            .reportCardBounds(entity.entityId).reportCardShape(entity.entityId, generalCardShape(0))
             .hideWhenMorphSource(entity.entityId)
             .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -546,7 +547,7 @@ private fun GreenhouseSummaryCard(states: Map<String, HaEntity>, onOpen: () -> U
     val sprinkler = states[SPRINKLER_SWITCH_ID]
     Box(
         Modifier.fillMaxWidth()
-            .reportCardBounds(GREENHOUSE_AUTOMATION_IDS.first())
+            .reportCardBounds(GREENHOUSE_AUTOMATION_IDS.first()).reportCardShape(GREENHOUSE_AUTOMATION_IDS.first(), generalCardShape(0))
             .hideWhenMorphSource(GREENHOUSE_AUTOMATION_IDS.first())
             .clip(generalCardShape(0))
             .background(MaterialTheme.colorScheme.surfaceContainer)

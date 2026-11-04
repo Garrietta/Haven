@@ -61,14 +61,11 @@ import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.generalCardShape
-import com.garrietta.haven.ui.components.cardIconForKey
-import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.data.inactiveCardColors
 import com.garrietta.haven.data.presetAppliesForState
 import com.garrietta.haven.data.presetBadgeColors
 import com.garrietta.haven.data.tilePresetFor
 import com.garrietta.haven.data.tilePresetColor
-import com.garrietta.haven.data.customIconKeyFor
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
@@ -83,9 +80,10 @@ import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
 import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.reportCardShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
-import com.garrietta.haven.ui.controls.domainIcon
+import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
@@ -246,7 +244,8 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
     val tileCustom = rememberCardCustom(vm)
     val tileTitle = customTitleFor(tileCustom.titles, entity.entityId,
         if (entity.domain == "sensor") sensorDisplayName(display) else displayCameraName(display))
-    val tileIcon = cardIconForKey(customIconKeyFor(tileCustom.iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
+    // Feedback round 11, item 3: the one icon path.
+    val tileIcon = entityIcon(tileCustom.iconKeys, entity)
     val tilePreset = tilePresetFor(tileCustom.tilePresets, entity.entityId)
     // Feedback round 2, item 1: same ON-state gating as Home cards
     // — a preset tile whose entity is off renders INACTIVE gray.
@@ -298,6 +297,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         modifier = Modifier.fillMaxWidth()
             .onGloballyPositioned { tileBounds = it.boundsInWindow() }
             .reportCardBounds(entity.entityId)
+            .reportCardShape(entity.entityId, tileOutline)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
             // Body hide (2026-10-29 verdict-fix round): the whole

@@ -136,6 +136,7 @@ import com.garrietta.haven.ui.components.weatherConditionColorThemed
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.legibleSecondaryOn
 import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.reportCardShape
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
 import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
@@ -967,13 +968,17 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
         animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
         label = "mediaCardPress",
     )
+    // Feedback round 11, item 2: the outline is a named value so
+    // the morph landing can report this exact shape.
+    val mediaCardOutline = LocalShapePrefs.current.cardShape(entity.entityId)
+        ?: homeCardShapeByIndex(gridIndex)
     Surface(
-        shape = LocalShapePrefs.current.cardShape(entity.entityId)
-            ?: homeCardShapeByIndex(gridIndex),
+        shape = mediaCardOutline,
         color = container,
         modifier = Modifier.fillMaxWidth()
             .height(136.dp)
             .reportCardBounds(entity.entityId)
+            .reportCardShape(entity.entityId, mediaCardOutline)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
             .hideBodyWhenMorphSource(entity.entityId)
@@ -1287,6 +1292,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         modifier = Modifier.fillMaxWidth()
             .heightIn(min = 136.dp)
             .reportCardBounds(entity.entityId)
+            .reportCardShape(entity.entityId, cardOutline)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
             .hideBodyWhenMorphSource(entity.entityId)
@@ -1651,6 +1657,7 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
         ),
         modifier = Modifier.fillMaxWidth()
             .reportCardBounds(weather.entityId)
+            .reportCardShape(weather.entityId, generalCardShape(0))
             .hideWhenMorphSource(weather.entityId),
     ) {
         Row(
@@ -2179,7 +2186,7 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // the top of the screen instead of on the quadrant.
             // It also hides while its panel is open, so the
             // snapshot never doubles the video.
-            .then(if (cameraId != null) Modifier.reportCardBounds(cameraId).hideWhenMorphSource(cameraId) else Modifier)
+            .then(if (cameraId != null) Modifier.reportCardBounds(cameraId).reportCardShape(cameraId, corners).hideWhenMorphSource(cameraId) else Modifier)
             .then(if (cameraId != null) Modifier.clickable { vm.openCameraDialog(cameraId) } else Modifier),
         contentAlignment = Alignment.Center,
     ) {

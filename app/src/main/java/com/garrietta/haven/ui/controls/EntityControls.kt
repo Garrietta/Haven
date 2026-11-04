@@ -1,6 +1,10 @@
 package com.garrietta.haven.ui.controls
+import com.garrietta.haven.ui.components.CARD_ICON_KEYS
+import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.reportCardShape
+import com.garrietta.haven.data.customIconKeyFor
 import com.garrietta.haven.ui.components.CoolBlue
 import com.garrietta.haven.ui.components.HeatOrange
 
@@ -184,6 +188,20 @@ fun sensorDisplayName(entity: HaEntity): String {
         entity.friendlyName
     }
 }
+
+/**
+ * Feedback round 11, item 3: the ONE icon resolution every entity
+ * badge uses — tile, sheet header, detail header, thermostat popout
+ * header, control-card header, and traveler. A stored custom icon
+ * key wins (unknown keys read as no override); otherwise the domain
+ * icon. Before this round the traveler and several headers read
+ * [domainIcon] directly, so an entity with a custom icon showed one
+ * glyph on its tile and the domain glyph everywhere else (the eufy
+ * AE C10 case: custom vacuum glyph on the tile, circular-arrows
+ * domain glyph on the detail header and the traveler).
+ */
+fun entityIcon(iconKeys: Map<String, String>, entity: HaEntity): ImageVector =
+    cardIconForKey(customIconKeyFor(iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
 
 fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
     "light" -> Icons.Filled.Lightbulb
@@ -438,7 +456,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
             }
             else MaterialTheme.colorScheme.surfaceContainer,
         ),
-        modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).hideWhenMorphSource(entity.entityId) else Modifier),
+        modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).reportCardShape(entity.entityId, cardShape).hideWhenMorphSource(entity.entityId) else Modifier),
     ) {
         // Body hide (2026-10-29 verdict-fix round): the whole card
         // body vanishes from frame 0 while its morph is open, exactly

@@ -79,7 +79,7 @@ import com.garrietta.haven.ui.theme.stateShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.dialogHeaderState
-import com.garrietta.haven.ui.controls.domainIcon
+import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
@@ -180,7 +180,8 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
             // are the dismiss paths.
             DomainBadge(
                 entity,
-                domainIcon(entity),
+                // Feedback round 11, item 3: the one icon path.
+                entityIcon(popoutCustom.iconKeys, entity),
                 accentFor(entity.entityId),
                 modifier = Modifier.size(48.dp).then(if (suppressTraveler) Modifier else Modifier.hideWhileTraveling()).clickable(
                     interactionSource = remember { MutableInteractionSource() },

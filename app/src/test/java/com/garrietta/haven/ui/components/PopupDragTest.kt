@@ -1,7 +1,6 @@
 package com.garrietta.haven.ui.components
 
 import androidx.compose.animation.core.SpringSpec
-import androidx.compose.ui.geometry.Rect
 import com.garrietta.haven.ui.theme.settleSpring
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,8 +10,10 @@ import org.junit.Test
 /**
  * Feedback round 7: the Koda now-playing morph port's pure drag
  * math. Velocity momentum first, else 40dp travel; the finger
- * formula tracks 1:1 over the exact top-edge travel; the centered
- * popup lerps its placed rect toward the tile rect.
+ * formula tracks 1:1 over the exact top-edge travel. Feedback
+ * round 11, item 1: the finger formula feeds ONLY the release
+ * rule — it is never rendered, so the centered-popup rect-lerp
+ * transform is deleted and has no test here.
  */
 class PopupDragTest {
 
@@ -77,29 +78,6 @@ class PopupDragTest {
         assertEquals(800f, dragRangeForCenteredPopup(500f, null, 800f), 0.001f)
         // Coincident centers: coerced to at least 1px.
         assertEquals(1f, dragRangeForCenteredPopup(500f, 500f, 800f), 0.001f)
-    }
-
-    @Test
-    fun centeredPopupDragTransformLerpsRect() {
-        val placed = Rect(0f, 0f, 400f, 800f)
-        val tile = Rect(100f, 1400f, 300f, 1600f)
-        // At rest the transform is identity.
-        val rest = centeredPopupDragTransform(placed, tile, 1f)
-        assertEquals(0f, rest.translation.x, 0.001f)
-        assertEquals(0f, rest.translation.y, 0.001f)
-        assertEquals(1f, rest.scaleX, 0.001f)
-        assertEquals(1f, rest.scaleY, 0.001f)
-        // Fully dragged: center lands on the tile center, size on the tile size.
-        val landed = centeredPopupDragTransform(placed, tile, 0f)
-        assertEquals(0f, landed.translation.x, 0.001f)
-        assertEquals(1100f, landed.translation.y, 0.001f)
-        assertEquals(0.5f, landed.scaleX, 0.001f)
-        assertEquals(0.25f, landed.scaleY, 0.001f)
-        // Halfway: halfway on both.
-        val half = centeredPopupDragTransform(placed, tile, 0.5f)
-        assertEquals(550f, half.translation.y, 0.001f)
-        assertEquals(0.75f, half.scaleX, 0.001f)
-        assertEquals(0.625f, half.scaleY, 0.001f)
     }
 
     @Test

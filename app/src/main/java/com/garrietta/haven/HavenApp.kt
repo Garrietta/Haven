@@ -4,19 +4,20 @@ import com.garrietta.haven.ui.components.LocalSuppressTraveler
 import com.garrietta.haven.ui.components.PopupDragHandle
 import com.garrietta.haven.ui.components.PopupDragState
 import com.garrietta.haven.ui.components.PopupDismissConnection
+import com.garrietta.haven.ui.components.LocalCardShapes
 import com.garrietta.haven.ui.components.PopupSideAnchor
-import com.garrietta.haven.ui.components.centeredPopupDragTransform
 import com.garrietta.haven.ui.components.centeredPopupEnter
+import com.garrietta.haven.ui.components.morphPopupShape
 import com.garrietta.haven.ui.components.dragProgressAfterDelta
 import com.garrietta.haven.ui.components.dragRangeForCenteredPopup
 import com.garrietta.haven.ui.components.dragRangeForPanelOverlay
-import com.garrietta.haven.ui.components.morphEnterContentAlpha
 import com.garrietta.haven.ui.components.popupDragDetector
 import com.garrietta.haven.ui.components.popupSideAnchor
 import com.garrietta.haven.ui.components.shouldDismissDrag
 import com.garrietta.haven.ui.components.ShapePrefs
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.badgeRectInRow
+import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.shapeLabel
@@ -398,6 +399,9 @@ fun HavenApp(vm: HavenViewModel) {
             else -> null
         }
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
+        // Feedback round 11, item 2: the source tiles' outline
+        // shapes, reported alongside cardBounds (see reportCardShape).
+        val cardShapes = remember { mutableStateMapOf<String, androidx.compose.ui.graphics.Shape>() }
         // Traveling-header state (2026-10-29 pop-up round): cards
         // report header rects here, measurement frames report their
         // pop-up header target here (id + rect, so a stale target from
@@ -587,11 +591,11 @@ fun HavenApp(vm: HavenViewModel) {
         // land here): if a drag is in flight, mark settling BEFORE
         // flipping exiting, so isClosing stays false and the surface
         // keeps the OPEN fade curves through the settle (content
-        // rides down visibly, as in Koda's minimize, instead of
-        // vanishing on the close curve). The launch then snaps the
-        // animatable to the drag position before clearing the drag
-        // flag, so the progress lambda never jumps: dragProgress
-        // equals the anim value at every step.
+        // rides down visibly on the settle spring, instead of
+        // vanishing on the close curve). Feedback round 11, item 1:
+        // no snap is needed anymore — the surface never left open
+        // under the finger, so the animatable already sits at the
+        // settle start when the drag flag clears.
         fun dismissDetail() {
             val anim = detailAnim ?: return
             if (detailExiting) return
@@ -603,7 +607,6 @@ fun HavenApp(vm: HavenViewModel) {
             scope.launch {
                 try {
                     if (fromDrag) {
-                        detailProgress.snapTo(detailDrag.dragProgress)
                         detailDrag.isDragging = false
                         detailDrag.pulling = false
                     }
@@ -629,7 +632,6 @@ fun HavenApp(vm: HavenViewModel) {
             scope.launch {
                 try {
                     if (fromDrag) {
-                        sheetProgress.snapTo(sheetDrag.dragProgress)
                         sheetDrag.isDragging = false
                         sheetDrag.pulling = false
                     }
@@ -655,7 +657,6 @@ fun HavenApp(vm: HavenViewModel) {
             scope.launch {
                 try {
                     if (fromDrag) {
-                        popoutProgress.snapTo(popoutDrag.dragProgress)
                         popoutDrag.isDragging = false
                         popoutDrag.pulling = false
                     }
@@ -697,7 +698,6 @@ fun HavenApp(vm: HavenViewModel) {
             scope.launch {
                 try {
                     if (fromDrag) {
-                        panelDetailProgress.snapTo(panelDetailDrag.dragProgress)
                         panelDetailDrag.isDragging = false
                         panelDetailDrag.pulling = false
                     }
@@ -735,15 +735,20 @@ fun HavenApp(vm: HavenViewModel) {
         //   40dp travel) with a single ContextClick settle tick,
         //   then calls the surface's dismiss while still dragging
         //   so its prologue keeps the open curves; otherwise the
-        //   anim snaps to the release position and springs back
-        //   open on the settle spring. DragCancel releases with
-        //   zero velocity (travel rule decides).
+        //   surface — which never moved under the finger — settles
+        //   back to open on the settle spring. DragCancel releases
+        //   with zero velocity (travel rule decides).
         val dragHaptics = LocalHapticFeedback.current
         val dragCommitPx = with(LocalDensity.current) { 40.dp.toPx() }
+        // Feedback round 11, item 1: NO finger-following. The morph
+        // progress is always the animatable's value: during a drag
+        // the popup stays fully open under the finger, and only a
+        // release past the threshold commits the settle spring down
+        // into the tile. The drag state's dragProgress is travel
+        // bookkeeping for the release rule only — never rendered.
         fun dragProgressFor(
-            drag: PopupDragState,
             anim: Animatable<Float, AnimationVector1D>,
-        ): () -> Float = { if (drag.isDragging) drag.dragProgress else anim.value }
+        ): () -> Float = { anim.value }
         fun onDragDelta(
             drag: PopupDragState,
             anim: Animatable<Float, AnimationVector1D>,
@@ -789,13 +794,13 @@ fun HavenApp(vm: HavenViewModel) {
                 dragHaptics.performHapticFeedback(HapticFeedbackType.ContextClick)
                 dismiss()
             } else {
+                // Feedback round 11, item 1: no snap-back — the
+                // surface never moved under the finger, so the
+                // animatable is already at (or within a hair of)
+                // open; the settle spring closes the micro-gap.
+                drag.isDragging = false
+                drag.pulling = false
                 scope.launch {
-                    try {
-                        anim.snapTo(released)
-                    } finally {
-                        drag.isDragging = false
-                        drag.pulling = false
-                    }
                     anim.animateTo(1f, settleSpring())
                 }
             }
@@ -1028,7 +1033,6 @@ fun HavenApp(vm: HavenViewModel) {
             scope.launch {
                 try {
                     if (fromDrag) {
-                        cameraDialogProgress.snapTo(cameraDrag.dragProgress)
                         cameraDrag.isDragging = false
                         cameraDrag.pulling = false
                     }
@@ -1121,6 +1125,7 @@ fun HavenApp(vm: HavenViewModel) {
             )
             CompositionLocalProvider(
                 LocalCardBounds provides cardBounds,
+                LocalCardShapes provides cardShapes,
                 // The camera panel's quadrant is a morph source too
                 // (see CameraQuadrant): its rect anchors the panel
                 // morph, and the opaque panel covers it while open,
@@ -1169,18 +1174,22 @@ fun HavenApp(vm: HavenViewModel) {
                 // read the root lambda only inside graphicsLayer,
                 // never during composition — no per-frame
                 // recomposition cost.
-                // Feedback round 7: closing is also true while a
-                // drag is in flight (the source badge crossfades
-                // in as the popup is pulled down, exactly as on a
-                // programmatic close). The camera dialog is
-                // deliberately absent, as before: it never sets a
-                // hidden id, so no badge reads this for it.
-                LocalMorphClosing provides (sheetExiting || detailExiting || panelDetailExiting || popoutExiting || sheetDrag.isDragging || detailDrag.isDragging || panelDetailDrag.isDragging || popoutDrag.isDragging),
+                // Feedback round 11, item 1: closing is true ONLY
+                // on an actual dismiss. Round 7 also set it while a
+                // drag was in flight (the source badge crossfaded
+                // in as the popup was pulled down) — but a drag no
+                // longer moves the popup, so there is nothing to
+                // crossfade toward mid-gesture. The camera dialog
+                // is deliberately absent, as before: it never sets
+                // a hidden id, so no badge reads this for it.
+                LocalMorphClosing provides (sheetExiting || detailExiting || panelDetailExiting || popoutExiting),
+                // Feedback round 11, item 1: the progress is always
+                // the animatable — a drag never moves it.
                 LocalMorphProgress provides {
                     when {
-                        sheetAnim != null -> if (sheetDrag.isDragging) sheetDrag.dragProgress else sheetProgress.value
-                        detailAnim != null -> if (detailDrag.isDragging) detailDrag.dragProgress else detailProgress.value
-                        popoutAnim != null -> if (popoutDrag.isDragging) popoutDrag.dragProgress else popoutProgress.value
+                        sheetAnim != null -> sheetProgress.value
+                        detailAnim != null -> detailProgress.value
+                        popoutAnim != null -> popoutProgress.value
                         else -> 1f
                     }
                 },
@@ -1584,13 +1593,14 @@ fun HavenApp(vm: HavenViewModel) {
                 // morph + traveler below, byte for byte.
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = dragProgressFor(sheetDrag, sheetProgress),
+                        progress = dragProgressFor(sheetProgress),
                         source = cardBounds[anim.id] ?: anim.source,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissSheet() },
                         dragHandle = sheetHandle,
                         onPanelPlaced = { sheetPanelBounds = it },
+                        landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                     ) {
                         EntityPopupSheetContent(
                             vm, navigate, anim.id, panelBounds = sheetPanelBounds,
@@ -1606,7 +1616,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // content). Progress is a lambda: nothing in this
                 // block reads the Animatable during composition.
                 PanelOverlay(
-                    progress = dragProgressFor(sheetDrag, sheetProgress),
+                    progress = dragProgressFor(sheetProgress),
                     source = cardBounds[anim.id] ?: anim.source,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
@@ -1618,6 +1628,7 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                     onPanelPlaced = { sheetPanelBounds = it },
+                    landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                 ) {
                     EntityPopupSheetContent(
                         vm, navigate, anim.id, panelBounds = sheetPanelBounds,
@@ -1632,7 +1643,7 @@ fun HavenApp(vm: HavenViewModel) {
                 TravelingHeader(
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = dragProgressFor(sheetDrag, sheetProgress), overlayOrigin,
+                    progress = dragProgressFor(sheetProgress), overlayOrigin,
                     onDismiss = { dismissSheet() },
                     isClosing = sheetExiting && !sheetDrag.settling,
                 )
@@ -1640,7 +1651,7 @@ fun HavenApp(vm: HavenViewModel) {
                 TravelingArc(
                     vm, anim.id, arcBounds[anim.id],
                     arcTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = dragProgressFor(sheetDrag, sheetProgress), overlayOrigin,
+                    progress = dragProgressFor(sheetProgress), overlayOrigin,
                     isClosing = sheetExiting && !sheetDrag.settling,
                 )
                 } // else: folded full-screen morph (feedback item 3)
@@ -1691,12 +1702,13 @@ fun HavenApp(vm: HavenViewModel) {
                 // morph + traveler below, byte for byte.
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = dragProgressFor(detailDrag, detailProgress),
+                        progress = dragProgressFor(detailProgress),
                         source = detailSource,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissDetail() },
                         dragHandle = detailHandle,
+                        landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                             content(anim.screen)
@@ -1712,7 +1724,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // measurement frame here either (see the sheet
                 // block); progress is a lambda.
                 PanelOverlay(
-                    progress = dragProgressFor(detailDrag, detailProgress),
+                    progress = dragProgressFor(detailProgress),
                     source = detailSource,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
@@ -1721,6 +1733,7 @@ fun HavenApp(vm: HavenViewModel) {
                     dragHandle = detailHandle,
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
+                    landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                         content(anim.screen)
@@ -1734,7 +1747,7 @@ fun HavenApp(vm: HavenViewModel) {
                     TravelingHeader(
                         vm, anim.entityId, heroBounds[anim.entityId],
                         heroTarget?.takeIf { it.first == anim.entityId }?.second,
-                        progress = dragProgressFor(detailDrag, detailProgress), overlayOrigin,
+                        progress = dragProgressFor(detailProgress), overlayOrigin,
                         onDismiss = { dismissDetail() },
                         isClosing = detailExiting && !detailDrag.settling,
                     )
@@ -1742,7 +1755,7 @@ fun HavenApp(vm: HavenViewModel) {
                 TravelingArc(
                     vm, anim.entityId, arcBounds[anim.entityId],
                     arcTarget?.takeIf { it.first == anim.entityId }?.second,
-                    progress = dragProgressFor(detailDrag, detailProgress), overlayOrigin,
+                    progress = dragProgressFor(detailProgress), overlayOrigin,
                     isClosing = detailExiting && !detailDrag.settling,
                 )
                 } // else: folded full-screen morph (feedback item 3)
@@ -1770,12 +1783,13 @@ fun HavenApp(vm: HavenViewModel) {
                 val panelDetailSource = anim.source ?: cardBounds[anim.entityId]
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = dragProgressFor(panelDetailDrag, panelDetailProgress),
+                        progress = dragProgressFor(panelDetailProgress),
                         source = panelDetailSource,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissPanelDetail() },
                         dragHandle = panelDetailHandle,
+                        landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
                             DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
@@ -1783,13 +1797,14 @@ fun HavenApp(vm: HavenViewModel) {
                     }
                 } else {
                 PanelOverlay(
-                    progress = dragProgressFor(panelDetailDrag, panelDetailProgress),
+                    progress = dragProgressFor(panelDetailProgress),
                     source = panelDetailSource,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     isClosing = panelDetailExiting && !panelDetailDrag.settling,
                     dragHandle = panelDetailHandle,
+                    landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides true) {
                         DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
@@ -1814,12 +1829,13 @@ fun HavenApp(vm: HavenViewModel) {
                 // morph + traveler below, byte for byte.
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = dragProgressFor(popoutDrag, popoutProgress),
+                        progress = dragProgressFor(popoutProgress),
                         source = cardBounds[anim.id] ?: anim.source,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissPopout() },
                         dragHandle = popoutHandle,
+                        landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                     ) {
                         ThermostatPopoutContent(
                             vm, anim.id,
@@ -1830,7 +1846,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // Round 6: no measurement frame here either (see
                 // the sheet block); progress is a lambda.
                 PanelOverlay(
-                    progress = dragProgressFor(popoutDrag, popoutProgress),
+                    progress = dragProgressFor(popoutProgress),
                     source = cardBounds[anim.id] ?: anim.source,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
@@ -1839,6 +1855,7 @@ fun HavenApp(vm: HavenViewModel) {
                     dragHandle = popoutHandle,
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
+                    landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
@@ -1851,7 +1868,7 @@ fun HavenApp(vm: HavenViewModel) {
                 TravelingHeader(
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = dragProgressFor(popoutDrag, popoutProgress), overlayOrigin,
+                    progress = dragProgressFor(popoutProgress), overlayOrigin,
                     onDismiss = { dismissPopout() },
                     isClosing = popoutExiting && !popoutDrag.settling,
                 )
@@ -1884,7 +1901,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // captured-at-open quadrant rect).
                 val cameraHandle = popupDragHandle(cameraDrag, cameraDialogProgress, { cameraDialogExiting }, { }, { dismissCameraDialog() })
                 PanelOverlay(
-                    progress = dragProgressFor(cameraDrag, cameraDialogProgress),
+                    progress = dragProgressFor(cameraDialogProgress),
                     // Captured-at-open quadrant rect (live map as
                     // first-frame fallback): never the sourceless
                     // fallback, so the close lands on the quadrant.
@@ -1894,13 +1911,14 @@ fun HavenApp(vm: HavenViewModel) {
                     scrollContent = false,
                     isClosing = cameraDialogExiting && !cameraDrag.settling,
                     dragHandle = cameraHandle,
+                    landingShape = cardShapes[camId] ?: LocalShapePrefs.current.cardShape(camId),
                 ) {
                     // Front Door live probe (Round 2): the Front
                     // Door panel alone gets the Live View / Event
                     // History toggle; every other camera keeps the
                     // exact body below, byte for byte.
                     if (camId == FRONT_DOOR_LIVE_VIEW_ID) {
-                        FrontDoorCameraPanel(vm, camId, { (if (cameraDrag.isDragging) cameraDrag.dragProgress else cameraDialogProgress.value).coerceIn(0f, 1f) }, onClose = { dismissCameraDialog() })
+                        FrontDoorCameraPanel(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, onClose = { dismissCameraDialog() })
                     } else {
                     Box(Modifier.fillMaxSize().background(Color.Black)) {
                         // The hero panel's MJPEG body is a recording
@@ -1910,7 +1928,7 @@ fun HavenApp(vm: HavenViewModel) {
                         // Feedback round, item 4: HLS-first for
                         // stream-capable non-Ring cameras; Ring
                         // keeps this MJPEG body via the route.
-                        CameraLiveBody(vm, camId, { (if (cameraDrag.isDragging) cameraDrag.dragProgress else cameraDialogProgress.value).coerceIn(0f, 1f) }, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
+                        CameraLiveBody(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
                         Row(
                             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -2119,9 +2137,8 @@ private fun EntityPopupSheetContent(
                     sheetCustom.titles, entity.entityId,
                     if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
                 )
-                val sheetIcon = com.garrietta.haven.ui.components.cardIconForKey(
-                    com.garrietta.haven.data.customIconKeyFor(sheetCustom.iconKeys, entity.entityId, com.garrietta.haven.ui.components.CARD_ICON_KEYS),
-                ) ?: domainIcon(entity)
+                // Feedback round 11, item 3: the one icon path.
+                val sheetIcon = entityIcon(sheetCustom.iconKeys, entity)
                 // Feedback round 4, item 2: the sheet header badge
                 // carries the card's preset pair, like every card.
                 val sheetBadgeOverride = detailBadgeOverride(
@@ -2335,6 +2352,9 @@ private fun PanelOverlay(
     heroTargetReporter: ((Rect) -> Unit)? = null,
     arcTargetReporter: ((Rect) -> Unit)? = null,
     onPanelPlaced: ((Rect) -> Unit)? = null,
+    // Feedback round 11, item 2: the source tile's outline, passed
+    // through to MorphSurface so the exit lands on its corners.
+    landingShape: androidx.compose.ui.graphics.Shape? = null,
     content: @Composable () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -2367,6 +2387,7 @@ private fun PanelOverlay(
                 progress = progress,
                 isClosing = isClosing,
                 onPlaced = onPanelPlaced,
+                landingShape = landingShape,
             ) {
                 CompositionLocalProvider(
                     LocalHeroTarget provides heroTargetReporter,
@@ -2474,10 +2495,10 @@ private fun PanelOverlay(
  * taps. Sheet callers pass onPanelPlaced so the sheet→detail
  * handoff (vm.pageOrigin) keeps working.
  * Feedback round 7: drag-to-dismiss (Koda now-playing port) —
- * the inner scroll column carries a PopupDismissConnection, and
- * during a drag the Surface lerps from its placed rect toward
- * the tile rect (rect-lerp extension; the open path is
- * untouched) with the enter fade curve. The back arrow row is
+ * the inner scroll column carries a PopupDismissConnection.
+ * Feedback round 11, item 1: NO finger-following — during a drag
+ * the Surface stays put (the enter transform owns every frame)
+ * and only the release dismisses it. The back arrow row is
  * removed with PanelOverlay's: Back, scrim tap, and the drag
  * dismiss.
  */
@@ -2492,6 +2513,9 @@ private fun CenteredPopup(
     // Feedback round 7: drag handle (null = no drag; every current
     // caller passes one). Before the content lambda (round 5).
     dragHandle: PopupDragHandle? = null,
+    // Feedback round 11, item 2: the source tile's outline, for the
+    // exit corner morph (see the Surface graphicsLayer below).
+    landingShape: androidx.compose.ui.graphics.Shape? = null,
     content: @Composable () -> Unit,
 ) {
     // Feedback round 7: the surface's placed rect in root
@@ -2549,7 +2573,14 @@ private fun CenteredPopup(
                 },
             ) {
             Surface(
-                shape = RoundedCornerShape(28.dp),
+                // Feedback round 11, item 2: the Surface shape is
+                // the SUPERSET (36dp, the largest tile corner), so
+                // the graphicsLayer morph clip below — not this
+                // clip — governs the visible outline; otherwise
+                // the Surface clip would cap a 36dp tile landing
+                // at 28dp. The soft shadow follows this outline;
+                // the visible corners follow the morph clip.
+                shape = RoundedCornerShape(36.dp),
                 color = panelBackground,
                 shadowElevation = 16.dp,
                 modifier = Modifier
@@ -2557,29 +2588,24 @@ private fun CenteredPopup(
                     .widthIn(max = 400.dp)
                     .heightIn(max = popupMaxHeight)
                     .graphicsLayer {
-                        // Round 7 rule: progress read ONLY here —
-                        // the open enter transform, or the drag
-                        // rect-lerp while a drag is in flight.
-                        // At progress 1 the drag transform is
-                        // identity, so the open-to-drag handoff is
-                        // continuous; the open path is untouched.
-                        val drag = dragHandle?.takeIf { it.state.isDragging }
-                        val placed = placedRect
-                        if (drag != null && placed != null && source != null) {
-                            val t = centeredPopupDragTransform(placed, source, progress())
-                            translationX = t.translation.x
-                            translationY = t.translation.y
-                            scaleX = t.scaleX
-                            scaleY = t.scaleY
-                            alpha = morphEnterContentAlpha(progress())
-                        } else {
-                            val enter = centeredPopupEnter(progress(), source?.center, popupCenter, distancePx)
-                            translationX = enter.offset.x
-                            translationY = enter.offset.y
-                            scaleX = enter.scale
-                            scaleY = enter.scale
-                            alpha = enter.alpha
-                        }
+                        // Round 7 rule: progress read ONLY here.
+                        // Feedback round 11, item 1: NO drag
+                        // rect-lerp — the enter transform owns
+                        // every frame, so the popup stays put
+                        // under the finger and only the release
+                        // dismisses it. Item 2: the clip lerps
+                        // from the popup's 28dp corners into the
+                        // source tile's corners (polygon tiles
+                        // keep soft 28dp — this popup scale-fades
+                        // and never lands on the tile rect).
+                        val enter = centeredPopupEnter(progress(), source?.center, popupCenter, distancePx)
+                        translationX = enter.offset.x
+                        translationY = enter.offset.y
+                        scaleX = enter.scale
+                        scaleY = enter.scale
+                        alpha = enter.alpha
+                        shape = morphPopupShape(progress(), landingShape)
+                        clip = true
                     }
                     .onGloballyPositioned { coords ->
                         placedRect = coords.boundsInRoot()
@@ -2782,7 +2808,10 @@ private fun TravelingHeader(
         // composition is needed to gate it.
         TravelingBadge(
             entity,
-            domainIcon(entity),
+            // Feedback round 11, item 3: the traveler resolves
+            // through the one icon path, so it can never show the
+            // domain glyph while the tile shows a custom icon.
+            entityIcon(travelerCustom.iconKeys, entity),
             accent,
             progress,
             tileSource,

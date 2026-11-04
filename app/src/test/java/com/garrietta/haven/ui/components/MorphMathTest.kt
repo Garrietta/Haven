@@ -443,6 +443,62 @@ class MorphMathTest {
         assertEquals(0f, morphSourceBadgeAlphaOnClose(0.9f), 0.001f)
     }
 
+    // Feedback round 11, item 2: the morph landing reads the
+    // tile's own corners, never a hardcoded default.
+    @Test
+    fun roundedLandingCorners_readsRoundedShape() {
+        // generalCardShape(0): three 28dp corners, 12dp bottom-right.
+        assertEquals(CardCorners(28.dp, 28.dp, 12.dp, 28.dp), roundedLandingCorners(generalCardShape(0)))
+        // Sharp 8dp all corners.
+        assertEquals(CardCorners(8.dp, 8.dp, 8.dp, 8.dp), roundedLandingCorners(generalCardShape(4)))
+        // Non-rounded outlines (and unknown shapes) read as null.
+        assertEquals(null, roundedLandingCorners(androidx.compose.ui.graphics.RectangleShape))
+        assertEquals(null, roundedLandingCorners(null))
+    }
+
+    @Test
+    fun morphSurfaceCorners_landsOnTileCorners() {
+        val landing = CardCorners(8.dp, 28.dp, 36.dp, 12.dp)
+        // At the tile: exactly the tile's corners.
+        assertEquals(landing, morphSurfaceCorners(0f, landing))
+        // At full page: square, as before.
+        assertEquals(CardCorners(0.dp, 0.dp, 0.dp, 0.dp), morphSurfaceCorners(1f, landing))
+        // Mid-morph: corners scale with the rect lerp.
+        assertEquals(CardCorners(4.dp, 14.dp, 18.dp, 6.dp), morphSurfaceCorners(0.5f, landing))
+        // Null landing keeps the old 28dp rule.
+        assertEquals(CardCorners(28.dp, 28.dp, 28.dp, 28.dp), morphSurfaceCorners(0f, null))
+        assertEquals(CardCorners(0.dp, 0.dp, 0.dp, 0.dp), morphSurfaceCorners(1f, null))
+        // Spring overshoot clamps: never past the tile, never past 1.
+        assertEquals(landing, morphSurfaceCorners(-0.5f, landing))
+        assertEquals(CardCorners(0.dp, 0.dp, 0.dp, 0.dp), morphSurfaceCorners(1.5f, landing))
+    }
+
+    @Test
+    fun morphPopupCorners_lerpsPopupToTile() {
+        val landing = CardCorners(8.dp, 28.dp, 36.dp, 12.dp)
+        // At the tile: exactly the tile's corners.
+        assertEquals(landing, morphPopupCorners(0f, landing))
+        // At rest: the popup's own 28dp.
+        assertEquals(CardCorners(28.dp, 28.dp, 28.dp, 28.dp), morphPopupCorners(1f, landing))
+        // Mid-morph: halfway between popup and tile corners.
+        assertEquals(CardCorners(18.dp, 28.dp, 32.dp, 20.dp), morphPopupCorners(0.5f, landing))
+        // Null landing keeps 28dp throughout.
+        assertEquals(CardCorners(28.dp, 28.dp, 28.dp, 28.dp), morphPopupCorners(0f, null))
+    }
+
+    @Test
+    fun morphSurfaceShape_polygonLandingSwitchesInFadeWindow() {
+        val poly = androidx.compose.ui.graphics.RectangleShape
+        // In the fade window the shape IS the tile's outline.
+        assertTrue(morphSurfaceShape(0.05f, poly) === poly)
+        // While opaque the outline stays soft and rounded.
+        assertEquals(CardCorners(14.dp, 14.dp, 14.dp, 14.dp), roundedLandingCorners(morphSurfaceShape(0.5f, poly)))
+        // A corner landing resolves through the corner lerp.
+        assertEquals(CardCorners(8.dp, 8.dp, 8.dp, 8.dp), roundedLandingCorners(morphSurfaceShape(0f, generalCardShape(4))))
+        // A popup over a polygon tile never goes sharp.
+        assertEquals(CardCorners(28.dp, 28.dp, 28.dp, 28.dp), roundedLandingCorners(morphPopupShape(0f, poly)))
+    }
+
     // Feedback round 2, item 6: popup side-anchoring buckets the
     // source tile's center into overlay thirds.
     @Test

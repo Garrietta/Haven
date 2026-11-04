@@ -148,7 +148,8 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true,
         Row(verticalAlignment = Alignment.CenterVertically) {
             // 48dp badge (up from 40dp): the shape background clears
             // the value text beside it even while pulsing/rotating.
-            DomainBadge(entity, domainIcon(entity), accent, Modifier.size(48.dp))
+            // Feedback round 11, item 3: the one icon path.
+            DomainBadge(entity, entityIcon(com.garrietta.haven.ui.screens.rememberCardCustom(vm).iconKeys, entity), accent, Modifier.size(48.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(

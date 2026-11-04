@@ -1,5 +1,129 @@
 # Haven Changelog
 
+## Feedback round 11 (2026-11-03, morph behavior + icon resolution only)
+
+Device verdict on the round-9 build (2026-11-03 21:36 video,
+no audio, frames reviewed): round 9's drag fix is CONFIRMED
+working — the popup now follows the finger on exit — but
+the user REDIRECTS the behavior in three items below. Round
+10's icon vectors and PNGs are untouched; thermostat dial,
+theme, nav, and every other behavior are untouched.
+
+### Item 1: NO finger-following on drag dismiss
+
+Round 7 shipped a finger-tracked scrub (the popup follows
+the finger toward its tile); the user corrects that Koda
+does NOT do that, and Haven must not either. Change: during
+a drag-down, the popup does NOT move, shrink, or scrub under
+the finger — it stays fully open. The drag remains a dismiss
+gesture with the existing release rule unchanged (velocity
+±120 px/s first, else 40dp travel): on release past the
+threshold the popup springs down into its tile on the calm
+settle spring (damping 0.95 / stiffness 350, no visible
+bounce); below threshold it settles back open. Mechanically:
+`dragProgressFor` now returns the animatable's value only
+(the drag state's `dragProgress` survives as travel
+bookkeeping for the release rule, never rendered); every
+dismiss prologue's snap-to-drag-position is deleted (the
+animatable never left open, so the settle starts exactly
+where it sits); the non-commit release path drops its
+snap-back; the centered popup's drag rect-lerp
+(`centeredPopupDragTransform`, deleted with its test) is
+gone — the enter transform owns every frame; the camera
+branch's progress lambdas read the animatable only.
+`LocalMorphClosing` no longer goes true mid-drag (round
+7's mid-drag source-badge crossfade had nothing to
+crossfade toward once the popup stops moving). KEEP
+unchanged, all verified by reading the call sites: the
+scroll-at-top gating (drag engages only from scroll top on
+scrollable surfaces), dial/toggle/slider ownership
+(on-thumb dial drags unaffected, pill toggles tap-only, M3
+sliders horizontal), reduce-motion (drag never engages),
+the single haptic tick at the dismiss commit, the
+NestedScrollConnection-ancestor-of-scrollable order
+(round-9 lesson), and the programmatic/back dismiss path
+(still springs to the tile).
+
+### Item 2: exit morph lands on the tile's corner radius
+
+Mid-exit frames showed the morphing popup outline with
+SHARP corners while the tile it lands in is rounded. Root
+cause: `MorphSurface` clipped to a hardcoded
+`morphCornerTop` (28dp at the card end) regardless of the
+tile's configured shape, and the centered popup kept a
+fixed 28dp surface. Change: every morph source now reports
+its exact outline alongside its bounds
+(`reportCardShape` into the new `LocalCardShapes` map —
+grid tiles, both home-card variants, panel cards, Round 3
+section cards, the weather card, and camera quadrants),
+and every morph call site passes that outline as
+`landingShape` (falling back to the store's
+override/global card-shape resolution, then to the old
+28dp behavior for a source that never reported). The
+full-screen morph lerps its corners from square to the
+tile's own four corners in step with the rect lerp
+(`morphSurfaceCorners`, pure and unit-tested), so the
+shrinking outline always reads as a scaled tile and lands
+exactly; polygon tile outlines switch to the exact polygon
+in the final fade window (progress < 0.1), where the
+container alpha is already fading and the never-hidden
+source tile shows through beneath — a crossfade onto the
+coincident tile, not a pop. The centered popup lerps its
+28dp corners into the tile's corners
+(`morphPopupCorners`); its Surface shape is raised to
+36dp (the largest tile corner) so the Surface clip cannot
+cap a 36dp landing at 28dp, while the graphicsLayer morph
+clip governs the visible outline; polygon tiles keep soft
+28dp there because the centered popup scale-fades and
+never lands on the tile rect. At minimum the corner radius
+matches at landing with no sharp-corner outline at any
+point of the morph, on both postures.
+
+### Item 3: ONE icon resolution for tile, header, and traveler
+
+Concrete case: eufy AE C10 (vacuum.t2292), an entity whose
+icon the user changed. On the round-9 build the Favorites
+tile badge showed the custom vacuum glyph, while the
+detail header badge — and the badge traveling down during
+the exit morph — showed the yellow circular-arrows glyph.
+Root cause: the tile (and the sheet header, and the detail
+page header via `detailHeaderCustom`) honored the custom
+icon key, but the traveler (`TravelingHeader`) and the
+detail page's hero badge (`DetailPageContent`) read
+`domainIcon` directly — and the vacuum domain icon IS the
+circular arrows (`Icons.Filled.Autorenew`), which is why
+the mismatch read as "vacuum glyph vs circular arrows"
+rather than two different icons. Change: one resolver,
+`entityIcon(iconKeys, entity)` in `EntityControls`
+(custom key wins, unknown keys fall back to the domain
+icon), now used by all seven entity-badge sites: the grid
+tile, the sheet header, the detail page header, the detail
+hero badge, the thermostat popout header badge, the
+control-card header badge, and the traveler. Deliberately
+NOT changed: the sheet/detail menu-row icons (navigation
+chrome, not entity badges), the shape-picker option
+previews (neutral preview glyphs), and the
+`DetailPopupHeader` default (unreachable — all four
+callers pass `displayIcon` through `detailHeaderCustom`,
+now via `entityIcon`). The icon picker UI and the stored
+overrides themselves are untouched.
+
+### Verification notes
+
+- Baseline: remote HEAD be465850 (round 10), 357 tests.
+- New pure tests: `roundedLandingCorners`,
+  `morphSurfaceCorners`, `morphPopupCorners`,
+  `morphSurfaceShape` polygon window (MorphMathTest);
+  the deleted rect-lerp transform's test is removed with
+  it (PopupDragTest). No test total change is claimed
+  here beyond the suite's own run.
+- Deliberately NOT changed: round-10 icon vectors/PNGs,
+  thermostat dial, theme, nav, signing files (byte-
+  identical to 616e3a96), WebRTC still gated off
+  (`webrtcEnabled = false`), no negative padding
+  anywhere (all progress/corner math clamped to [0, 1]
+  before use).
+
 ## Feedback round 10 (2026-11-03/04, app icon only — user-approved generated image)
 
 The user approved a generated icon image as the new app icon

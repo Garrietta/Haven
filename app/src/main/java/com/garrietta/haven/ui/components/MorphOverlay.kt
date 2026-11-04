@@ -30,6 +30,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -112,6 +117,18 @@ fun centerTargetRect(overlayOrigin: Offset, overlaySize: IntSize, panelSize: Int
 
 /** Morph-source bounds by entity id, in root coordinates. Written by cards, read at morph open. */
 val LocalCardBounds = staticCompositionLocalOf<MutableMap<String, Rect>> { mutableMapOf() }
+
+/**
+ * Feedback round 11, item 2: morph-source OUTLINE shapes by entity
+ * id. Written by cards alongside [LocalCardBounds] (every site that
+ * reports bounds reports the exact outline it renders — override,
+ * global, or index-cycled default), read by the morphing surface so
+ * the exit morph lands on the tile's own corners instead of a
+ * hardcoded 28dp. A missing entry (a source that never reported)
+ * falls back to the store resolution at the morph call site, then
+ * to the old 28dp behavior — never a crash, never a guess.
+ */
+val LocalCardShapes = staticCompositionLocalOf<MutableMap<String, Shape>> { mutableMapOf() }
 
 /** Entity id of the card currently hidden as a morph source, or null. */
 val LocalHiddenCardId = staticCompositionLocalOf<String?> { null }
@@ -216,6 +233,22 @@ fun Modifier.reportCardBounds(id: String): Modifier = composed {
     onGloballyPositioned { coords: LayoutCoordinates ->
         val rect = coords.boundsInRoot()
         if (bounds[id] != rect) bounds[id] = rect
+    }
+}
+
+/**
+ * Feedback round 11, item 2: reports this layout's outline shape
+ * into [LocalCardShapes] under [id]. Call sites pair this with
+ * [reportCardBounds] and pass the exact shape the layout renders,
+ * so the morphing surface can land on the tile's own corners.
+ * Writes only when the shape actually changed (same rule as bounds,
+ * so the write cannot schedule a recomposition loop — Shape
+ * equality here is the outline's own equals).
+ */
+fun Modifier.reportCardShape(id: String, shape: Shape): Modifier = composed {
+    val shapes = LocalCardShapes.current
+    onGloballyPositioned {
+        if (shapes[id] != shape) shapes[id] = shape
     }
 }
 
@@ -422,8 +455,15 @@ fun lerpRect(from: Rect, to: Rect, t: Float): Rect {
  * connection object, so recomposition creating a fresh connection
  * cannot lose a mid-gesture latch. [settling] marks a dismiss that was
  * initiated from a drag, so the surface keeps the OPEN fade curves
- * through the settle (the popup content rides down visibly, as in
- * Koda's minimize, instead of vanishing on the close curve).
+ * through the settle (the popup content rides down visibly on the
+ * settle spring, instead of vanishing on the close curve).
+ * Feedback round 11, item 1: [dragProgress] is gesture-travel
+ * bookkeeping ONLY (the release rule compares it against
+ * [dragStartProgress]). It is NEVER rendered: the popup stays fully
+ * open under the finger, and only the release commits the spring
+ * down into the tile. Round 7's finger-following scrub is deleted
+ * — the user corrected that Koda does not do that, and neither
+ * does Haven.
  */
 class PopupDragState {
     var isDragging by mutableStateOf(false)
@@ -478,7 +518,9 @@ fun shouldDismissDrag(
 /**
  * Feedback round 7: Koda's finger formula, pure. Dragging down (positive
  * dy) decreases progress; the denominator is the exact top-edge travel
- * of the container, so the popup tracks the finger 1:1. Floor 0 — Haven
+ * of the container. Feedback round 11, item 1: the result feeds ONLY
+ * the release rule ([shouldDismissDrag] travel) — it is never
+ * rendered, so the popup does not track the finger. Floor 0 — Haven
  * has no curtain path, so no 0.25 floor.
  */
 fun dragProgressAfterDelta(current: Float, dy: Float, dragRangePx: Float): Float =
@@ -517,42 +559,6 @@ fun dragRangeForCenteredPopup(
         placedHeight
     }
     return range.coerceAtLeast(1f)
-}
-
-/** Feedback round 7: rect-lerp drag transform for a CenteredPopup. */
-data class PopupDragTransform(
-    val translation: Offset,
-    val scaleX: Float,
-    val scaleY: Float,
-)
-
-/**
- * Feedback round 7: during a CenteredPopup drag ONLY, the surface
- * lerps from its placed rect toward the tile rect (translation +
- * scale about the default center origin). At progress 1 the transform
- * is identity, so the open-to-drag handoff is continuous; the open
- * path itself is untouched (centeredPopupEnter still owns it).
- */
-fun centeredPopupDragTransform(placed: Rect, tile: Rect, progress: Float): PopupDragTransform {
-    val t = (1f - progress.coerceIn(0f, 1f))
-    val scaleX = if (placed.width > 0f && tile.width > 0f) {
-        1f + (tile.width / placed.width - 1f) * t
-    } else {
-        1f
-    }
-    val scaleY = if (placed.height > 0f && tile.height > 0f) {
-        1f + (tile.height / placed.height - 1f) * t
-    } else {
-        1f
-    }
-    return PopupDragTransform(
-        translation = Offset(
-            x = (tile.center.x - placed.center.x) * t,
-            y = (tile.center.y - placed.center.y) * t,
-        ),
-        scaleX = scaleX,
-        scaleY = scaleY,
-    )
 }
 
 /**
@@ -723,6 +729,112 @@ fun morphCornerTop(progress: Float): Dp =
 fun morphPopupCorner(progress: Float, from: Dp = 28.dp, to: Dp = 32.dp): Dp {
     val p = progress.coerceIn(0f, 1f)
     return (from + (to - from) * p).coerceAtLeast(0.dp)
+}
+
+/**
+ * Feedback round 11, item 2: the four corners of a tile outline,
+ * for morph landing. Pure, unit-tested.
+ */
+data class CardCorners(
+    val topStart: Dp,
+    val topEnd: Dp,
+    val bottomEnd: Dp,
+    val bottomStart: Dp,
+)
+
+/**
+ * The four corners of a [RoundedCornerShape] outline, or null for
+ * a polygon/unknown outline. CornerSize implementations are
+ * internal in this Compose version, so corners are read through
+ * the public [CornerSize.toPx] API at unit density (where px ==
+ * dp numerically) instead of a cast — every tile outline in-tree
+ * is Dp-based, so the read is exact.
+ */
+fun roundedLandingCorners(shape: Shape?): CardCorners? {
+    if (shape !is RoundedCornerShape) return null
+    val density = Density(1f)
+    fun corner(size: CornerSize): Dp = size.toPx(Size.Zero, density).dp
+    return CardCorners(
+        corner(shape.topStart),
+        corner(shape.topEnd),
+        corner(shape.bottomEnd),
+        corner(shape.bottomStart),
+    )
+}
+
+/**
+ * Feedback round 11, item 2: the full-screen morph surface's corners
+ * at [progress] (0 = tile, 1 = full page). The corners lerp from the
+ * tile's own corners to square exactly in step with the rect lerp, so
+ * the shrinking outline always reads as a scaled tile — never a sharp
+ * rectangle floating mid-screen — and lands on the tile's corners
+ * exactly. Null landing (unknown outline) keeps the old 28dp rule.
+ * Pure, unit-tested.
+ */
+fun morphSurfaceCorners(progress: Float, landing: CardCorners?): CardCorners {
+    val t = (1f - progress.coerceIn(0f, 1f))
+    if (landing == null) {
+        val c = morphCornerTop(progress)
+        return CardCorners(c, c, c, c)
+    }
+    return CardCorners(
+        topStart = landing.topStart * t,
+        topEnd = landing.topEnd * t,
+        bottomEnd = landing.bottomEnd * t,
+        bottomStart = landing.bottomStart * t,
+    )
+}
+
+/**
+ * Feedback round 11, item 2: the centered popup's corners at
+ * [progress] (0 = tile, 1 = popup). The popup's 28dp corners lerp to
+ * the tile's own corners, so the exit ends on the tile's shape, not
+ * on 28dp. Null landing keeps 28dp. Pure, unit-tested.
+ */
+fun morphPopupCorners(progress: Float, landing: CardCorners?): CardCorners {
+    val t = (1f - progress.coerceIn(0f, 1f))
+    if (landing == null) return CardCorners(28.dp, 28.dp, 28.dp, 28.dp)
+    return CardCorners(
+        topStart = 28.dp + (landing.topStart - 28.dp) * t,
+        topEnd = 28.dp + (landing.topEnd - 28.dp) * t,
+        bottomEnd = 28.dp + (landing.bottomEnd - 28.dp) * t,
+        bottomStart = 28.dp + (landing.bottomStart - 28.dp) * t,
+    )
+}
+
+private fun CardCorners.toShape(): RoundedCornerShape =
+    RoundedCornerShape(topStart, topEnd, bottomEnd, bottomStart)
+
+/**
+ * Feedback round 11, item 2: the full-screen morph surface's clip
+ * shape at [progress] for a tile outline of [landingShape]. Corner
+ * outlines lerp per [morphSurfaceCorners]; polygon outlines cannot
+ * lerp corners, so the surface keeps the soft rounded outline while
+ * opaque and switches to the exact polygon in the final fade window
+ * (progress < 0.1), where the container alpha is already fading and
+ * the never-hidden source tile shows through beneath — the switch
+ * crossfades onto the coincident tile instead of popping. At
+ * progress 0 the shape IS the tile's shape in both cases.
+ */
+fun morphSurfaceShape(progress: Float, landingShape: Shape?): Shape {
+    val p = progress.coerceIn(0f, 1f)
+    if (landingShape != null && roundedLandingCorners(landingShape) == null && p < 0.1f) {
+        return landingShape
+    }
+    return morphSurfaceCorners(p, roundedLandingCorners(landingShape)).toShape()
+}
+
+/**
+ * Feedback round 11, item 2: the centered popup's clip shape at
+ * [progress] for a tile outline of [landingShape]. Corner outlines
+ * lerp per [morphPopupCorners]; polygon outlines keep the popup's
+ * soft 28dp (the centered popup never lands on the tile rect — it
+ * scale-fades — so no landing mismatch can show, and its outline is
+ * never sharp).
+ */
+fun morphPopupShape(progress: Float, landingShape: Shape?): Shape {
+    val p = progress.coerceIn(0f, 1f)
+    return morphPopupCorners(p, roundedLandingCorners(landingShape)).toShape()
 }
 
 /**
@@ -1071,6 +1183,10 @@ fun MorphSurface(
     progress: (() -> Float)? = null,
     isClosing: Boolean = false,
     onPlaced: ((Rect) -> Unit)? = null,
+    // Feedback round 11, item 2: the source tile's outline (from
+    // [LocalCardShapes], resolved by the caller). The clip lerps
+    // into it so the exit lands on the tile's own corners.
+    landingShape: Shape? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -1091,7 +1207,7 @@ fun MorphSurface(
                 translationY = rect.top - target.top
                 scaleX = if (target.width > 0f) rect.width / target.width else 1f
                 scaleY = if (target.height > 0f) rect.height / target.height else 1f
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(morphCornerTop(p))
+                shape = morphSurfaceShape(p, landingShape)
                 clip = true
             }
             .drawBehind {
