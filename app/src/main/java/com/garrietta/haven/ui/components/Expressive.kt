@@ -758,6 +758,14 @@ fun Dial(
                     onDragCancel = { grabbing = false },
                 ) { change, _ ->
                     if (!grabbing) return@detectDragGestures
+                    // Feedback round 7: a genuine handle drag
+                    // consumes its changes, so the popup's drag
+                    // connection (and, before this round, the popup
+                    // scroll) never also moves while the value
+                    // changes. Off-handle drags stay unconsumed by
+                    // design: dragging anywhere else pulls the
+                    // popup down.
+                    change.consume()
                     val pos = change.position
                     val cx = size.width / 2f
                     val cy = size.height / 2f

@@ -1,9 +1,19 @@
 package com.garrietta.haven
 import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.LocalSuppressTraveler
+import com.garrietta.haven.ui.components.PopupDragHandle
+import com.garrietta.haven.ui.components.PopupDragState
+import com.garrietta.haven.ui.components.PopupDismissConnection
 import com.garrietta.haven.ui.components.PopupSideAnchor
+import com.garrietta.haven.ui.components.centeredPopupDragTransform
 import com.garrietta.haven.ui.components.centeredPopupEnter
+import com.garrietta.haven.ui.components.dragProgressAfterDelta
+import com.garrietta.haven.ui.components.dragRangeForCenteredPopup
+import com.garrietta.haven.ui.components.dragRangeForPanelOverlay
+import com.garrietta.haven.ui.components.morphEnterContentAlpha
+import com.garrietta.haven.ui.components.popupDragDetector
 import com.garrietta.haven.ui.components.popupSideAnchor
+import com.garrietta.haven.ui.components.shouldDismissDrag
 import com.garrietta.haven.ui.components.ShapePrefs
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.badgeRectInRow
@@ -31,6 +41,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -81,7 +92,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
@@ -191,6 +201,7 @@ import com.garrietta.haven.ui.components.PillBarActiveGlyph
 import com.garrietta.haven.ui.components.PillBarContainer
 import com.garrietta.haven.ui.components.PillBarUnselectedGlyph
 import com.garrietta.haven.ui.components.pillUnselectedGlyph
+import com.garrietta.haven.ui.theme.settleSpring
 import com.garrietta.haven.ui.theme.sheetSpring
 import com.garrietta.haven.ui.components.pillScrub
 import com.garrietta.haven.ui.components.pillScrubItem
@@ -388,6 +399,15 @@ fun HavenApp(vm: HavenViewModel) {
         // selectedNavIndex returns non-null).
         var lastRailTabIndex by remember { mutableStateOf<Int?>(null) }
         val popoutProgress = remember { Animatable(0f) }
+        // Feedback round 7: per-surface drag state for the Koda
+        // now-playing morph port (see MorphOverlay.PopupDragState).
+        // Declared here, next to the progress animatables, so the
+        // dismiss functions below can reference them.
+        val sheetDrag = remember { PopupDragState() }
+        val detailDrag = remember { PopupDragState() }
+        val panelDetailDrag = remember { PopupDragState() }
+        val popoutDrag = remember { PopupDragState() }
+        val cameraDrag = remember { PopupDragState() }
         // The live panel's root rect (camera-rise origin for
         // sheet Details actions); re-reported on every panel place.
         var sheetPanelBounds by remember { mutableStateOf<Rect?>(null) }
@@ -433,6 +453,13 @@ fun HavenApp(vm: HavenViewModel) {
             detailAnim = null
             panelDetailAnim = null
             popoutAnim = null
+            // Feedback round 7: instant navigation clears any
+            // in-flight drag state alongside the anims.
+            sheetDrag.reset()
+            detailDrag.reset()
+            panelDetailDrag.reset()
+            popoutDrag.reset()
+            cameraDrag.reset()
             heroTarget = null
             arcTarget = null
             vm.closeClimatePopout()
@@ -494,6 +521,8 @@ fun HavenApp(vm: HavenViewModel) {
             if (detailAnim?.screen == anim.screen) {
                 detailAnim = null
             }
+            // Feedback round 7: instant clears drop drag state too.
+            detailDrag.reset()
             vm.clearTravelSnapshot(anim.entityId)
             // Fresh measurement on the next open: a stale target rect
             // (e.g. from before a rotation) would otherwise steer the
@@ -505,6 +534,8 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = sheetAnim ?: return
             if (vm.popupEntityId == anim.id) vm.closePopup()
             if (sheetAnim?.id == anim.id) sheetAnim = null
+            // Feedback round 7: instant clears drop drag state too.
+            sheetDrag.reset()
             vm.clearTravelSnapshot(anim.id)
             heroTarget = null
             arcTarget = null
@@ -513,27 +544,49 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = popoutAnim ?: return
             if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
             if (popoutAnim?.id == anim.id) popoutAnim = null
+            // Feedback round 7: instant clears drop drag state too.
+            popoutDrag.reset()
             vm.clearTravelSnapshot(anim.id)
             heroTarget = null
             arcTarget = null
         }
         // Animated dismisses: Back, the back arrow, and Close all use
-        // these. The progress animates 1 -> 0 on the bounds spring
-        // (snapped under reduce-motion); only then is the trigger
+        // these. The progress animates 1 -> 0 on the settle spring
+        // (feedback round 7: Koda's calm 0.95/350, replacing
+        // springBounds for dismisses; opens stay on springBounds),
+        // snapped under reduce-motion; only then is the trigger
         // cleared, and only if the generation + identity still
         // match the morph that started (see above).
+        // Feedback round 7 drag-aware prologue (the single choke
+        // point — Back, badge tap, scrim tap, and drag release all
+        // land here): if a drag is in flight, mark settling BEFORE
+        // flipping exiting, so isClosing stays false and the surface
+        // keeps the OPEN fade curves through the settle (content
+        // rides down visibly, as in Koda's minimize, instead of
+        // vanishing on the close curve). The launch then snaps the
+        // animatable to the drag position before clearing the drag
+        // flag, so the progress lambda never jumps: dragProgress
+        // equals the anim value at every step.
         fun dismissDetail() {
             val anim = detailAnim ?: return
             if (detailExiting) return
+            val fromDrag = detailDrag.isDragging
+            if (fromDrag) detailDrag.settling = true
             detailExiting = true
             vm.captureTravelSnapshot(anim.entityId)
             val gen = morphGeneration
             scope.launch {
                 try {
+                    if (fromDrag) {
+                        detailProgress.snapTo(detailDrag.dragProgress)
+                        detailDrag.isDragging = false
+                        detailDrag.pulling = false
+                    }
                     if (reduceMotion) detailProgress.snapTo(0f)
-                    else detailProgress.animateTo(0f, springBounds())
+                    else detailProgress.animateTo(0f, settleSpring())
                 } finally {
                     detailExiting = false
+                    detailDrag.settling = false
                     if (gen == morphGeneration && detailAnim?.screen == anim.screen) {
                         dismissDetailInstant()
                     }
@@ -543,15 +596,23 @@ fun HavenApp(vm: HavenViewModel) {
         fun dismissSheet() {
             val anim = sheetAnim ?: return
             if (sheetExiting) return
+            val fromDrag = sheetDrag.isDragging
+            if (fromDrag) sheetDrag.settling = true
             sheetExiting = true
             vm.captureTravelSnapshot(anim.id)
             val gen = morphGeneration
             scope.launch {
                 try {
+                    if (fromDrag) {
+                        sheetProgress.snapTo(sheetDrag.dragProgress)
+                        sheetDrag.isDragging = false
+                        sheetDrag.pulling = false
+                    }
                     if (reduceMotion) sheetProgress.snapTo(0f)
-                    else sheetProgress.animateTo(0f, springBounds())
+                    else sheetProgress.animateTo(0f, settleSpring())
                 } finally {
                     sheetExiting = false
+                    sheetDrag.settling = false
                     if (gen == morphGeneration && sheetAnim?.id == anim.id) {
                         dismissSheetInstant()
                     }
@@ -561,15 +622,23 @@ fun HavenApp(vm: HavenViewModel) {
         fun dismissPopout() {
             val anim = popoutAnim ?: return
             if (popoutExiting) return
+            val fromDrag = popoutDrag.isDragging
+            if (fromDrag) popoutDrag.settling = true
             popoutExiting = true
             vm.captureTravelSnapshot(anim.id)
             val gen = morphGeneration
             scope.launch {
                 try {
+                    if (fromDrag) {
+                        popoutProgress.snapTo(popoutDrag.dragProgress)
+                        popoutDrag.isDragging = false
+                        popoutDrag.pulling = false
+                    }
                     if (reduceMotion) popoutProgress.snapTo(0f)
-                    else popoutProgress.animateTo(0f, springBounds())
+                    else popoutProgress.animateTo(0f, settleSpring())
                 } finally {
                     popoutExiting = false
+                    popoutDrag.settling = false
                     if (gen == morphGeneration && popoutAnim?.id == anim.id) {
                         dismissPopoutInstant()
                     }
@@ -584,6 +653,8 @@ fun HavenApp(vm: HavenViewModel) {
             if (panelDetailAnim?.entityId == anim.entityId) {
                 panelDetailAnim = null
             }
+            // Feedback round 7: instant clears drop drag state too.
+            panelDetailDrag.reset()
             vm.clearTravelSnapshot(anim.entityId)
             heroTarget = null
             arcTarget = null
@@ -591,21 +662,130 @@ fun HavenApp(vm: HavenViewModel) {
         fun dismissPanelDetail() {
             val anim = panelDetailAnim ?: return
             if (panelDetailExiting) return
+            // Feedback round 7: same drag-aware prologue as the
+            // other dismisses (see dismissDetail).
+            val fromDrag = panelDetailDrag.isDragging
+            if (fromDrag) panelDetailDrag.settling = true
             panelDetailExiting = true
             vm.captureTravelSnapshot(anim.entityId)
             val gen = morphGeneration
             scope.launch {
                 try {
+                    if (fromDrag) {
+                        panelDetailProgress.snapTo(panelDetailDrag.dragProgress)
+                        panelDetailDrag.isDragging = false
+                        panelDetailDrag.pulling = false
+                    }
                     if (reduceMotion) panelDetailProgress.snapTo(0f)
-                    else panelDetailProgress.animateTo(0f, springBounds())
+                    else panelDetailProgress.animateTo(0f, settleSpring())
                 } finally {
                     panelDetailExiting = false
+                    panelDetailDrag.settling = false
                     if (gen == morphGeneration && panelDetailAnim?.entityId == anim.entityId) {
                         dismissPanelDetailInstant()
                     }
                 }
             }
         }
+        // Feedback round 7: the drag controller for the Koda
+        // now-playing port. One handle per surface, built at the
+        // render block; the wrapper supplies the drag range per
+        // event (it owns the placed rect). Rules, in order:
+        // - Under reduce-motion the drag never engages (Back/dismiss
+        //   snap as today). This is a deliberate new behavior: the
+        //   existing idiom never disabled a gesture, but a scrubbed
+        //   morph under reduce-motion would be animation by
+        //   another name.
+        // - While a dismiss animation owns the surface (exiting),
+        //   deltas are ignored; a release then just clears the flag.
+        // - A drag only engages at rest (anim >= 0.99): a grab
+        //   mid-open simply does not engage, so the gesture never
+        //   fights an in-flight open animation.
+        // - First accepted delta latches dragging, records the
+        //   start progress, and re-captures the travel snapshot
+        //   (state may have changed since open, and the return
+        //   flight must reflect current state). A cancelled drag
+        //   never clears the snapshot.
+        // - Release commits on Koda's rule (velocity momentum, else
+        //   40dp travel) with a single ContextClick settle tick,
+        //   then calls the surface's dismiss while still dragging
+        //   so its prologue keeps the open curves; otherwise the
+        //   anim snaps to the release position and springs back
+        //   open on the settle spring. DragCancel releases with
+        //   zero velocity (travel rule decides).
+        val dragHaptics = LocalHapticFeedback.current
+        val dragCommitPx = with(LocalDensity.current) { 40.dp.toPx() }
+        fun dragProgressFor(
+            drag: PopupDragState,
+            anim: Animatable<Float, AnimationVector1D>,
+        ): () -> Float = { if (drag.isDragging) drag.dragProgress else anim.value }
+        fun onDragDelta(
+            drag: PopupDragState,
+            anim: Animatable<Float, AnimationVector1D>,
+            isExiting: () -> Boolean,
+            onDragStart: () -> Unit,
+            dy: Float,
+            rangePx: Float,
+        ) {
+            if (reduceMotion) return
+            if (isExiting()) return
+            if (!drag.isDragging) {
+                if (anim.value < 0.99f) return
+                drag.isDragging = true
+                drag.dragProgress = anim.value
+                drag.dragStartProgress = anim.value
+                onDragStart()
+            }
+            drag.dragProgress = dragProgressAfterDelta(drag.dragProgress, dy, rangePx)
+        }
+        fun onDragRelease(
+            drag: PopupDragState,
+            anim: Animatable<Float, AnimationVector1D>,
+            velocityY: Float,
+            rangePx: Float,
+            isExiting: () -> Boolean,
+            dismiss: () -> Unit,
+        ) {
+            if (!drag.isDragging) return
+            if (isExiting()) {
+                drag.isDragging = false
+                drag.pulling = false
+                return
+            }
+            val released = drag.dragProgress
+            val commit = shouldDismissDrag(
+                velocityY,
+                drag.dragStartProgress,
+                released,
+                rangePx,
+                dragCommitPx,
+            )
+            if (commit) {
+                dragHaptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                dismiss()
+            } else {
+                scope.launch {
+                    try {
+                        anim.snapTo(released)
+                    } finally {
+                        drag.isDragging = false
+                        drag.pulling = false
+                    }
+                    anim.animateTo(1f, settleSpring())
+                }
+            }
+        }
+        fun popupDragHandle(
+            drag: PopupDragState,
+            anim: Animatable<Float, AnimationVector1D>,
+            isExiting: () -> Boolean,
+            onDragStart: () -> Unit,
+            dismiss: () -> Unit,
+        ): PopupDragHandle = PopupDragHandle(
+            state = drag,
+            onDelta = { dy, range -> onDragDelta(drag, anim, isExiting, onDragStart, dy, range) },
+            onRelease = { v, range -> onDragRelease(drag, anim, v, range, isExiting, dismiss) },
+        )
         // Open a panel detail: capture the tapped panel card's rect now (the panel is still
         // composed, so cardBounds holds the panel card's rect); the open effect below animates
         // progress 0 -> 1. A retap while one is open replaces it and clears the stale snapshot.
@@ -631,6 +811,12 @@ fun HavenApp(vm: HavenViewModel) {
             detailAnim = null
             panelDetailAnim = null
             popoutAnim = null
+            // Feedback round 7: same instant drag-state clear as goTop.
+            sheetDrag.reset()
+            detailDrag.reset()
+            panelDetailDrag.reset()
+            popoutDrag.reset()
+            cameraDrag.reset()
             heroTarget = null
             arcTarget = null
             vm.closeClimatePopout()
@@ -667,6 +853,10 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = sheetAnim
             if (id != null && anim?.id == id) {
                 vm.captureTravelSnapshot(id)
+                // Feedback round 7: open resets the drag state
+                // (Koda's open-state backstop: a latched drag flag
+                // can never survive into a fresh open).
+                sheetDrag.reset()
                 // Always animate (unless reduce-motion): a sourced
                 // morph interpolates from the card, a sourceless one
                 // from the graceful fallback rect — never an instant
@@ -686,6 +876,8 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = detailAnim
             if (detailScreen != null && anim != null && detailEntityId(anim.screen) == detailEntityId(detailScreen)) {
                 vm.captureTravelSnapshot(detailEntityId(detailScreen))
+                // Feedback round 7: open resets the drag state.
+                detailDrag.reset()
                 if (!reduceMotion) {
                     detailProgress.snapTo(0f)
                     detailProgress.animateTo(1f, springBounds())
@@ -704,6 +896,8 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = panelDetailAnim
             if (anim != null) {
                 vm.captureTravelSnapshot(anim.entityId)
+                // Feedback round 7: open resets the drag state.
+                panelDetailDrag.reset()
                 if (!reduceMotion) {
                     panelDetailProgress.snapTo(0f)
                     panelDetailProgress.animateTo(1f, springBounds())
@@ -724,6 +918,8 @@ fun HavenApp(vm: HavenViewModel) {
             val anim = popoutAnim
             if (id != null && anim?.id == id) {
                 vm.captureTravelSnapshot(id)
+                // Feedback round 7: open resets the drag state.
+                popoutDrag.reset()
                 if (!reduceMotion) {
                     popoutProgress.snapTo(0f)
                     popoutProgress.animateTo(1f, springBounds())
@@ -798,13 +994,24 @@ fun HavenApp(vm: HavenViewModel) {
             // dismissal starts, not after the close animation lands —
             // the panel's dispose effect disengages again (no-op).
             vm.disengageFrontDoorLive("panel-close")
+            // Feedback round 7: same drag-aware prologue as the
+            // other dismisses (see dismissDetail), and the settle
+            // spring for the return flight.
+            val fromDrag = cameraDrag.isDragging
+            if (fromDrag) cameraDrag.settling = true
             cameraDialogExiting = true
             scope.launch {
                 try {
+                    if (fromDrag) {
+                        cameraDialogProgress.snapTo(cameraDrag.dragProgress)
+                        cameraDrag.isDragging = false
+                        cameraDrag.pulling = false
+                    }
                     if (reduceMotion) cameraDialogProgress.snapTo(0f)
-                    else cameraDialogProgress.animateTo(0f, springBounds())
+                    else cameraDialogProgress.animateTo(0f, settleSpring())
                 } finally {
                     cameraDialogExiting = false
+                    cameraDrag.settling = false
                     if (vm.cameraDialogId == id) vm.closeCameraDialog()
                 }
             }
@@ -813,6 +1020,8 @@ fun HavenApp(vm: HavenViewModel) {
             val id = vm.cameraDialogId
             if (id != null && !cameraDialogExiting) {
                 cameraDialogSource = cardBounds[id]
+                // Feedback round 7: open resets the drag state.
+                cameraDrag.reset()
                 if (reduceMotion) cameraDialogProgress.snapTo(1f)
                 else {
                     cameraDialogProgress.snapTo(0f)
@@ -932,12 +1141,18 @@ fun HavenApp(vm: HavenViewModel) {
                 // read the root lambda only inside graphicsLayer,
                 // never during composition — no per-frame
                 // recomposition cost.
-                LocalMorphClosing provides (sheetExiting || detailExiting || panelDetailExiting || popoutExiting),
+                // Feedback round 7: closing is also true while a
+                // drag is in flight (the source badge crossfades
+                // in as the popup is pulled down, exactly as on a
+                // programmatic close). The camera dialog is
+                // deliberately absent, as before: it never sets a
+                // hidden id, so no badge reads this for it.
+                LocalMorphClosing provides (sheetExiting || detailExiting || panelDetailExiting || popoutExiting || sheetDrag.isDragging || detailDrag.isDragging || panelDetailDrag.isDragging || popoutDrag.isDragging),
                 LocalMorphProgress provides {
                     when {
-                        sheetAnim != null -> sheetProgress.value
-                        detailAnim != null -> detailProgress.value
-                        popoutAnim != null -> popoutProgress.value
+                        sheetAnim != null -> if (sheetDrag.isDragging) sheetDrag.dragProgress else sheetProgress.value
+                        detailAnim != null -> if (detailDrag.isDragging) detailDrag.dragProgress else detailProgress.value
+                        popoutAnim != null -> if (popoutDrag.isDragging) popoutDrag.dragProgress else popoutProgress.value
                         else -> 1f
                     }
                 },
@@ -1327,21 +1542,26 @@ fun HavenApp(vm: HavenViewModel) {
             // panel covers the page at rest. The badge still
             // travels into the panel's header (see
             // TravelingHeader) while the panel morphs — both, not
-            // one or the other. No drag-to-dismiss: Back and the
-            // panel's back arrow dismiss (see dismissSheet).
+            // one or the other. Feedback round 7: drag-to-dismiss
+            // (Koda now-playing port) and Back dismiss; the back
+            // arrow is gone (see PanelOverlay/CenteredPopup).
             if (sheetAnim != null) {
                 val anim = sheetAnim!!
                 BackHandler { dismissSheet() }
+                // Feedback round 7: drag handle for this surface
+                // (progress lambda below is drag-aware).
+                val sheetHandle = popupDragHandle(sheetDrag, sheetProgress, { sheetExiting }, { vm.captureTravelSnapshot(anim.id) }, { dismissSheet() })
                 // Feedback round, item 3: unfolded gets the
                 // centered popup; folded keeps the full-screen
                 // morph + traveler below, byte for byte.
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = { sheetProgress.value },
+                        progress = dragProgressFor(sheetDrag, sheetProgress),
                         source = cardBounds[anim.id] ?: anim.source,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissSheet() },
+                        dragHandle = sheetHandle,
                         onPanelPlaced = { sheetPanelBounds = it },
                     ) {
                         EntityPopupSheetContent(
@@ -1358,13 +1578,15 @@ fun HavenApp(vm: HavenViewModel) {
                 // content). Progress is a lambda: nothing in this
                 // block reads the Animatable during composition.
                 PanelOverlay(
-                    progress = { sheetProgress.value },
+                    progress = dragProgressFor(sheetDrag, sheetProgress),
                     source = cardBounds[anim.id] ?: anim.source,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    onDismiss = { dismissSheet() },
-                    isClosing = sheetExiting,
+                    // Feedback round 7: settling keeps the open
+                    // curves through a drag-initiated dismiss.
+                    isClosing = sheetExiting && !sheetDrag.settling,
+                    dragHandle = sheetHandle,
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                     onPanelPlaced = { sheetPanelBounds = it },
@@ -1382,16 +1604,16 @@ fun HavenApp(vm: HavenViewModel) {
                 TravelingHeader(
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = { sheetProgress.value }, overlayOrigin,
+                    progress = dragProgressFor(sheetDrag, sheetProgress), overlayOrigin,
                     onDismiss = { dismissSheet() },
-                    isClosing = sheetExiting,
+                    isClosing = sheetExiting && !sheetDrag.settling,
                 )
                 // Traveling arc, above the panel (see TravelingArc).
                 TravelingArc(
                     vm, anim.id, arcBounds[anim.id],
                     arcTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = { sheetProgress.value }, overlayOrigin,
-                    isClosing = sheetExiting,
+                    progress = dragProgressFor(sheetDrag, sheetProgress), overlayOrigin,
+                    isClosing = sheetExiting && !sheetDrag.settling,
                 )
                 } // else: folded full-screen morph (feedback item 3)
             }
@@ -1401,12 +1623,14 @@ fun HavenApp(vm: HavenViewModel) {
             // content is unchanged; the one-frame measurement pass
             // reports only the header/arc target rects, never a
             // panel size — the panel is full-screen. Back and the
-            // panel's back arrow are the smooth reverse of enter
+            // drag are the smooth reverse of enter
             // (see dismissDetail); only the sheet -> detail
             // handoff clears instantly.
             if (detailAnim != null) {
                 val anim = detailAnim!!
                 BackHandler { dismissDetail() }
+                // Feedback round 7: drag handle for this surface.
+                val detailHandle = popupDragHandle(detailDrag, detailProgress, { detailExiting }, { vm.captureTravelSnapshot(anim.entityId) }, { dismissDetail() })
                 // Feedback round 4, item 4: when this detail opened
                 // from a sub-panel or another detail, the previous
                 // backstack entry is an overlay screen — the source
@@ -1439,11 +1663,12 @@ fun HavenApp(vm: HavenViewModel) {
                 // morph + traveler below, byte for byte.
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = { detailProgress.value },
+                        progress = dragProgressFor(detailDrag, detailProgress),
                         source = detailSource,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissDetail() },
+                        dragHandle = detailHandle,
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                             content(anim.screen)
@@ -1459,13 +1684,13 @@ fun HavenApp(vm: HavenViewModel) {
                 // measurement frame here either (see the sheet
                 // block); progress is a lambda.
                 PanelOverlay(
-                    progress = { detailProgress.value },
+                    progress = dragProgressFor(detailDrag, detailProgress),
                     source = detailSource,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    onDismiss = { dismissDetail() },
-                    isClosing = detailExiting,
+                    isClosing = detailExiting && !detailDrag.settling,
+                    dragHandle = detailHandle,
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
                 ) {
@@ -1481,16 +1706,16 @@ fun HavenApp(vm: HavenViewModel) {
                     TravelingHeader(
                         vm, anim.entityId, heroBounds[anim.entityId],
                         heroTarget?.takeIf { it.first == anim.entityId }?.second,
-                        progress = { detailProgress.value }, overlayOrigin,
+                        progress = dragProgressFor(detailDrag, detailProgress), overlayOrigin,
                         onDismiss = { dismissDetail() },
-                        isClosing = detailExiting,
+                        isClosing = detailExiting && !detailDrag.settling,
                     )
                 }
                 TravelingArc(
                     vm, anim.entityId, arcBounds[anim.entityId],
                     arcTarget?.takeIf { it.first == anim.entityId }?.second,
-                    progress = { detailProgress.value }, overlayOrigin,
-                    isClosing = detailExiting,
+                    progress = dragProgressFor(detailDrag, detailProgress), overlayOrigin,
+                    isClosing = detailExiting && !detailDrag.settling,
                 )
                 } // else: folded full-screen morph (feedback item 3)
             }
@@ -1508,14 +1733,21 @@ fun HavenApp(vm: HavenViewModel) {
             if (panelDetailAnim != null) {
                 val anim = panelDetailAnim!!
                 BackHandler { dismissPanelDetail() }
+                // Feedback round 7: the panel-detail layer uses the
+                // same wrappers, so it gets the same drag wiring
+                // (the spec listed sheet/detail/popout/camera, but
+                // leaving this surface undraggable would be an
+                // inconsistent popup).
+                val panelDetailHandle = popupDragHandle(panelDetailDrag, panelDetailProgress, { panelDetailExiting }, { vm.captureTravelSnapshot(anim.entityId) }, { dismissPanelDetail() })
                 val panelDetailSource = anim.source ?: cardBounds[anim.entityId]
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = { panelDetailProgress.value },
+                        progress = dragProgressFor(panelDetailDrag, panelDetailProgress),
                         source = panelDetailSource,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissPanelDetail() },
+                        dragHandle = panelDetailHandle,
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
                             DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
@@ -1523,13 +1755,13 @@ fun HavenApp(vm: HavenViewModel) {
                     }
                 } else {
                 PanelOverlay(
-                    progress = { panelDetailProgress.value },
+                    progress = dragProgressFor(panelDetailDrag, panelDetailProgress),
                     source = panelDetailSource,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    onDismiss = { dismissPanelDetail() },
-                    isClosing = panelDetailExiting,
+                    isClosing = panelDetailExiting && !panelDetailDrag.settling,
+                    dragHandle = panelDetailHandle,
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides true) {
                         DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
@@ -1547,16 +1779,19 @@ fun HavenApp(vm: HavenViewModel) {
             if (popoutAnim != null) {
                 val anim = popoutAnim!!
                 BackHandler { dismissPopout() }
+                // Feedback round 7: drag handle for this surface.
+                val popoutHandle = popupDragHandle(popoutDrag, popoutProgress, { popoutExiting }, { vm.captureTravelSnapshot(anim.id) }, { dismissPopout() })
                 // Feedback round, item 3: unfolded gets the
                 // centered popup; folded keeps the full-screen
                 // morph + traveler below, byte for byte.
                 if (LocalWideLayout.current) {
                     CenteredPopup(
-                        progress = { popoutProgress.value },
+                        progress = dragProgressFor(popoutDrag, popoutProgress),
                         source = cardBounds[anim.id] ?: anim.source,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
                         onDismiss = { dismissPopout() },
+                        dragHandle = popoutHandle,
                     ) {
                         ThermostatPopoutContent(
                             vm, anim.id,
@@ -1567,13 +1802,13 @@ fun HavenApp(vm: HavenViewModel) {
                 // Round 6: no measurement frame here either (see
                 // the sheet block); progress is a lambda.
                 PanelOverlay(
-                    progress = { popoutProgress.value },
+                    progress = dragProgressFor(popoutDrag, popoutProgress),
                     source = cardBounds[anim.id] ?: anim.source,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
                     sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    onDismiss = { dismissPopout() },
-                    isClosing = popoutExiting,
+                    isClosing = popoutExiting && !popoutDrag.settling,
+                    dragHandle = popoutHandle,
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                 ) {
@@ -1588,9 +1823,9 @@ fun HavenApp(vm: HavenViewModel) {
                 TravelingHeader(
                     vm, anim.id, heroBounds[anim.id],
                     heroTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = { popoutProgress.value }, overlayOrigin,
+                    progress = dragProgressFor(popoutDrag, popoutProgress), overlayOrigin,
                     onDismiss = { dismissPopout() },
-                    isClosing = popoutExiting,
+                    isClosing = popoutExiting && !popoutDrag.settling,
                 )
                 } // else: folded full-screen morph (feedback item 3)
             }
@@ -1600,9 +1835,9 @@ fun HavenApp(vm: HavenViewModel) {
             // device surface, so no centered device dialog remains.
             // The MJPEG body fills the panel; Ring uses the #65
             // proxy path through the same body and stays labeled
-            // as a recording, never live. No back bar: the panel's
-            // own header row carries the Close button, and Back
-            // dismisses (see dismissCameraDialog). This block moved
+            // as a recording, never live. Feedback round 7: no
+            // back bar and no header button — Back and the drag
+            // dismiss (see dismissCameraDialog). This block moved
             // inside the overlay root so the morph shares its
             // origin with the other panels; the camera fullscreen
             // below still draws above it.
@@ -1615,25 +1850,29 @@ fun HavenApp(vm: HavenViewModel) {
                 // a lambda and is read only inside graphicsLayer blocks.
                 val camStates by vm.states.collectAsState()
                 val camEntity = camStates[camId]
+                // Feedback round 7: drag handle for this surface
+                // (no travel snapshot: the camera panel has no
+                // traveler, and its landing rect is the
+                // captured-at-open quadrant rect).
+                val cameraHandle = popupDragHandle(cameraDrag, cameraDialogProgress, { cameraDialogExiting }, { }, { dismissCameraDialog() })
                 PanelOverlay(
-                    progress = { cameraDialogProgress.value },
+                    progress = dragProgressFor(cameraDrag, cameraDialogProgress),
                     // Captured-at-open quadrant rect (live map as
                     // first-frame fallback): never the sourceless
                     // fallback, so the close lands on the quadrant.
                     source = cameraDialogSource ?: cardBounds[camId],
                     overlayOrigin = overlayOrigin,
                     panelBackground = Color.Black,
-                    onDismiss = { dismissCameraDialog() },
-                    showBackBar = false,
                     scrollContent = false,
-                    isClosing = cameraDialogExiting,
+                    isClosing = cameraDialogExiting && !cameraDrag.settling,
+                    dragHandle = cameraHandle,
                 ) {
                     // Front Door live probe (Round 2): the Front
                     // Door panel alone gets the Live View / Event
                     // History toggle; every other camera keeps the
                     // exact body below, byte for byte.
                     if (camId == FRONT_DOOR_LIVE_VIEW_ID) {
-                        FrontDoorCameraPanel(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, onClose = { dismissCameraDialog() })
+                        FrontDoorCameraPanel(vm, camId, { (if (cameraDrag.isDragging) cameraDrag.dragProgress else cameraDialogProgress.value).coerceIn(0f, 1f) }, onClose = { dismissCameraDialog() })
                     } else {
                     Box(Modifier.fillMaxSize().background(Color.Black)) {
                         // The hero panel's MJPEG body is a recording
@@ -1643,18 +1882,15 @@ fun HavenApp(vm: HavenViewModel) {
                         // Feedback round, item 4: HLS-first for
                         // stream-capable non-Ring cameras; Ring
                         // keeps this MJPEG body via the route.
-                        CameraLiveBody(vm, camId, { cameraDialogProgress.value.coerceIn(0f, 1f) }, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
+                        CameraLiveBody(vm, camId, { (if (cameraDrag.isDragging) cameraDrag.dragProgress else cameraDialogProgress.value).coerceIn(0f, 1f) }, recording = camEntity?.let { isRingCamera(it) } == true, onClose = { dismissCameraDialog() })
                         Row(
                             Modifier.align(Alignment.TopStart).fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // Single top-left back button (2026-11-01
-                            // round 1 panel chrome): the top-right X
-                            // is gone — BackHandler + this arrow are
-                            // the dismiss paths, like every panel.
-                            IconButton(onClick = { dismissCameraDialog() }) {
-                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                            }
+                            // Feedback round 7: no header button —
+                            // the back arrow is removed with every
+                            // other popup chrome button. BackHandler
+                            // + the drag dismiss, like every panel.
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     camEntity?.let { displayCameraName(it) } ?: "Camera",
@@ -2012,11 +2248,10 @@ private fun EntityPopupSheetContent(
  *   the content is laid out at target geometry, so its header's
  *   untransformed layout bounds ARE the travel target. The camera
  *   panel passes neither (it has no traveling header).
- * - Chrome: status-bar padding + a back arrow row above the
- *   content (suppressed only for the camera panel, whose own
- *   header row carries Close). No drag-to-dismiss: Back and the
- *   back arrow are the dismiss paths, plus each panel's own
- *   Close/badge affordance.
+ * - Chrome: status-bar padding, nothing else. Feedback round 7
+ *   removes the back arrow row (and the camera call site's
+ *   showBackBar argument with it): Back, the drag, and each
+ *   panel's own badge affordance are the dismiss paths.
  * - Scroll: the panel body scrolls (the old dialog's scroll
  *   wrapper, same structure), so dialog-threaded pages that own
  *   no scroll of their own (sheet, detail, pop-out) scroll here.
@@ -2024,6 +2259,15 @@ private fun EntityPopupSheetContent(
  *   that owns its own full-size layout (the camera panel's video
  *   body), where a fillMaxSize child inside a scroll container
  *   would have no definite height to fill.
+ * - Drag (feedback round 7, Koda now-playing port): with a
+ *   [dragHandle], the scroll wrapper carries a
+ *   PopupDismissConnection (downward overscroll at top drags the
+ *   panel toward its tile; child controls that consume their own
+ *   drags are untouched), and the non-scroll branch carries a
+ *   direct vertical-drag detector on the content box. No
+ *   competing parent pointerInput on scrollable popups: the
+ *   nested-scroll protocol orders parent pre-scroll before child
+ *   consumption, so no consume-order proof is needed.
  * [onPanelPlaced] reports the panel's full-screen root rect (the
  * camera-rise origin for sheet Details actions); the layout
  * bounds are the target rect from the first frame, so this fires
@@ -2035,20 +2279,24 @@ private fun PanelOverlay(
     source: Rect?,
     overlayOrigin: Offset,
     panelBackground: Color,
-    onDismiss: () -> Unit,
-    showBackBar: Boolean = true,
     scrollContent: Boolean = true,
     // True while this panel is animating closed: the surface
     // container still lerps back to the card rect, but the inner
     // content fades out in the first stretch of the close (see
     // morphCloseContentAlpha) instead of shrinking at full opacity
     // over the grid — the thermostat dial bleed-through fix.
+    // Feedback round 7: false while settling from a drag, so the
+    // surface keeps the open curves through the settle.
     isClosing: Boolean = false,
     // The source card's container color (sheet/detail/pop-out pass
     // surfaceContainerHighest; cameras pass null and keep black).
     // The panel background lerps from this at p = 0 to
     // panelBackground at p = 0.35 (see MorphSurface).
     sourceCardColor: Color? = null,
+    // Feedback round 7: drag handle (null = no drag; every current
+    // caller passes one). Declared before the content lambda
+    // (round 5 lesson: never append params after a lambda).
+    dragHandle: PopupDragHandle? = null,
     heroTargetReporter: ((Rect) -> Unit)? = null,
     arcTargetReporter: ((Rect) -> Unit)? = null,
     onPanelPlaced: ((Rect) -> Unit)? = null,
@@ -2089,22 +2337,28 @@ private fun PanelOverlay(
                     LocalHeroTarget provides heroTargetReporter,
                     LocalArcTarget provides arcTargetReporter,
                 ) {
+                    // Feedback round 7: the drag range is the exact
+                    // top-edge travel from target to source tile.
+                    val dragRangePx = dragRangeForPanelOverlay(source?.top, target.top, target.height)
                     if (scrollContent) {
                         Box(
                             Modifier.fillMaxSize().statusBarsPadding()
-                                .verticalScroll(rememberScrollState()),
+                                .verticalScroll(rememberScrollState())
+                                .then(
+                                    if (dragHandle != null) {
+                                        Modifier.nestedScroll(
+                                            PopupDismissConnection(
+                                                dragHandle.state,
+                                                onDelta = { dy -> dragHandle.onDelta(dy, dragRangePx) },
+                                                onRelease = { v -> dragHandle.onRelease(v, dragRangePx) },
+                                            ),
+                                        )
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
                         ) {
                             Column(Modifier.fillMaxWidth()) {
-                                if (showBackBar) {
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        IconButton(onClick = onDismiss) {
-                                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
-                                        }
-                                    }
-                                }
                                 content()
                             }
                         }
@@ -2112,9 +2366,20 @@ private fun PanelOverlay(
                         // Full-size content (camera video): no scroll
                         // wrapper, so fillMaxSize resolves against the
                         // panel's definite size, not an unbounded scroll
-                        // height. No back bar here either (callers that
-                        // skip scrolling carry their own header).
-                        Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                        // height. Feedback round 7: the direct drag
+                        // detector lives here, where no scroll
+                        // competition exists.
+                        val cameraBoxModifier = if (dragHandle != null) {
+                            Modifier.fillMaxSize().statusBarsPadding()
+                                .popupDragDetector(
+                                    dragHandle.state,
+                                    onDelta = { dy -> dragHandle.onDelta(dy, dragRangePx) },
+                                    onRelease = { v -> dragHandle.onRelease(v, dragRangePx) },
+                                )
+                        } else {
+                            Modifier.fillMaxSize().statusBarsPadding()
+                        }
+                        Box(cameraBoxModifier) {
                             content()
                         }
                     }
@@ -2159,6 +2424,13 @@ private fun PanelOverlay(
  * full-screen panels have no scrim); the surface consumes its own
  * taps. Sheet callers pass onPanelPlaced so the sheet→detail
  * handoff (vm.pageOrigin) keeps working.
+ * Feedback round 7: drag-to-dismiss (Koda now-playing port) —
+ * the inner scroll column carries a PopupDismissConnection, and
+ * during a drag the Surface lerps from its placed rect toward
+ * the tile rect (rect-lerp extension; the open path is
+ * untouched) with the enter fade curve. The back arrow row is
+ * removed with PanelOverlay's: Back, scrim tap, and the drag
+ * dismiss.
  */
 @Composable
 private fun CenteredPopup(
@@ -2168,8 +2440,17 @@ private fun CenteredPopup(
     panelBackground: Color,
     onDismiss: () -> Unit,
     onPanelPlaced: ((Rect) -> Unit)? = null,
+    // Feedback round 7: drag handle (null = no drag; every current
+    // caller passes one). Before the content lambda (round 5).
+    dragHandle: PopupDragHandle? = null,
     content: @Composable () -> Unit,
 ) {
+    // Feedback round 7: the surface's placed rect in root
+    // coordinates (same space as cardBounds — the existing
+    // onPanelPlaced callback already reports boundsInRoot), for
+    // the drag rect-lerp and range. NOT reused from onPanelPlaced:
+    // that callback is the caller's handoff channel.
+    var placedRect by remember { mutableStateOf<Rect?>(null) }
     Box(Modifier.fillMaxSize()) {
         // Scrim: dims the still-visible page behind the popup.
         Box(
@@ -2227,15 +2508,32 @@ private fun CenteredPopup(
                     .widthIn(max = 400.dp)
                     .heightIn(max = popupMaxHeight)
                     .graphicsLayer {
-                        // Round 7 rule: progress read ONLY here.
-                        val enter = centeredPopupEnter(progress(), source?.center, popupCenter, distancePx)
-                        translationX = enter.offset.x
-                        translationY = enter.offset.y
-                        scaleX = enter.scale
-                        scaleY = enter.scale
-                        alpha = enter.alpha
+                        // Round 7 rule: progress read ONLY here —
+                        // the open enter transform, or the drag
+                        // rect-lerp while a drag is in flight.
+                        // At progress 1 the drag transform is
+                        // identity, so the open-to-drag handoff is
+                        // continuous; the open path is untouched.
+                        val drag = dragHandle?.takeIf { it.state.isDragging }
+                        val placed = placedRect
+                        if (drag != null && placed != null && source != null) {
+                            val t = centeredPopupDragTransform(placed, source, progress())
+                            translationX = t.translation.x
+                            translationY = t.translation.y
+                            scaleX = t.scaleX
+                            scaleY = t.scaleY
+                            alpha = morphEnterContentAlpha(progress())
+                        } else {
+                            val enter = centeredPopupEnter(progress(), source?.center, popupCenter, distancePx)
+                            translationX = enter.offset.x
+                            translationY = enter.offset.y
+                            scaleX = enter.scale
+                            scaleY = enter.scale
+                            alpha = enter.alpha
+                        }
                     }
                     .onGloballyPositioned { coords ->
+                        placedRect = coords.boundsInRoot()
                         onPanelPlaced?.invoke(coords.boundsInRoot())
                     }
                     // Consume taps on the surface so they never
@@ -2249,17 +2547,32 @@ private fun CenteredPopup(
                 // traveler on this path, headers must render fully
                 // visible from frame 0 (see the KDoc above).
                 CompositionLocalProvider(LocalMorphProgress provides { 1f }) {
+                    // Feedback round 7: drag range is the vertical
+                    // travel of the surface center toward the tile
+                    // center (placed height fallback before first
+                    // placement; a drag cannot start before rest,
+                    // which requires placement).
+                    val centeredDragRangePx = dragRangeForCenteredPopup(
+                        placedRect?.center?.y,
+                        source?.center?.y,
+                        placedRect?.height ?: overlayHeightPx,
+                    )
                     Column(
-                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                            .then(
+                                if (dragHandle != null) {
+                                    Modifier.nestedScroll(
+                                        PopupDismissConnection(
+                                            dragHandle.state,
+                                            onDelta = { dy -> dragHandle.onDelta(dy, centeredDragRangePx) },
+                                            onRelease = { v -> dragHandle.onRelease(v, centeredDragRangePx) },
+                                        ),
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
                     ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(onClick = onDismiss) {
-                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
-                            }
-                        }
                         content()
                     }
                 }
@@ -2569,7 +2882,6 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
         CameraHeader(
             entity?.let { displayCameraName(it) } ?: "Camera",
             badgeText = if (isRing) "Latest motion recording · Not live" else null,
-            onClose = onClose,
         )
     }
 }
@@ -3038,9 +3350,11 @@ private fun FrontDoorCameraPanel(
                 .statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
+                // Feedback round 7: the header back arrow is
+                // removed with every other popup chrome button.
+                // BackHandler + the drag dismiss (onClose stays:
+                // the video bodies below use it for their error
+                // paths).
                 Text(
                     entity?.let { displayCameraName(it) } ?: "Camera",
                     color = Color.White,
@@ -3438,7 +3752,11 @@ private fun CameraMjpegBody(
 
 /** Fullscreen name + live/recording badge (top-left) and close (top-right). */
 @Composable
-private fun BoxScope.CameraHeader(name: String, badgeText: String?, onClose: () -> Unit) {
+// Feedback round 7: the top-right Close (X) is removed with every
+// other popup chrome button; both hosts keep BackHandler, and the
+// video bodies keep their own error-path Close buttons. The onClose
+// parameter goes with the button (it had no other reader).
+private fun BoxScope.CameraHeader(name: String, badgeText: String?) {
     Column(
         Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp),
     ) {
@@ -3448,10 +3766,6 @@ private fun BoxScope.CameraHeader(name: String, badgeText: String?, onClose: () 
             Text(badgeText, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
         }
     }
-    IconButton(
-        onClick = onClose,
-        modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
-    ) { Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White) }
 }
 
 /**
@@ -3466,7 +3780,7 @@ fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: 
     BackHandler { onClose() }
     Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
         CameraMjpegBody(vm, recordingEntityId, enterProgress, recording = true, onClose = onClose)
-        CameraHeader(entity?.let { displayCameraName(it) } ?: "Camera", badgeText = "Recording", onClose = onClose)
+        CameraHeader(entity?.let { displayCameraName(it) } ?: "Camera", badgeText = "Recording")
     }
 }
 /**

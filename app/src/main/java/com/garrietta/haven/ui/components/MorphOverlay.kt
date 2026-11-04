@@ -1,8 +1,18 @@
 package com.garrietta.haven.ui.components
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawBehind
@@ -398,6 +408,227 @@ fun lerpRect(from: Rect, to: Rect, t: Float): Rect {
         top = from.top + (to.top - from.top) * c,
         right = from.right + (to.right - from.right) * c,
         bottom = from.bottom + (to.bottom - from.bottom) * c,
+    )
+}
+
+/**
+ * Feedback round 7: per-surface drag state for the Koda now-playing
+ * morph port. Plain snapshot state on the finger — NOT an Animatable
+ * scrubbed mid-gesture (Koda's MutatorMutex cancels per-event snapTo
+ * calls, which is why Koda's video minimize keeps dragProgress as a
+ * plain float). One instance per popup surface, hoisted in HavenApp
+ * scope near the progress animatables so dismiss functions can read
+ * it. [pulling] is the nested-scroll latch: it lives here, not in the
+ * connection object, so recomposition creating a fresh connection
+ * cannot lose a mid-gesture latch. [settling] marks a dismiss that was
+ * initiated from a drag, so the surface keeps the OPEN fade curves
+ * through the settle (the popup content rides down visibly, as in
+ * Koda's minimize, instead of vanishing on the close curve).
+ */
+class PopupDragState {
+    var isDragging by mutableStateOf(false)
+    var dragProgress by mutableFloatStateOf(1f)
+    var dragStartProgress by mutableFloatStateOf(1f)
+    var pulling by mutableStateOf(false)
+    var settling by mutableStateOf(false)
+
+    fun reset() {
+        isDragging = false
+        dragProgress = 1f
+        dragStartProgress = 1f
+        pulling = false
+        settling = false
+    }
+}
+
+/**
+ * Feedback round 7: the drag handle a popup wrapper receives. The
+ * wrapper computes its own drag range (it owns the placed rect) and
+ * passes it per event; the controller curries everything else
+ * (animatable, exiting gate, snapshot, dismiss). Pure carrier.
+ */
+class PopupDragHandle(
+    val state: PopupDragState,
+    val onDelta: (dy: Float, rangePx: Float) -> Unit,
+    val onRelease: (velocityY: Float, rangePx: Float) -> Unit,
+)
+
+/**
+ * Feedback round 7: Koda's video-minimize release rule, pure.
+ * Velocity momentum first (±120 px/s: downward drift commits, upward
+ * drift always restores), else travel: the finger must have pulled
+ * more than [commitTravelPx] (40dp in px) of the drag range. Progress
+ * units: [dragStartProgress] minus [releasedProgress] is the fraction
+ * of the range travelled, so the travel threshold in progress units
+ * is commitTravelPx / range.
+ */
+fun shouldDismissDrag(
+    velocityY: Float,
+    dragStartProgress: Float,
+    releasedProgress: Float,
+    dragRangePx: Float,
+    commitTravelPx: Float,
+): Boolean {
+    if (velocityY > 120f) return true
+    if (velocityY < -120f) return false
+    return (dragStartProgress - releasedProgress) >
+        (commitTravelPx / dragRangePx.coerceAtLeast(1f))
+}
+
+/**
+ * Feedback round 7: Koda's finger formula, pure. Dragging down (positive
+ * dy) decreases progress; the denominator is the exact top-edge travel
+ * of the container, so the popup tracks the finger 1:1. Floor 0 — Haven
+ * has no curtain path, so no 0.25 floor.
+ */
+fun dragProgressAfterDelta(current: Float, dy: Float, dragRangePx: Float): Float =
+    (current - dy / dragRangePx.coerceAtLeast(1f)).coerceIn(0f, 1f)
+
+/**
+ * Feedback round 7: drag range for a rect-morphing PanelOverlay — the
+ * exact travel of the container's top edge from its target position to
+ * the source tile's top. Falls back to the target height when the
+ * source is null or the range is degenerate (tile above target, which
+ * cannot happen for a below-screen panel but is guarded anyway).
+ */
+fun dragRangeForPanelOverlay(
+    sourceTop: Float?,
+    targetTop: Float,
+    targetHeight: Float,
+): Float {
+    val range = if (sourceTop != null) sourceTop - targetTop else targetHeight
+    return if (range > 0f) range else targetHeight.coerceAtLeast(1f)
+}
+
+/**
+ * Feedback round 7: drag range for a CenteredPopup — the vertical
+ * travel of the surface center from its placed position to the tile
+ * center. Falls back to the placed height when either center is
+ * unknown or the range is degenerate (tile centered on the popup).
+ */
+fun dragRangeForCenteredPopup(
+    placedCenterY: Float?,
+    tileCenterY: Float?,
+    placedHeight: Float,
+): Float {
+    val range = if (placedCenterY != null && tileCenterY != null) {
+        kotlin.math.abs(placedCenterY - tileCenterY)
+    } else {
+        placedHeight
+    }
+    return range.coerceAtLeast(1f)
+}
+
+/** Feedback round 7: rect-lerp drag transform for a CenteredPopup. */
+data class PopupDragTransform(
+    val translation: Offset,
+    val scaleX: Float,
+    val scaleY: Float,
+)
+
+/**
+ * Feedback round 7: during a CenteredPopup drag ONLY, the surface
+ * lerps from its placed rect toward the tile rect (translation +
+ * scale about the default center origin). At progress 1 the transform
+ * is identity, so the open-to-drag handoff is continuous; the open
+ * path itself is untouched (centeredPopupEnter still owns it).
+ */
+fun centeredPopupDragTransform(placed: Rect, tile: Rect, progress: Float): PopupDragTransform {
+    val t = (1f - progress.coerceIn(0f, 1f))
+    val scaleX = if (placed.width > 0f && tile.width > 0f) {
+        1f + (tile.width / placed.width - 1f) * t
+    } else {
+        1f
+    }
+    val scaleY = if (placed.height > 0f && tile.height > 0f) {
+        1f + (tile.height / placed.height - 1f) * t
+    } else {
+        1f
+    }
+    return PopupDragTransform(
+        translation = Offset(
+            x = (tile.center.x - placed.center.x) * t,
+            y = (tile.center.y - placed.center.y) * t,
+        ),
+        scaleX = scaleX,
+        scaleY = scaleY,
+    )
+}
+
+/**
+ * Feedback round 7: Koda's pullToMinimize as a NestedScrollConnection,
+ * attached to the popup scroll container (never the outer box — Koda's
+ * comments-panel lesson: a nested scrollable inside the popup must
+ * keep its own dismiss). Protocol order, not pointer racing, decides:
+ * parent pre-scroll runs before the child consumes, so no
+ * consume-order proof is needed.
+ * - onPreScroll: once [PopupDragState.pulling] latched, keeps the
+ *   gesture to the end and feeds every delta to the drag, consuming
+ *   all of it, UserInput only.
+ * - onPostScroll: leftover downward drag (available.y > 0 — the scroll
+ *   container is already at top, or the content is shorter than the
+ *   viewport so nothing scrolls) latches pulling, feeds the drag,
+ *   consumes all.
+ * - onPostFling: only if this connection started the pull, unlatches
+ *   and releases with the fling velocity, consuming it. A fling that
+ *   merely runs out of list at the top is left alone.
+ * The controller's onDelta/onRelease gate on reduce-motion, exiting,
+ * and at-rest internally; this connection only routes.
+ */
+class PopupDismissConnection(
+    private val drag: PopupDragState,
+    private val onDelta: (Float) -> Unit,
+    private val onRelease: (Float) -> Unit,
+) : NestedScrollConnection {
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        if (source != NestedScrollSource.UserInput || !drag.pulling) return Offset.Zero
+        onDelta(available.y)
+        return available
+    }
+
+    override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: NestedScrollSource,
+    ): Offset {
+        if (source != NestedScrollSource.UserInput) return Offset.Zero
+        if (available.y <= 0f) return Offset.Zero
+        drag.pulling = true
+        onDelta(available.y)
+        return available
+    }
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+        if (!drag.pulling) return available
+        drag.pulling = false
+        onRelease(available.y)
+        return available
+    }
+}
+
+/**
+ * Feedback round 7: direct vertical-drag detector for the non-scroll
+ * camera branch (PanelOverlay scrollContent = false), where no scroll
+ * competition exists. Child controls that consume their own drags
+ * cancel this detector (innermost-first arbitration); drags on the
+ * bare video surface reach it. Velocity from the real pointer
+ * positions; cancel releases with zero velocity so the travel rule
+ * decides.
+ */
+fun Modifier.popupDragDetector(
+    drag: PopupDragState,
+    onDelta: (Float) -> Unit,
+    onRelease: (Float) -> Unit,
+): Modifier = pointerInput(drag, onDelta, onRelease) {
+    val tracker = VelocityTracker()
+    detectVerticalDragGestures(
+        onDragStart = { tracker.resetTracking() },
+        onVerticalDrag = { change, dragAmount ->
+            tracker.addPosition(change.uptimeMillis, change.position)
+            onDelta(dragAmount)
+        },
+        onDragEnd = { onRelease(tracker.calculateVelocity().y) },
+        onDragCancel = { onRelease(0f) },
     )
 }
 

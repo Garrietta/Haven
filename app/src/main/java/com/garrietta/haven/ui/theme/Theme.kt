@@ -86,6 +86,19 @@ fun <T> springBounds(): FiniteAnimationSpec<T> =
     spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
 
 /**
+ * Feedback round 7: the settle spring, pinned from Koda's
+ * PLAYER_CONTAINER_SPRING as-is (damping 0.95, stiffness 350) — near-
+ * critically damped, deliberately NO visible bounce. Used for every
+ * popup dismiss (drag-release settle and programmatic dismiss alike)
+ * and for the spring-back to open after a cancelled drag. Open
+ * animations stay on springBounds(); this token is the return flight
+ * only. The user's "bounce back down" means the spring return into
+ * the tile, not literal overshoot — no bounce token is used here.
+ */
+fun <T> settleSpring(): FiniteAnimationSpec<T> =
+    spring(dampingRatio = 0.95f, stiffness = 350f)
+
+/**
  * The SINGLE press token (spec item 4). Canonical tactile values:
  * Spring.DampingRatioMediumBouncy + Spring.StiffnessMedium, adopted
  * into the token in the design-system sprint (was 0.55/Medium — the

@@ -1061,10 +1061,12 @@ private fun ClipPlayerScreen(
                 )
             }
         }
-        TextButton(
-            onClick = onClose,
-            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
-        ) { Text("Close", color = Color.White) }
+        // Feedback round 7: the top-end Close chrome is removed
+        // with every other popup chrome button. The content
+        // "Close" button in the unavailable state above stays
+        // (it is content, not chrome — that state has no other
+        // visible dismiss affordance), and BackHandler stays wired
+        // to onClose.
     }
 }
 

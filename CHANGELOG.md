@@ -1,5 +1,250 @@
 # Haven Changelog
 
+## Feedback round 7 (2026-11-03/04, Koda now-playing morph port)
+
+Port of Koda's now-playing open/close animation into Haven for
+every tile-to-popup transition, per the user's 2026-11-03 spec
+(video of Koda's morph; the video's audio was just the playing
+podcast, no narration — the written spec is the directive).
+Port source: `koda-morph-port-plan.md` (Koda remote HEAD
+`12c47f64` on branch `podcasts`; the finger-scrubbed morph is
+Koda's video `VideoPlayerOverlay` minimize, NOT the music
+player, whose expand is threshold-gated). Baseline proven
+green first (349 tests, 0 failures on the round-6 tree).
+Final: 357 tests, 0 failures (349 + 8 new in
+`PopupDragTest`). Local APK built this round (daemon
+healthy); the shipped artifact is the CI release APK (see
+rebase note).
+
+### Rebase note (read first)
+
+Round 6 landed after the port plan was written, so every plan
+mapping was re-verified against the round-6 tree before
+applying anything. Two plan claims corrected against the
+code: (1) CenteredPopup's `onPanelPlaced` callback reports
+`boundsInRoot()` — the plan's rebase note said boundsInWindow,
+which is wrong; the drag rect-lerp therefore uses the same
+coordinate space as `cardBounds` with no conversion. (2) The
+"Round 7" comments already in the tree predate this round and
+were not reconciled against remote state; code was reported
+as found on disk. Remote HEAD moved during this round from
+`bffe4642` (#114) to `616e3a96` (release signing: CI builds a
+signed release APK — `.github/workflows/build.yml` +
+`app/build.gradle.kts` only, no Kotlin changes). Round 7
+rebased onto `616e3a96` (those two files taken verbatim from
+the new head, so the push cannot regress signing); the
+round-7 parent is `616e3a96`. Consequence for delivery: CI
+now uploads `haven-release` (signed release APK) instead of
+`haven-debug`, while local builds stay debug for testing.
+Migration cost (standing): the release signature differs
+from all debug keys, so the first signed build will NOT
+install over a debug build — uninstall once, which wipes
+SharedPreferences (custom presets, thermostat override) and
+they must be re-set; after that one move, signed updates
+install over cleanly.
+
+### 1. Finger-tracked drag + calm settle (all popup surfaces)
+
+One `PopupDragState` per surface (sheet, detail, panelDetail,
+popout, cameraDialog), hoisted next to the progress
+animatables; the progress lambda each surface and its
+travelers read is drag-aware (`dragProgress` while dragging,
+animatable otherwise). Plain snapshot state on the finger —
+NOT an Animatable scrubbed mid-gesture (Koda's MutatorMutex
+cancels per-event `snapTo`, which is why Koda's minimize
+keeps `dragProgress` as a plain float). Drag formula, from
+Koda: `progress -= dy / rangePx`, clamped to [0,1], floor 0
+(Haven has no curtain path, so no 0.25 floor). Release rule,
+from Koda: velocity momentum first (±120 px/s — downward
+drift commits, upward drift always restores), else travel >
+40dp of the drag range. Settle spring, locked by the user:
+Koda's `PLAYER_CONTAINER_SPRING` as-is — damping 0.95,
+stiffness 350, near-critically damped, NO visible bounce —
+for drag-release AND programmatic dismiss (new `settleSpring`
+token in Theme.kt; all five dismiss `animateTo(0f, …)` sites
+moved from `springBounds` to it). Opens stay on
+`springBounds`; camera fullscreen enter/exit keep
+`sheetSpring` (different mechanism, out of scope). A
+cancelled drag springs back open on the settle spring.
+Haptics: a single `ContextClick` tick at the dismiss-commit
+branch only — never during drag, never on cancel.
+Drag ranges (decided, stated): PanelOverlay morphs use the
+exact top-edge travel (source top − target top, target-height
+fallback); CenteredPopup uses the vertical travel of the
+surface center toward the tile center (placed-height
+fallback). The 40dp commit threshold is independent of range.
+CenteredPopup drag needs a rect-lerp extension, not just
+scrubbing its enter transform (it never morphed from the
+tile rect): during a drag ONLY, the Surface lerps from its
+placed rect (captured via `onGloballyPositioned`, root
+coordinates) toward the tile rect — translation + scale
+about the center origin, alpha on the enter fade curve
+(solid until 0.5, out by 0.15, Koda's full-content window).
+At progress 1 the drag transform is identity, so the
+open-to-drag handoff is continuous; the open path
+(centeredPopupEnter 96dp/scale/alpha) is byte-identical.
+Scrim alpha already reads the drag-aware progress, so it
+fades as the popup is pulled down. Panel-detail included
+(the spec listed sheet/detail/popout/camera, but it uses
+the same wrappers and leaving it undraggable would be an
+inconsistent surface).
+
+Judgment call — open curves through drag and settle, NOT
+close curves: Koda's minimize fade (solid until 0.5, out by
+0.12) matches Haven's ENTER curve, not its close curve
+(content gone by 0.85). Close curves would make popup
+content vanish almost immediately on drag start,
+contradicting "popup follows my finger". A per-surface
+`settling` flag carries this: `isClosing` passed to surfaces
+and travelers is `exiting && !settling`, and the root
+`LocalMorphClosing` is `exiting || anyDragging`, so during a
+drag the content rides down visibly, the traveler badge
+lerps back toward the tile, and the source card badge
+crossfades in on the close curve — and during a
+drag-initiated settle the same curves hold. Dismiss
+functions are the single choke point (Back, badge tap,
+scrim tap, drag release all land there): the prologue marks
+`settling` BEFORE flipping `exiting`, and the launch snaps
+the animatable to the drag position before clearing the
+drag flag, so the progress lambda never jumps
+(dragProgress equals the anim value at every step). Drag
+release calls the surface's dismiss while still dragging so
+its prologue keeps the open curves; a restore snaps to the
+release position, clears the flag, then animates back open.
+Koda's two latched-drag defenses are both copied: snap in
+`try`, flag clear in `finally`, plus the open effects
+resetting drag state on every open (backstop). At-rest gate:
+a drag only engages at anim ≥ 0.99, so a grab mid-open
+never fights an in-flight open animation. No 2D
+translation: vertical only (Koda has no horizontal container
+drift; horizontal on bars is skip).
+
+### 2. Scroll + control coordination
+
+No competing parent pointerInput detector on scrollable
+popups: consume-order arbitration is unprovable from app
+code, so the port uses the nested-scroll protocol instead
+(parent pre-scroll runs before child consumption).
+`PopupDismissConnection` (MorphOverlay.kt) attaches to the
+popup scroll container itself — never the outer box (Koda's
+comments-panel lesson: a nested scrollable inside the popup
+keeps its own dismiss). onPreScroll: once `pulling` (the
+latch, stored in drag state so recomposition creating a
+fresh connection cannot lose it) latched, feeds every delta
+to the drag and consumes all of it, UserInput only.
+onPostScroll: leftover downward drag (scroll container
+already at top, or content shorter than the viewport so
+nothing scrolls) latches pulling, feeds the drag, consumes
+all — this IS the at-top signal, so no ScrollState hoisting
+was needed (every popup ScrollState is an anonymous inline
+`rememberScrollState`). onPostFling: only if this
+connection started the pull, unlatches and releases with
+the fling velocity, consuming it; a fling that merely runs
+out of list at the top is left alone. The non-scroll camera
+branch (PanelOverlay `scrollContent = false`) carries a
+direct vertical-drag detector instead — no scroll
+competition exists there; child controls that consume win
+(innermost-first), bare-surface drags reach it. Control
+isolation, verified in code: the thermostat dial already
+consumes only on-thumb (off-thumb drags pull the popup,
+which IS the spec); pill toggles are tap-only, so a vertical
+drag starting on one is not their gesture; M3 sliders are
+horizontal, so a pure vertical drag starting on one is not
+the slider's gesture (diagonal drags are consumed wholesale
+by the slider, cancelling the popup detector). One
+targeted fix, spec-required: the generic Dial
+(Expressive.kt) NEVER consumed even on a genuine handle
+drag, so a sheet-dial handle drag would both change the
+value and drag the popup (and already wrongly scrolled the
+popup today) — it now calls `change.consume()` when
+grabbing. Tiles unchanged: no HomeRoomCard, EntityTile,
+card color/shape, inline switch, or cardBounds reporting
+change is in this round.
+
+### 3. Back arrows + close buttons removed; DetailTopBar stays
+
+Removed: PanelOverlay's back row + `showBackBar` parameter
+(the parameter goes with the row — it had no other reader —
+and the camera call site's explicit `showBackBar = false`
+argument goes with it; PanelOverlay's `onDismiss` parameter
+goes too, since the row was its only reader — BackHandlers
+and traveling-badge taps call the dismiss functions
+directly); CenteredPopup's back row (no parameter existed);
+FrontDoorCameraPanel's header ArrowBack (title + LIVE badge
+kept; `onClose` stays — the video bodies use it for error
+paths); the non-Front-Door camera dialog header ArrowBack
+(name + subtitle column expands to full width);
+CameraHeader's top-right Close (X) + its `onClose` parameter
+(both call sites updated; the video bodies' own error-path
+Close buttons are untouched); ClipPlayerScreen's top-end
+Close TextButton (the content "Close" button in the
+unavailable state stays — that state has no other visible
+dismiss affordance). Each removed row's height simply
+disappears; content below shifts up by that amount, no
+spacer compensation (none compensated today). All
+BackHandlers stay wired to the dismiss functions, so system
+back plays the same spring-down into the tile. DetailTopBar
+STAYS (verified, not assumed): all 11 call sites are
+backstack pages in ui/screens (Browse, Builders,
+Dashboards, DetailPages CameraClipsScreen, HomeEditor,
+OAuthWebView, Screens, Tabs) and zero are inside a popup —
+CameraClipsScreen is a full page reached via navigate, not
+an overlay screen, and its RecordingFullscreen /
+ClipPlayerScreen overlays sit on top of it, not the reverse.
+Predictive back DEFERRED (not half-wired): the manifest
+flag is not enabled, and enabling it means manifest +
+handler-replacement surgery with back-button regression
+risk; the spec only requires BackHandler wired, which is
+done. If it lands cleanly later, the recommended peek is
+0.82 (Koda's video source).
+
+### Reduce-motion, and what was not done
+
+Under reduce-motion the drag never engages (Back/dismiss
+snap as today). Deliberate new behavior, stated: the
+existing idiom never disabled a gesture, but a scrubbed
+morph under reduce-motion would be animation by another
+name. WebRTC stays gated off (`webrtcEnabled = false`,
+verified). No negative padding in changed files (all drag
+progress clamped to [0,1] before geometry math). Not in
+this round: trigger-button identification (still awaiting
+his answer), video-26 recording-button musing
+(inconclusive), garage-door actuation (deliberately
+untested), camera fullscreen SheetPageContent drag
+(different mechanism), M3 sheets' built-in swipe-to-dismiss
+(DeviceSheet, CardSettings), the queued round-8 thermostat
+radial/number work, and the 62°/72° screenshot note (ends
+read 62°/72° where the round-6 formula gives 50/80 —
+unconfirmed whether a Settings override he set while
+testing, expected if so, or a range bug; investigate if
+not). No live device state touched (no setpoint writes).
+
+### Residuals (device-test items, not code gaps)
+
+- Source-rect precedence stays inconsistent BY DESIGN
+(sheet/popout read the live map first, detail/panelDetail
+the captured rect first — the base page relayout
+overwrites the map mid-flight). A sheet/popout scrub could
+land on a different rect than open if the card moved
+mid-drag — rare (requires base relayout + recomposition
+mid-drag + a moved card).
+- The drag range is recomputed per composition from the
+current source rect; a card moving mid-drag shifts the
+mapping slightly (same rarity as above).
+- The nested-vertical LazyColumn case (camera detail clips
+list inside a popup scroll inside the drag connection) is
+handled by protocol order but untested on device, as is
+every drag behavior in this round.
+- The generic Dial consume fix also fixes the existing
+scroll-during-dial-drag quirk; the thermostat dial's
+off-thumb fall-through remains framework arbitration, not
+app-code proof (same caveat as the rebase findings).
+- Test note: the travel-rule boundary assertion uses exact
+float values (travel 1.0 vs threshold 40/40) — a 0.96f-style
+boundary is not exact in float32 (1f − 0.96f lands a hair
+above 0.04f) and failed the first run; the implementation
+was correct, the test constant was not.
+
 ## Feedback round 6 (2026-11-03, screenshots + icon example)
 
 Three items against the feedback-round-5 build (`c71572c3`, CI
