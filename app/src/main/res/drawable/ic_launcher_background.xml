@@ -3,6 +3,13 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Haven round 13: field color now #EFF1E1, the approved
+         preview image's sampled field (round 7's #FAF7F0 was the
+         vector era's cream). The foreground is now a raster of
+         that same preview, so background and foreground fields
+         agree exactly; the round-7 recents note below still
+         applies (a blackened background still leaves the bright
+         house readable). -->
     <!-- Haven round 7, launcher icon ONLY (folds the user's
          "Fold into 7" icon redesign into round 7). REPLACES round
          6's full-bleed Haven leaf green #3E6B2F field: the field
@@ -22,6 +29,6 @@
          even where that facet alone goes soft on black. See
          ic_launcher_foreground.xml for the full reasoning. -->
     <path
-        android:fillColor="#FAF7F0"
+        android:fillColor="#EFF1E1"
         android:pathData="M0,0 H108 V108 H0 Z" />
 </vector>

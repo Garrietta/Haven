@@ -1,5 +1,69 @@
 # Haven Changelog
 
+## Feedback round 13 (2026-11-04, launcher icon raster rebuild only)
+
+User verdict on the shipped round-12 icon (2026-11-04 morning,
+device screenshot): STILL BAD — "a bastardized version of the
+mockup." The screenshot shows hard vertical seams, a flat roof,
+and a small plain-yellow sparkle where the mockup has soft
+blends and a big two-tone sparkle. Diagnosis: his launcher's
+vector path flattened the round-12 alpha layers, exactly as it
+dropped vector gradients in round 7. Two vector approximations
+in a row landed wrong on device, so this round stops
+approximating in vector entirely: the icon IS the mockup's
+pixels now.
+
+### Raster construction
+
+- Foreground: raster PNGs derived from the user-approved
+  layered preview image (2026-11-04, "Use this, build it as
+  round 12"), in drawable-mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi at
+  108/162/216/324/432 px for the 108dp adaptive layer. The
+  anydpi XMLs already reference @drawable/ic_launcher_foreground,
+  which now resolves to these PNGs — no XML edits needed.
+- Correction to an earlier assumption: the preview file has NO
+  dark backdrop (the dark surround seen in chat was the chat
+  UI's presentation background). The file is full-bleed pale
+  field with a soft edge vignette in the outer ~2-3%; the
+  vignette is cropped off (1% safety inset, square center-crop)
+  so no gray border survives into the icon.
+- Background: the existing cream vector, fill changed to the
+  preview's sampled field color #EFF1E1 (round 7's #FAF7F0 was
+  the vector era's cream), so background and foreground fields
+  agree exactly. The foreground is opaque (it IS the preview),
+  so parallax edges stay seamless.
+- Old vector foreground (round 12's layered polygons) DELETED,
+  replaced by the PNGs. Monochrome vector UNTOUCHED (themed
+  icons need a vector silhouette; it does not affect the
+  normal icon and already matches the house geometry).
+- Legacy mipmap PNGs regenerated from the same raster artwork
+  (flat #EFF1E1 field + foreground) at 48/72/96/144/192 px,
+  launcher + round identical per repo convention, so the grid
+  (PNG path) and the launcher (adaptive path) agree.
+
+### Masked-render comparison (before pushing)
+
+Composed background + foreground at 432 and applied circle AND
+squircle masks the way a launcher would: ZERO house/sparkle
+pixels lost under either mask; composite matches the preview
+crop 100% within tolerance 45 (expected — the foreground IS
+the crop; the masks are the real check). Sampled tones: roof
+(133,196,91), center (223,188,68), door (232,210,111),
+bottom-left (145,226,90), bottom-right (48,158,99).
+Bottom-center band mean brightness 143 (a dark block would
+read < 60). No dark curved band, no dark bottom rectangle,
+no fringe — the outer ring is flat field by construction.
+
+### Device checklist (owed)
+
+1. Icon on the launcher grid matches the mockup.
+2. Icon in the unfolded recents pane matches the mockup — the
+   acceptance case.
+3. Grid vs recents AGREE this time: there is no more
+   vector-path divergence excuse. If they still differ, the
+   raster itself is the issue and must be reported as such.
+4. Nothing else changed (no code touched).
+
 ## Feedback round 12 (2026-11-04, launcher icon rebuild only)
 
 User verdict on the shipped round-10 icon (2026-11-04 morning,
