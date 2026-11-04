@@ -124,4 +124,65 @@ class CameraStreamTest {
             isRingCamera(HaEntity("camera.front_door_live_view", "idle", emptyMap())),
         )
     }
+
+    // Front-door source resolution (camera fallback round): the
+    // ring-mqtt camera leads whenever it is present and not
+    // "unavailable"; otherwise the official live-view camera is
+    // the fallback; both down resolves to null.
+    private fun frontDoorStates(
+        ringMqtt: String?,
+        liveView: String?,
+    ): Map<String, HaEntity> {
+        val states = mutableMapOf<String, HaEntity>()
+        if (ringMqtt != null) {
+            states[FRONT_DOOR_RING_MQTT_CAMERA_ID] =
+                HaEntity(FRONT_DOOR_RING_MQTT_CAMERA_ID, ringMqtt, emptyMap())
+        }
+        if (liveView != null) {
+            states[FRONT_DOOR_LIVE_VIEW_ID] =
+                HaEntity(FRONT_DOOR_LIVE_VIEW_ID, liveView, emptyMap())
+        }
+        return states
+    }
+
+    @Test
+    fun frontDoorSource_prefersRingMqttWhenAvailable() {
+        assertEquals(
+            FRONT_DOOR_RING_MQTT_CAMERA_ID,
+            resolveFrontDoorCameraSource(frontDoorStates("idle", "idle")),
+        )
+        assertEquals(
+            FRONT_DOOR_RING_MQTT_CAMERA_ID,
+            resolveFrontDoorCameraSource(frontDoorStates("streaming", "unavailable")),
+        )
+    }
+
+    @Test
+    fun frontDoorSource_fallsBackToLiveViewWhenRingMqttUnavailable() {
+        assertEquals(
+            FRONT_DOOR_LIVE_VIEW_ID,
+            resolveFrontDoorCameraSource(frontDoorStates("unavailable", "idle")),
+        )
+    }
+
+    @Test
+    fun frontDoorSource_fallsBackToLiveViewWhenRingMqttAbsent() {
+        assertEquals(
+            FRONT_DOOR_LIVE_VIEW_ID,
+            resolveFrontDoorCameraSource(frontDoorStates(null, "idle")),
+        )
+    }
+
+    @Test
+    fun frontDoorSource_nullWhenBothUnavailable() {
+        assertEquals(
+            null,
+            resolveFrontDoorCameraSource(frontDoorStates("unavailable", "unavailable")),
+        )
+    }
+
+    @Test
+    fun frontDoorSource_nullWhenBothAbsent() {
+        assertEquals(null, resolveFrontDoorCameraSource(emptyMap()))
+    }
 }

@@ -1,5 +1,14 @@
 # Haven Changelog
 
+## Front-door camera fallback (2026-11-04, device-proven diagnosis)
+
+Device evidence the same day: `camera.front_door_69a1` (ring-mqtt) is UNAVAILABLE, while the official `camera.front_door_live_view` loads video in the HA app and stays "idle" while playing — viewing a camera changes no entity states, so there is no trigger entity; the stream is pulled, not triggered. Haven's front-door panel led with the 69a1 MJPEG path, so when 69a1 went down the panel cycled through a futile switch-wait and error path instead of showing the working camera.
+
+1. **Shared source resolution.** New pure `resolveFrontDoorCameraSource` (CameraStream.kt, unit tested): use `camera.front_door_69a1` whenever it is present and not "unavailable"; otherwise fall back to `camera.front_door_live_view` when it is present and not "unavailable"; both down resolves to null. Only the literal "unavailable" state triggers the fallback — any other 69a1 state still tries 69a1 first, keeping the existing error path.
+2. **Panel Live View.** The Live tab now resolves on every state change: when 69a1 is down it skips the 69a1 attempt entirely (no switch-wait, no error cycle) and shows the official camera's MJPEG proxy directly through the same MJPEG body. The fallback body passes NO onFirstFrame, so its frames never feed `mjpegFrames` and never earn the LIVE badge; the status line reads the neutral "Front door camera" (no liveness claim, no recording claim). When 69a1 recovers, the panel re-arms the live body automatically (failure latch cleared, body remounted) — no panel reopen needed. The 69a1 LIVE-badge rule itself is unchanged, as is the recording fallback after a 69a1 stream error and the untouched Event History tab. WebRTC stays gated off.
+3. **Hero quadrant.** The front-door quadrant keeps `camera.front_door_live_view` as its id — tap routing to the front-door panel and morph-source keys are untouched — but when BOTH sources are down it now shows an honest "Unavailable" state instead of a stale cached snapshot, with no overlay pill contradicting it.
+4. **Both down.** Panel and hero both show an honest unavailable state, never a blank or broken frame.
+
 ## Feedback round 15 (2026-11-04, six feedback items from the 2026-11-04 videos)
 
 1. **Tile saturation.** The six pale light tile colors carry a little more saturation (chroma scale around the channel mean for the chromatic pastels, hand-tuned sage), so pale tiles read against the cream background like the red and yellow tiles do. Heating FFDBD0→FFD1B9, cooling D4E3FF→BDDEFF, lock DCE1FF→CCD7FF, alert FFDAD6→FFCDC4, media EFE0FF→EFCEFF, sage EFF1E8→E6EBD3 — applied to both the tile presets and the domain-matrix light containers, so presets and defaults never diverge. Lime and amber were already vivid and are untouched, as are all dark values and the background cream #F6F5EC itself. Inactive dark badges stay visible; temperature coral-red and humidity sky-blue stay as bypasses.

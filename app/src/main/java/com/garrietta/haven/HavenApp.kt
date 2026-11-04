@@ -188,6 +188,7 @@ import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.RingWebRtcSession
 import com.garrietta.haven.data.frontDoorShowsLiveBadge
+import com.garrietta.haven.data.resolveFrontDoorCameraSource
 import com.garrietta.haven.data.isRingCamera
 import com.garrietta.haven.data.displayCameraName
 import org.webrtc.SurfaceViewRenderer
@@ -3114,6 +3115,11 @@ private fun FrontDoorCameraPanel(
     val states by vm.states.collectAsState()
     val entity = states[cameraId]
     val switchOn = states[FRONT_DOOR_LIVE_STREAM_SWITCH_ID]?.state == "on"
+    // Camera fallback round: the resolved front-door video source,
+    // re-derived from the live states map on every state change,
+    // so a recovered 69a1 automatically retakes the lead (see
+    // resolveFrontDoorCameraSource). Null means both sources down.
+    val frontDoorSource = resolveFrontDoorCameraSource(states)
     val engaged = vm.frontDoorLiveEngaged
     val stopReason = vm.frontDoorLiveStopReason
 
@@ -3185,6 +3191,23 @@ private fun FrontDoorCameraPanel(
         } else {
             delay(2000)
             live69a1Ready = true
+        }
+    }
+    // Camera fallback round: re-arm on source flips. A recovered
+    // 69a1 must retake the live body (clearing a latched failure),
+    // and a flip away from 69a1 must drop any stale LIVE-badge
+    // frame flag at once — the fallback body never feeds the badge,
+    // so without this the badge could linger on fallback video.
+    // This also fires once at open, where every reset is a no-op
+    // except liveBodyKey (0 -> 1, harmless: the body keys on it).
+    LaunchedEffect(frontDoorSource) {
+        mjpegFrames = false
+        mjpegError = null
+        if (frontDoorSource == FRONT_DOOR_RING_MQTT_CAMERA_ID) {
+            live69a1Failed = false
+            liveRestarts = 0
+            liveBodyKey += 1
+            liveEverFramed = false
         }
     }
     // Backstop disengage: fires when the tab flips AND when the
@@ -3332,6 +3355,11 @@ private fun FrontDoorCameraPanel(
         !engaged -> "Live paused — the live-stream switch is off"
         phase == FrontDoorLivePhase.WEBRTC_CONNECTING -> "Connecting to live view…"
         phase == FrontDoorLivePhase.WEBRTC_LIVE -> "Live"
+        // Camera fallback round: the fallback source gets a neutral
+        // status line — no liveness claim (no LIVE badge either),
+        // and no recording claim. On a fallback-body error the
+        // later mjpegError branch reports "Live view unavailable".
+        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && mjpegError == null -> "Front door camera"
         phase == FrontDoorLivePhase.MJPEG && live69a1Failed -> "Live view unavailable — showing latest recording"
         phase == FrontDoorLivePhase.MJPEG && liveRestarts > 0 && !mjpegFrames -> "Reconnecting to live view…"
         phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn -> "Live view"
@@ -3405,7 +3433,46 @@ private fun FrontDoorCameraPanel(
                 // LIVE). A 69a1 error also clears mjpegFrames so
                 // the badge cannot linger on the fallback while
                 // the switch is still on.
+                // Camera fallback round: the two branches below
+                // run FIRST. When 69a1's state is "unavailable"
+                // (or it is absent), the Live tab skips the 69a1
+                // attempt entirely — no switch-wait, no error
+                // cycle — and shows the official camera's MJPEG
+                // proxy directly, with NO onFirstFrame, so these
+                // frames never feed mjpegFrames and never earn
+                // the LIVE badge. When both sources are down the
+                // panel shows an honest unavailable state, never
+                // a blank frame or a stale last frame.
                 when {
+                    frontDoorSource == null -> {
+                        Column(
+                            Modifier.fillMaxSize().padding(horizontal = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text(
+                                "Front door camera unavailable",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Both camera sources are unavailable right now.",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 14.sp,
+                            )
+                        }
+                    }
+                    frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> {
+                        CameraMjpegBody(
+                            vm, FRONT_DOOR_LIVE_VIEW_ID, enterProgress, recording = false, onClose = onClose,
+                            onError = { message ->
+                                Log.w("Haven", "FrontDoorLive: fallback live_view error: $message")
+                                mjpegError = message
+                            },
+                        )
+                    }
                     !live69a1Failed && switchOn && live69a1Ready -> {
                         // Visual-fidelity round §3: keyed on the
                         // remount key (NOT the restart count), so

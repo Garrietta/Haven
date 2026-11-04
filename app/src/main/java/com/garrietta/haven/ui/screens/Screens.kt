@@ -170,6 +170,7 @@ import com.garrietta.haven.ui.theme.polygonShape
 import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID
+import com.garrietta.haven.data.resolveFrontDoorCameraSource
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.isRingCamera
 import java.util.Calendar
@@ -2218,6 +2219,14 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // morph-source / hide keys stay on cameraId, so the
             // panel morph is untouched. Falls back to cameraId when
             // the snapshot entity is absent.
+            // Camera fallback round: when BOTH front-door sources
+            // are down, the quadrant shows an honest unavailable
+            // state instead of a stale cached snapshot. The tap
+            // target, morph keys, and cameraId stay on live_view,
+            // so the panel (with its own unavailable state) still
+            // opens and the dialog routing is untouched.
+            val frontDoorDown = cameraId == FRONT_DOOR_LIVE_VIEW_ID &&
+                resolveFrontDoorCameraSource(states) == null
             val thumbnailId = if (cameraId == FRONT_DOOR_LIVE_VIEW_ID &&
                 states[FRONT_DOOR_SNAPSHOT_ID] != null
             ) FRONT_DOOR_SNAPSHOT_ID else cameraId
@@ -2237,7 +2246,13 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                 vm.refreshSnapshot(thumbnailId)
             }
             val entity = states[cameraId]
-            if (snap != null) {
+            if (frontDoorDown) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text("Unavailable", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else if (snap != null) {
                 Image(snap.asImageBitmap(), contentDescription = entity?.friendlyName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
                 Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
@@ -2259,7 +2274,10 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // detected" was demo data, but the Ring doorbell's
             // real motion sensor now backs the same chip. No
             // linked sensor means no chip, never a guess.
-            if (entity != null) {
+            // Camera fallback round: no overlay on the
+            // unavailable state — a "Recording" pill over an
+            // "Unavailable" quadrant would contradict it.
+            if (entity != null && !frontDoorDown) {
                 val isRing = isRingCamera(entity)
                 val entityDevices by vm.entityDevices.collectAsState()
                 val motionSensor = motionSensorForCamera(cameraId, states, entityDevices)

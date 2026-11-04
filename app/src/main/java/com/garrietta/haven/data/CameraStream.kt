@@ -110,6 +110,32 @@ const val FRONT_DOOR_BATTERY_SENSOR_ID = "sensor.front_door_battery"
  */
 const val FRONT_DOOR_RING_MQTT_CAMERA_ID = "camera.front_door_69a1"
 
+/**
+ * Front-door source resolution (camera fallback round, 2026-11-04):
+ * the panel and the hero quadrant share this one rule so they can
+ * never disagree about which camera is the front door. The
+ * ring-mqtt camera (camera.front_door_69a1) leads whenever it is
+ * present and not "unavailable" — it is the only source whose
+ * frames may earn the LIVE badge. When it is unavailable (or
+ * absent from states), the official camera.front_door_live_view
+ * is the fallback, provided it is present and not "unavailable".
+ * Both down (or absent) resolves to null: the caller must show an
+ * honest unavailable state, never a blank or stale frame. Pure
+ * (no Android types) so it is unit tested; callers re-derive it
+ * from the live states map on every state change, so a recovered
+ * 69a1 automatically becomes the lead source again. Only the
+ * literal "unavailable" state triggers the fallback — any other
+ * state still tries 69a1 first, and a stream error there keeps
+ * the existing error path.
+ */
+fun resolveFrontDoorCameraSource(states: Map<String, HaEntity>): String? {
+    val ringMqtt = states[FRONT_DOOR_RING_MQTT_CAMERA_ID]
+    if (ringMqtt != null && ringMqtt.state != "unavailable") return FRONT_DOOR_RING_MQTT_CAMERA_ID
+    val liveView = states[FRONT_DOOR_LIVE_VIEW_ID]
+    if (liveView != null && liveView.state != "unavailable") return FRONT_DOOR_LIVE_VIEW_ID
+    return null
+}
+
 /** Watchdog cap for a Front Door live session: the switch auto-offs after this long even if the panel stays open. */
 const val FRONT_DOOR_LIVE_MAX_MS = 10 * 60 * 1000L
 
