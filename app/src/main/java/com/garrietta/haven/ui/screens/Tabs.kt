@@ -282,11 +282,15 @@ fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
             // stays reachable from Settings -> Browse.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Show Scenes on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                // Feedback round 16, item 3: default switch–text buffer.
+                Spacer(Modifier.width(12.dp))
                 Switch(checked = vm.navShowScenes, onCheckedChange = { vm.navShowScenes = it })
             }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Show Energy on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                // Feedback round 16, item 3: default switch–text buffer.
+                Spacer(Modifier.width(12.dp))
                 Switch(checked = vm.navShowEnergy, onCheckedChange = { vm.navShowEnergy = it })
             }
             Spacer(Modifier.height(8.dp))

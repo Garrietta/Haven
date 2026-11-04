@@ -140,7 +140,10 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     if (entity == null) {
         // Dialog-owned insets/sizing: no fillMaxSize, no status
         // bars padding — the dialog panel owns both (2026-10-30).
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        // Feedback round 16, item 2: the top edge buffer matches
+        // the thermostat popout's 16dp (was flush to the panel
+        // edge); sides were already 16dp, bottom untouched.
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupTitleHeader("Unavailable")
             Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -179,7 +182,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         return
     }
     if (entity.domain == "camera") {
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = detailBadge)
             Spacer(Modifier.height(16.dp))
             Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
@@ -220,7 +223,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         weatherCustom.domainTilePresets,
     )
     Column(
-        Modifier.padding(horizontal = 16.dp),
+        Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
     ) {
         DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = weatherBadge)
         Spacer(Modifier.height(16.dp))
@@ -402,7 +405,7 @@ private fun DetailPageContent(
     // panel caps height at 85% and scrolls, so detail roots are plain
     // columns — no fillMaxSize, no status-bars padding, no own scroll.
     if (LocalWideLayout.current) {
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
             Row(Modifier.fillMaxWidth()) {
                 Column(Modifier.weight(1f).padding(end = 8.dp)) {
@@ -415,7 +418,7 @@ private fun DetailPageContent(
             }
         }
     } else {
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
             if (entity.domain !in noHeroDomains) hero()
             control()

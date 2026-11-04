@@ -1,7 +1,11 @@
 package com.garrietta.haven
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -27,7 +31,13 @@ import com.garrietta.haven.data.changeCardType
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.data.DEFAULT_HIDDEN_HOME_SECTIONS
 import com.garrietta.haven.data.HOME_SECTION_ORDER_DEFAULT
+import com.garrietta.haven.data.ConnectionMode
 import com.garrietta.haven.data.TokenStore
+import com.garrietta.haven.data.connectionLabel
+import com.garrietta.haven.data.connectionModeFromKey
+import com.garrietta.haven.data.isLocalAddress
+import com.garrietta.haven.data.resolveConnectionTarget
+import com.garrietta.haven.data.shouldAutoPinNewTab
 import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.navStyleFromKey
@@ -162,6 +172,106 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openCardSettings(entityId: String) { cardSettingsTarget = entityId }
     fun closeCardSettings() { cardSettingsTarget = null }
+
+    // ---- Connection switcher (feedback round 16, item 7) ----
+    //
+    // Two URL slots: the legacy instanceUrl (local when it
+    // classifies local) and the pasted Nabu Casa remote-UI URL.
+    // The row in Settings -> Connection shows Local vs Cloud for
+    // the EFFECTIVE target (anything not a local address reads
+    // Cloud), and tapping it switches mode + cloud URL. The same
+    // HA token works through both URLs (remote UI forwards to
+    // the same instance), so a switch never re-logs in.
+    // AUTO means Wi-Fi -> local, off Wi-Fi -> cloud. Wi-Fi
+    // TRANSPORT is the platform-allowed signal: SSID-specific
+    // "home" detection would need location permission, so any
+    // Wi-Fi counts as local-capable; if the local URL is
+    // unreachable on a foreign Wi-Fi, pinning Local/Cloud in
+    // the dialog overrides AUTO. Cloud-URL auto-detection from
+    // HA's cloud integration is not exposed through any API the
+    // app uses, so the cloud side is a paste field — no URL is
+    // ever guessed or hardcoded from a screenshot.
+    var connectionPrefsVersion by mutableStateOf(0)
+        private set
+
+    fun bumpConnectionPrefs() { connectionPrefsVersion++ }
+
+    /** The stored local URL, if the legacy URL classifies local. */
+    val connectionLocalUrl: String?
+        get() = tokenStore.instanceUrl.takeIf { isLocalAddress(it) }
+
+    /** The pasted cloud URL, else a cloud-classified legacy URL. */
+    val connectionCloudUrl: String?
+        get() = tokenStore.cloudInstanceUrl
+            ?: tokenStore.instanceUrl.takeIf { !isLocalAddress(it) }
+
+    val connectionMode: ConnectionMode
+        get() = connectionModeFromKey(tokenStore.connectionModeKey)
+
+    /** Wi-Fi transport only — no location permission involved. */
+    fun isWifiConnected(): Boolean {
+        return try {
+            val cm = getApplication<Application>()
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** The URL the current mode + transport resolve to, if any. */
+    fun connectionTarget(): String? = resolveConnectionTarget(
+        connectionMode, connectionLocalUrl, connectionCloudUrl, isWifiConnected(),
+    )
+
+    /** (Local|Cloud, effective target) for the Settings row. */
+    fun connectionDisplay(): Pair<String, String?> {
+        val target = connectionTarget()
+        return connectionLabel(target) to target
+    }
+
+    /** Last AUTO-resolved target: reconnects happen only on change. */
+    private var lastAutoTarget: String? = null
+
+    private val connectivityCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = reevaluateAutoConnection()
+        override fun onLost(network: Network) = reevaluateAutoConnection()
+    }
+
+    private fun reevaluateAutoConnection() {
+        if (connectionMode != ConnectionMode.AUTO) return
+        val target = connectionTarget() ?: return
+        if (target == lastAutoTarget) return
+        val token = tokenStore.accessToken ?: return
+        lastAutoTarget = target
+        client.connect(target, token)
+    }
+
+    /**
+     * Saves the mode (+ a pasted cloud URL, when given) and
+     * reconnects to the new effective target with the existing
+     * token. A reconnect to the same URL is harmless; the dialog
+     * is an explicit user action, so no change-guard here — the
+     * guard lives in reevaluateAutoConnection, which must never
+     * loop on transport flaps.
+     */
+    fun switchConnection(mode: ConnectionMode, cloudUrlInput: String?) {
+        tokenStore.connectionModeKey = when (mode) {
+            ConnectionMode.AUTO -> null
+            ConnectionMode.LOCAL -> "local"
+            ConnectionMode.CLOUD -> "cloud"
+        }
+        val cleanCloud = cloudUrlInput?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { normalizeInstanceUrl(it) }
+        if (cleanCloud != null) tokenStore.cloudInstanceUrl = cleanCloud
+        bumpConnectionPrefs()
+        val target = connectionTarget()
+        lastAutoTarget = target
+        val token = tokenStore.accessToken
+        if (target != null && token != null) client.connect(target, token)
+    }
 
     val connection = client.connection
     val states = client.states
@@ -311,6 +421,13 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        // Round 16, item 7: drop the transport watcher.
+        try {
+            val cm = getApplication<Application>()
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            cm?.unregisterNetworkCallback(connectivityCallback)
+        } catch (_: Exception) {
+        }
         if (frontDoorLiveEngaged) {
             // Best effort: the process may be going away, so this is
             // fire-and-forget, never a reason to keep the ViewModel alive.
@@ -598,6 +715,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             val first = client.states.first { it.isNotEmpty() }
             maybeMigrateCameras(first)
         }
+        // Round 16, item 7: seed the AUTO target BEFORE the
+        // callback registers (its first fire is immediate and
+        // must be a no-op, not a reconnect), then watch
+        // transport changes for Wi-Fi <-> cellular flips.
+        lastAutoTarget = connectionTarget()
+        try {
+            val cm = getApplication<Application>()
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            cm?.registerDefaultNetworkCallback(connectivityCallback)
+        } catch (_: Exception) {
+        }
         autoConnect()
     }
 
@@ -611,7 +739,15 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /** Creates a tab and returns its id, so the caller can navigate to it. */
     fun addTab(title: String): String {
         val id = "tab_${System.currentTimeMillis()}"
-        userTabs = userTabs + UserTab(id, title.trim().ifEmpty { "Tab" }, emptyList())
+        // Feedback round 16, item 6: a new tab is auto-pinned
+        // when a pin slot is free (cap 2, same rule as
+        // setTabPinned). The "climate" tab was created fine but
+        // unpinned, so it appeared nowhere the user looked —
+        // not on the bar, and the empty tab screen reads as
+        // nothing happening. Auto-pin puts it on the bar; the
+        // Pin button still unpins it in one tap.
+        val pinned = shouldAutoPinNewTab(userTabs.count { it.pinned })
+        userTabs = userTabs + UserTab(id, title.trim().ifEmpty { "Tab" }, emptyList(), pinned = pinned)
         tabsStore.saveTabs(userTabs)
         return id
     }
@@ -880,7 +1016,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Auth ----
 
     private fun autoConnect() {
-        val url = tokenStore.instanceUrl
+        // Round 16, item 7: start on the mode-resolved target
+        // (AUTO on home Wi-Fi -> local), falling back to the
+        // legacy URL exactly as before when nothing resolves.
+        val url = connectionTarget() ?: tokenStore.instanceUrl
         val token = tokenStore.accessToken
         if (url != null && token != null) {
             isAuthenticated = true
@@ -896,7 +1035,20 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loginWithToken(url: String, token: String) {
         val clean = normalizeInstanceUrl(url)
-        tokenStore.instanceUrl = clean
+        // Round 16, item 7: slot the login URL without losing
+        // the other side — a cloud login must not wipe a stored
+        // local URL (switching back would strand the app), and
+        // a local login replaces the local slot only. First-ever
+        // login keeps the legacy field populated either way.
+        if (isLocalAddress(clean)) {
+            tokenStore.instanceUrl = clean
+        } else {
+            if (tokenStore.instanceUrl?.let { isLocalAddress(it) } != true) {
+                tokenStore.instanceUrl = clean
+            }
+            tokenStore.cloudInstanceUrl = clean
+        }
+        bumpConnectionPrefs()
         tokenStore.accessToken = token
         tokenStore.refreshToken = null
         tokenStore.tokenExpiresAtMs = 0L

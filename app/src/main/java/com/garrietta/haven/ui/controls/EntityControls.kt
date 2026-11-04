@@ -3,6 +3,7 @@ import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.reportCardColor
 import com.garrietta.haven.ui.components.reportCardShape
 import com.garrietta.haven.data.customIconKeyFor
 import com.garrietta.haven.ui.components.CoolBlue
@@ -426,16 +427,11 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
     // token extraLarge corners are unchanged.
     val cardShape = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain)
         ?: generalCardShape(0)
-    Card(
-        shape = cardShape,
-        // Hierarchy tokens: SurfaceContainer for root cards (Home, Boards,
-        // Areas, detail pages), SurfaceContainerLow for nested cards
-        // (inside the sheet, where the panel is already a container).
-        // Weather and climate root cards carry their dynamic color at
-        // low alpha — condition on the weather front card, mode on
-        // climate cards — so state reads on the card face itself.
-        colors = CardDefaults.cardColors(
-            containerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
+    // Feedback round 16, item 4a: the card's container color as
+    // a named value, so the morph can report it alongside the
+    // bounds/shape — the surface must start at the card's own
+    // color, not panel cream (the white exit flash).
+    val cardContainerColor = if (nested) MaterialTheme.colorScheme.surfaceContainerLow
             else if (display.domain == "weather") lerp(
                 MaterialTheme.colorScheme.surfaceContainer,
                 weatherConditionColorThemed(display.state, isDarkBackdrop(MaterialTheme.colorScheme.background)),
@@ -454,9 +450,17 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 if (tint != null) lerp(MaterialTheme.colorScheme.surfaceContainer, tint, 0.15f)
                 else MaterialTheme.colorScheme.surfaceContainer
             }
-            else MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).reportCardShape(entity.entityId, cardShape).hideWhenMorphSource(entity.entityId) else Modifier),
+            else MaterialTheme.colorScheme.surfaceContainer
+    Card(
+        shape = cardShape,
+        // Hierarchy tokens: SurfaceContainer for root cards (Home, Boards,
+        // Areas, detail pages), SurfaceContainerLow for nested cards
+        // (inside the sheet, where the panel is already a container).
+        // Weather and climate root cards carry their dynamic color at
+        // low alpha — condition on the weather front card, mode on
+        // climate cards — so state reads on the card face itself.
+        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+        modifier = Modifier.fillMaxWidth().then(if (morphSource) Modifier.reportCardBounds(entity.entityId).reportCardShape(entity.entityId, cardShape).reportCardColor(entity.entityId, cardContainerColor).hideWhenMorphSource(entity.entityId) else Modifier),
     ) {
         // Body hide (2026-10-29 verdict-fix round): the whole card
         // body vanishes from frame 0 while its morph is open, exactly

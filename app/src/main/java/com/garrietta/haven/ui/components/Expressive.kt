@@ -586,6 +586,10 @@ fun KodaMenuRow(
                 Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        // Feedback round 16, item 3: a default buffer between the
+        // label and the trailing control (switches included) — a
+        // long title used to run flush into the switch.
+        Spacer(Modifier.width(12.dp))
         if (trailing != null) {
             trailing()
         } else if (onClick != null) {

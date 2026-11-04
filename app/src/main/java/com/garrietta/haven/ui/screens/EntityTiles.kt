@@ -80,6 +80,7 @@ import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.hideHeroWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
 import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.reportCardColor
 import com.garrietta.haven.ui.components.reportCardShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
@@ -270,11 +271,11 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
         label = "tilePress",
     )
-    Surface(
-        // Expressive-menus round, item 6: the general card shape
-        // (a shape-picker override still beats it, as on Home).
-        shape = tileOutline,
-        color = tilePresetContainer ?: tileInactiveContainer ?: when {
+    // Feedback round 16, item 4a: the tile's container color as
+    // a named value, so the morph can report it alongside the
+    // bounds/shape — the surface must start at the tile's own
+    // color, not panel cream (the white exit flash).
+    val tileContainerColor = tilePresetContainer ?: tileInactiveContainer ?: when {
             // Lit tiles tint by kelvin AND brightness: a dim light reads
             // dimmer than a bright one, never full-tint at 10%.
             display.domain == "light" && display.state == "on" ->
@@ -293,11 +294,17 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
                     0.15f,
                 )
             else -> MaterialTheme.colorScheme.surfaceContainerLow
-        },
+    }
+    Surface(
+        // Expressive-menus round, item 6: the general card shape
+        // (a shape-picker override still beats it, as on Home).
+        shape = tileOutline,
+        color = tileContainerColor,
         modifier = Modifier.fillMaxWidth()
             .onGloballyPositioned { tileBounds = it.boundsInWindow() }
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, tileOutline)
+            .reportCardColor(entity.entityId, tileContainerColor)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
             // Body hide (2026-10-29 verdict-fix round): the whole

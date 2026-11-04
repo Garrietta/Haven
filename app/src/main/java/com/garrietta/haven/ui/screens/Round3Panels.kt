@@ -221,6 +221,8 @@ private fun ToggleRow(label: String, sub: String?, checked: Boolean, enabled: Bo
                 Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        // Feedback round 16, item 3: default switch–text buffer.
+        Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = { onToggle() }, enabled = enabled)
     }
 }

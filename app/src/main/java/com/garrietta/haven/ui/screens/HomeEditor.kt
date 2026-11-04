@@ -169,6 +169,8 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("Greeting", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                        // Feedback round 16, item 3: default switch–text buffer.
+                        Spacer(Modifier.width(12.dp))
                         Switch(
                             checked = "greeting" !in hidden,
                             onCheckedChange = { shown ->
@@ -186,6 +188,8 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                            // Feedback round 16, item 3: default switch–text buffer.
+                            Spacer(Modifier.width(12.dp))
                             IconButton(onClick = { moveSection(key, true) }) {
                                 Icon(Icons.Filled.ArrowUpward, "Move up", modifier = Modifier.size(20.dp))
                             }

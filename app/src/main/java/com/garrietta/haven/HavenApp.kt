@@ -4,11 +4,13 @@ import com.garrietta.haven.ui.components.LocalSuppressTraveler
 import com.garrietta.haven.ui.components.PopupDragHandle
 import com.garrietta.haven.ui.components.PopupDragState
 import com.garrietta.haven.ui.components.PopupDismissConnection
+import com.garrietta.haven.ui.components.LocalCardColors
 import com.garrietta.haven.ui.components.LocalCardShapes
 import com.garrietta.haven.ui.components.PopupSideAnchor
 import com.garrietta.haven.ui.components.centeredPopupEnter
 import com.garrietta.haven.ui.components.morphCloseContentAlpha
 import com.garrietta.haven.ui.components.morphEnterContentAlpha
+import com.garrietta.haven.ui.components.morphPanelBackgroundBlend
 import com.garrietta.haven.ui.components.morphPopupShape
 import com.garrietta.haven.ui.components.tileMorphTransform
 import com.garrietta.haven.ui.components.dragProgressAfterDelta
@@ -29,6 +31,7 @@ import com.garrietta.haven.data.alertDotColor
 import com.garrietta.haven.data.ControlDeepLinkTarget
 import com.garrietta.haven.data.controlDeepLinkTarget
 import com.garrietta.haven.data.hasImportantAlert
+import com.garrietta.haven.data.isWideLayout
 import com.garrietta.haven.ui.components.NavItem
 import com.garrietta.haven.ui.components.NavPillGeometry
 import com.garrietta.haven.ui.components.NavStyle
@@ -139,7 +142,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -240,6 +245,7 @@ import com.garrietta.haven.ui.components.selectedPillFill
 import com.garrietta.haven.ui.components.selectedPillGlyph
 import com.garrietta.haven.ui.components.ScrollVisibilityState
 import com.garrietta.haven.ui.components.heroHeaderAlpha
+import com.garrietta.haven.ui.theme.popupMorphSpring
 import com.garrietta.haven.ui.theme.springBounds
 import com.garrietta.haven.ui.theme.kodaBarSpec
 import com.garrietta.haven.ui.theme.springSpatial
@@ -315,25 +321,34 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
  * at open (null = the card never reported bounds, e.g. a board card;
  * the sheet then morphs from the graceful fallback rect — the target
  * shifted 80dp down — never an instant appearance, never a crash).
- * The overlay always prefers the card's CURRENT bounds over this captured
- * rect (cards re-report on relayout), so rotation mid-morph and cards
- * that moved between open and dismiss track correctly; this captured
- * rect is only the fallback.
+ * Feedback round 16, item 4c: the render sites prefer this CAPTURED
+ * rect over the live map (see resolveMorphSource): while a panel
+ * for an entity is open, that panel's own cards report their
+ * panel-internal rects under the same id, so a live-first read
+ * lands the exit morph on the panel-internal rect instead of the
+ * tapped tile. The live map stays the fallback for cards that
+ * never reported bounds. Rotation mid-panel is the one accepted
+ * edge: the exit lands on the pre-rotation tile rect rather than
+ * tracking the moved tile — far rarer than the always-wrong
+ * poisoned read it replaces.
+ * sourceColor is the tile's container color captured at the same
+ * instant (item 4a): the morph surface starts at the tile's own
+ * color instead of flashing panel cream over the hidden tile.
  */
-private class SheetAnim(val id: String, val source: Rect?)
+private class SheetAnim(val id: String, val source: Rect?, val sourceColor: Color? = null)
 
 /** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
-private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?)
+private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?, val sourceColor: Color? = null)
 
 /** Feedback round 5, item 1: a detail opened from a panel card, stacked above the panel overlay
  * WITHOUT touching the backstack. The panel stays the backstack top, so the base page never
  * switches to the panel page (the "middleman" screen). Back from this layer returns to the panel
  * popup, not Home. The source rect is captured at tap time from the panel card, same rule as
  * the detail block's open-captured rect. */
-private class PanelDetailAnim(val entityId: String, val source: Rect?)
+private class PanelDetailAnim(val entityId: String, val source: Rect?, val sourceColor: Color? = null)
 
 /** Open thermostat pop-out morph: the climate entity plus its source card rect (same fallback rule as sheets). */
-private class PopoutAnim(val id: String, val source: Rect?)
+private class PopoutAnim(val id: String, val source: Rect?, val sourceColor: Color? = null)
 
 @Composable
 fun HavenApp(vm: HavenViewModel) {
@@ -408,6 +423,7 @@ fun HavenApp(vm: HavenViewModel) {
         // Feedback round 11, item 2: the source tiles' outline
         // shapes, reported alongside cardBounds (see reportCardShape).
         val cardShapes = remember { mutableStateMapOf<String, androidx.compose.ui.graphics.Shape>() }
+        val cardColors = remember { mutableStateMapOf<String, Color>() }
         // Traveling-header state (2026-10-29 pop-up round): cards
         // report header rects here, measurement frames report their
         // pop-up header target here (id + rect, so a stale target from
@@ -428,11 +444,17 @@ fun HavenApp(vm: HavenViewModel) {
         val sheetProgress = remember { Animatable(0f) }
         val detailProgress = remember { Animatable(0f) }
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
-        // Feedback round 2, item 7: the last ON-TAB rail index,
-        // remembered so the rail's selected indicator survives
-        // popups (updated at the rail call site below whenever
-        // selectedNavIndex returns non-null).
-        var lastRailTabIndex by remember { mutableStateOf<Int?>(null) }
+        // Feedback round 2, item 7: the last ON-TAB rail
+        // destination, remembered so the rail's selected
+        // indicator survives popups (updated at the rail call
+        // site below whenever selectedNavIndex returns
+        // non-null). Feedback round 16, item 9: this stores
+        // the SCREEN, never an index — after an add/pin/
+        // remove the bar list shifts and a stored index
+        // points one slot off (vid9: Add-a-tab, back out,
+        // highlight wrong). The index is resolved fresh
+        // against the current bar list every composition.
+        var lastRailTabScreen by remember { mutableStateOf<Screen?>(null) }
         val popoutProgress = remember { Animatable(0f) }
         // Feedback round 7: per-surface drag state for the Koda
         // now-playing morph port (see MorphOverlay.PopupDragState).
@@ -831,7 +853,7 @@ fun HavenApp(vm: HavenViewModel) {
                 vm.clearTravelSnapshot(prev.entityId)
             }
             if (prev?.entityId == entityId) return
-            panelDetailAnim = PanelDetailAnim(entityId, cardBounds[entityId])
+            panelDetailAnim = PanelDetailAnim(entityId, cardBounds[entityId], cardColors[entityId])
         }
         val goBack: () -> Unit = {
             if (panelDetailAnim != null) dismissPanelDetail()
@@ -879,10 +901,10 @@ fun HavenApp(vm: HavenViewModel) {
         // over the hidden card) with no one-frame gap. The effects
         // below own only the progress animation.
         if (vm.popupEntityId != null && sheetAnim?.id != vm.popupEntityId) {
-            sheetAnim = SheetAnim(vm.popupEntityId!!, cardBounds[vm.popupEntityId!!])
+            sheetAnim = SheetAnim(vm.popupEntityId!!, cardBounds[vm.popupEntityId!!], cardColors[vm.popupEntityId!!])
         }
         if (detailScreen != null && detailAnim?.screen != detailScreen) {
-            detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)])
+            detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)], cardColors[detailEntityId(detailScreen)])
         }
         LaunchedEffect(vm.popupEntityId) {
             val id = vm.popupEntityId
@@ -899,7 +921,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // appearance.
                 if (!reduceMotion) {
                     sheetProgress.snapTo(0f)
-                    sheetProgress.animateTo(1f, springBounds())
+                    sheetProgress.animateTo(1f, popupMorphSpring())
                 } else sheetProgress.snapTo(1f)
             } else if (id == null && anim != null) {
                 sheetAnim = null
@@ -916,7 +938,7 @@ fun HavenApp(vm: HavenViewModel) {
                 detailDrag.reset()
                 if (!reduceMotion) {
                     detailProgress.snapTo(0f)
-                    detailProgress.animateTo(1f, springBounds())
+                    detailProgress.animateTo(1f, popupMorphSpring())
                 } else detailProgress.snapTo(1f)
             } else if (detailScreen == null && anim != null) {
                 detailAnim = null
@@ -936,7 +958,7 @@ fun HavenApp(vm: HavenViewModel) {
                 panelDetailDrag.reset()
                 if (!reduceMotion) {
                     panelDetailProgress.snapTo(0f)
-                    panelDetailProgress.animateTo(1f, springBounds())
+                    panelDetailProgress.animateTo(1f, popupMorphSpring())
                 } else panelDetailProgress.snapTo(1f)
             } else {
                 heroTarget = null
@@ -947,7 +969,7 @@ fun HavenApp(vm: HavenViewModel) {
         // capture synchronously, animate progress 0 -> 1 on the bounds
         // spring (snapped under reduce-motion).
         if (vm.climatePopoutId != null && popoutAnim?.id != vm.climatePopoutId) {
-            popoutAnim = PopoutAnim(vm.climatePopoutId!!, cardBounds[vm.climatePopoutId!!])
+            popoutAnim = PopoutAnim(vm.climatePopoutId!!, cardBounds[vm.climatePopoutId!!], cardColors[vm.climatePopoutId!!])
         }
         LaunchedEffect(vm.climatePopoutId) {
             val id = vm.climatePopoutId
@@ -958,7 +980,7 @@ fun HavenApp(vm: HavenViewModel) {
                 popoutDrag.reset()
                 if (!reduceMotion) {
                     popoutProgress.snapTo(0f)
-                    popoutProgress.animateTo(1f, springBounds())
+                    popoutProgress.animateTo(1f, popupMorphSpring())
                 } else popoutProgress.snapTo(1f)
             } else if (id == null && anim != null) {
                 popoutAnim = null
@@ -1060,7 +1082,7 @@ fun HavenApp(vm: HavenViewModel) {
                 if (reduceMotion) cameraDialogProgress.snapTo(1f)
                 else {
                     cameraDialogProgress.snapTo(0f)
-                    cameraDialogProgress.animateTo(1f, springBounds())
+                    cameraDialogProgress.animateTo(1f, popupMorphSpring())
                 }
             }
         }
@@ -1068,7 +1090,12 @@ fun HavenApp(vm: HavenViewModel) {
         // Wide-layout detection lives here, above the Scaffold, so every
         // screen (and the overlays) reads the same value.
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val wideLayout = maxWidth >= 600.dp
+            // Feedback round 16, item 1: unfolded/tablet mode
+            // ONLY once width >= height (and >= 600dp) — see
+            // isWideLayout. The old width-only gate flipped to
+            // tablet mode at ~50% split-screen, where the width
+            // already crossed 600dp but the height was far larger.
+            val wideLayout = isWideLayout(maxWidth.value, maxHeight.value)
             val windowSizeClass = windowSizeClassFor(maxWidth)
             CompositionLocalProvider(
                 LocalWideLayout provides wideLayout,
@@ -1132,6 +1159,7 @@ fun HavenApp(vm: HavenViewModel) {
             CompositionLocalProvider(
                 LocalCardBounds provides cardBounds,
                 LocalCardShapes provides cardShapes,
+                LocalCardColors provides cardColors,
                 // The camera panel's quadrant is a morph source too
                 // (see CameraQuadrant): its rect anchors the panel
                 // morph, and the opaque panel covers it while open,
@@ -1313,12 +1341,13 @@ fun HavenApp(vm: HavenViewModel) {
                     val badged = if (vm.badgeNav && hasImportantAlert(chromeStates.values.toList())) setOf(Screen.Today) else emptySet()
                     // Feedback round 15, item 4: Settings submenus
                     // resolve to Settings, so the rail highlight
-                    // persists inside them (and the lastRailTabIndex
-                    // fallback below then holds Settings too).
+                    // persists inside them (and the
+                    // lastRailTabScreen fallback below then holds
+                    // Settings too).
                     val onTabIndex = selectedNavIndex(navActiveScreen(current), barItems)
-                    if (onTabIndex != null) lastRailTabIndex = onTabIndex
+                    if (onTabIndex != null) lastRailTabScreen = barItems[onTabIndex].screen
                     val railSelectedIndex = if (sheetAnim != null || detailAnim != null || popoutAnim != null) {
-                        onTabIndex ?: lastRailTabIndex
+                        onTabIndex ?: lastRailTabScreen?.let { selectedNavIndex(it, barItems) }
                     } else {
                         onTabIndex
                     }
@@ -1412,8 +1441,14 @@ fun HavenApp(vm: HavenViewModel) {
             // open/close, so exiting restores the exact prior view.
             // Folded keeps its gate: folded panels are opaque
             // full-screen, so the shift underneath is invisible.
+            // Feedback round 16, item 8: the 20dp "daylight"
+            // is gone — unfolded has no bottom pill to mirror,
+            // so the reserve only ever pushed content up and
+            // left the last row short of the bottom edge. The
+            // gesture-bar inset stays, so content still clears
+            // the system bar.
             val unfoldedBottomClearance =
-                if (LocalWideLayout.current) 20.dp + navBottom else 0.dp
+                if (LocalWideLayout.current) navBottom else 0.dp
             val foldedNavClearance =
                 if (!LocalWideLayout.current && isTopLevel(current)) navBottom else 0.dp
             val contentPadding = PaddingValues(
@@ -1613,9 +1648,10 @@ fun HavenApp(vm: HavenViewModel) {
                 if (LocalWideLayout.current) {
                     CenteredPopup(
                         progress = dragProgressFor(sheetProgress),
-                        source = cardBounds[anim.id] ?: anim.source,
+                        source = anim.source ?: cardBounds[anim.id],
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
+                        fromBackground = anim.sourceColor,
                         onDismiss = { dismissSheet() },
                         dragHandle = sheetHandle,
                         isClosing = sheetExiting && !sheetDrag.settling,
@@ -1637,10 +1673,10 @@ fun HavenApp(vm: HavenViewModel) {
                 // block reads the Animatable during composition.
                 PanelOverlay(
                     progress = dragProgressFor(sheetProgress),
-                    source = cardBounds[anim.id] ?: anim.source,
+                    source = anim.source ?: cardBounds[anim.id],
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
-                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                     // Feedback round 7: settling keeps the open
                     // curves through a drag-initiated dismiss.
                     isClosing = sheetExiting && !sheetDrag.settling,
@@ -1726,6 +1762,7 @@ fun HavenApp(vm: HavenViewModel) {
                         source = detailSource,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
+                        fromBackground = anim.sourceColor,
                         onDismiss = { dismissDetail() },
                         dragHandle = detailHandle,
                         isClosing = detailExiting && !detailDrag.settling,
@@ -1749,7 +1786,7 @@ fun HavenApp(vm: HavenViewModel) {
                     source = detailSource,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
-                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                     isClosing = detailExiting && !detailDrag.settling,
                     dragHandle = detailHandle,
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
@@ -1808,6 +1845,7 @@ fun HavenApp(vm: HavenViewModel) {
                         source = panelDetailSource,
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
+                        fromBackground = anim.sourceColor,
                         onDismiss = { dismissPanelDetail() },
                         dragHandle = panelDetailHandle,
                         isClosing = panelDetailExiting && !panelDetailDrag.settling,
@@ -1823,7 +1861,7 @@ fun HavenApp(vm: HavenViewModel) {
                     source = panelDetailSource,
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
-                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                     isClosing = panelDetailExiting && !panelDetailDrag.settling,
                     dragHandle = panelDetailHandle,
                     landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
@@ -1852,9 +1890,10 @@ fun HavenApp(vm: HavenViewModel) {
                 if (LocalWideLayout.current) {
                     CenteredPopup(
                         progress = dragProgressFor(popoutProgress),
-                        source = cardBounds[anim.id] ?: anim.source,
+                        source = anim.source ?: cardBounds[anim.id],
                         overlayOrigin = overlayOrigin,
                         panelBackground = MaterialTheme.colorScheme.background,
+                        fromBackground = anim.sourceColor,
                         onDismiss = { dismissPopout() },
                         dragHandle = popoutHandle,
                         isClosing = popoutExiting && !popoutDrag.settling,
@@ -1870,10 +1909,10 @@ fun HavenApp(vm: HavenViewModel) {
                 // the sheet block); progress is a lambda.
                 PanelOverlay(
                     progress = dragProgressFor(popoutProgress),
-                    source = cardBounds[anim.id] ?: anim.source,
+                    source = anim.source ?: cardBounds[anim.id],
                     overlayOrigin = overlayOrigin,
                     panelBackground = MaterialTheme.colorScheme.background,
-                    sourceCardColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                     isClosing = popoutExiting && !popoutDrag.settling,
                     dragHandle = popoutHandle,
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
@@ -2148,11 +2187,15 @@ private fun EntityPopupSheetContent(
     // The panel scrolls: plain column, no own scroll, no drag
     // handle (2026-10-30 round — panels do not drag, and the sheet
     // handle was a sheet affordance).
+    // Feedback round 16, item 2: the sheet's top edge buffer
+    // matches the thermostat popout's 16dp (was a 12dp spacer).
+    // Sides were already 16dp; the bottom stays 24dp — content
+    // still scrolls up from the very bottom.
     Column(
         Modifier.fillMaxWidth()
             .padding(horizontal = 16.dp).padding(bottom = 24.dp),
     ) {
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
             if (entity == null) {
                 Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
@@ -2550,6 +2593,15 @@ private fun CenteredPopup(
     // runs (mirrors PanelOverlay's isClosing), so the content
     // fades out early on close instead of late.
     isClosing: Boolean = false,
+    // Feedback round 16, item 4a: the source tile's container
+    // color, captured at open (null = sourceless/camera: keep the
+    // panel color throughout). The Surface keeps its panel color;
+    // the content wrapper below draws this lerp over it, so the
+    // unfolded popup — which previously had no source-color lerp
+    // at all — starts at the tile's own color instead of flashing
+    // panel cream over the hidden tile on exit. Declared before
+    // the content lambda (round 5 lesson).
+    fromBackground: Color? = null,
     content: @Composable () -> Unit,
 ) {
     // Feedback round 7: the surface's placed rect in root
@@ -2683,6 +2735,25 @@ private fun CenteredPopup(
                         indication = null,
                     ) { },
             ) {
+                // Feedback round 16, item 4a: the color-lerp
+                // rect. It covers the Surface exactly (same
+                // size, drawn over the panel color), lerping
+                // from the tile's captured color to the panel
+                // color over the first 35% of the morph —
+                // mirroring MorphSurface's fromBackground rule.
+                // Progress is read ONLY in this draw block,
+                // never during composition (round 6 rule), so
+                // the morph still runs on the RenderThread.
+                // At rest (p = 1) the rect IS the panel color,
+                // so the settled panel is byte-identical to
+                // before; sourceless popups pass null and draw
+                // the panel color throughout.
+                Box(
+                    Modifier.fillMaxSize().drawBehind {
+                        val p = progress().coerceIn(0f, 1f)
+                        drawRect(lerp(fromBackground ?: panelBackground, panelBackground, morphPanelBackgroundBlend(p)))
+                    },
+                ) {
                 // Pin destination-header visibility: with no
                 // traveler on this path, headers must render fully
                 // visible from frame 0 (see the KDoc above).
@@ -2733,6 +2804,7 @@ private fun CenteredPopup(
                         content()
                     }
                 }
+                } // color-lerp wrapper (round 16, item 4a)
             }
             }
         }
@@ -4109,7 +4181,11 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     // icon only, so the highlight never stretches into a tall
     // vertical capsule and never changes shape across tabs.
     var pillOrigin by remember { mutableStateOf(0f) }
-    var iconRects by remember { mutableStateOf<Map<Int, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
+    // Feedback round 16, item 9: keyed by SCREEN, not by
+    // index — the old index keys went stale the moment the
+    // bar list changed (add/pin/remove), so the indicator
+    // glided to the previous item's rect: the off-by-one.
+    var iconRects by remember { mutableStateOf<Map<Screen, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
     // Expressive-menus round, item 5: the unfolded rail scrubs
     // exactly like the folded pill bar (drag along the rail to
     // pick a tab, commit on release, haptic tick per tab). The
@@ -4125,7 +4201,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
         },
     )
     val scrubIndex = scrub.hoveredTab ?: currentIndex
-    val targetIconRect = iconRects[scrubIndex]
+    val targetIconRect = items.getOrNull(scrubIndex)?.let { iconRects[it.screen] }
     val density = LocalDensity.current
     // Follow-up B (2026-11-03): the rail's selection glide uses
     // Koda's bar spec (expressive fast spatial) instead of the
@@ -4263,7 +4339,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                                     contentDescription = item.label,
                                     tint = contentColor,
                                     modifier = Modifier.size(24.dp)
-                                        .onGloballyPositioned { iconRects = iconRects + (index to it.boundsInWindow()) },
+                                        .onGloballyPositioned { iconRects = iconRects + (item.screen to it.boundsInWindow()) },
                                 )
                                 // Stage E §9: same condition dot as the
                                 // folded pill — never a count.

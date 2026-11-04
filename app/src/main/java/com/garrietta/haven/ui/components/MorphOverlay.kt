@@ -130,6 +130,23 @@ val LocalCardBounds = staticCompositionLocalOf<MutableMap<String, Rect>> { mutab
  */
 val LocalCardShapes = staticCompositionLocalOf<MutableMap<String, Shape>> { mutableMapOf() }
 
+/**
+ * Feedback round 16, item 4a: morph-source CONTAINER colors by
+ * entity id. Written by cards alongside [LocalCardBounds] (every
+ * site that reports bounds reports the exact container color it
+ * renders — tile tint, preset, or default), read at morph open so
+ * the morphing surface starts at the tile's own color instead of
+ * the panel color. The folded surface already lerped from a
+ * source color over the first 35% of the morph, but every call
+ * site passed the same constant (surfaceContainerHighest) — for a
+ * yellow lamp tile or a purple media tile the exit's final frames
+ * showed a pale rect over the hidden colored tile: the white
+ * flash. The unfolded popup had no lerp at all (full panel cream
+ * from frame 0). With the tile's true color captured at open,
+ * both surfaces land on the tile with its color.
+ */
+val LocalCardColors = staticCompositionLocalOf<MutableMap<String, Color>> { mutableMapOf() }
+
 /** Entity id of the card currently hidden as a morph source, or null. */
 val LocalHiddenCardId = staticCompositionLocalOf<String?> { null }
 
@@ -249,6 +266,19 @@ fun Modifier.reportCardShape(id: String, shape: Shape): Modifier = composed {
     val shapes = LocalCardShapes.current
     onGloballyPositioned {
         if (shapes[id] != shape) shapes[id] = shape
+    }
+}
+
+/**
+ * Feedback round 16, item 4a: reports this layout's container
+ * color into [LocalCardColors] under [id]. Same write-once-changed
+ * rule as bounds/shapes. Call sites pair this with
+ * [reportCardBounds] and pass the exact color the layout renders.
+ */
+fun Modifier.reportCardColor(id: String, color: Color): Modifier = composed {
+    val colors = LocalCardColors.current
+    onGloballyPositioned {
+        if (colors[id] != color) colors[id] = color
     }
 }
 

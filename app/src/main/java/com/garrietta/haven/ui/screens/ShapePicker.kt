@@ -26,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -285,9 +286,17 @@ fun DomainDefaultsDialog(vm: HavenViewModel, onClose: () -> Unit) {
                 )
                 Spacer(Modifier.height(16.dp))
                 Box {
+                    // Feedback round 16, item 5: ONLY this bar
+                    // changes — cream, differentiated from the
+                    // green selector around it. Nothing else in
+                    // the dialog moves.
                     OutlinedButton(
                         onClick = { domainExpanded = true },
                         modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color(0xFFF6F5EC),
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
                     ) { Text("Entity type: $domainLabel") }
                     DropdownMenu(
                         expanded = domainExpanded,

@@ -148,6 +148,16 @@ fun <T> exitFast(): FiniteAnimationSpec<T> =
  */
 fun <T> sheetSpring(): FiniteAnimationSpec<T> = spring(stiffness = 500f, dampingRatio = 0.85f)
 
+/**
+ * Feedback round 16, item 4b: the popup morph spring. Same numbers
+ * as [sheetSpring] (500/0.85, matched to Koda's recorded player
+ * expansion) but its own token, so popup open speed tunes
+ * independently of sheet rise. The five popup open effects
+ * (sheet/detail/panel-detail/popout/camera-dialog) run on this;
+ * dismiss keeps [settleSpring] (Koda's player settle).
+ */
+fun <T> popupMorphSpring(): FiniteAnimationSpec<T> = spring(stiffness = 500f, dampingRatio = 0.85f)
+
 /** Instant spec used when reduce-motion is on. Finite, so it also serves animateContentSize and expand/shrink. */
 fun <T> havenMotion(reduceMotion: Boolean): FiniteAnimationSpec<T> =
     if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else havenSpring()

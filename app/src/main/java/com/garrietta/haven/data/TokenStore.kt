@@ -25,6 +25,33 @@ class TokenStore(context: Context) {
             else prefs.edit().putString("instance_url", value).apply()
         }
 
+    /**
+     * Feedback round 16, item 7: the Nabu Casa remote-UI URL,
+     * pasted by the user (cloud auto-detection from HA's cloud
+     * integration is not exposed through any API the app uses,
+     * so no URL is ever guessed or hardcoded). Plain prefs, like
+     * instanceUrl — a URL is not a secret. Null until pasted.
+     */
+    var cloudInstanceUrl: String?
+        get() = prefs.getString("cloud_instance_url", null)
+        set(value) {
+            if (value == null) prefs.edit().remove("cloud_instance_url").apply()
+            else prefs.edit().putString("cloud_instance_url", value).apply()
+        }
+
+    /**
+     * Feedback round 16, item 7: the connection mode key —
+     * "local", "cloud", or null for AUTO (the default). Stored
+     * as a raw string so unknown values parse back to AUTO
+     * (see connectionModeFromKey), never a crash.
+     */
+    var connectionModeKey: String?
+        get() = prefs.getString("connection_mode", null)
+        set(value) {
+            if (value == null) prefs.edit().remove("connection_mode").apply()
+            else prefs.edit().putString("connection_mode", value).apply()
+        }
+
     var accessToken: String?
         get() = readEncrypted("access_token")
         set(value) = writeEncrypted("access_token", value)

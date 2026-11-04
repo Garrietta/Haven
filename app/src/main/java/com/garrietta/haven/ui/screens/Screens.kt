@@ -32,6 +32,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import com.garrietta.haven.data.HOME_SECTION_ORDER_DEFAULT
+import com.garrietta.haven.data.ConnectionMode
 import com.garrietta.haven.data.alertDotColor
 import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.ui.components.PillSwitch
@@ -137,6 +139,7 @@ import com.garrietta.haven.ui.components.weatherConditionColorThemed
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.legibleSecondaryOn
 import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.reportCardColor
 import com.garrietta.haven.ui.components.reportCardShape
 import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.reportHeroBounds
@@ -587,7 +590,9 @@ fun TodayScreen(
                         }
                     }
                 }
-                item { Spacer(Modifier.height(16.dp)) }
+                // Feedback round 16, item 8: the last row must
+                // draw fully — trailing reserve 16dp -> 32dp.
+                item { Spacer(Modifier.height(32.dp)) }
             }
         }
     } else {
@@ -665,7 +670,10 @@ fun TodayScreen(
                             }
                         }
                     }
-                    Spacer(Modifier.height(16.dp))
+                    // Feedback round 16, item 8: the last row
+                    // (Bedroom media tile) must draw fully —
+                    // trailing reserve 16dp -> 32dp.
+                    Spacer(Modifier.height(32.dp))
                 }
             }
         }
@@ -981,6 +989,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
             .height(136.dp)
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, mediaCardOutline)
+            .reportCardColor(entity.entityId, container)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
             .hideBodyWhenMorphSource(entity.entityId)
@@ -1295,6 +1304,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
             .heightIn(min = 136.dp)
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, cardOutline)
+            .reportCardColor(entity.entityId, container)
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
             .hideBodyWhenMorphSource(entity.entityId)
@@ -1660,6 +1670,7 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
         modifier = Modifier.fillMaxWidth()
             .reportCardBounds(weather.entityId)
             .reportCardShape(weather.entityId, generalCardShape(0))
+            .reportCardColor(weather.entityId, homeWeatherContainer)
             .hideWhenMorphSource(weather.entityId),
     ) {
         Row(
@@ -1698,6 +1709,8 @@ fun SettingsScreen(
     navigate: (Screen) -> Unit,
 ) {
     val connection by vm.connection.collectAsState()
+    // Feedback round 16, item 7: the connection switcher dialog.
+    var connectionDialog by remember { mutableStateOf(false) }
     val updateStates by vm.states.collectAsState()
     val updateSummary = updatesSummary(updateStates)
     // Koda Settings menu DNA: dark rounded rows with shaped icon badges,
@@ -1707,7 +1720,10 @@ fun SettingsScreen(
     // live as the rows' subtitles, so nothing is lost in the restyle.
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(16.dp),
-        contentPadding = PaddingValues(bottom = 16.dp),
+        // Feedback round 16, item 8: the last row (Instance
+        // tile) must draw fully — the trailing reserve grows
+        // 16dp -> 32dp so the final row clears the bottom edge.
+        contentPadding = PaddingValues(bottom = 32.dp),
     ) {
         item {
             Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
@@ -1777,13 +1793,22 @@ fun SettingsScreen(
             Spacer(Modifier.height(16.dp))
             KodaMenuSection("Connection")
             KodaMenuGroup {
+                // Feedback round 16, item 7: the Instance row is
+                // tappable and shows Local vs Cloud for the
+                // EFFECTIVE target (anything not a local address
+                // reads Cloud). The subtitle recomputes when
+                // connectionPrefsVersion bumps (switch/save), so
+                // it always shows the live target, not a stale
+                // stored URL.
+                val connTick = vm.connectionPrefsVersion
+                val (connLabel, connTarget) = remember(connTick) { vm.connectionDisplay() }
                 KodaMenuRow(
                     badgeKey = "connection-instance",
                     badgeKind = ExpressiveKind.CLOUD,
                     icon = Icons.Filled.Wifi,
                     title = "Instance",
-                    subtitle = vm.tokenStore.instanceUrl ?: "—",
-                    onClick = null,
+                    subtitle = connTarget?.let { "$connLabel · $it" } ?: "—",
+                    onClick = { connectionDialog = true },
                     flat = true,
                 )
                 KodaMenuDivider()
@@ -2135,6 +2160,79 @@ fun SettingsScreen(
             )
         }
     }
+    // Feedback round 16, item 7: the connection switcher.
+    if (connectionDialog) {
+        ConnectionDialog(vm, onDismiss = { connectionDialog = false })
+    }
+}
+
+/**
+ * Feedback round 16, item 7: the connection switcher dialog.
+ * Mode + cloud URL save through [HavenViewModel.switchConnection],
+ * which reconnects with the existing token (Nabu Casa remote UI
+ * forwards to the same instance, so no re-login). The cloud URL
+ * is pasted by the user: HA's cloud integration does not expose
+ * the remote-UI URL through any API the app uses, so nothing is
+ * guessed or hardcoded. AUTO keys on Wi-Fi transport (no location
+ * permission involved): local on Wi-Fi, cloud elsewhere.
+ */
+@Composable
+private fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
+    var mode by remember { mutableStateOf(vm.connectionMode) }
+    var cloudUrl by remember { mutableStateOf(vm.connectionCloudUrl ?: "") }
+    val (label, target) = vm.connectionDisplay()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connection") },
+        text = {
+            Column {
+                Text(
+                    "Current: $label" + (target?.let { " · $it" } ?: ""),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(16.dp))
+                for ((m, title, sub) in listOf(
+                    Triple(ConnectionMode.AUTO, "Automatic", "Local on Wi-Fi, cloud elsewhere"),
+                    Triple(ConnectionMode.LOCAL, "Local only", "Always use the local address"),
+                    Triple(ConnectionMode.CLOUD, "Cloud only", "Always use the Nabu Casa remote UI"),
+                )) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { mode = m },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = mode == m, onClick = { mode = m })
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text(sub, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = cloudUrl,
+                    onValueChange = { cloudUrl = it },
+                    label = { Text("Cloud URL (Nabu Casa remote UI)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Paste the remote-UI URL from your Home Assistant Cloud settings. Nothing is detected automatically.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { vm.switchConnection(mode, cloudUrl); onDismiss() }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 /**

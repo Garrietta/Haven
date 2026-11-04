@@ -133,6 +133,8 @@ fun AutomationBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Only if…", modifier = Modifier.weight(1f))
+                // Feedback round 16, item 3: default switch–text buffer.
+                Spacer(Modifier.width(12.dp))
                 Switch(checked = useCondition, onCheckedChange = { useCondition = it })
             }
             if (useCondition) {
@@ -376,10 +378,14 @@ fun HelperBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 "input_datetime" -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Has date", modifier = Modifier.weight(1f))
+                        // Feedback round 16, item 3: default switch–text buffer.
+                        Spacer(Modifier.width(12.dp))
                         Switch(checked = hasDate, onCheckedChange = { hasDate = it })
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Has time", modifier = Modifier.weight(1f))
+                        // Feedback round 16, item 3: default switch–text buffer.
+                        Spacer(Modifier.width(12.dp))
                         Switch(checked = hasTime, onCheckedChange = { hasTime = it })
                     }
                 }
