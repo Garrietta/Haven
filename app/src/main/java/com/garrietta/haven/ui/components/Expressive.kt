@@ -713,7 +713,13 @@ fun Dial(
     // Whether the current drag started on the handle; reset on every drag
     // start, so only handle grabs move the value.
     var grabbing by remember { mutableStateOf(false) }
-    val track = MaterialTheme.colorScheme.surfaceVariant
+    // Feedback round 8, item 1: the track was surfaceVariant —
+    // near-invisible in the dark theme and weak in the light
+    // theme (same finding as ThermostatDial's heat_cool track).
+    // scheme.outline is M3's mid-tone border color and reads in
+    // both themes. Ride-along, stated not hidden: the weather
+    // dial shares this component, so its track lightens too.
+    val track = MaterialTheme.colorScheme.outline
     val textMeasurer = rememberTextMeasurer()
     val currentDotColor = MaterialTheme.colorScheme.onSurface
     val currentLabelColor = MaterialTheme.colorScheme.onSurfaceVariant

@@ -1,5 +1,147 @@
 # Haven Changelog
 
+## Feedback round 8 (2026-11-03/04, thermostat radial + set-temp size)
+
+The user's 2026-11-03 screenshot + words: "The radial is too
+dark a color to see and the set temps need to be reduced in
+font size so they don't clip the radial." Screenshot state:
+Ecobee Thermostat detail, Heat 66° / Cool 69°, Indoor 69°,
+steppers below the dial. Baseline proven green first (357
+tests, 0 failures on the round-7 tree).
+
+### Item 1 — thermostat arc track lightened
+
+Root cause: the dial's base track was `scheme.surfaceVariant`
+— in the dark theme that is a dark gray on the dark scallop
+disc (dark-on-dark, near-invisible), and in the light theme
+only a weak gray on the pastel disc. Fix: the base track is
+now `scheme.outline`, M3's mid-tone border color, which reads
+~3.5:1 against the disc in BOTH themes. Applied at all three
+sites that draw a thermostat track: `ThermostatDial`'s
+heat_cool base arc and its else-branch arc
+(`ThermostatDial.kt`), and the shared generic `Dial`'s track
+(`Expressive.kt`), which the thermostat sheet uses. The
+shaded band between the thumbs keeps its thumb-matched
+container blend deliberately — it carries the setpoint colors,
+not the track color — and the heat/cool gradient arcs, the
+off-mode dashed track, thumb colors, and mode colors are
+untouched. Ride-along, stated not hidden: the weather dial
+shares the generic `Dial` component, so its track lightens
+too. Track only: no setpoint, drag, clamp, or gap-proofing
+behavior changed.
+
+### Item 2 — dual set-temp numbers smaller (52.sp -> 44.sp)
+
+The dual Heat/Cool numbers dropped from 52.sp to 44.sp in
+`ThermostatDialBlock` (`ThermostatPage.kt`): both the measured
+`numberStyle` and `KineticTempText`'s default, which the dual
+call sites rely on, changed together so measurement still
+matches rendering. Round 5's `dualNumberGapPx` separation rule
+is untouched. Why 44.sp: at 52.sp the popout row (~185dp)
+kissed the ring at rest and the kinetic 1.15x scale-out
+pushed it past the ring mid-change — the clipping the user
+saw. At 44.sp the labels span ~129dp, the row spreads to
+~176dp (8dp daylight per side at rest), and even the 1.15x
+outgoing peak (~93dp from center against the 96dp inner
+edge) clears the ring on the 240dp popout; the 300dp hero
+gets the full computed spread. 44.sp is the largest size
+that clears the ring even at kinetic peak. The single
+setpoint number stays 72.sp, and the steppers stay below
+the dial.
+
+### The 62°/72° axis ends — investigated, CLOSED: user-confirmed override, no resolver change
+
+The same screenshot's arc ends read 62°/72° where the
+round-6 formula gives 50/80 for setpoints 66/69. Checked
+first, before touching anything: `resolveThermostatDisplayRange`
+(`ThermostatLogic.kt`) implements the formula literally
+(low = max(40, floor(low/10)*10 − 10), high = min(100,
+ceil(high/10)*10 + 10)), and the formula's outputs are
+always multiples of 10 — it can NEVER produce 62/72. A full
+surface audit confirmed every live thermostat surface funnels
+through that one resolver: detail and popout
+(`DetailPages.kt` → `ThermostatPopout` →
+`ThermostatDialBlock`), the panel and Device Controls deep
+link (both → `ThermostatPopoutContent` → `ThermostatPopout`),
+and the sheet (generic `Dial` with the resolved window).
+`ThermostatHero` takes the range as a parameter and has no
+call sites; no other range producers exist; nothing hardcodes
+62/72; the Settings prefs are contains-guarded null by
+default. So a stored Settings override of 62/72 was the only
+code-consistent explanation — and the user CONFIRMED it
+(2026-11-03 20:39: "Settings shows an override"). Working as
+designed. The resolver and all axis logic are untouched in
+this round. (Reproduced on the round-7 signed build first,
+which is what made the override-vs-bug question sharp: the
+signed build's uninstall should have wiped prefs, so the
+override was either re-set after reinstall or restored with
+the app data — either way the stored override is the cause,
+and the user's confirmation closes it.)
+
+### Dial spacing fixes (folded into round 8 from the user's 4 bullets)
+
+Same dial code as items 1–2 above, so these ride in round 8
+rather than queuing behind it. Applied to the shared
+`ThermostatDial` / `ThermostatDialBlock` (popout, detail,
+hero) consistently:
+
+(a) Wider arc: track inset 16dp -> 12dp
+(`ThermostatDial.kt` `trackRadiusPx`), opening the center
+by 8dp of diameter (popout inner width 192dp -> 200dp, hero
+252dp -> 260dp; `ThermostatDialBlock`'s gap math moves from
+diameter − 48dp to diameter − 40dp). Guardrail honored:
+grabbed stroke outer sits 1dp inside the canvas (12dp −
+11dp half-stroke), the unstaggered circular thumb 2dp
+inside, and the staggered cool thumb 10dp past the canvas
+edge but still 10.8dp inside the popout scallop's valley
+(140.8dp) — the scallop is the visible bound, exactly as
+round 6's valley analysis had it. 10dp would clip the
+grabbed stroke, so 12dp is the smallest safe inset.
+
+(b) Centered readout: the dual numbers + Indoor label
+overlay drops 16dp (`ThermostatDialBlock`, `Modifier.offset`
+— a visual shift, no layout change, and NOT negative
+padding) to the dial's vertical center, filling the empty
+bottom-gap space. Composes with the smaller numbers: the
+row's bottom corners sit ~7dp inside the ring at rest on
+the popout, glyphs clear at kinetic peak.
+
+(c) Circular thumbs: `drawThumb` draws 20dp circles (fill,
+white 1.5dp ring, 4dp dot, unchanged bloom) instead of
+30x20 ovals, so the right handle never looms over the 69°
+text. VISUAL ONLY: the grab target stays 32dp and
+handle-grab-only (nearest wins) is preserved — the touch
+target does not shrink with the visual thumb. The stagger
+radii (`dualThumbRadii`) are untouched, so close setpoints
+still separate exactly as before.
+
+(d) Anchored min/max labels: the legend row below the dial
+is REMOVED from `ThermostatDialBlock`, and the range ends
+are now drawn inside the dial canvas itself
+(`ThermostatDial`, `drawText`), each centered on its arc
+endpoint's x and 29dp below the endpoint (10dp thumb radius
++ 9dp half text height + 10dp gap) — so even a thumb
+staggered outward at the extreme end clears its label, and
+the popout label bottom (234dp of 240dp) stays inside the
+canvas. The labels always show the EFFECTIVE ends (formula
+or override, e.g. 62°/72°).
+
+Sheet mapping, stated not hidden: the thermostat sheet uses
+the generic `Dial`, not this code. Its handle is already a
+circle (no (c) change needed), its track already sits at
+the handle edge with no scallop to widen toward (no (a)
+change possible without redesigning the handle), its
+center content is a single number, not the dual readout
+(no (b) target), and its range-end legend row below the
+dial also labels the slider under it, so it stays (no (d)
+change). The sheet DOES get the round-8 track lightening
+above, since it shares the generic `Dial`'s track color.
+
+Unchanged by everything in this round: setpoint values,
+axis formula, override behavior, Mode/Fan bars, steppers
+(stay below the dial), scallop shape, morph/drag/icon/
+signing code.
+
 ## Feedback round 7 (2026-11-03/04, Koda now-playing morph port)
 
 Port of Koda's now-playing open/close animation into Haven for

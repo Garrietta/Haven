@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -47,6 +46,7 @@ import com.garrietta.haven.ui.theme.springBounds
 import com.garrietta.haven.ui.theme.springMorph
 import com.garrietta.haven.ui.components.coolSetpointContainer
 import com.garrietta.haven.ui.components.coolSetpointOnContainer
+import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.components.heatSetpointContainer
 import com.garrietta.haven.ui.components.heatSetpointOnContainer
 import kotlin.math.atan2
@@ -171,14 +171,19 @@ fun ThermostatDial(
     // infinite transition redraws the dial without recomposing the page.
     // Feedback round 2, item 4: the bar protrudes more — 16dp idle
     // (was 12dp), 22dp grabbed (was 18dp). Round 6 moves the track
-    // inset below from 20dp to 16dp: the grabbed stroke's outer edge
-    // then sits 5dp inside the canvas (16dp inset − 11dp half-stroke)
-    // and the pill rect still clears the square canvas (its worst
-    // coordinate is track radius + 15dp half-width = 1dp inside at
-    // the 180° west point); 14dp would clip the pill by 1dp there,
-    // so 16dp is the smallest safe inset. The track's inner edge
-    // moves out 4dp, so the dual-number row gains 8dp of inner
-    // width (see ThermostatDialBlock's 48dp subtraction).
+    // inset below from 20dp to 16dp. Feedback round 8 moves it again,
+    // 16dp -> 12dp, now that the thumbs are 20dp circles (see
+    // drawThumb): the grabbed stroke's outer edge then sits 1dp
+    // inside the canvas (12dp inset − 11dp half-stroke), the
+    // unstaggered thumb 2dp inside (12dp − 10dp radius), and the
+    // staggered cool thumb 10dp past the canvas edge — still
+    // 10.8dp inside the popout scallop's valley (140.8dp), which is
+    // the visible bound exactly as round 6's valley analysis had
+    // it; the hero has no scallop and draws into page space as
+    // before. 10dp would clip the grabbed stroke by 1dp, so 12dp
+    // is the smallest safe inset. The track's inner edge moves
+    // out 4dp, so the dual-number row gains 8dp of inner width
+    // (see ThermostatDialBlock's 40dp subtraction).
     val trackStroke by animateDpAsState(
         if (grabbed != null) 22.dp else 16.dp,
         animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springMorph(),
@@ -221,7 +226,7 @@ fun ThermostatDial(
     val animatedCoolAngle by animateFloatAsState(separatedCoolAngle, needleSpec, label = "coolAngle")
     val animatedSingleAngle by animateFloatAsState(dial240AngleForValue(drawnSingle, range), needleSpec, label = "singleAngle")
 
-    fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 16.dp.toPx() }
+    fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 12.dp.toPx() }
 
     fun thumbCenter(angleDeg: Float, radius: Float, cx: Float, cy: Float): Offset {
         val a = Math.toRadians(angleDeg.toDouble()).toFloat()
@@ -229,8 +234,6 @@ fun ThermostatDial(
     }
 
     fun DrawScope.drawThumb(center: Offset, fill: Color, dot: Color, active: Boolean, pulsing: Boolean) {
-        val w = 30.dp.toPx()
-        val h = 20.dp.toPx()
         // Outward bloom behind the thumb: static when idle, gently
         // undulating (radius + alpha) while actively heating/cooling.
         // pulsePhase is read here, in the draw phase, so the pulse
@@ -238,17 +241,21 @@ fun ThermostatDial(
         val bloomAlpha = if (pulsing) 0.18f + 0.14f * pulsePhase else 0.25f
         val bloomRadius = if (pulsing) (24.dp + 4.dp * pulsePhase).toPx() else 24.dp.toPx()
         drawCircle(color = fill.copy(alpha = bloomAlpha), radius = bloomRadius, center = center)
-        drawRoundRect(
+        // Feedback round 8, item (c): compact CIRCULAR thumbs —
+        // 20dp circles replace the 30x20 ovals, so a thumb never
+        // looms over the set-temp text. VISUAL ONLY: the grab
+        // target stays 32dp and handle-grab-only (nearest wins)
+        // is untouched — the touch target does not shrink with
+        // the visual thumb.
+        drawCircle(
             color = fill.copy(alpha = if (active) 1f else 0.55f),
-            topLeft = Offset(center.x - w / 2f, center.y - h / 2f),
-            size = Size(w, h),
-            cornerRadius = CornerRadius(h / 2f, h / 2f),
+            radius = 10.dp.toPx(),
+            center = center,
         )
-        drawRoundRect(
+        drawCircle(
             color = Color.White.copy(alpha = if (active) 0.9f else 0.5f),
-            topLeft = Offset(center.x - w / 2f, center.y - h / 2f),
-            size = Size(w, h),
-            cornerRadius = CornerRadius(h / 2f, h / 2f),
+            radius = 10.dp.toPx(),
+            center = center,
             style = Stroke(width = 1.5.dp.toPx()),
         )
         drawCircle(color = dot.copy(alpha = if (active) 1f else 0.55f), radius = 4.dp.toPx(), center = center)
@@ -484,8 +491,17 @@ fun ThermostatDial(
                 }
             }
             "heat_cool" -> {
+                // Feedback round 8, item 1: the base track was
+                // scheme.surfaceVariant — near-invisible against
+                // the scallop disc in the dark theme (dark-on-dark)
+                // and weak in the light theme. scheme.outline is
+                // M3's mid-tone border color and reads ~3.5:1
+                // against the disc in BOTH themes. The shaded
+                // band between the thumbs keeps its thumb-matched
+                // container blend deliberately (it carries the
+                // setpoint colors, not the track color).
                 drawArc(
-                    color = scheme.surfaceVariant,
+                    color = scheme.outline,
                     startAngle = DIAL240_START_DEG,
                     sweepAngle = DIAL240_SWEEP_DEG,
                     useCenter = false,
@@ -511,8 +527,11 @@ fun ThermostatDial(
                 }
             }
             else -> {
+                // Feedback round 8, item 1: same track fix as
+                // heat_cool — surfaceVariant vanishes against the
+                // scallop in the dark theme; outline reads in both.
                 drawArc(
-                    color = scheme.surfaceVariant,
+                    color = scheme.outline,
                     startAngle = DIAL240_START_DEG,
                     sweepAngle = DIAL240_SWEEP_DEG,
                     useCenter = false,
@@ -546,7 +565,34 @@ fun ThermostatDial(
                 ),
             )
         }
-        // Pill thumbs on the track. When the setpoints are close,
+        // Feedback round 8, item (d): the range-end labels live
+        // INSIDE the dial, directly beneath the arc endpoints,
+        // instead of the legend row below the dial (removed from
+        // ThermostatDialBlock). Each label centers on its
+        // endpoint's x, 29dp below the endpoint (10dp thumb
+        // radius + 9dp half text height + 10dp gap), so even a
+        // thumb staggered outward at the extreme end clears it
+        // (stagger moves the thumb only 8.5dp vertically, leaving
+        // 1.5dp); the canvas edge still has room (popout label
+        // bottom 234dp of 240).
+        val endLabelStyle = TextStyle(fontSize = 13.sp, color = scheme.onSurfaceVariant)
+        for ((angleDeg, text) in listOf(
+            DIAL240_START_DEG to range.start.toDouble().formatTemp(),
+            (DIAL240_START_DEG + DIAL240_SWEEP_DEG) % 360f to range.endInclusive.toDouble().formatTemp(),
+        )) {
+            val a = Math.toRadians(angleDeg.toDouble()).toFloat()
+            val endX = cx + trackRadius * cos(a)
+            val endY = cy + trackRadius * sin(a)
+            val layout = textMeasurer.measure(text, endLabelStyle)
+            drawText(
+                layout,
+                topLeft = Offset(
+                    endX - layout.size.width / 2f,
+                    endY + 29.dp.toPx() - layout.size.height / 2f,
+                ),
+            )
+        }
+        // Circular thumbs on the track. When the setpoints are close,
         // the thumbs stagger radially (see dualThumbRadii) instead
         // of colliding — the same radii the grab test uses.
         if (dual) {

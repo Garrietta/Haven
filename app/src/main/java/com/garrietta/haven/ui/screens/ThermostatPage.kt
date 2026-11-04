@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -207,17 +208,19 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
         // where 67/69 thumbs sit near the valleys. THERMOSTAT_SCALLOP
         // valleys sit at 0.88 x radius = 140.8dp. Round 6 moves the
         // track inset 20dp -> 16dp and the sweep 240° -> 270° (see
-        // ThermostatDial), so with the 240dp dial the hard-edged
-        // elements still clear the valley: track outer 115dp
-        // grabbed (25.8 margin), pill outer 126dp (14.8, full
-        // stagger + pill half-height), track inner edge 96dp idle
-        // (was 92dp), so the dual-number row GAINS clearance: its
-        // inner width is now 192dp (was 184dp) against a ~185dp
-        // row, 7dp of daylight instead of a 2dp box kiss. The
+        // ThermostatDial). Round 8 moves the inset 16dp -> 12dp and
+        // the thumbs from 30x20 ovals to 20dp circles, so with the
+        // 240dp dial the hard-edged elements still clear the
+        // valley: track outer 119dp grabbed (21.8 margin), thumb
+        // outer 130dp (10.8, full stagger + circle radius), track
+        // inner edge 100dp idle (was 96dp), so the dual-number row
+        // GAINS clearance: its inner width is now 200dp (was
+        // 192dp) against a ~184dp row. The
         // bloom is a soft alpha fade, unchanged in kind from round
         // 5; its peak-pulse extent past the valley is a fade, never
         // a hard edge, and the scallop itself is untouched (the
-        // user likes it). Thumb sizes and grab targets are untouched.
+        // user likes it). Thumb grab targets are untouched — only
+        // the visual thumb shape changed.
         Box(
             Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.THERMOSTAT_SCALLOP)),
             contentAlignment = Alignment.Center,
@@ -539,18 +542,18 @@ private fun ThermostatDialBlock(
     numberBackdrop: Color,
 ) {
     val current = entity.attrDouble("current_temperature")
-    // Feedback round 3, item 5: the dial sits in a Column with its
-    // range-end legend row below it (min at the bar's left end,
-    // max at its right end, spread to the dial width) — the popout
-    // dial used the dynamic range since round 2 but never SHOWED
-    // the window's ends. Round 6: with the 270° sweep the arc ends
-    // sit lower (135° lower-left, 45° lower-right), so this
-    // left=min/right=max row now sits directly under the arc ends
-    // it labels — no angle-positioned labels were needed, and the
-    // row stays clear of the steppers (which live below the disc /
-    // below the dial block, never in this row). The inner Box
-    // (dial + centered overlay) is unchanged; only the legend row
-    // is added beneath it.
+    // Feedback round 3, item 5: the dial used to sit in a Column
+    // with its range-end legend row below it (min at the bar's left
+    // end, max at its right end, spread to the dial width) — the
+    // popout dial used the dynamic range since round 2 but never
+    // SHOWED the window's ends. Feedback round 8, item (d):
+    // that row is GONE — the ends are now drawn inside the dial
+    // canvas itself, directly beneath the arc endpoints (see
+    // ThermostatDial), so the dial block is just the dial +
+    // centered overlay and centers cleanly in the scallop. The
+    // row stays clear of the steppers trivially: it no longer
+    // exists (steppers live below the disc / below the dial block,
+    // never in this row).
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
     Box(contentAlignment = Alignment.Center) {
         ThermostatDial(
@@ -580,7 +583,14 @@ private fun ThermostatDialBlock(
             pulseSelector = state.pulseSelector,
             diameter = diameter,
         )
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.offset(y = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Feedback round 8, item (b): the readout sits 16dp
+            // BELOW the dial's geometric center, filling the
+            // empty bottom-gap space instead of floating high —
+            // numbers + Indoor label move together, and the
+            // offset keeps glyphs clear of the ring on both dial
+            // sizes (see the gap math below). Offset, not
+            // padding: a visual shift with no layout change.
             // Hoisted above the dual/single branch so the measurer
             // slot never shifts if the mode changes mid-lifetime.
             val textMeasurer = rememberTextMeasurer()
@@ -590,22 +600,32 @@ private fun ThermostatDialBlock(
                 // numbers is COMPUTED from dial geometry, never a
                 // fixed guess — the measured label widths plus the
                 // track's inner width (diameter minus twice the
-                // 16dp track inset and the 8dp idle half-stroke =
-                // diameter − 48dp; see ThermostatDial's
+                // 12dp track inset and the 8dp idle half-stroke =
+                // diameter − 40dp; see ThermostatDial's
                 // trackRadiusPx/trackStroke) feed dualNumberGapPx,
                 // which spreads the pair to fill the inner width
                 // with 8dp of clearance per side, floored at an
-                // ample 32dp. Round 6's 16dp inset widens the inner
-                // width (240dp popout: 192dp, was 184dp; 300dp hero:
-                // 252dp, was 244dp), so the popout pair at 52.sp
-                // (~153dp of labels + the 32dp floor = ~185dp)
-                // now clears the ring by ~7dp total instead of
-                // kissing it by ~2dp of label BOX per side, and
-                // the hero dial gets the full computed spread.
+                // ample 32dp. Round 8's 12dp inset widens the inner
+                // width again (240dp popout: 200dp, was 192dp;
+                // 300dp hero: 260dp, was 252dp). Feedback round 8,
+                // item 2: the pair drops 52.sp -> 44.sp, because at
+                // 52.sp the popout row (~185dp) kissed the ring at
+                // rest and the kinetic 1.15x scale-out pushed it
+                // past the ring mid-change — the user's screenshot
+                // showed the numbers clipping the radial. At
+                // 44.sp the labels span ~129dp, the row spreads
+                // to ~184dp (8dp daylight per side at rest), and
+                // even the 1.15x outgoing peak (~98dp from center
+                // against the 100dp track inner edge) clears the
+                // ring on the 240dp popout — label-box corners may
+                // kiss as in round 5, glyphs clear on side
+                // bearings. The 16dp drop (item (b)) is already
+                // in these numbers: the row's bottom corners sit
+                // ~7dp inside the ring at rest.
                 // Visual only: setpoints are never touched, only
                 // label positions.
                 val numberStyle = TextStyle(
-                    fontSize = 52.sp,
+                    fontSize = 44.sp,
                     fontWeight = FontWeight.Bold,
                     fontFeatureSettings = "tnum",
                 )
@@ -615,7 +635,7 @@ private fun ThermostatDialBlock(
                 val coolLabelWidth = textMeasurer.measure(
                     state.cool.value.toDouble().formatTemp(), numberStyle,
                 ).size.width.toFloat()
-                val innerWidthPx = with(density) { (diameter - 48.dp).toPx() }
+                val innerWidthPx = with(density) { (diameter - 40.dp).toPx() }
                 val dualGap = with(density) {
                     dualNumberGapPx(
                         heatLabelWidth, coolLabelWidth, innerWidthPx,
@@ -659,14 +679,6 @@ private fun ThermostatDialBlock(
                 )
             }
         }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            Modifier.width(diameter),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(displayRange.start.toDouble().formatTemp(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(displayRange.endInclusive.toDouble().formatTemp(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -723,17 +735,20 @@ private fun ThermostatBelowDial(state: ThermostatDialState) {
  * past the 260dp pop-out dial's ~102dp inner edge at rest — and the
  * kinetic scale-out (1.15x) pushed it to ~239dp, a definite overlap
  * with the bar (the 2026-10-29 verdict video's circled 67°/70°).
- * At 52.sp with the feedback-round-5 computed gap the row spans
+ * At 52.sp with the feedback-round-5 computed gap the row spanned
  * labels + gap: ~185dp at rest on the 240dp pop-out dial (inner
  * width 192dp since round 6's 16dp inset — ~7dp of daylight total,
  * no kiss) and ~236dp on the 300dp hero dial (inner width 252dp,
  * full 8dp clearance per side). The kinetic peak scale (1.15x, outgoing text only, sliding
- * vertically away) can transiently touch the ring during a value
- * change; at rest the pair is clear. The single number stays
- * 72.sp: ~108dp wide, no overlap.
+ * vertically away) could transiently touch the ring during a value
+ * change; at rest the pair was clear. Feedback round 8, item 2:
+ * the dual size drops to 44.sp — the largest size whose 1.15x
+ * outgoing peak still clears the 240dp popout's 100dp inner edge
+ * (~98dp) — because the user still saw the 52.sp numbers clipping
+ * the radial. The single number stays 72.sp: ~108dp wide, no overlap.
  */
 @Composable
-private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 52.sp, backdrop: Color) {
+private fun KineticTempText(value: Float, color: Color, active: Boolean, fontSize: TextUnit = 44.sp, backdrop: Color) {
     val text = value.toDouble().formatTemp()
     AnimatedContent(
         targetState = text,
