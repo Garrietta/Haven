@@ -29,6 +29,6 @@
          even where that facet alone goes soft on black. See
          ic_launcher_foreground.xml for the full reasoning. -->
     <path
-        android:fillColor="#EFF1E1"
+        android:fillColor="#F6F5EC"
         android:pathData="M0,0 H108 V108 H0 Z" />
 </vector>

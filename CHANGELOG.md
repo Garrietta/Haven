@@ -1,5 +1,80 @@
 # Haven Changelog
 
+## Feedback round 14 (2026-11-04, launcher icon v7 rebuild only)
+
+User approved the v7 icon render ("Build this as round 14"). v7 is
+a from-scratch PROGRAMMATIC rebuild, not an AI mockup: the AI image
+generator kept anchoring to the v2 mockup through three iterations
+(wrong scale, harsh center seam, swoop bleeding into the field), so
+the icon was rendered deterministically in code from the user's
+coordinate spec (script: haven-overnight/make-icon-round14.py) and
+verified by pixel measurement, not eyeballing. This round ships
+those exact pixels — no color, geometry, or proportion tweaks.
+
+### v7 construction (108x108 adaptive grid)
+
+- Field: cream/off-white #F6F5EC squircle (background vector fill
+  changed from round 13's #EFF1E1 so both layers agree exactly).
+- House: single smooth symmetrical pentagon — flat base Y=78
+  (X 30..76), vertical walls of equal height to Y=50, straight
+  roof slopes to a softly rounded center peak (53,29), uniform
+  3.375-unit corner rounding (peak, both eaves, both bottom
+  corners). No eaves, no ears, no letters, no dip in the roofline.
+- Four layers, all strictly clipped to the house pentagon:
+  L1 base shell, linear gradient vibrant medium-green #62BD59 at
+  the peak to rich forest green #1E8E4E at the bottom-right;
+  L2 warm golden-amber radial glow (#FFB732 -> #F4CE50 ->
+  transparent) centered (43,54), sweeping above the curve from
+  the lower-left wall (Y=66) to the right eave (76,50);
+  L3 left-wall arch (X 30..42), cap curve starting where the
+  eave corner arc meets the wall, pastel-yellow #DFDF88 at the
+  cap fading to bright lime #7CE253 at the base, crisp right
+  edge exactly at X=42; L4 lower-right emerald sweep below the
+  curve, #5FD352 to deep emerald #179352. Plus a soft mint
+  highlight (#B0EAB8) along the upper-left roof slope.
+- Star: chunky symmetrical 4-point golden sparkle (gradient
+  #FFD54F -> #F5A623), center (66,36), radius 7, outer tips
+  rounded 1.25dp, placed BEHIND the house pentagon so the
+  roofline cuts it cleanly — its bottom point tucks behind the
+  upper-right roof slope instead of poking over the edge — with
+  a faint warm glow trailing into the upper-right roof.
+- Measured on the render (not claimed): content bbox
+  X 30..76, Y 29.7..78; margins left 27.8% / right 29.6% /
+  top 27.5% / bottom 27.8% (all clear of the 24% floor); no
+  vertical center split; no dark bottom bar; no fringe outside
+  the house (left-of-wall strip deviation from field: 0).
+
+### Production variant (transparent corners)
+
+- The v7 preview file has white corners (chat presentation). The
+  shipped foregrounds are a transparent-corner variant: identical
+  artwork inside the squircle, alpha 0 outside it (same squircle
+  rect and radius, outside RGB set to the field color first so
+  downsampled edge pixels can never fringe). Verified: variant
+  matches the v7 preview pixel-for-pixel on all artwork pixels
+  (max diff 0), squircle edge in the same place (first opaque
+  pixel on the diagonal at 95, as predicted for radius 324).
+- Foreground drawables (drawable-mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi)
+  at 108/162/216/324/432 px; legacy mipmap PNGs (launcher +
+  round identical, per repo convention) at 48/72/96/144/192 px.
+  All LANCZOS-downsampled from the 1080 master (RGB and alpha
+  resized separately — PIL's RGBA resize premultiplies and had
+  darkened squircle edge pixels; split resize fixed it, verified
+  by a zero-deviation composite). The anydpi XMLs already
+  reference @drawable/ic_launcher_foreground — no XML edits.
+  Monochrome vector untouched (themed icons need it).
+- Masked-render check (launcher simulation at 432, background
+  #F6F5EC + foreground): ZERO house/star pixels lost under the
+  circle mask and ZERO under the squircle mask; composite
+  outside the house matches the field with deviation 0 (no white
+  or dark fringe at any mask edge); masked result matches the
+  v7 preview inside the safe zone with max diff 0.
+
+### Unchanged
+
+- No Kotlin, no dial, morph, drag, scroll, or theme code touched.
+  Signing files byte-identical to 616e3a96; webrtcEnabled=false.
+
 ## Feedback round 13 (2026-11-04, launcher icon raster rebuild only)
 
 User verdict on the shipped round-12 icon (2026-11-04 morning,
