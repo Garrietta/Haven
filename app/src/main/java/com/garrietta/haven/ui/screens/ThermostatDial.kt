@@ -104,6 +104,19 @@ private val HEAT_ARC_END = Color(0xFFC62828)
 private val COOL_ARC_START = Color(0xFF00BCD4)
 private val COOL_ARC_END = CoolBlue // single source: DesignTokens.CoolBlue
 
+/**
+ * Round 21, item 2: the dial track color. Round 8 set the track to
+ * scheme.outline, claiming ~3.5:1 against the scallop disc — measured
+ * it is ~1.3:1 in BOTH themes (dark outline #3F3F3A on the dark disc,
+ * light outline #C6C4B4 on the light disc), so the arc blends into
+ * the scallop and is hard to read. The track is a lerp from the disc
+ * color toward onSurface at 0.55: 4.9:1 dark / 3.5:1 light against
+ * the plain disc, still clearly quieter than the setpoint band and
+ * the thumbs. The 20% mode tint on the popout disc shifts the disc
+ * only slightly, so the floor holds there too.
+ */
+internal fun dialTrackColor(disc: Color, onSurface: Color): Color = lerp(disc, onSurface, 0.55f)
+
 @Composable
 fun ThermostatDial(
     heat: Float,
@@ -124,6 +137,11 @@ fun ThermostatDial(
     // means idle: static blooms. Single mode passes HEATING for either
     // active action; dual mode passes the matching selector.
     pulseSelector: SetpointSelector? = null,
+    // Round 21, item 2: the color directly behind the track (the
+    // scallop disc in the popout, the sheet surface elsewhere) —
+    // the track color is lerped from it (see dialTrackColor), so
+    // the arc reads against whatever it sits on.
+    trackBackdrop: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     modifier: Modifier = Modifier,
     diameter: Dp = 300.dp,
 ) {
@@ -491,17 +509,18 @@ fun ThermostatDial(
                 }
             }
             "heat_cool" -> {
-                // Feedback round 8, item 1: the base track was
-                // scheme.surfaceVariant — near-invisible against
-                // the scallop disc in the dark theme (dark-on-dark)
-                // and weak in the light theme. scheme.outline is
-                // M3's mid-tone border color and reads ~3.5:1
-                // against the disc in BOTH themes. The shaded
-                // band between the thumbs keeps its thumb-matched
-                // container blend deliberately (it carries the
-                // setpoint colors, not the track color).
+                // Round 21, item 2 (SUPERSEDES the round-8 note
+                // below it): the base track was scheme.outline,
+                // which measures ~1.3:1 against the scallop disc
+                // in both themes — near-invisible, not the ~3.5:1
+                // the round-8 comment claimed. dialTrackColor
+                // lerps from the disc toward onSurface (4.9:1
+                // dark / 3.5:1 light). The shaded band between
+                // the thumbs keeps its thumb-matched container
+                // blend deliberately (it carries the setpoint
+                // colors, not the track color).
                 drawArc(
-                    color = scheme.outline,
+                    color = dialTrackColor(trackBackdrop, scheme.onSurface),
                     startAngle = DIAL240_START_DEG,
                     sweepAngle = DIAL240_SWEEP_DEG,
                     useCenter = false,
@@ -527,11 +546,11 @@ fun ThermostatDial(
                 }
             }
             else -> {
-                // Feedback round 8, item 1: same track fix as
-                // heat_cool — surfaceVariant vanishes against the
-                // scallop in the dark theme; outline reads in both.
+                // Round 21, item 2: same track fix as
+                // heat_cool — scheme.outline measured ~1.3:1
+                // against the disc in both themes.
                 drawArc(
-                    color = scheme.outline,
+                    color = dialTrackColor(trackBackdrop, scheme.onSurface),
                     startAngle = DIAL240_START_DEG,
                     sweepAngle = DIAL240_SWEEP_DEG,
                     useCenter = false,

@@ -321,15 +321,15 @@ fun railIndicatorTop(index: Int): Dp = 20.dp + 48.dp * index
 
 /**
  * Feedback round 17, item 2: the card/tile tap-routing decision
- * table — pure, unit-tested, shared by HomeRoomCard and
- * EntityTile so taps can never disagree between surfaces.
- * Climate opens its dial popout; the eufy vacuum (the single
- * vacuum panel, [VACUUM_ID]) opens the vacuum panel; every other
- * controllable domain opens its full detail page. Cameras are
- * NOT in this table: EntityTile routes them to fullscreen /
- * the front-door dialog before reaching it, and HomeRoomCards
- * never carry cameras. Long-press keeps the sheet (openPopup)
- * on both surfaces — this table is tap-only.
+ * table — pure, unit-tested, shared by HomeRoomCard on every
+ * surface (Home, rooms, Favorites, and user tabs since round 21,
+ * item 6 unified the tile). Climate opens its dial popout; the
+ * eufy vacuum (the single vacuum panel, [VACUUM_ID]) opens the
+ * vacuum panel; every other controllable domain opens its full
+ * detail page — cameras included (they open the detail page like
+ * every Home card now; the detail page's Open live view button
+ * reaches the viewer). Long-press enters Arrange mode on every
+ * surface (round 21, item 7) — this table is tap-only.
  */
 enum class CardTapRoute {
     CLIMATE_POPOUT,

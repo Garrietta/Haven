@@ -17,6 +17,7 @@ import androidx.lifecycle.viewModelScope
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_MAX_MS
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_STREAM_SWITCH_ID
+import com.garrietta.haven.data.frontDoorRtspUrl
 import com.garrietta.haven.data.motionSensorForCamera
 import com.garrietta.haven.data.HaClient
 import com.garrietta.haven.data.storageKey
@@ -503,13 +504,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ---- Entity popups + camera fullscreen ----
-
-    /** Entity id shown in the more-info bottom sheet, if any. */
-    var popupEntityId by mutableStateOf<String?>(null)
-        private set
-
-    fun openPopup(entityId: String) { popupEntityId = entityId }
-    fun closePopup() { popupEntityId = null }
+    // Round 21, item 5: the long-press settings sheet is gone —
+    // the popupEntityId/openPopup/closePopup state that drove it
+    // is deleted with it. Entity detail now opens only through
+    // the backstack (navigate to Screen.EntityDetail).
 
     /** Camera id shown in the landscape fullscreen viewer, if any. */
     var fullscreenCameraId by mutableStateOf<String?>(null)
@@ -520,10 +518,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * The centered expressive thermostat pop-out (scalloped container,
-     * radial dial, fan/mode underneath). Mirrors popupEntityId: one
-     * climate entity at a time, closed by scrim tap, X, back, or the
-     * Details route (which closes the pop-out and navigates to the
-     * full thermostat page).
+     * radial dial, fan/mode underneath). One climate entity at a
+     * time, closed by scrim tap, X, back, or the Details route
+     * (which closes the pop-out and navigates to the full
+     * thermostat page).
      */
     var climatePopoutId by mutableStateOf<String?>(null)
         private set
@@ -570,6 +568,30 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
      */
     var frontDoorLiveEngaged by mutableStateOf(false)
         private set
+
+    /**
+     * Round 21, item 3: sticky in-memory proof that the RTSP
+     * fallback streamed this session — set on the panel's RTSP
+     * first frame, cleared on an RTSP error. The Front Door
+     * quadrant reads LIVE for the fallback only while this is
+     * true; before any proof it stays Recording. In-memory only
+     * (never persisted): a fresh app launch must re-prove it.
+     */
+    var frontDoorRtspProven by mutableStateOf(false)
+        private set
+
+    fun markFrontDoorRtspProven() { frontDoorRtspProven = true }
+
+    fun clearFrontDoorRtspProven() { frontDoorRtspProven = false }
+
+    /**
+     * Round 21, item 3: the ring-mqtt RTSP URL for the front door,
+     * derived from the stored LOCAL instance URL. Null off-LAN
+     * (cloud URL stored) — RTSP exists only on the Pi, so the
+     * panel attempts it only when the device can reach the LAN.
+     */
+    val frontDoorRtspUrl: String?
+        get() = frontDoorRtspUrl(connectionLocalUrl)
 
     /** Why the live session last stopped, for the panel's paused UI. Null while never stopped. */
     var frontDoorLiveStopReason by mutableStateOf<String?>(null)

@@ -73,6 +73,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -82,6 +83,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -318,6 +320,18 @@ fun PressablePillButton(
         animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
         label = "pressPill",
     )
+    // Round 21, item 4: the contentColor parameter used to be DEAD
+    // — the Row never set LocalContentColor, so every bare Text
+    // inside a pill inherited the ambient content color, whose
+    // Compose default is BLACK (no Surface provides it on the
+    // panel path). In light mode black text on light containers
+    // reads fine, so nobody noticed; in dark mode the garage
+    // Open/Close/Stop labels rendered black on dark blue/grey
+    // and were nearly unreadable (measured: pure-black text on a
+    // #192E4C pill). The provider below makes the parameter real
+    // for every caller — garage pills, vacuum pills, steppers,
+    // media transports — with no call-site change. Disabled pills
+    // keep their 0.38-alpha mute on top of the provided color.
     Box(
         modifier
             .height(height)
@@ -327,11 +341,13 @@ fun PressablePillButton(
             .clickable(interactionSource = interactionSource, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(contentPadding),
-            content = content,
-        )
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(contentPadding),
+                content = content,
+            )
+        }
     }
 }
 

@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.Screen
 import com.garrietta.haven.data.DeviceGroup
 import com.garrietta.haven.data.deviceDisplayName
 import com.garrietta.haven.ui.controls.SheetIconSquircleButton
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 fun DeviceSheet(
     vm: HavenViewModel,
     group: DeviceGroup,
+    navigate: (Screen) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -92,7 +94,7 @@ fun DeviceSheet(
                     Spacer(Modifier.width(8.dp))
                     SheetIconSquircleButton(Icons.Filled.ChevronRight, "Open ${entity.friendlyName}", onClick = {
                         onDismiss()
-                        vm.openPopup(entity.entityId)
+                        navigate(Screen.EntityDetail(entity.entityId))
                     })
                 }
                 Spacer(Modifier.height(4.dp))

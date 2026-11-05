@@ -165,17 +165,22 @@ fun detailBadgeOverride(
  * the disc edge is still visible (white vs pastel luminance differ), and the track color is
  * what he asked to see.
  *
- * GATING — DELIBERATE, DOCUMENTED DIVERGENCE from [detailBadgeOverride]: this accent is
- * intentionally NOT gated by [presetAppliesForState]. The video-3 evidence forces it: both
- * headline examples are inactive-state entities — a CLOSED garage door set to cooling blue,
- * and a DOCKED vacuum set to sage — and the user expects the chosen color through the popup
- * regardless ("any time you change the color of a tile, it should change the key colors
- * associated with the elements of the popup page for ANY entity"). A gated accent would show
- * NOTHING for exactly the two cases he filmed. The card face keeps its on-state law (a preset
- * card renders inactive gray when off, so color still signals state on the grid) and badges
- * keep [detailBadgeOverride]'s gating (badges signal state); only the popup accent — a control
- * surface, not a state signal — follows the user's choice unconditionally. Null ONLY when no
- * preset is set (never invent color where the user chose none); callers then keep defaults.
+ * GATING — Round 21, item 4 (SUPERSEDES the round-5 divergence
+ * below it): this accent IS gated by [presetAppliesForState] now,
+ * exactly like [detailBadgeOverride] and the tile itself. The
+ * round-5 rule made the popup follow the preset even while the
+ * entity was inactive — so a CLOSED garage door (blue preset,
+ * inactive on the tile) showed a BLUE panel under a GREEN tile,
+ * and the user filmed it as a bug: "the green color on the tile
+ * isn't carrying over here to the control scheme." The panel must
+ * show the color the tile shows: preset while the preset applies,
+ * matrix/scheme defaults otherwise (the garage pills fall back to
+ * secondaryContainer and the door to primary — both green in the
+ * matrix family, matching the tile's inactive row). The tile and
+ * the popup can never disagree about the entity's color again.
+ * Null when no preset is set (never invent color where the user
+ * chose none) AND when the preset doesn't apply for the current
+ * state; callers then keep defaults.
  * (Toggle off-state still reads gray: VerticalPillToggle/PillToggle use surfaceVariant when
  * unchecked, whatever accent is passed.)
  */
@@ -186,6 +191,7 @@ fun detailPageAccent(
     domainPresets: Map<String, String> = emptyMap(),
 ): Color? {
     val preset = tilePresetFor(presets, entity.entityId, domainPresets, entity.domain) ?: return null
+    if (!presetAppliesForState(entity.domain, entity.state)) return null
     return tilePresetColor(preset, isDark)
 }
 

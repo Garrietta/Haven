@@ -110,6 +110,26 @@ const val FRONT_DOOR_BATTERY_SENSOR_ID = "sensor.front_door_battery"
  */
 const val FRONT_DOOR_RING_MQTT_CAMERA_ID = "camera.front_door_69a1"
 
+/** ring-mqtt's RTSP listener on the Pi (port 8554) + the front-door feed path. */
+const val FRONT_DOOR_RTSP_PORT = 8554
+const val FRONT_DOOR_RTSP_PATH = "5c475ecd13a7_live"
+
+/**
+ * Round 21, item 3: the ring-mqtt RTSP URL for the front door,
+ * derived from the HA instance URL's host. RTSP exists only on
+ * the LAN Pi, so a non-local host (Nabu Casa remote UI, any
+ * public hostname) yields null — no RTSP attempt off-LAN, and no
+ * host is ever guessed: the URL comes from the stored instance
+ * URL the app already connects through. IPv6 hosts are bracketed.
+ * Pure (no Android types) so it is unit tested.
+ */
+fun frontDoorRtspUrl(instanceUrl: String?): String? {
+    val host = connectionHostOf(instanceUrl) ?: return null
+    if (!isLocalAddress(instanceUrl)) return null
+    val hostPart = if (host.contains(":")) "[$host]" else host
+    return "rtsp://$hostPart:$FRONT_DOOR_RTSP_PORT/$FRONT_DOOR_RTSP_PATH"
+}
+
 /**
  * Front-door source resolution (camera fallback round, 2026-11-04):
  * the panel and the hero quadrant share this one rule so they can
@@ -167,12 +187,18 @@ const val FRONT_DOOR_LIVE_MAX_MS = 10 * 60 * 1000L
  * 69a1 live-stream frames. Frames with the switch off are the
  * recording path, so they never earn the badge. No frames, no
  * badge, regardless of what was attempted.
+ *
+ * Round 21, item 3: RTSP frames earn the badge too — the ring-mqtt
+ * RTSP feed IS the live doorbell feed (not a recording), so a first
+ * frame from it is live proof on its own, with no switch involved
+ * (ring-mqtt serves RTSP independently of HA's live-stream switch).
  */
 fun frontDoorShowsLiveBadge(
     webrtcFrames: Boolean,
     mjpegFrames: Boolean,
     liveSwitchOn: Boolean,
-): Boolean = webrtcFrames || (mjpegFrames && liveSwitchOn)
+    rtspFrames: Boolean = false,
+): Boolean = webrtcFrames || rtspFrames || (mjpegFrames && liveSwitchOn)
 
 /**
  * Feedback round 19, item 4: the Front Door quadrant badge rule,
@@ -189,9 +215,18 @@ fun frontDoorShowsLiveBadge(
  * The resolver already treats "unavailable" as down, so a
  * resolved 69a1 source is by construction present and available;
  * [streamError] covers only a load failure on top of that.
+ *
+ * Round 21, item 3 (SUPERSEDES the round-19 reading above for
+ * the fallback): once the RTSP fallback has proven itself
+ * streaming this session ([rtspProven] — set on the panel's
+ * RTSP first frame, cleared on an RTSP error), the fallback
+ * feed IS live, so the quadrant reads LIVE for it too. Before
+ * any proof the quadrant stays Recording: the badge is earned
+ * by frames, never by the attempt.
  */
-fun frontDoorQuadrantShowsLive(resolvedSource: String?, streamError: Boolean): Boolean =
-    resolvedSource == FRONT_DOOR_RING_MQTT_CAMERA_ID && !streamError
+fun frontDoorQuadrantShowsLive(resolvedSource: String?, streamError: Boolean, rtspProven: Boolean = false): Boolean =
+    (resolvedSource == FRONT_DOOR_RING_MQTT_CAMERA_ID && !streamError) ||
+        (resolvedSource == FRONT_DOOR_LIVE_VIEW_ID && rtspProven && !streamError)
 
 /**
  * Pulls the HLS playlist URL out of a WS `camera/stream` result message.

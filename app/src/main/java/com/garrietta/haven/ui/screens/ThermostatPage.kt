@@ -309,6 +309,13 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
         // history charts below carry what Details used to hold.
         val states by vm.states.collectAsState()
         ThermostatHistorySection(entity, vm, states)
+        // Round 21, item 5: the settings rows at the very bottom,
+        // for every tile. Details is omitted — the popout IS the
+        // thermostat's full surface (the secondary page was
+        // deleted in round 4).
+        Spacer(Modifier.height(24.dp))
+        EntityPopupMenuRows(vm, entity, onDetails = null, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(16.dp))
     }
 }
 
@@ -603,6 +610,10 @@ private fun ThermostatDialBlock(
                 null
             },
             pulseSelector = state.pulseSelector,
+            // Round 21, item 2: the track color lerps from the
+            // disc it sits on (numberBackdrop is the composited
+            // scallop-disc color in the popout).
+            trackBackdrop = numberBackdrop,
             diameter = diameter,
         )
         Column(Modifier.offset(y = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {

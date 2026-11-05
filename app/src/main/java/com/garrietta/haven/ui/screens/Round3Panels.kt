@@ -756,7 +756,7 @@ private fun PersonSheet(
 
 /** Vacuum panel: lidar map snapshot, transport, dock actions, selectors, consumables, toggles, DND, lifetime stats. */
 @Composable
-fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
+fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val vacuum = states[VACUUM_ID]
     if (vacuum == null) {
@@ -766,8 +766,11 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
         }
         return
     }
-    // Feedback round 5, item 4: the panel's action pills carry the vacuum's tile color
-    // (ungated — see detailPageAccent; a docked vacuum's panel still shows its sage).
+    // Round 21, item 4 (SUPERSEDES the round-5 ungated rule):
+    // the panel's action pills carry the vacuum's tile color
+    // only while the preset applies — a docked vacuum's panel
+    // now shows the matrix defaults, matching its tile (the
+    // old ungated sage is gone; see detailPageAccent).
     val vacuumPanelCustom = rememberCardCustom(vm)
     val vacuumPanelAccent = detailPageAccent(vacuumPanelCustom.tilePresets, vacuum, isDarkBackdrop(MaterialTheme.colorScheme.background), vacuumPanelCustom.domainTilePresets)
     val vacuumPanelPillContent = if (vacuumPanelAccent != null) MaterialTheme.colorScheme.onSurface else null
@@ -780,16 +783,17 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val taskStatus = states[VACUUM_TASK_STATUS_ID]?.state
     Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         // Feedback round 18, item 6: the vacuum panel gets the
-        // standard detail header (badge + edit pencil) instead of
-        // the title-only header — the badge and pencil were
-        // missing on this panel. The big state line below stays
-        // (it carries battery + state in one line, which the
-        // header's state text does not duplicate exactly).
+        // standard detail header (badge + title) instead of
+        // the title-only header — the badge was missing on this
+        // panel. (Round 21, item 5: the header pencil is gone
+        // everywhere; Card settings lives in the menu rows at
+        // the bottom of this panel.) The big state line below
+        // stays (it carries battery + state in one line, which
+        // the header's state text does not duplicate exactly).
         DetailPopupHeader(
             vacuum, onBack,
             displayTitle = detailHeaderCustom(vm, vacuum).first,
             displayIcon = detailHeaderCustom(vm, vacuum).second,
-            onEdit = detailHeaderCustom(vm, vacuum).third,
         )
         Text(
             vacuumTileLine(vacuum.state, battery?.toString()),
@@ -924,6 +928,14 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             PanelBodyText("Lifetime stats are not available right now.")
         }
         }
+        // Round 21, item 5: the settings rows at the very bottom,
+        // for every tile. Details here is REAL — this custom panel
+        // is not the generic detail page, so it opens it.
+        Spacer(Modifier.height(24.dp))
+        EntityPopupMenuRows(
+            vm, vacuum,
+            onDetails = { navigate(Screen.EntityDetail(VACUUM_ID)) },
+        )
         Spacer(Modifier.height(16.dp))
     }
 }

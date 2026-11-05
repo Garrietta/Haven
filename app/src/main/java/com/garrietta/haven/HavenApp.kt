@@ -9,6 +9,9 @@ import com.garrietta.haven.ui.components.PopupDismissConnection
 import com.garrietta.haven.ui.components.LocalCardColors
 import com.garrietta.haven.ui.components.LocalCardShapes
 import com.garrietta.haven.ui.components.centeredPopupEnter
+import com.garrietta.haven.ui.components.morphCardAlpha
+import com.garrietta.haven.ui.components.topMorphProgress
+import com.garrietta.haven.ui.components.topMorphSourceId
 import com.garrietta.haven.ui.components.morphCloseContentAlpha
 import com.garrietta.haven.ui.components.morphEnterContentAlpha
 import com.garrietta.haven.ui.components.morphPanelBackgroundBlend
@@ -283,7 +286,6 @@ import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.DomainDefaultsDialog
 import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.CardSettingsSheet
-import com.garrietta.haven.ui.screens.CardSettingsPencil
 import com.garrietta.haven.ui.screens.rememberCardCustom
 import com.garrietta.haven.ui.screens.UserTabsScreen
 import com.garrietta.haven.ui.screens.ThermostatPopout
@@ -324,27 +326,6 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
     is Screen.GreenhousePanel -> "automation.greenhouse_brain"
     else -> ""
 }
-
-/**
- * Open sheet morph: the entity id plus the source card rect captured
- * at open (null = the card never reported bounds, e.g. a board card;
- * the sheet then morphs from the graceful fallback rect — the target
- * shifted 80dp down — never an instant appearance, never a crash).
- * Feedback round 16, item 4c: the render sites prefer this CAPTURED
- * rect over the live map (see resolveMorphSource): while a panel
- * for an entity is open, that panel's own cards report their
- * panel-internal rects under the same id, so a live-first read
- * lands the exit morph on the panel-internal rect instead of the
- * tapped tile. The live map stays the fallback for cards that
- * never reported bounds. Rotation mid-panel is the one accepted
- * edge: the exit lands on the pre-rotation tile rect rather than
- * tracking the moved tile — far rarer than the always-wrong
- * poisoned read it replaces.
- * sourceColor is the tile's container color captured at the same
- * instant (item 4a): the morph surface starts at the tile's own
- * color instead of flashing panel cream over the hidden tile.
- */
-private class SheetAnim(val id: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
 
 /** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
 private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
@@ -461,12 +442,10 @@ fun HavenApp(vm: HavenViewModel) {
         // dismiss path alongside heroTarget (see the reset sites).
         val arcBounds = remember { mutableStateMapOf<String, Rect>() }
         var arcTarget by remember { mutableStateOf<Pair<String, Rect>?>(null) }
-        var sheetAnim by remember { mutableStateOf<SheetAnim?>(null) }
         var detailAnim by remember { mutableStateOf<DetailAnim?>(null) }
         // Feedback round 5, item 1: the stacked panel-detail layer (see PanelDetailAnim).
         var panelDetailAnim by remember { mutableStateOf<PanelDetailAnim?>(null) }
         val panelDetailProgress = remember { Animatable(0f) }
-        val sheetProgress = remember { Animatable(0f) }
         val detailProgress = remember { Animatable(0f) }
         var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
         // Feedback round 2, item 7: the last ON-TAB rail
@@ -485,14 +464,10 @@ fun HavenApp(vm: HavenViewModel) {
         // now-playing morph port (see MorphOverlay.PopupDragState).
         // Declared here, next to the progress animatables, so the
         // dismiss functions below can reference them.
-        val sheetDrag = remember { PopupDragState() }
         val detailDrag = remember { PopupDragState() }
         val panelDetailDrag = remember { PopupDragState() }
         val popoutDrag = remember { PopupDragState() }
         val cameraDrag = remember { PopupDragState() }
-        // The live panel's root rect (camera-rise origin for
-        // sheet Details actions); re-reported on every panel place.
-        var sheetPanelBounds by remember { mutableStateOf<Rect?>(null) }
         // Morph generation + exiting flags (restored from #52, for
         // the animated exit below): an exit animation is async
         // again, so a top-level navigation (goTop/signOut) or a
@@ -505,7 +480,6 @@ fun HavenApp(vm: HavenViewModel) {
         // launching a second animation on the same progress
         // Animatable.
         var morphGeneration by remember { mutableIntStateOf(0) }
-        var sheetExiting by remember { mutableStateOf(false) }
         var detailExiting by remember { mutableStateOf(false) }
         var panelDetailExiting by remember { mutableStateOf(false) }
         var popoutExiting by remember { mutableStateOf(false) }
@@ -545,14 +519,11 @@ fun HavenApp(vm: HavenViewModel) {
             }
             morphGeneration++
             vm.pageOrigin = null
-            vm.closePopup()
-            sheetAnim = null
             detailAnim = null
             panelDetailAnim = null
             popoutAnim = null
             // Feedback round 7: instant navigation clears any
             // in-flight drag state alongside the anims.
-            sheetDrag.reset()
             detailDrag.reset()
             panelDetailDrag.reset()
             popoutDrag.reset()
@@ -627,16 +598,6 @@ fun HavenApp(vm: HavenViewModel) {
             heroTarget = null
             arcTarget = null
         }
-        fun dismissSheetInstant() {
-            val anim = sheetAnim ?: return
-            if (vm.popupEntityId == anim.id) vm.closePopup()
-            if (sheetAnim?.id == anim.id) sheetAnim = null
-            // Feedback round 7: instant clears drop drag state too.
-            sheetDrag.reset()
-            vm.clearTravelSnapshot(anim.id)
-            heroTarget = null
-            arcTarget = null
-        }
         fun dismissPopoutInstant() {
             val anim = popoutAnim ?: return
             if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
@@ -691,34 +652,6 @@ fun HavenApp(vm: HavenViewModel) {
                     detailDrag.settling = false
                     if (gen == morphGeneration && detailAnim?.screen == anim.screen) {
                         dismissDetailInstant()
-                    }
-                }
-            }
-        }
-        fun dismissSheet() {
-            val anim = sheetAnim ?: return
-            if (sheetExiting) return
-            val fromDrag = sheetDrag.isDragging
-            if (fromDrag) sheetDrag.settling = true
-            sheetExiting = true
-            vm.captureTravelSnapshot(anim.id)
-            val gen = morphGeneration
-            scope.launch {
-                try {
-                    if (fromDrag) {
-                        // Round 18, item 5: snap onto the released
-                        // drag progress BEFORE clearing isDragging.
-                        sheetProgress.snapTo(sheetDrag.dragProgress)
-                        sheetDrag.isDragging = false
-                        sheetDrag.pulling = false
-                    }
-                    if (reduceMotion) sheetProgress.snapTo(0f)
-                    else sheetProgress.animateTo(0f, settleSpring())
-                } finally {
-                    sheetExiting = false
-                    sheetDrag.settling = false
-                    if (gen == morphGeneration && sheetAnim?.id == anim.id) {
-                        dismissSheetInstant()
                     }
                 }
             }
@@ -927,13 +860,10 @@ fun HavenApp(vm: HavenViewModel) {
         val signOut: () -> Unit = {
             morphGeneration++
             vm.pageOrigin = null
-            vm.closePopup()
-            sheetAnim = null
             detailAnim = null
             panelDetailAnim = null
             popoutAnim = null
             // Feedback round 7: same instant drag-state clear as goTop.
-            sheetDrag.reset()
             detailDrag.reset()
             panelDetailDrag.reset()
             popoutDrag.reset()
@@ -954,7 +884,7 @@ fun HavenApp(vm: HavenViewModel) {
         // when the card never reported bounds, e.g. a board card);
         // these effects animate progress 0 -> 1 on the bounds spring
         // (snapped under reduce-motion). Exit is the smooth reverse
-        // (see dismissDetail/dismissSheet/dismissPopout): progress
+        // (see dismissDetail/dismissPopout): progress
         // animates 1 -> 0, then the trigger clears. External clears
         // (goTop, signOut) bump the generation and drop the anim
         // state instantly, cancelling any in-flight exit.
@@ -963,36 +893,6 @@ fun HavenApp(vm: HavenViewModel) {
         // appears, so the overlay renders (at progress 0, i.e. exactly
         // over the hidden card) with no one-frame gap. The effects
         // below own only the progress animation.
-        if (vm.popupEntityId != null && sheetAnim?.id != vm.popupEntityId) {
-            sheetAnim = SheetAnim(vm.popupEntityId!!, cardBounds[vm.popupEntityId!!], cardColors[vm.popupEntityId!!], cardShapes[vm.popupEntityId!!])
-        }
-        if (detailScreen != null && detailAnim?.screen != detailScreen) {
-            detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)], cardColors[detailEntityId(detailScreen)], cardShapes[detailEntityId(detailScreen)])
-        }
-        LaunchedEffect(vm.popupEntityId) {
-            val id = vm.popupEntityId
-            val anim = sheetAnim
-            if (id != null && anim?.id == id) {
-                vm.captureTravelSnapshot(id)
-                // Feedback round 7: open resets the drag state
-                // (Koda's open-state backstop: a latched drag flag
-                // can never survive into a fresh open).
-                sheetDrag.reset()
-                // Always animate (unless reduce-motion): a sourced
-                // morph interpolates from the card, a sourceless one
-                // from the graceful fallback rect — never an instant
-                // appearance.
-                if (!reduceMotion) {
-                    sheetProgress.snapTo(0f)
-                    sheetProgress.animateTo(1f, popupMorphSpring())
-                } else sheetProgress.snapTo(1f)
-            } else if (id == null && anim != null) {
-                sheetAnim = null
-                heroTarget = null
-                arcTarget = null
-                vm.clearTravelSnapshot(anim.id)
-            }
-        }
         LaunchedEffect(detailScreen?.let { detailEntityId(it) }) {
             val anim = detailAnim
             if (detailScreen != null && anim != null && detailEntityId(anim.screen) == detailEntityId(detailScreen)) {
@@ -1201,7 +1101,7 @@ fun HavenApp(vm: HavenViewModel) {
             // GONE: the pill now exits the viewport during panels (see
             // the pill-exit below), which replaces the blur as the answer
             // to the panel problem, and the panel itself covers the page.
-            val modalActive = sheetAnim != null || detailAnim != null || panelDetailAnim != null || popoutAnim != null
+            val modalActive = detailAnim != null || panelDetailAnim != null || popoutAnim != null
             // Scroll-away (production-upgrade round): the pill slides
             // out of view on a downward scroll past 8dp and returns on
             // an upward scroll past 8dp (the spec sample's thresholds,
@@ -1218,6 +1118,34 @@ fun HavenApp(vm: HavenViewModel) {
                 if (pillHidden) 1f else 0f,
                 animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springSpatial(),
                 label = "pillExit",
+            )
+            // Round 21, item 8: the ONE root morph-progress lambda,
+            // shared by LocalMorphProgress (badge crossfades) and
+            // LocalMorphCardAlpha (the source tile's fade). The
+            // topmost surface wins (see topMorphProgress) — a panel
+            // detail stacked over a detail panel reports its own
+            // progress, so the panel card it grew from fades on the
+            // panel detail's curve, not the underlying panel's rest
+            // progress. Read only inside graphicsLayer/draw blocks,
+            // never during composition — no per-frame recomposition
+            // cost. PanelDetailAnim was missing from the old
+            // when-branch; that gap is closed here (its progress
+            // was unreadable at the root before this round).
+            val rootMorphProgress: () -> Float = {
+                topMorphProgress(
+                    panelDetailAnim?.let { panelDetailProgress.value },
+                    detailAnim?.let { detailProgress.value },
+                    popoutAnim?.let { popoutProgress.value },
+                )
+            }
+            // Round 21, item 8: the id of the card currently hidden
+            // as a morph source, or null. Same topmost-surface
+            // order as rootMorphProgress above (see
+            // topMorphSourceId). The camera dialog is deliberately
+            // absent, as before: it never sets a hidden id
+            // (fullscreen viewer, not a morph).
+            val hiddenMorphSourceId: String? = topMorphSourceId(
+                panelDetailAnim?.entityId, detailAnim?.entityId, popoutAnim?.id,
             )
             CompositionLocalProvider(
                 // Feedback round 17, item 6: dashboard chrome
@@ -1243,7 +1171,16 @@ fun HavenApp(vm: HavenViewModel) {
                 // of open from the source card's color, fade out
                 // over the final 25% of close), so no pitch-black
                 // box ever cuts across adjacent cards.
-                LocalHiddenCardId provides null,
+                // Round 21, item 8 SUPERSEDES this rule: the tile
+                // BECOMES the popup — the topmost morph's source
+                // card fades out by progress 0.4 (morphCardAlpha)
+                // and back in over the last 40% of exit, leaving
+                // a blank slot in the grid where the tile was.
+                // The grid never reflows around the blank (the
+                // hide is alpha-only, layout unchanged), and the
+                // card is fully visible again at progress 0,
+                // before any dismiss clears state.
+                LocalHiddenCardId provides hiddenMorphSourceId,
                 LocalHeroBounds provides heroBounds,
                 LocalArcBounds provides arcBounds,
                 // Round 6 badge-only hide: while a panel with a
@@ -1282,7 +1219,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // crossfade toward mid-gesture. The camera dialog
                 // is deliberately absent, as before: it never sets
                 // a hidden id, so no badge reads this for it.
-                LocalMorphClosing provides (sheetExiting || detailExiting || panelDetailExiting || popoutExiting),
+                LocalMorphClosing provides (detailExiting || panelDetailExiting || popoutExiting),
                 // Feedback round 18, item 5 (EXPLICIT REVERSAL of
                 // round 11, item 1): the progress IS finger-
                 // tracked while dragging — dragProgressFor reads
@@ -1293,15 +1230,10 @@ fun HavenApp(vm: HavenViewModel) {
                 // subtrees, so panel behavior is untouched. Cards
                 // read the root lambda only inside graphicsLayer,
                 // never during composition — no per-frame
-                // recomposition cost.
-                LocalMorphProgress provides {
-                    when {
-                        sheetAnim != null -> sheetProgress.value
-                        detailAnim != null -> detailProgress.value
-                        popoutAnim != null -> popoutProgress.value
-                        else -> 1f
-                    }
-                },
+                // recomposition cost. Round 21, item 8: this is
+                // now the shared rootMorphProgress above (the
+                // panel detail's progress joins the when-branch).
+                LocalMorphProgress provides rootMorphProgress,
                 // Shape picker state (2026-10-30): badges and card
                 // outlines resolve through this; re-read from the
                 // store whenever a picker save bumps the version.
@@ -1333,7 +1265,16 @@ fun HavenApp(vm: HavenViewModel) {
                 // the traveler's isClosing curve, see MorphSurface), landing as
                 // a short crossfade onto the coincident card badge
                 // instead of a doubled badge.
-                LocalMorphCardAlpha provides 1f,
+                // Round 21, item 8 SUPERSEDES the never-hides half
+                // of this rule: the card alpha is now the
+                // morphCardAlpha curve of the topmost morph's
+                // progress (gone by 0.4 on enter, back over the
+                // last 40% of exit) — the tile becomes the popup.
+                // The surface-cover half is unchanged, and the
+                // card is fully visible at progress 0, before any
+                // dismiss clears state, so no blank frame follows
+                // the landing.
+                LocalMorphCardAlpha provides { morphCardAlpha(rootMorphProgress()) },
             ) {
             // Overlay root: its root-coordinate origin anchors every
             // traveler rect. All panel overlays below render inside
@@ -1421,7 +1362,7 @@ fun HavenApp(vm: HavenViewModel) {
                     // Settings too).
                     val onTabIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     if (onTabIndex != null) lastRailTabScreen = barItems[onTabIndex].screen
-                    val railSelectedIndex = if (sheetAnim != null || detailAnim != null || popoutAnim != null) {
+                    val railSelectedIndex = if (detailAnim != null || popoutAnim != null) {
                         onTabIndex ?: lastRailTabScreen?.let { selectedNavIndex(it, barItems) }
                     } else {
                         onTabIndex
@@ -1777,69 +1718,6 @@ fun HavenApp(vm: HavenViewModel) {
             // one or the other. Feedback round 7: drag-to-dismiss
             // (Koda now-playing port) and Back dismiss; the back
             // arrow is gone (see PanelOverlay/CenteredPopup).
-            if (sheetAnim != null) {
-                val anim = sheetAnim!!
-                BackHandler { dismissSheet() }
-                // Feedback round 7: drag handle for this surface
-                // (progress lambda below is drag-aware).
-                val sheetHandle = popupDragHandle(sheetDrag, sheetProgress, { sheetExiting }, { vm.captureTravelSnapshot(anim.id) }, { dismissSheet() })
-                // Feedback round, item 3: unfolded gets the
-                // centered popup; folded keeps the full-screen
-                // morph + traveler below, byte for byte.
-                if (LocalWideLayout.current) {
-                    CenteredPopup(
-                        progress = dragProgressFor(sheetProgress, sheetDrag),
-                        source = anim.source ?: cardBounds[anim.id],
-                        overlayOrigin = overlayOrigin,
-                        fromBackground = anim.sourceColor,
-                        onDismiss = { dismissSheet() },
-                        dragHandle = sheetHandle,
-                        isClosing = sheetExiting && !sheetDrag.settling,
-                        onPanelPlaced = { sheetPanelBounds = it },
-                        landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
-                    ) {
-                        EntityPopupSheetContent(
-                            vm, navigate, anim.id, panelBounds = sheetPanelBounds,
-                            onDetails = { dismissSheetInstant() },
-                        )
-                    }
-                } else {
-                // Round 6: no measurement frame — the panel is
-                // composed ONCE, at target geometry, and the live
-                // header reports the travel target from its
-                // untransformed layout bounds (PanelOverlay
-                // provides the hero/arc targets around the live
-                // content). Progress is a lambda: nothing in this
-                // block reads the Animatable during composition.
-                PanelOverlay(
-                    progress = dragProgressFor(sheetProgress, sheetDrag),
-                    source = anim.source ?: cardBounds[anim.id],
-                    overlayOrigin = overlayOrigin,
-                    panelBackground = MaterialTheme.colorScheme.background,
-                    sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
-                    // Feedback round 7: settling keeps the open
-                    // curves through a drag-initiated dismiss.
-                    isClosing = sheetExiting && !sheetDrag.settling,
-                    dragHandle = sheetHandle,
-                    heroTargetReporter = { r -> heroTarget = anim.id to r },
-                    arcTargetReporter = { r -> arcTarget = anim.id to r },
-                    onPanelPlaced = { sheetPanelBounds = it },
-                    landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
-                ) {
-                    EntityPopupSheetContent(
-                        vm, navigate, anim.id, panelBounds = sheetPanelBounds,
-                        onDetails = { dismissSheetInstant() },
-                    )
-                }
-                // Traveling arc, above the panel (see TravelingArc).
-                TravelingArc(
-                    vm, anim.id, arcBounds[anim.id],
-                    arcTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = dragProgressFor(sheetProgress, sheetDrag), overlayOrigin,
-                    isClosing = sheetExiting && !sheetDrag.settling,
-                )
-                } // else: folded full-screen morph (feedback item 3)
-            }
             // Detail panel overlay: FULL-SCREEN PANEL (2026-11-01
             // panels round) — SUPERSEDES the 2026-10-30 centered
             // dialog, exactly like the sheets above. The detail
@@ -1965,7 +1843,7 @@ fun HavenApp(vm: HavenViewModel) {
                         landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
-                            DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
+                            DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() }, navigate = navigate)
                         }
                     }
                 } else {
@@ -1980,7 +1858,7 @@ fun HavenApp(vm: HavenViewModel) {
                     landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides true) {
-                        DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
+                        DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() }, navigate = navigate)
                     }
                 }
                 } // else: folded full-screen morph (mirrors the detail block)
@@ -2215,13 +2093,13 @@ private fun ScreenContent(
         Screen.Scenes -> ScenesScreen(vm)
         Screen.Energy -> EnergyScreen(vm)
         Screen.RoomsTabs -> RoomsTabsScreen(vm, goBack, navigate)
-        Screen.HomeEditor -> HomeEditorScreen(vm, goBack)
+        Screen.HomeEditor -> HomeEditorScreen(vm, goBack, navigate)
         is Screen.RoomTab -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onSignInExpired = onSignOut)
         // Detail pages replaced the old generic detail screen: per-domain
         // pages (climate still routes to its thermostat page inside).
-        is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack)
+        is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack, navigate)
         // Round 3 panels: full-screen morph panels, same machinery.
-        is Screen.VacuumPanel -> VacuumPanelScreen(vm, goBack)
+        is Screen.VacuumPanel -> VacuumPanelScreen(vm, goBack, navigate)
         is Screen.MediaPanel -> MediaPanelScreen(vm, screen.entityId, goBack)
         is Screen.SecurityPanel -> SecurityPanelScreen(vm, goBack)
         is Screen.GreenhousePanel -> GreenhousePanelScreen(vm, goBack)
@@ -2256,199 +2134,6 @@ private fun ThermostatPopoutContent(
         }
     } else {
         ThermostatPopout(entity, vm, onClose)
-    }
-}
-
-/**
- * The sheet panel's CONTENT (not the panel itself): the panel
- * overlay in HavenApp owns positioning and sizing; this is
- * the column laid out inside it at the panel's intrinsic size. Kept
- * separate so the same content serves the one-frame measurement pass
- * and the live panel. [panelBounds] is the panel's window
- * rect for the camera rise origin on Details. [onDetails] dismisses
- * instantly for the sheet -> detail handoff (the detail panel
- * starts from the same card, so the card never flashes back in
- * between); the panel's back arrow + BackHandler are the dismiss
- * paths (2026-11-01 round 1 panel chrome — no Close button here).
- */
-@Composable
-private fun EntityPopupSheetContent(
-    vm: HavenViewModel,
-    navigate: (Screen) -> Unit,
-    popupId: String,
-    panelBounds: androidx.compose.ui.geometry.Rect?,
-    onDetails: () -> Unit,
-) {
-    val states by vm.states.collectAsState()
-    val entity = states[popupId]
-    // Traveling header target (2026-10-29 pop-up round): read during
-    // composition; the header row below reports its root rect into it
-    // only inside the measurement frame (the provider is absent in the
-    // live panel, so the target can never be overwritten mid-panel).
-    val heroTarget = LocalHeroTarget.current
-    // The panel scrolls: plain column, no own scroll, no drag
-    // handle (2026-10-30 round — panels do not drag, and the sheet
-    // handle was a sheet affordance).
-    // Feedback round 16, item 2: the sheet's top edge buffer
-    // matches the thermostat popout's 16dp (was a 12dp spacer).
-    // Sides were already 16dp; the bottom stays 24dp — content
-    // still scrolls up from the very bottom.
-    Column(
-        Modifier.fillMaxWidth()
-            .padding(horizontal = 16.dp).padding(bottom = 24.dp),
-    ) {
-        Spacer(Modifier.height(16.dp))
-            if (entity == null) {
-                Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                val accent = accentFor(entity.entityId)
-                // Customization round, item 2: the sheet header
-                // honors the same overrides as every card, plus the
-                // edit pencil beside the title.
-                val sheetCustom = rememberCardCustom(vm)
-                val sheetTitle = com.garrietta.haven.data.customTitleFor(
-                    sheetCustom.titles, entity.entityId,
-                    if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity),
-                )
-                // Feedback round 11, item 3: the one icon path.
-                val sheetIcon = entityIcon(sheetCustom.iconKeys, entity)
-                // Feedback round 4, item 2: the sheet header badge
-                // carries the card's pair, like every card.
-                // Feedback round 17, item 1: the TILE's exact
-                // pair (tileBadgePair), not the preset-only
-                // override — the old detailBadgeOverride
-                // returned null with no preset, so headers fell
-                // back to the hash accent and eufy read YELLOW
-                // in the sheet while its tile read muted green.
-                val sheetBadgeOverride = tileBadgePair(
-                    sheetCustom.tilePresets, sheetCustom.domainTilePresets, entity,
-                    isDarkBackdrop(MaterialTheme.colorScheme.background),
-                    MaterialTheme.colorScheme, accent,
-                )
-                // Feedback round 5, item 4: the sheet's controls carry
-                // the assigned tile color itself (ungated — see
-                // detailPageAccent: the video-3 garage/vacuum sheets
-                // are closed/docked entities, and the user expects
-                // the chosen color there regardless of state).
-                val sheetAccent = detailPageAccent(
-                    sheetCustom.tilePresets, entity,
-                    isDarkBackdrop(MaterialTheme.colorScheme.background),
-                    sheetCustom.domainTilePresets,
-                )
-                // Feedback round 18, item 5: header drag-to-
-                // dismiss (see LocalPopupDragHandle); null on
-                // plain detail pages, so no detector there.
-                val sheetDragHandle = LocalPopupDragHandle.current
-                val sheetDragRangePx = LocalPopupDragRangePx.current
-                Row(
-                    Modifier.fillMaxWidth()
-                        .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
-                        .then(
-                            if (sheetDragHandle != null) {
-                                Modifier.popupDragDetector(
-                                    sheetDragHandle.state,
-                                    { dy -> sheetDragHandle.onDelta(dy, sheetDragRangePx()) },
-                                    { v -> sheetDragHandle.onRelease(v, sheetDragRangePx()) },
-                                )
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Feedback round 18, item 4: the badge renders
-                    // in place and fades with the content curves
-                    // (see morphHeaderBadgeAlpha) — no traveler.
-                    DomainBadge(
-                        entity,
-                        sheetIcon,
-                        accent,
-                        modifier = Modifier.size(48.dp).morphHeaderBadgeAlpha(),
-                        badgeOverride = sheetBadgeOverride,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        DialogTitleText(sheetTitle, Modifier.fillMaxWidth())
-                        Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    CardSettingsPencil(onClick = { vm.openCardSettings(entity.entityId) })
-                }
-                Spacer(Modifier.height(12.dp))
-                // Plain control, not the card's header bar: the header
-                // is a dead control here (this IS the detail surface),
-                // so the card renders without it and the name still shows.
-                // Nested: the sheet panel is already a container.
-                EntityControlCard(entity, vm, onDetail = { }, showHeader = false, nested = true, pageAccent = sheetAccent, pageBadge = sheetBadgeOverride)
-                Spacer(Modifier.height(12.dp))
-                Row {
-                    KodaMenuRow(
-                        badgeKey = entity.entityId,
-                        badgeKind = shapeForDomain(entity.domain),
-                        icon = domainIcon(entity),
-                        title = "Details",
-                        subtitle = "Open the full page",
-                        onClick = {
-                            panelBounds?.let { vm.pageOrigin = it }
-                            onDetails()
-                            when (entity.domain) {
-                                // Round 4: the secondary thermostat
-                                // page is deleted — a sheet climate
-                                // Details tap opens the primary dial
-                                // panel instead (safety net; the
-                                // sheet's onDetails dismiss above
-                                // already ran before this when).
-                                "climate" -> vm.openClimatePopout(popupId)
-                                // Cameras open their fullscreen viewer,
-                                // not a static page (Ring: the latest
-                                // motion recording, labeled as such).
-                                "camera" -> vm.openCameraFullscreen(popupId)
-                                else -> navigate(Screen.EntityDetail(popupId))
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                // Shape picker (2026-10-30): per-entity overrides,
-                // reachable from every entity's sheet (long-press
-                // any card or tile). The badge and card-outline
-                // shapes are picked independently; the subtitle
-                // shows the effective choice (override, else the
-                // global default, else the domain default).
-                Spacer(Modifier.height(8.dp))
-                KodaMenuRow(
-                    badgeKey = "shape-badge-${entity.entityId}",
-                    badgeKind = shapeForDomain(entity.domain),
-                    icon = domainIcon(entity),
-                    title = "Badge shape",
-                    subtitle = shapeLabel(vm.settingsStore.badgeShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalBadgeShape) ?: "Domain default",
-                    onClick = { vm.openShapePicker(entity.entityId, false) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                KodaMenuRow(
-                    badgeKey = "shape-card-${entity.entityId}",
-                    badgeKind = shapeForDomain(entity.domain),
-                    icon = domainIcon(entity),
-                    title = "Card shape",
-                    subtitle = shapeLabel(vm.settingsStore.cardShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalCardShape) ?: "Default corners",
-                    onClick = { vm.openShapePicker(entity.entityId, true) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                // Customization round, item 2: the one Card
-                // settings surface (title, icon, badge shape, tile
-                // color), reachable from every entity's menu.
-                Spacer(Modifier.height(8.dp))
-                KodaMenuRow(
-                    badgeKey = "card-settings-${entity.entityId}",
-                    badgeKind = shapeForDomain(entity.domain),
-                    icon = domainIcon(entity),
-                    title = "Card settings",
-                    subtitle = "Title, icon, badge shape, tile color",
-                    onClick = { vm.openCardSettings(entity.entityId) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -3168,6 +2853,9 @@ private fun FrontDoorCameraPanel(
     // so a recovered 69a1 automatically retakes the lead (see
     // resolveFrontDoorCameraSource). Null means both sources down.
     val frontDoorSource = resolveFrontDoorCameraSource(states)
+    // Round 21, item 3: the ring-mqtt RTSP URL for the fallback
+    // live attempt (null off-LAN — RTSP exists only on the Pi).
+    val rtspUrl = vm.frontDoorRtspUrl
     val engaged = vm.frontDoorLiveEngaged
     val stopReason = vm.frontDoorLiveStopReason
 
@@ -3202,6 +2890,14 @@ private fun FrontDoorCameraPanel(
     var liveRestarts by remember { mutableIntStateOf(0) }
     var liveBodyKey by remember { mutableIntStateOf(0) }
     var liveEverFramed by remember { mutableStateOf(false) }
+    // Round 21, item 3: the RTSP fallback attempt state. rtspFrames
+    // feeds the LIVE badge (RTSP frames are live by construction);
+    // rtspFailed latches the attempt so a failed RTSP falls through
+    // to the labeled MJPEG recording for the rest of this panel
+    // session instead of retry-looping. Both reset on a source flip
+    // and on Live-tab activation (see the effects below).
+    var rtspFrames by remember { mutableStateOf(false) }
+    var rtspFailed by remember { mutableStateOf(false) }
 
     // Engagement: the Live tab owns the switch. Resetting the probe
     // on every Live activation keeps a stale phase from surviving a
@@ -3220,6 +2916,8 @@ private fun FrontDoorCameraPanel(
             liveRestarts = 0
             liveBodyKey = 0
             liveEverFramed = false
+            rtspFrames = false
+            rtspFailed = false
             vm.startFrontDoorLive()
         }
     }
@@ -3251,6 +2949,12 @@ private fun FrontDoorCameraPanel(
     LaunchedEffect(frontDoorSource) {
         mjpegFrames = false
         mjpegError = null
+        // Round 21, item 3: a source flip re-arms the RTSP
+        // attempt (a recovered 69a1 hides the fallback branch
+        // entirely; a flip back to the fallback retries RTSP
+        // instead of showing the recording from a stale failure).
+        rtspFrames = false
+        rtspFailed = false
         if (frontDoorSource == FRONT_DOOR_RING_MQTT_CAMERA_ID) {
             live69a1Failed = false
             liveRestarts = 0
@@ -3392,7 +3096,9 @@ private fun FrontDoorCameraPanel(
     // live body (see the MJPEG phase below) — live_view recording
     // frames never reach it, so the badge can no longer fire on a
     // recording with the switch on (the #93 rule's error).
-    val showLive = frontDoorShowsLiveBadge(webrtcFrames, mjpegFrames, switchOn)
+    // Round 21, item 3: rtspFrames feeds the badge — RTSP frames
+    // are live by construction, no switch involved.
+    val showLive = frontDoorShowsLiveBadge(webrtcFrames, mjpegFrames, switchOn, rtspFrames = rtspFrames)
     // Round 4: clean user-facing status only — the #93 debug
     // "Live path: …" wording (switch + MJPEG internals, WebRTC
     // outcomes, "?" placeholders) is retired. The LIVE badge
@@ -3403,6 +3109,17 @@ private fun FrontDoorCameraPanel(
         !engaged -> "Live paused — the live-stream switch is off"
         phase == FrontDoorLivePhase.WEBRTC_CONNECTING -> "Connecting to live view…"
         phase == FrontDoorLivePhase.WEBRTC_LIVE -> "Live"
+        // Round 21, item 3: RTSP frames are live — the status
+        // reads Live while they render, and "Connecting…" while
+        // the RTSP attempt is in flight (rtspUrl non-null, not
+        // yet failed). Once RTSP has failed the MJPEG recording
+        // shows with the neutral line below it, and a recording
+        // error reads "Recording unavailable", never "Live view
+        // unavailable" — the live_view proxy serves the last
+        // motion recording by construction.
+        phase == FrontDoorLivePhase.MJPEG && rtspFrames -> "Live"
+        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && !rtspFailed && rtspUrl != null -> "Connecting to live view…"
+        phase == FrontDoorLivePhase.MJPEG && mjpegError != null && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> "Recording unavailable"
         // Camera fallback round: the fallback source gets a neutral
         // status line — no liveness claim (no LIVE badge either),
         // and no recording claim. On a fallback-body error the
@@ -3513,13 +3230,43 @@ private fun FrontDoorCameraPanel(
                         }
                     }
                     frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> {
-                        CameraMjpegBody(
-                            vm, FRONT_DOOR_LIVE_VIEW_ID, enterProgress, recording = false, onClose = onClose,
-                            onError = { message ->
-                                Log.w("Haven", "FrontDoorLive: fallback live_view error: $message")
-                                mjpegError = message
-                            },
-                        )
+                        // Round 21, item 3: the live_view MJPEG
+                        // proxy serves the last motion recording by
+                        // construction — it can never be the live
+                        // path. The RTSP attempt goes FIRST (LAN
+                        // only, rtspUrl null off-LAN): a first frame
+                        // proves liveness in-session (badge LIVE +
+                        // quadrant proof); an error or the 8s
+                        // first-frame timeout latches rtspFailed and
+                        // the panel falls through to the LABELED
+                        // recording below (recording = true, so the
+                        // body reads "Loading recording…" /
+                        // "Recording unavailable" instead of
+                        // pretending to be live).
+                        if (rtspUrl != null && !rtspFailed) {
+                            CameraRtspPlayerBody(
+                                vm, rtspUrl, enterProgress,
+                                onFirstFrame = {
+                                    Log.d("Haven", "FrontDoorLive: RTSP fallback first frame")
+                                    rtspFrames = true
+                                    vm.markFrontDoorRtspProven()
+                                },
+                                onPlayerError = { message ->
+                                    Log.w("Haven", "FrontDoorLive: RTSP fallback error: $message — showing recording")
+                                    rtspFrames = false
+                                    vm.clearFrontDoorRtspProven()
+                                    rtspFailed = true
+                                },
+                            )
+                        } else {
+                            CameraMjpegBody(
+                                vm, FRONT_DOOR_LIVE_VIEW_ID, enterProgress, recording = true, onClose = onClose,
+                                onError = { message ->
+                                    Log.w("Haven", "FrontDoorLive: fallback live_view error: $message")
+                                    mjpegError = message
+                                },
+                            )
+                        }
                     }
                     !live69a1Failed && switchOn && live69a1Ready -> {
                         // Visual-fidelity round §3: keyed on the
@@ -3905,6 +3652,116 @@ private fun CameraHlsPlayerBody(
     }
 }
 
+/**
+ * ExoPlayer RTSP playback on a bare SurfaceView (round 21, item 3).
+ * Mirrors [CameraHlsPlayerBody] — same letterboxing (the surface
+ * itself is sized to the video aspect, centered in the black Box)
+ * and the same enter curve — but plays the ring-mqtt RTSP feed
+ * through [HaClient.createRtspPlayer] instead of an HLS playlist.
+ * The RTSP feed is the live doorbell feed, so the first frame is
+ * live proof: [onFirstFrame] fires once and the caller earns the
+ * LIVE badge from it. If no frame renders within 8s, or the player
+ * errors, [onPlayerError] fires once and the caller falls through
+ * to the labeled MJPEG recording — RTSP must never hang the panel
+ * on "Loading camera…". The last cached live_view frame dims behind
+ * the loading state, as in the HLS body.
+ */
+@Composable
+private fun CameraRtspPlayerBody(
+    vm: HavenViewModel,
+    rtspUrl: String,
+    enterProgress: () -> Float,
+    onFirstFrame: (() -> Unit)?,
+    onPlayerError: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    var rendered by remember(rtspUrl) { mutableStateOf(false) }
+    var failed by remember(rtspUrl) { mutableStateOf(false) }
+    var videoAspect by remember(rtspUrl) { mutableStateOf<Float?>(null) }
+    val player = remember(rtspUrl) {
+        vm.client.createRtspPlayer(context, rtspUrl).apply {
+            videoScalingMode = androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+            addListener(object : Player.Listener {
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    val w = videoSize.width
+                    val h = videoSize.height
+                    if (w > 0 && h > 0) {
+                        val aspect = w * videoSize.pixelWidthHeightRatio / h
+                        if (aspect > 0f && aspect.isFinite()) videoAspect = aspect
+                    }
+                }
+
+                override fun onRenderedFirstFrame() {
+                    if (!rendered) {
+                        rendered = true
+                        onFirstFrame?.invoke()
+                    }
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    if (!failed) {
+                        failed = true
+                        onPlayerError(error.message ?: "RTSP playback failed")
+                    }
+                }
+            })
+        }
+    }
+    DisposableEffect(rtspUrl) {
+        onDispose { player.release() }
+    }
+    // 8s first-frame timeout: a dead RTSP endpoint must degrade
+    // to the recording instead of hanging on "Loading camera…".
+    // The effect reads the CURRENT rendered/failed values after
+    // the delay — it is keyed on the URL only, never restarted
+    // by a frame arriving.
+    LaunchedEffect(rtspUrl) {
+        delay(8000)
+        if (!rendered && !failed) {
+            failed = true
+            onPlayerError("RTSP first-frame timeout (8s)")
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (!rendered) {
+            val last = vm.lastCameraFrame(FRONT_DOOR_LIVE_VIEW_ID)
+            if (last != null) {
+                Image(
+                    bitmap = last.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.25f },
+                )
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Loading camera…", color = Color.White, fontSize = 16.sp)
+            }
+        }
+        // Fit: the largest rect of the video aspect inside the
+        // Box, centered, so the black Box area becomes the bars.
+        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            val aspect = videoAspect
+            val surfaceModifier = if (aspect == null) {
+                Modifier.fillMaxSize()
+            } else if (maxWidth / maxHeight < aspect) {
+                Modifier.size(width = maxWidth, height = maxWidth / aspect)
+            } else {
+                Modifier.size(width = maxHeight * aspect, height = maxHeight)
+            }
+            AndroidView(
+                factory = { ctx -> SurfaceView(ctx).also { player.setVideoSurfaceView(it) } },
+                modifier = surfaceModifier.graphicsLayer {
+                    val p = enterProgress().coerceIn(0f, 1f)
+                    val s = 0.94f + 0.06f * p
+                    scaleX = s
+                    scaleY = s
+                    alpha = 0.7f + 0.3f * p
+                },
+            )
+        }
+    }
+}
+
 @Composable
 private fun CameraMjpegBody(
     vm: HavenViewModel,
@@ -4236,7 +4093,14 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, currentS
             // transition clip box gone, not the pill). The
             // shadow restores the floating-bar look the #108
             // pill had (container + shadow, Koda-style).
-            color = PillBarContainer,
+            // Round 21, item 2 (minor polish only, per his
+            // correction — the rail was never a flagged item):
+            // #161D17 measures 1.1:1 against the black dark
+            // background, so in dark mode only the rail lifts
+            // slightly to #263026 (~1.35:1). A small bump, not
+            // a rework; the folded pill bar keeps
+            // PillBarContainer in both themes.
+            color = if (isDark) Color(0xFF263026) else PillBarContainer,
             tonalElevation = 0.dp,
             shadowElevation = 6.dp,
         ) {
@@ -4594,9 +4458,11 @@ fun DetailPopupTitleHeader(title: String) {
  */
 /**
  * Customization round, item 2: optional displayTitle/displayIcon
- * (the caller's Card-settings overrides) and an optional edit
- * pencil beside the title opening Card settings. Callers without
- * a ViewModel keep the old behavior exactly.
+ * (the caller's Card-settings overrides). Round 21, item 5: the
+ * header pencil is gone — Card settings now lives in the
+ * EntityPopupMenuRows at the bottom of every popup, so no header
+ * opens it anymore. Callers without a ViewModel keep the old
+ * behavior exactly.
  */
 @Composable
 fun DetailPopupHeader(
@@ -4604,7 +4470,6 @@ fun DetailPopupHeader(
     onDismiss: () -> Unit,
     displayTitle: String? = null,
     displayIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
-    onEdit: (() -> Unit)? = null,
     // Feedback round 4, item 2: the preset badge pair for this
     // entity (detailBadgeOverride), or null to keep badgeColors.
     badgeOverride: Pair<Color, Color>? = null,
@@ -4651,9 +4516,6 @@ fun DetailPopupHeader(
                 Modifier.fillMaxWidth(),
             )
             Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        if (onEdit != null) {
-            CardSettingsPencil(onClick = onEdit)
         }
     }
     Spacer(Modifier.height(4.dp))

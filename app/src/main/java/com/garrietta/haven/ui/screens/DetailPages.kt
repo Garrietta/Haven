@@ -71,6 +71,7 @@ import com.garrietta.haven.DetailPopupHeader
 import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.Screen
 import com.garrietta.haven.RecordingFullscreen
 import com.garrietta.haven.data.HaClient
 import com.garrietta.haven.data.HaEntity
@@ -81,7 +82,11 @@ import com.garrietta.haven.data.displayCameraName
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.garrietta.haven.ui.components.DomainBadge
+import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.VerticalPillToggle
+import com.garrietta.haven.ui.components.shapeForDomain
+import com.garrietta.haven.ui.components.shapeLabel
+import com.garrietta.haven.ui.controls.domainIcon
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import com.garrietta.haven.ui.components.ShimmerBox
@@ -137,7 +142,7 @@ import org.json.JSONObject
  * viewer (a page of its own, landscape-locked) instead of a static page.
  */
 @Composable
-fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
+fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
     if (entity == null) {
@@ -189,7 +194,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     }
     if (entity.domain == "camera") {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
-            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = detailBadge)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, badgeOverride = detailBadge)
             Spacer(Modifier.height(16.dp))
             Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accentFor(entityId))
             Spacer(Modifier.height(16.dp))
@@ -202,6 +207,32 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
                 // The button promises live only where it is live.
                 Text(if (isRingCamera(entity)) "Open latest recording" else "Open live view")
             }
+            Spacer(Modifier.height(16.dp))
+            // Round 21, item 7: the clips timeline used to be a
+            // camera-tile long-press — long-press is Arrange now,
+            // so the timeline lives here as an Event history row
+            // (the Front Door keeps its in-panel Event History
+            // tab). Dismiss first, then navigate — the sheet's
+            // Details handoff pattern.
+            KodaMenuRow(
+                badgeKey = "clips-${entity.entityId}",
+                badgeKind = shapeForDomain(entity.domain),
+                icon = domainIcon(entity),
+                title = "Event history",
+                subtitle = "Recorded clips timeline",
+                onClick = {
+                    onBack()
+                    navigate(Screen.CameraClips(entityId))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // Round 21, item 5: the settings rows at the very
+            // bottom, for every tile. Details is omitted — the
+            // Open live view button above is this surface's
+            // Details action.
+            Spacer(Modifier.height(24.dp))
+            EntityPopupMenuRows(vm, entity, onDetails = null)
+            Spacer(Modifier.height(16.dp))
         }
         return
     }
@@ -233,7 +264,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
     Column(
         Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
     ) {
-        DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = weatherBadge)
+        DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, badgeOverride = weatherBadge)
         Spacer(Modifier.height(16.dp))
         // Round 4: the static non-functional grey semicircle gauge
         // (WeatherControl's display-only Dial) is GONE from this
@@ -249,6 +280,11 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         // timeline"). The hero above and the condition coloring are
         // unchanged; only the hourly presentation changes.
         ForecastTimeline(entity, vm)
+        Spacer(Modifier.height(16.dp))
+        // Round 21, item 5: the settings rows at the very bottom,
+        // for every tile. Details is omitted — this IS the full page.
+        Spacer(Modifier.height(8.dp))
+        EntityPopupMenuRows(vm, entity, onDetails = null)
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -374,7 +410,7 @@ private fun DetailPageContent(
     // columns — no fillMaxSize, no status-bars padding, no own scroll.
     if (LocalWideLayout.current) {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
-            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, badgeOverride = badgeOverride)
             // Feedback round 18, item 2: the two-column split
             // applies ONLY to numeric states (sensors: control
             // left, history right). Non-numeric entities (light,
@@ -397,12 +433,23 @@ private fun DetailPageContent(
                 control()
                 history()
             }
+            // Round 21, item 5: the settings rows at the very
+            // bottom of the popup, for every tile. Details is
+            // omitted here — this IS the full page.
+            Spacer(Modifier.height(24.dp))
+            EntityPopupMenuRows(vm, entity, onDetails = null)
+            Spacer(Modifier.height(16.dp))
         }
     } else {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
-            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
+            DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, badgeOverride = badgeOverride)
             control()
             history()
+            // Round 21, item 5: the settings rows at the very
+            // bottom of the popup, for every tile. Details is
+            // omitted here — this IS the full page.
+            Spacer(Modifier.height(24.dp))
+            EntityPopupMenuRows(vm, entity, onDetails = null)
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -574,16 +621,88 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
 /**
  * Customization round, item 2: the detail header's Card-settings
  * values, computed once per page from the same store maps every
- * surface reads (title + icon + pencil target).
+ * surface reads (title + icon). Round 21, item 5: the pencil
+ * target is gone — Card settings now lives in the
+ * EntityPopupMenuRows at the bottom of every popup, so the
+ * header no longer opens it; the Triple is a Pair.
  */
 @Composable
-internal fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit> {
+internal fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Pair<String, androidx.compose.ui.graphics.vector.ImageVector> {
     val custom = rememberCardCustom(vm)
     val base = if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity)
     val title = customTitleFor(custom.titles, entity.entityId, base)
     // Feedback round 11, item 3: the one icon path.
     val icon = entityIcon(custom.iconKeys, entity)
-    return Triple(title, icon) { vm.openCardSettings(entity.entityId) }
+    return title to icon
+}
+
+/**
+ * Round 21, item 5: the settings rows that used to live in the
+ * long-press sheet, now at the bottom of the single-press popup
+ * for EVERY tile. The sheet is gone (HavenApp's
+ * EntityPopupSheetContent is deleted); these rows are the only
+ * settings surface, shared verbatim by the generic detail page,
+ * the thermostat popout, the weather page, the camera column,
+ * and the vacuum panel. [onDetails] is the "open the full page"
+ * destination — null when this surface IS the full page (generic
+ * detail, thermostat popout, weather page: the row would navigate
+ * to itself, and pushing a duplicate detail screen is a real
+ * defect, not a no-op), non-null where a deeper surface exists
+ * (vacuum panel: the generic detail page). Cameras carry their
+ * own Details action (the Open live view button) plus an Event
+ * history row, so they pass null here too. Badge shape / Card
+ * shape / Card settings are always present.
+ */
+@Composable
+internal fun EntityPopupMenuRows(
+    vm: HavenViewModel,
+    entity: HaEntity,
+    onDetails: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        if (onDetails != null) {
+            KodaMenuRow(
+                badgeKey = entity.entityId,
+                badgeKind = shapeForDomain(entity.domain),
+                icon = domainIcon(entity),
+                title = "Details",
+                subtitle = "Open the full page",
+                onClick = onDetails,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        KodaMenuRow(
+            badgeKey = "shape-badge-${entity.entityId}",
+            badgeKind = shapeForDomain(entity.domain),
+            icon = domainIcon(entity),
+            title = "Badge shape",
+            subtitle = shapeLabel(vm.settingsStore.badgeShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalBadgeShape) ?: "Domain default",
+            onClick = { vm.openShapePicker(entity.entityId, false) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        KodaMenuRow(
+            badgeKey = "shape-card-${entity.entityId}",
+            badgeKind = shapeForDomain(entity.domain),
+            icon = domainIcon(entity),
+            title = "Card shape",
+            subtitle = shapeLabel(vm.settingsStore.cardShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalCardShape) ?: "Default corners",
+            onClick = { vm.openShapePicker(entity.entityId, true) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        KodaMenuRow(
+            badgeKey = "card-settings-${entity.entityId}",
+            badgeKind = shapeForDomain(entity.domain),
+            icon = domainIcon(entity),
+            title = "Card settings",
+            subtitle = "Title, icon, badge shape, tile color",
+            onClick = { vm.openCardSettings(entity.entityId) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /**

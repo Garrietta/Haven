@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HOME_SECTIONS
 import com.garrietta.haven.data.migrateRound3Hidden
 import com.garrietta.haven.data.migrateRound3SectionOrder
@@ -67,7 +68,7 @@ import com.garrietta.haven.ui.components.tabIconPairForKey
  *   refresh never re-excludes it.
  */
 @Composable
-fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
+fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val areas by vm.areas.collectAsState()
     var welcome by remember { mutableStateOf(vm.settingsStore.homeWelcomeMessage) }
@@ -226,7 +227,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 Text("Manage favorites")
             }
             if (showFavoritesSheet) {
-                FavoritesSheet(vm, states, onDismiss = { showFavoritesSheet = false })
+                FavoritesSheet(vm, states, navigate = navigate, onDismiss = { showFavoritesSheet = false })
             }
         }
         item {

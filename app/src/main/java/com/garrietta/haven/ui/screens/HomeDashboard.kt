@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -320,14 +321,18 @@ fun FavoritesSection(
     // Feedback round 20, item 5: Arrange mode shows the drag
     // handles; exiting keeps sizes (they live in prefs).
     var arrangeMode by remember { mutableStateOf(false) }
+    // Round 21, item 7: back exits Arrange (enabled only while
+    // arranging). The Arrange button is gone — a long-press on
+    // any favorite enters Arrange mode instead.
+    BackHandler(enabled = arrangeMode) { arrangeMode = false }
     val columns = columnsOverride ?: 2
     val resolved = vm.favorites.mapNotNull { states[it] }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Favorites", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-        // Feedback round 20, item 5: Arrange toggles the resize
-        // handles; the pencil stays always-composed (round 18).
-        TextButton(onClick = { arrangeMode = !arrangeMode }) { Text(if (arrangeMode) "Done" else "Arrange") }
+        // Round 21, item 7: the Arrange button is gone — a
+        // long-press on any favorite enters Arrange mode.
+        // The pencil stays always-composed (round 18).
         // Visual-fidelity round §2: the Manage TEXT button is
         // replaced by the mockup's circular pencil button (40dp
         // surfaceContainerHigh circle, Outlined Edit icon) opening
@@ -362,22 +367,22 @@ fun FavoritesSection(
     } else {
         // UI rewrite round §3: Favorites use the SAME card as room
         // grids — the legacy EntityTile (with its wide inner box +
-        // status dot) is gone from this path. Active or favorite
+        // status dot) is gone from this path (round 21, item 6
+        // deleted it outright; tab pages render these same cards
+        // now). Active or favorite
         // media players span the full width as 2x1 cards, exactly
         // like RoomSectionGrid; everything else chunks into the
         // standard 136dp grid. (Behavior change, reported: a
         // Favorites light no longer toggles on a body tap — the
         // pill switch and the badge zone toggle, the body opens
-        // the detail panel, like every room card. EntityTile still
-        // serves TabTileGrid user-tab pages, which render arbitrary
-        // YAML cards rather than Home dashboard cards.)
+        // the detail panel, like every room card.)
         val wideMedia = resolved.filter { member ->
             member.domain == "media_player" &&
                 (member.state == "playing" || member.entityId in vm.favorites)
         }
         val standard = resolved - wideMedia.toSet()
         for ((wideIndex, media) in wideMedia.withIndex()) {
-            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, navigate = navigate)
+            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
             Spacer(Modifier.height(spacing))
         }
         // Feedback round 20, item 5: wide-aware rows. A WIDE card
@@ -392,7 +397,7 @@ fun FavoritesSection(
             if (vm.cardSize("home", standard[i].entityId) == CardSize.WIDE) {
                 val member = standard[i]
                 Box(Modifier.fillMaxWidth().resizeSettle()) {
-                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx)
+                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                     if (arrangeMode) {
                         CardResizeHandle(
                             CardSize.WIDE,
@@ -424,6 +429,8 @@ fun FavoritesSection(
                             HomeRoomCard(
                                 vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
                                 modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                                arrangeMode = arrangeMode,
+                                onArrangeToggle = { arrangeMode = !arrangeMode },
                             )
                             if (arrangeMode) {
                                 CardResizeHandle(
@@ -447,7 +454,7 @@ fun FavoritesSection(
     Spacer(Modifier.height(16.dp))
 
     if (managing) {
-        FavoritesSheet(vm, states, onDismiss = { managing = false })
+        FavoritesSheet(vm, states, navigate = navigate, onDismiss = { managing = false })
     }
 }
 
@@ -480,6 +487,7 @@ internal fun favoriteMatchesQuery(query: String, name: String, entityId: String)
 fun FavoritesSheet(
     vm: HavenViewModel,
     states: Map<String, HaEntity>,
+    navigate: (Screen) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -595,7 +603,7 @@ fun FavoritesSheet(
                                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable {
                                     onDismiss()
-                                    vm.openPopup(member.entityId)
+                                    navigate(Screen.EntityDetail(member.entityId))
                                 },
                             )
                             if (member.entityId !in vm.favorites) {
@@ -646,7 +654,7 @@ fun FavoritesSheet(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f).clickable {
                                     onDismiss()
-                                    vm.openPopup(member.entityId)
+                                    navigate(Screen.EntityDetail(member.entityId))
                                 },
                             )
                             SheetIconSquircleButton(Icons.Filled.Add, "Add favorite", onClick = { vm.addFavorite(member.entityId) })

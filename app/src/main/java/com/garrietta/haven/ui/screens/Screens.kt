@@ -109,6 +109,7 @@ import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.data.CardSize
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.UserTab
 import com.garrietta.haven.data.groupEntitiesByRoom
 import com.garrietta.haven.ui.components.shapeLabel
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -554,18 +555,14 @@ fun TodayScreen(
     // and a tab chip navigates to the tab (it is never the
     // selected filter — leaving Home selects nothing there).
     // "No room" has no placement and is always a chip.
-    val roomChips: List<HomeChip> = buildList {
-        add(HomeChip("My Home", null, roomFilter == RoomFilter.All) { vm.roomFilter = RoomFilter.All })
-        for (section in allRooms) {
-            if (section.areaId != null && vm.roomPlacement(section.areaId) != Placement.ROOM_CHIP) continue
-            val filter = if (section.areaId == null) RoomFilter.Unassigned else RoomFilter.Area(section.areaId)
-            add(HomeChip(section.name, section.iconKey, roomFilter == filter) { vm.roomFilter = filter })
-        }
-        for (tab in vm.userTabs) {
-            if (tabPlacementFor(tab.pinned, tab.chip, tab.hidden) != Placement.ROOM_CHIP) continue
-            add(HomeChip(tab.title, tab.icon, false) { navigate(Screen.UserTab(tab.id)) })
-        }
-    }
+    val roomChips: List<HomeChip> = buildHomeChips(
+        allRooms,
+        roomFilter,
+        vm::roomPlacement,
+        vm.userTabs,
+        onRoomFilter = { vm.roomFilter = it },
+        onNavigateTab = { navigate(it) },
+    )
 
     // Room-filter state is hoisted in the ViewModel (round 19,
     // item 3 — never inside a pane composable, and never in
@@ -766,12 +763,41 @@ internal data class RoomSection(
  * tab navigation — the row carries both, each with its own tap
  * action, so tab chips join the room chips without a second row.
  */
-private data class HomeChip(
+internal data class HomeChip(
     val label: String,
     val iconKey: String?,
     val selected: Boolean,
     val onClick: () -> Unit,
 )
+
+/**
+ * Round 21, item 1: the room-chip list, extracted pure so the tap →
+ * filter mapping is unit-testable. The regression that motivated it:
+ * RoomFilterChips rendered `.clickable { chip.onClick }` — a function
+ * reference, never invoked — so every chip tap was a no-op and My
+ * Home stayed selected after Bedroom/Living Room taps. The call site
+ * now invokes chip.onClick(); this builder owns the mapping the taps
+ * dispatch through.
+ */
+internal fun buildHomeChips(
+    allRooms: List<RoomSection>,
+    roomFilter: RoomFilter,
+    roomPlacement: (String) -> Placement,
+    userTabs: List<UserTab>,
+    onRoomFilter: (RoomFilter) -> Unit,
+    onNavigateTab: (Screen) -> Unit,
+): List<HomeChip> = buildList {
+    add(HomeChip("My Home", null, roomFilter == RoomFilter.All) { onRoomFilter(RoomFilter.All) })
+    for (section in allRooms) {
+        if (section.areaId != null && roomPlacement(section.areaId) != Placement.ROOM_CHIP) continue
+        val filter = if (section.areaId == null) RoomFilter.Unassigned else RoomFilter.Area(section.areaId)
+        add(HomeChip(section.name, section.iconKey, roomFilter == filter) { onRoomFilter(filter) })
+    }
+    for (tab in userTabs) {
+        if (tabPlacementFor(tab.pinned, tab.chip, tab.hidden) != Placement.ROOM_CHIP) continue
+        add(HomeChip(tab.title, tab.icon, false) { onNavigateTab(Screen.UserTab(tab.id)) })
+    }
+}
 
 @Composable
 private fun RoomFilterChips(
@@ -791,7 +817,7 @@ private fun RoomFilterChips(
                         if (isSelected) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceContainer,
                     )
-                    .clickable { chip.onClick }
+                    .clickable { chip.onClick() }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
                 // Stage G: a room's chosen icon rides in its chip
@@ -858,6 +884,10 @@ private fun RoomSectionGrid(
     // Feedback round 20, item 5: Arrange mode shows the drag
     // handles; exiting keeps sizes (they live in prefs).
     var arrangeMode by remember { mutableStateOf(false) }
+    // Round 21, item 7: back exits Arrange (enabled only while
+    // this section is arranging, so a section that is not
+    // arranging never swallows another section's back press).
+    BackHandler(enabled = arrangeMode) { arrangeMode = false }
     val scope = "room:${areaId ?: "unassigned"}"
     // Resolved here, per section, from the already-collected map:
     // no extra subscription, no re-sort (membership order is
@@ -878,10 +908,11 @@ private fun RoomSectionGrid(
                 Spacer(Modifier.width(8.dp))
             }
             Text(name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f, fill = false))
-            // Feedback round 20, item 5: per-section Arrange toggle
-            // (a room view shows that room's single grid, so this
-            // approximates a per-page toggle there).
-            TextButton(onClick = { arrangeMode = !arrangeMode }) { Text(if (arrangeMode) "Done" else "Arrange") }
+            // Round 21, item 7: the Arrange button is gone — a
+            // long-press on any card in this section enters
+            // Arrange/resize mode instead (onArrangeToggle below).
+            // Back exits Arrange (see the BackHandler at the end
+            // of this section); exiting keeps sizes (prefs).
             if (vm.badgeRoom && hasImportantAlert(members)) {
                 Spacer(Modifier.width(8.dp))
                 Box(
@@ -902,7 +933,7 @@ private fun RoomSectionGrid(
         }
         val standard = members - wideMedia.toSet()
         for ((wideIndex, media) in wideMedia.withIndex()) {
-            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, navigate = navigate)
+            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
             Spacer(Modifier.height(spacing))
         }
         // Feedback round 20, item 5: wide-aware rows, same rule
@@ -917,7 +948,7 @@ private fun RoomSectionGrid(
             if (vm.cardSize(scope, standard[i].entityId) == CardSize.WIDE) {
                 val member = standard[i]
                 Box(Modifier.fillMaxWidth().resizeSettle()) {
-                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx)
+                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                     if (arrangeMode) {
                         CardResizeHandle(
                             CardSize.WIDE,
@@ -949,6 +980,8 @@ private fun RoomSectionGrid(
                             HomeRoomCard(
                                 vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
                                 modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                                arrangeMode = arrangeMode,
+                                onArrangeToggle = { arrangeMode = !arrangeMode },
                             )
                             if (arrangeMode) {
                                 CardResizeHandle(
@@ -981,7 +1014,7 @@ private fun RoomSectionGrid(
  */
 private fun homeCardStatus(entity: HaEntity): String = when (entity.domain) {
     "light" -> if (entity.state == "on") {
-        val b = entity.attrInt("brightness")?.let { it * 100 / 255 }
+        val b = entity.attrInt("brightness")?.let { lightBrightnessPercent(it) }
         if (b != null) "On • $b%" else "On"
     } else "Off"
     "switch", "input_boolean" -> if (entity.state == "on") "On" else "Off"
@@ -1040,7 +1073,7 @@ fun homeCardShapeByIndex(index: Int): RoundedCornerShape = generalCardShape(inde
  * the card opens the detail panel, like every other card.
  */
 @Composable
-fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, navigate: ((Screen) -> Unit)? = null) {
+fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, modifier: Modifier = Modifier, navigate: (Screen) -> Unit) {
     val liveEntity by vm.entityFlow(entityId).collectAsState()
     val entity = liveEntity ?: return
     val snap = vm.travelSnapshots[entity.entityId]
@@ -1103,8 +1136,12 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
     Surface(
         shape = mediaCardOutline,
         color = container,
-        modifier = Modifier.fillMaxWidth()
-            .height(136.dp)
+        modifier = modifier.fillMaxWidth()
+            // Round 21, item 6: the 136dp floor, like HomeRoomCard
+            // (was a fixed height — a TALL-resized media card left
+            // a 136dp card in a 272dp box). Content stays
+            // top-aligned when the card grows.
+            .heightIn(min = 136.dp)
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, mediaCardOutline)
             .reportCardColor(entity.entityId, container)
@@ -1118,9 +1155,13 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
                 // the detail page (MediaPageControl) like
                 // every other domain — the old tap-to-sheet
                 // was the same inconsistency as vacuum/cover.
-                // Long-press keeps the settings sheet.
-                onClick = { if (navigate != null) navigate(Screen.EntityDetail(entity.entityId)) else vm.openPopup(entity.entityId) },
-                onLongClick = { vm.openPopup(entity.entityId) },
+                // Round 21, item 7: long-press enters Arrange
+                // mode instead of the settings sheet; taps are
+                // swallowed while in Arrange mode. Round 21,
+                // item 5: navigate is non-null — every caller
+                // passes it, and the sheet fallback is gone.
+                onClick = { if (!arrangeMode) navigate(Screen.EntityDetail(entity.entityId)) },
+                onLongClick = { onArrangeToggle?.invoke() },
             ),
     ) {
         Column(Modifier.padding(12.dp)) {
@@ -1235,10 +1276,10 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
  * panel, no dialog — the 2026-11-01 panels round's card-level
  * model); background tap on any other domain opens its
  * full-screen panel (Home behavior — never a full page); badge
- * tap actuates where a shape action exists; long-press opens the
- * panel. Morph wiring mirrors EntityTile: the card reports its
- * bounds and its badge anchors the traveling header (the badge
- * rect is reported directly, so the 44dp badge size is
+ * tap actuates where a shape action exists; long-press enters
+ * Arrange mode (round 21, item 7). Morph wiring: the card
+ * reports its bounds and its badge anchors the traveling header
+ * (the badge rect is reported directly, so the 44dp badge size is
  * traveler-exact — no row-derivation size to update).
  *
  * Lock safety: the card Switch NEVER unlocks one-tap. Turning a
@@ -1260,7 +1301,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
  * which beats this alternating default.
  */
 @Composable
-fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, modifier: Modifier = Modifier, onOpenPanel: (() -> Unit)? = null) {
+fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, modifier: Modifier = Modifier, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, onOpenPanel: (() -> Unit)? = null) {
     // Entity-scoped state (§6): this card recomposes only when
     // its own entity changes. An entity that vanished from state
     // renders nothing (membership rebuilds without it).
@@ -1281,14 +1322,13 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // detail page for everything else) — the old binary-only
     // rule sent vacuum/cover/media taps to the settings sheet
     // while Lamp/Ecobee taps opened full panels, the
-    // inconsistency filmed on the 2026-11-04 runs. The sheet
-    // (openSheet) is long-press/pencil only now. Follow-up A
+    // inconsistency filmed on the 2026-11-04 runs. Follow-up A
     // (2026-11-03): an explicit onOpenPanel override replaces
     // the routing wholesale (surface tap, surface long-press,
     // badge long-press). The Home Status panel passes
-    // navigate-to-detail so panel cards never open a sheet UNDER
-    // the opaque detail panel (the sheet block renders before
-    // the detail block, so a sheet opened from inside a panel
+    // navigate-to-detail so panel cards never open a panel UNDER
+    // the opaque detail panel (the detail block renders before
+    // any sheet block, so a panel opened from inside a panel
     // would paint underneath it and read as a dead tap until
     // back reveals it). Badge-zone taps (toggle/toggleCover)
     // and the switch stay live as on the home page. Default
@@ -1300,11 +1340,16 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
             CardTapRoute.ENTITY_DETAIL -> navigate(Screen.EntityDetail(entity.entityId))
         }
     }
-    // Feedback round 17, item 2: the sheet is long-press only
-    // (or the header pencil). With an onOpenPanel override the
-    // override still wins — a sheet from inside a panel would
-    // paint underneath it and read as a dead tap.
-    val openSheet: () -> Unit = onOpenPanel ?: { vm.openPopup(entity.entityId) }
+    // Round 21, item 7 (SUPERSEDES round 17, item 2's long-press
+    // sheet rule): long-press ANYWHERE on a card enters
+    // Arrange/resize mode (onArrangeToggle), and the settings sheet
+    // is gone — the popup itself carries the settings rows now
+    // (round 21, item 5). Taps are swallowed while in Arrange
+    // mode: a card in Arrange never opens a panel or actuates.
+    // With an onOpenPanel override (Home Status panel cards) the
+    // override still wins for taps, and the arrange toggle stays
+    // null there — long-press inside a panel is a no-op, since
+    // resizing a card from inside a panel has no meaning.
     // §1 container + badge: the domain table wins where it has a
     // row; temperature/humidity sensors bypass it (standing law)
     // and fall through to the existing semantic pipeline below.
@@ -1343,7 +1388,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
             lightBrightnessContainer(
                 scheme,
                 display.attrInt("color_temp_kelvin"),
-                display.attrInt("brightness")?.let { it * 100 / 255 },
+                display.attrInt("brightness")?.let { lightBrightnessPercent(it) },
                 true,
             )
         display.domain == "climate" ->
@@ -1442,16 +1487,17 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 indication = null,
                 // Round 4 split zones (binary cards): the badge row
                 // below owns tap-to-toggle, the text zone below owns
-                // tap-to-panel, and long-press ANYWHERE opens the
-                // settings sheet (round 17, item 2 — the old
-                // long-press-opens-panel rule is gone) — so this
+                // tap-to-panel, and long-press ANYWHERE enters
+                // Arrange mode (round 21, item 7 — the old
+                // long-press-opens-sheet rule is gone) — so this
                 // surface-level tap is the panel fallback for taps
                 // on card padding only. Climate's tap still opens
                 // the dial panel. (The old tap-anywhere-toggles
                 // model for lights is deliberately replaced by the
-                // zone split.)
-                onClick = { openPanel() },
-                onLongClick = { openSheet() },
+                // zone split.) While in Arrange mode the tap is
+                // swallowed: no panel, no actuation.
+                onClick = { if (!arrangeMode) openPanel() },
+                onLongClick = { onArrangeToggle?.invoke() },
             ),
     ) {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (isPolygonCard) 28.dp else 16.dp)) {
@@ -1469,15 +1515,15 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                     .combinedClickable(
                         interactionSource = zoneInteraction,
                         indication = null,
-                        onClick = { vm.toggle(entity.entityId) },
-                        onLongClick = { openSheet() },
+                        onClick = { if (!arrangeMode) vm.toggle(entity.entityId) },
+                        onLongClick = { onArrangeToggle?.invoke() },
                     )
                 display.domain == "cover" -> Modifier.fillMaxWidth()
                     .combinedClickable(
                         interactionSource = zoneInteraction,
                         indication = null,
-                        onClick = { vm.toggleCover(entity.entityId) },
-                        onLongClick = { openSheet() },
+                        onClick = { if (!arrangeMode) vm.toggleCover(entity.entityId) },
+                        onLongClick = { onArrangeToggle?.invoke() },
                     )
                 else -> Modifier
             }
@@ -1501,8 +1547,8 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                         .then(if (shapeAction != null) Modifier.combinedClickable(
                             interactionSource = badgeInteraction,
                             indication = null,
-                            onClick = shapeAction,
-                            onLongClick = { openSheet() },
+                            onClick = { if (!arrangeMode) shapeAction() },
+                            onLongClick = { onArrangeToggle?.invoke() },
                         ) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1612,16 +1658,17 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
             Spacer(Modifier.height(if (isPolygonCard) 4.dp else 16.dp))
             // Round 4 split zone, lower half: tapping the name or
             // status text opens the expanded panel (binary cards);
-            // long-press anywhere does the same. Non-binary cards
-            // keep their surface-level routing; this zone is
-            // harmless there (same openPanel target).
+            // long-press anywhere enters Arrange mode (round 21,
+            // item 7). Non-binary cards keep their surface-level
+            // routing; this zone is harmless there (same openPanel
+            // target). Taps are swallowed while in Arrange mode.
             val textZoneInteraction = remember { MutableInteractionSource() }
             Column(
                 Modifier.fillMaxWidth().combinedClickable(
                     interactionSource = textZoneInteraction,
                     indication = null,
-                    onClick = { openPanel() },
-                    onLongClick = { openSheet() },
+                    onClick = { if (!arrangeMode) openPanel() },
+                    onLongClick = { onArrangeToggle?.invoke() },
                 ),
             ) {
             Text(
@@ -1806,10 +1853,12 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
     ) {
         Row(
             Modifier.fillMaxWidth()
-                .combinedClickable(
-                    onClick = { navigate(Screen.EntityDetail(weather.entityId)) },
-                    onLongClick = { vm.openPopup(weather.entityId) },
-                )
+                // Round 21, item 5: the long-press sheet is gone;
+                // the weather card is not an Arrange-able grid
+                // card, so it has no long-press action anymore —
+                // its settings live in the popup (tap → weather
+                // page → menu rows at the bottom).
+                .clickable { navigate(Screen.EntityDetail(weather.entityId)) }
                 .padding(16.dp)
                 .reportHeroBounds(weather.entityId),
             verticalAlignment = Alignment.CenterVertically,
@@ -2574,7 +2623,12 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                 // brand rule (LIVE for native feeds, Recording
                 // for Ring).
                 val showLive = if (cameraId == FRONT_DOOR_LIVE_VIEW_ID) {
-                    frontDoorQuadrantShowsLive(resolveFrontDoorCameraSource(frontDoorStates), false)
+                    // Round 21, item 3: the quadrant reads LIVE
+                    // for the fallback once the RTSP fallback has
+                    // proven itself streaming this session
+                    // (vm.frontDoorRtspProven); before any proof
+                    // it stays Recording.
+                    frontDoorQuadrantShowsLive(resolveFrontDoorCameraSource(frontDoorStates), false, rtspProven = vm.frontDoorRtspProven)
                 } else {
                     !isRingCamera(entity)
                 }

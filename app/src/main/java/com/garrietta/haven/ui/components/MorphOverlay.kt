@@ -104,6 +104,11 @@ fun centerTargetRect(overlayOrigin: Offset, overlaySize: IntSize, panelSize: Int
  *    back. Exit is the smooth reverse of enter on the same bounds
  *    spring — the #62 synchronous removal read on device as "a sudden
  *    smack back to the previous state" and is gone.
+ *    Round 21, item 8 SUPERSEDES the full-alpha half of this
+ *    rule: the source card now fades via [morphCardAlpha] (gone
+ *    by progress 0.4, back over the last 40% of exit), so the
+ *    tile BECOMES the popup and leaves a blank slot in the grid;
+ *    the surface-cover half is unchanged.
  * 3. NO SCALING (Round 6 change — see [MorphSurface]): content is
  *    laid out once at its target size and position, and the surface
  *    now SCALES via graphicsLayer (translation + scale about the
@@ -159,7 +164,7 @@ val LocalHiddenCardId = staticCompositionLocalOf<String?> { null }
 
 /**
  * Header bounds by entity id, in root coordinates: the card header row
- * (EntityControlCard) or the tile badge (EntityTile). Written by cards,
+ * (EntityControlCard) or the tile badge (HomeRoomCard). Written by cards,
  * read by the traveling header at morph time. Separate from
  * [LocalCardBounds]: the traveling header needs the header's own rect,
  * not the whole card's.
@@ -254,12 +259,19 @@ val LocalSuppressTraveler = staticCompositionLocalOf { false }
 
 /**
  * Alpha for the active morph source card (see
- * [hideWhenMorphSource]). Round 5: the overlay root provides 1f
- * always — the card never fades; the opaque panel surface covers
- * it. (Historically this was progress-driven via [morphCardAlpha];
- * that curve is retained below but no longer wired in.)
+ * [hideWhenMorphSource]). Round 5: the overlay root provided 1f
+ * always — the card never faded; the opaque panel surface covered
+ * it. Round 21, item 8 (SUPERSEDES that rule): the root provides
+ * a lambda reading the active morph's progress through
+ * [morphCardAlpha], so the tile fades out by progress 0.4 on
+ * enter and back in over the last 40% of exit. A lambda, not a
+ * Float, so cards read it inside graphicsLayer with no per-frame
+ * recomposition — and MorphSurface does NOT shadow this local
+ * (it shadows only [LocalMorphProgress]), so panel-internal
+ * cards read the ROOT progress for a stacked panel detail too,
+ * instead of the underlying panel's rest progress.
  */
-val LocalMorphCardAlpha = staticCompositionLocalOf { 1f }
+val LocalMorphCardAlpha = staticCompositionLocalOf<() -> Float> { { 1f } }
 
 /**
  * Reports this layout's boundsInRoot into [LocalCardBounds] under [id].
@@ -320,7 +332,7 @@ fun Modifier.reportCardColor(id: String, color: Color): Modifier = composed {
 /**
  * Reports this layout's header boundsInRoot into [LocalHeroBounds]
  * under [id] (see [reportCardBounds] for the write-once-changed rule).
- * EntityControlCard reports its header row; EntityTile reports its
+ * EntityControlCard reports its header row; HomeRoomCard reports its
  * badge (the tile's name/status sit below the badge, so the badge
  * rect anchors the traveling header's position).
  */
@@ -462,7 +474,12 @@ fun Modifier.hideBodyWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenCardId.current
     val cardAlpha = LocalMorphCardAlpha.current
     graphicsLayer {
-        alpha = if (id == hiddenId) cardAlpha else 1f
+        // Round 21, item 8: the alpha lambda is invoked ONLY
+        // here, inside graphicsLayer — never during composition —
+        // so the progress read costs no recomposition (same
+        // pattern as hideHeroWhenMorphSource's progress read).
+        // No morph (null hidden id) falls through to 1f.
+        alpha = if (id == hiddenId) morphCardAlpha(cardAlpha()) else 1f
     }
 }
 
@@ -481,7 +498,12 @@ fun Modifier.hideWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenCardId.current
     val cardAlpha = LocalMorphCardAlpha.current
     graphicsLayer {
-        alpha = if (id == hiddenId) cardAlpha else 1f
+        // Round 21, item 8: the alpha lambda is invoked ONLY
+        // here, inside graphicsLayer — never during composition —
+        // so the progress read costs no recomposition (same
+        // pattern as hideHeroWhenMorphSource's progress read).
+        // No morph (null hidden id) falls through to 1f.
+        alpha = if (id == hiddenId) morphCardAlpha(cardAlpha()) else 1f
     }
 }
 
@@ -1302,6 +1324,24 @@ fun morphBackgroundBlend(progress: Float): Float =
  */
 fun morphCardAlpha(progress: Float): Float =
     1f - smoothstep(0f, 0.4f, progress)
+
+/**
+ * Round 21, item 8: which morph source card hides — the TOPMOST
+ * surface wins. A panel detail stacked over a detail panel hides
+ * its own source card, not the underlying panel's; a detail panel
+ * beats the thermostat popout. Pure, so the priority is
+ * unit-tested (see Round21LogicTest).
+ */
+fun topMorphSourceId(panelDetailId: String?, detailId: String?, popoutId: String?): String? =
+    panelDetailId ?: detailId ?: popoutId
+
+/**
+ * Round 21, item 8: the topmost morph's progress, same priority
+ * as [topMorphSourceId]. Nulls are "that surface is not open";
+ * 1f is rest (no morph — the card reads fully visible).
+ */
+fun topMorphProgress(panelDetail: Float?, detail: Float?, popout: Float?): Float =
+    panelDetail ?: detail ?: popout ?: 1f
 
 /**
  * Content alpha for a morphing surface CLOSE at [progress] (1 = panel

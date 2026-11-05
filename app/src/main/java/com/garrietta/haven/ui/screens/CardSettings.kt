@@ -47,8 +47,9 @@ import com.garrietta.haven.ui.controls.PressablePillButton
 
 /**
  * Card settings (customization round, item 2): ONE surface for
- * per-entity customization, reached from a card/panel menu or from
- * the edit pencil beside a detail/panel title. Title/rename, icon
+ * per-entity customization, reached from the menu rows at the
+ * bottom of every popup (round 21, item 5 — the header pencil
+ * and the long-press sheet are both gone). Title/rename, icon
  * picker, badge-shape picker (delegates to the existing shape
  * picker — no second shape store), and tile color from a preset
  * list only (the app palette + domain matrix colors; no free color
@@ -60,8 +61,9 @@ import com.garrietta.haven.ui.controls.PressablePillButton
  * Surfaces that honor the overrides: Home room cards, Favorites
  * cards (same composables), media cards (title fallback + icon +
  * tile color; the playing track title still wins over a custom
- * title), user-tab EntityTile cards, EntityControlCard headers,
- * detail/panel headers (title + icon + pencil), sheet headers,
+ * title), user-tab cards (same composables since round 21, item 6),
+ * EntityControlCard headers,
+ * detail/panel headers (title + icon),
  * Home Status panel rows, Favorites sheet rows, Search rows (via
  * EntityControlCard), and the Round 3 vacuum block title.
  * Surfaces that cannot honor them (named, not silently skipped):
@@ -218,14 +220,6 @@ fun CardSettingsSheet(vm: HavenViewModel, entityId: String, onDismiss: () -> Uni
             }
             Spacer(Modifier.height(32.dp))
         }
-    }
-}
-
-/** The Favorites-pencil-style edit affordance beside a detail/panel title (item 2 companion ask). */
-@Composable
-fun CardSettingsPencil(onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
-        Icon(Icons.Outlined.Edit, contentDescription = "Card settings", modifier = Modifier.size(20.dp))
     }
 }
 

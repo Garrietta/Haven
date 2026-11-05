@@ -112,17 +112,20 @@ class CardCustomizationTest {
         assertNull(detailBadgeOverride(presets, HaEntity("light.lamp", "unavailable", emptyMap()), false))
     }
 
-    // Feedback round 5, item 4: the popup accent is the tile
-    // preset's container, and it is deliberately UNGATED — unlike
-    // the badge override above, it returns the container whenever
-    // a preset is set, even for inactive-state entities. The two
-    // filmed cases are exactly that: a CLOSED garage door with
-    // cooling blue and a DOCKED vacuum with sage neutral must
-    // still theme their popups; a gated accent would show nothing
-    // for both. Null only when no preset is set (never invent
-    // color where the user chose none).
+    // Feedback round 5, item 4: the popup accent was the tile
+    // preset's container, deliberately UNGATED — a CLOSED garage
+    // door with cooling blue and a DOCKED vacuum with sage
+    // neutral still themed their popups. Round 21, item 4
+    // REVERSES that rule: the accent is now gated by
+    // presetAppliesForState, like the badge override — the
+    // panel follows the tile, so a closed garage's panel shows
+    // the tile's inactive matrix colors (green family), not the
+    // inactive cooling blue. Active entities still get their
+    // container in both themes; inactive ones get null (the
+    // matrix/scheme fallback). Null only when no preset is set
+    // (never invent color where the user chose none).
     @Test
-    fun detailPageAccentReturnsContainerUngated() {
+    fun detailPageAccentReturnsContainerGated() {
         val cooling = TILE_PRESETS.first { it.key == "cooling" }
         val sage = TILE_PRESETS.first { it.key == "sage" }
         val presets = mapOf(
@@ -130,23 +133,27 @@ class CardCustomizationTest {
             "vacuum.v" to "sage",
             "light.lamp" to "amber",
         )
-        // Inactive-state entities still get their container.
-        assertEquals(
-            tilePresetColor(cooling, false),
-            detailPageAccent(presets, HaEntity("cover.garage", "closed", emptyMap()), false),
-        )
-        assertEquals(
-            tilePresetColor(sage, false),
-            detailPageAccent(presets, HaEntity("vacuum.v", "docked", emptyMap()), false),
-        )
+        // Inactive-state entities get NO preset accent now.
+        assertNull(detailPageAccent(presets, HaEntity("cover.garage", "closed", emptyMap()), false))
+        assertNull(detailPageAccent(presets, HaEntity("cover.garage", "closed", emptyMap()), true))
+        assertNull(detailPageAccent(presets, HaEntity("vacuum.v", "docked", emptyMap()), false))
+        assertNull(detailPageAccent(presets, HaEntity("light.lamp", "off", emptyMap()), false))
         // Active entities and both themes, same rule.
         assertEquals(
             tilePresetColor(cooling, true),
             detailPageAccent(presets, HaEntity("cover.garage", "open", emptyMap()), true),
         )
         assertEquals(
+            tilePresetColor(cooling, false),
+            detailPageAccent(presets, HaEntity("cover.garage", "open", emptyMap()), false),
+        )
+        assertEquals(
             tilePresetColor(sage, true),
             detailPageAccent(presets, HaEntity("vacuum.v", "cleaning", emptyMap()), true),
+        )
+        assertEquals(
+            tilePresetColor(sage, false),
+            detailPageAccent(presets, HaEntity("vacuum.v", "cleaning", emptyMap()), false),
         )
         // Unset / unknown key: null, never an invented color.
         assertNull(detailPageAccent(presets, HaEntity("light.plain", "on", emptyMap()), false))

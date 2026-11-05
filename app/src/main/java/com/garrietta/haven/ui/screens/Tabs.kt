@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.foundation.lazy.items
@@ -89,6 +90,10 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
     // Feedback round 20, item 5: Arrange mode shows the drag
     // handles; exiting keeps sizes (they live in prefs).
     var arrangeMode by remember { mutableStateOf(false) }
+    // Round 21, item 7: back exits Arrange (enabled only while
+    // arranging). The Arrange button is gone — a long-press on
+    // any tab tile enters Arrange mode instead.
+    BackHandler(enabled = arrangeMode) { arrangeMode = false }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         if (tab == null) {
             Spacer(Modifier.height(16.dp))
@@ -105,7 +110,8 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             // verdict's "hermostat" frame). Titles stay fully
             // rendered through the whole morph and at rest.
             Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            TextButton(onClick = { arrangeMode = !arrangeMode }) { Text(if (arrangeMode) "Done" else "Arrange") }
+            // Round 21, item 7: the Arrange button is gone — a
+            // long-press on any tile enters Arrange mode.
             OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Edit") }
         }
         Spacer(Modifier.height(12.dp))
@@ -115,14 +121,14 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            // Tab pages render Apple Home-style tiles (tap = full page,
-            // long-press = detail sheet); cards that can't tile
-            // keep their card rendering below.
+            // Round 21, item 6: tab pages render the one tile
+            // style (HomeRoomCard); long-press enters Arrange.
             TabTileGrid(
                 vm, tab.cards, states, navigate,
                 arrangeMode = arrangeMode,
                 sizeFor = { vm.cardSize("tab:${tab.id}", it) },
                 onSizeChange = { id, size -> vm.setCardSize("tab:${tab.id}", id, size) },
+                onArrangeToggle = { arrangeMode = !arrangeMode },
             ) { yaml ->
                 TabCardView(vm, yaml, states, navigate)
             }

@@ -1234,6 +1234,26 @@ class HaClient(
     }
 
     /**
+     * An ExoPlayer configured for the ring-mqtt RTSP feed (round 21,
+     * item 3): the Front Door panel's fallback live source when
+     * camera.front_door_69a1 is down. RTSP is unauthenticated on the
+     * LAN — no Bearer header — and RTP is forced over TCP, which is
+     * the reliable transport through the Pi's go2rtc listener and
+     * the only one ExoPlayer's RTSP stack should negotiate here.
+     * The caller owns the player and must release it.
+     */
+    fun createRtspPlayer(context: android.content.Context, rtspUrl: String): androidx.media3.exoplayer.ExoPlayer {
+        val source = androidx.media3.exoplayer.rtsp.RtspMediaSource.Factory()
+            .setForceUseRtpTcp(true)
+            .createMediaSource(androidx.media3.common.MediaItem.fromUri(rtspUrl))
+        return androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaSource(source)
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    /**
      * Player for a resolved media-source clip (usually mp4): same
      * Bearer auth + relative-URL resolution as the HLS path, with the
      * resolved mime type on the MediaItem so ExoPlayer never has to

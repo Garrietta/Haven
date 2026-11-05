@@ -119,7 +119,7 @@ fun AreaDetailScreen(vm: HavenViewModel, areaId: String, onBack: () -> Unit, nav
                 }
             }
             item {
-                EntityControlCard(entity, vm) { vm.openPopup(it) }
+                EntityControlCard(entity, vm) { navigate(Screen.EntityDetail(it)) }
                 Spacer(Modifier.height(12.dp))
             }
         }
@@ -207,13 +207,13 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                     }
                 }
                 items(results) { entity ->
-                    EntityControlCard(entity, vm) { vm.openPopup(it) }
+                    EntityControlCard(entity, vm) { navigate(Screen.EntityDetail(it)) }
                     Spacer(Modifier.height(12.dp))
                 }
                 item { Spacer(Modifier.height(16.dp)) }
             }
             if (openDevice != null) {
-                DeviceSheet(vm, openDevice!!, onDismiss = { openDevice = null })
+                DeviceSheet(vm, openDevice!!, navigate = navigate, onDismiss = { openDevice = null })
             }
         }
     }
