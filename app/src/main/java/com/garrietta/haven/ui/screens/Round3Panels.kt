@@ -946,7 +946,7 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val entity = states[entityId]
     if (entity == null) {
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupTitleHeader("TV & media")
             PanelBodyText("This player is no longer available.")
         }
@@ -973,7 +973,7 @@ fun MediaPanelScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         mediaPanelCustom.domainTilePresets,
     )
     val mediaPanelPillContent = if (mediaPanelAccent != null) MaterialTheme.colorScheme.onSurface else null
-    Column(Modifier.padding(horizontal = 16.dp)) {
+    Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         DetailPopupTitleHeader(entity.friendlyName)
         if (unavailable) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1147,7 +1147,7 @@ fun SecurityPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val alarm = states[ALARM_ID]
     if (alarm == null) {
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupTitleHeader("Security")
             PanelBodyText("The alarm panel is no longer available.")
         }
@@ -1158,7 +1158,7 @@ fun SecurityPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val codeFormat = alarm.attrString("code_format")
     val codeData = if (code.isNotEmpty()) JSONObject().put("code", code) else null
     val siren = states[SIREN_ID]
-    Column(Modifier.padding(horizontal = 16.dp)) {
+    Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         DetailPopupTitleHeader("Security")
         Text(
             alarmModeLabel(alarm.state),
@@ -1269,7 +1269,7 @@ fun SecurityPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
 @Composable
 fun GreenhousePanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
-    Column(Modifier.padding(horizontal = 16.dp)) {
+    Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         DetailPopupTitleHeader("Greenhouse & irrigation")
         PanelSectionTitle("Automations")
         var anyAutomation = false
@@ -1383,7 +1383,7 @@ private fun TimerRingRow(timer: HaEntity) {
 fun UpdatesPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val summary = updatesSummary(states)
-    Column(Modifier.padding(horizontal = 16.dp)) {
+    Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         DetailPopupTitleHeader("System Updates")
         Text(
             if (summary.available == 0) "Everything is up to date"

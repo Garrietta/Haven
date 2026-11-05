@@ -49,6 +49,7 @@ import com.garrietta.haven.ui.components.railIndicatorTop
 import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.tabSlideDirection
 import com.garrietta.haven.ui.components.tabSlideOffsets
+import com.garrietta.haven.ui.components.railSelectedIndexWithFallback
 import com.garrietta.haven.ui.components.selectedNavIndex
 import com.garrietta.haven.ui.theme.FloatingCorner
 
@@ -255,6 +256,7 @@ import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.selectedPillFill
 import com.garrietta.haven.ui.components.selectedPillGlyph
 import com.garrietta.haven.ui.components.ScrollVisibilityState
+import com.garrietta.haven.ui.components.showPillOnSwipeDown
 import com.garrietta.haven.ui.components.heroHeaderAlpha
 import com.garrietta.haven.ui.theme.popupMorphSpring
 import com.garrietta.haven.ui.theme.springBounds
@@ -458,7 +460,13 @@ fun HavenApp(vm: HavenViewModel) {
         // points one slot off (vid9: Add-a-tab, back out,
         // highlight wrong). The index is resolved fresh
         // against the current bar list every composition.
-        var lastRailTabScreen by remember { mutableStateOf<Screen?>(null) }
+        // Feedback round 22, item 6: the initial value is
+        // Home, NEVER null — a null here (plus the old
+        // nullable fallback chain) let the rail's green
+        // capsule vanish entirely when the active screen
+        // was a popup/detail/sub-screen (the 2026-11-05
+        // runs showed no capsule on any icon).
+        var lastRailTabScreen by remember { mutableStateOf<Screen>(Screen.Today) }
         val popoutProgress = remember { Animatable(0f) }
         // Feedback round 7: per-surface drag state for the Koda
         // now-playing morph port (see MorphOverlay.PopupDragState).
@@ -893,6 +901,23 @@ fun HavenApp(vm: HavenViewModel) {
         // appears, so the overlay renders (at progress 0, i.e. exactly
         // over the hidden card) with no one-frame gap. The effects
         // below own only the progress animation.
+        // Feedback round 22, item 1 (RESTORES the round-21 deletion):
+        // round 21 deleted this construction alongside the sheetAnim
+        // construction, leaving detailAnim permanently null — so no
+        // tile tap outside the thermostat popout ever opened the
+        // morphing overlay, and every detail screen fell through to
+        // the base Scaffold as a full-screen sliding page. Every
+        // detail screen (EntityDetail, Vacuum/Media/Security/
+        // Greenhouse/Updates/HomeStatus panels) constructs its
+        // DetailAnim here, exactly as #131 did, so it renders
+        // strictly inside CenteredPopup (unfolded) / PanelOverlay
+        // (folded) with the thermostat's spring morph, container
+        // transform, and finger-tracked dismiss — never as a
+        // Scaffold page. The thermostat popout is untouched (its
+        // own popoutAnim construction below is unchanged).
+        if (detailScreen != null && detailAnim?.screen != detailScreen) {
+            detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)], cardColors[detailEntityId(detailScreen)], cardShapes[detailEntityId(detailScreen)])
+        }
         LaunchedEffect(detailScreen?.let { detailEntityId(it) }) {
             val anim = detailAnim
             if (detailScreen != null && anim != null && detailEntityId(anim.screen) == detailEntityId(detailScreen)) {
@@ -952,6 +977,19 @@ fun HavenApp(vm: HavenViewModel) {
                 vm.clearTravelSnapshot(anim.id)
             }
         }
+        // Feedback round 22, item 5: the bottom pill bar must never
+        // get stuck hidden. A fresh screen always starts with the
+        // bar visible, so any popup/panel open or close and any
+        // room-chip switch resets the scroll-visibility state —
+        // otherwise a bar hidden by a scroll on one screen stayed
+        // hidden on the next screen (or under a popup), and on a
+        // short page (Climate tab) no scroll event ever arrived to
+        // bring it back. Tab switches already reset via goTop;
+        // this covers the modal and room-filter changes goTop
+        // never sees.
+        val anyModalOpen = detailAnim != null || panelDetailAnim != null || popoutAnim != null || vm.cameraDialogId != null
+        LaunchedEffect(anyModalOpen) { scrollVisibility.reset() }
+        LaunchedEffect(vm.roomFilter) { scrollVisibility.reset() }
         // Camera overlay transitions share the same language:
         // view rises as a bottom sheet out of the tapped camera tile and
         // sinks back on close.
@@ -1141,11 +1179,13 @@ fun HavenApp(vm: HavenViewModel) {
             // Round 21, item 8: the id of the card currently hidden
             // as a morph source, or null. Same topmost-surface
             // order as rootMorphProgress above (see
-            // topMorphSourceId). The camera dialog is deliberately
-            // absent, as before: it never sets a hidden id
-            // (fullscreen viewer, not a morph).
+            // topMorphSourceId). Feedback round 22, item 3: the
+            // camera dialog joins last — its tile hides while the
+            // fullscreen viewer is open (the viewer is opaque, so
+            // the hide is invisible, but the tile must never show
+            // through a gap on return).
             val hiddenMorphSourceId: String? = topMorphSourceId(
-                panelDetailAnim?.entityId, detailAnim?.entityId, popoutAnim?.id,
+                panelDetailAnim?.entityId, detailAnim?.entityId, popoutAnim?.id, vm.cameraDialogId,
             )
             CompositionLocalProvider(
                 // Feedback round 17, item 6: dashboard chrome
@@ -1360,13 +1400,18 @@ fun HavenApp(vm: HavenViewModel) {
                     // persists inside them (and the
                     // lastRailTabScreen fallback below then holds
                     // Settings too).
+                    // Feedback round 22, item 6: the capsule NEVER
+                    // disappears. A popup, detail panel, or
+                    // sub-screen is off-tab, so selectedNavIndex
+                    // returns null there — the old code passed that
+                    // null through (or fell back to a nullable
+                    // lastRailTabScreen that started null), and the
+                    // indicator vanished. The fallback is the last
+                    // on-tab screen, resolved fresh, else index 0
+                    // (Home) — see railSelectedIndexWithFallback.
                     val onTabIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     if (onTabIndex != null) lastRailTabScreen = barItems[onTabIndex].screen
-                    val railSelectedIndex = if (detailAnim != null || popoutAnim != null) {
-                        onTabIndex ?: lastRailTabScreen?.let { selectedNavIndex(it, barItems) }
-                    } else {
-                        onTabIndex
-                    }
+                    val railSelectedIndex = railSelectedIndexWithFallback(onTabIndex, lastRailTabScreen, barItems)
                     // Feedback round 3, item 1: the rail draws
                     // AFTER (on top of) the Scaffold content, so
                     // tab pages sliding left pass UNDER the pill
@@ -1514,7 +1559,7 @@ fun HavenApp(vm: HavenViewModel) {
             // and dark system themes. The pill still floats above it
             // on its own shadow; nothing about the floating bar
             // changes.
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(contentPadding).nestedScroll(scrollVisibility.nestedScrollConnection)) {
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(contentPadding).nestedScroll(scrollVisibility.nestedScrollConnection).showPillOnSwipeDown(scrollVisibility)) {
                 // Detail pages do NOT render here: the scaffold shows
                 // the screen underneath, and the page itself lives in
                 // the overlay below (above all chrome). Every other
@@ -2468,8 +2513,18 @@ private fun CenteredPopup(
                 // blended invisibly into the black dashboard (the
                 // 2026-11-04 "pure #000000" popup), so the popup
                 // never reads as a surface of its own.
+                // Feedback round 22, item 3: the Surface itself is
+                // TRANSPARENT — its background comes only from the
+                // color-lerp rect below, which cross-fades from the
+                // source tile's exact container color at p = 0 to
+                // the container color at p = 1. An opaque Surface
+                // color sat under the lerp rect and flashed
+                // white/cream on close as the surface shrank over
+                // the tile; transparent + lerp lands on the tile
+                // seamlessly. Border and shadow are unaffected
+                // (they render from the shape, not the color).
                 shape = RoundedCornerShape(36.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = Color.Transparent,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 shadowElevation = 16.dp,
                 modifier = Modifier
@@ -2521,10 +2576,19 @@ private fun CenteredPopup(
                             // 2026-11-04 empty blue rectangle and
                             // eufy black box). Now the real tile
                             // shows through the scrim at small p
-                            // and the surface fades in as it grows
-                            // (out over the final 25% on close),
-                            // so the source card is never blanked.
-                            alpha = if (isClosing) morphPanelContainerAlphaClose(p) else morphPanelContainerAlphaOpen(p)
+                            // and the surface fades in as it grows.
+                            // Feedback round 22, item 3: on close
+                            // the alpha stays 1 — the old close
+                            // fade (to 0 by p = 0.25) vanished the
+                            // surface mid-flight and the tile popped
+                            // back as a white/cream flash. The
+                            // color-lerp rect below cross-fades the
+                            // surface into the tile's exact color
+                            // as p -> 0, so no fade is needed (or
+                            // wanted) on exit; the lerp does the
+                            // handoff. Open keeps its fade-in over
+                            // the first 15%.
+                            alpha = if (isClosing) 1f else morphPanelContainerAlphaOpen(p)
                         } else {
                             val enter = centeredPopupEnter(p, null, popupCenter, distancePx)
                             translationX = enter.offset.x

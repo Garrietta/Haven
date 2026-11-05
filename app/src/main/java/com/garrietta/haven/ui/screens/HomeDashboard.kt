@@ -49,6 +49,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -279,18 +280,23 @@ fun HomeStatusPanelScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         for ((colIndex, entity) in pair.withIndex()) {
-                            Box(Modifier.width(cardWidth)) {
-                                HomeRoomCard(
-                                    vm,
-                                    entity.entityId,
-                                    navigate,
-                                    rowIndex * 2 + colIndex,
-                                ) {
-                                    // Feedback round 5, item 1: stacked panel detail, no
-                                    // backstack push, no base-page switch. Back from the
-                                    // detail returns to this panel popup.
-                                    if (onPanelDetail != null) onPanelDetail(entity.entityId)
-                                    else navigate(Screen.EntityDetail(entity.entityId))
+                            // Feedback round 22, item 4: keyed by
+                            // entity id — same slot-reuse defect as
+                            // the Favorites/room grids.
+                            key(entity.entityId) {
+                                Box(Modifier.width(cardWidth)) {
+                                    HomeRoomCard(
+                                        vm,
+                                        entity.entityId,
+                                        navigate,
+                                        rowIndex * 2 + colIndex,
+                                    ) {
+                                        // Feedback round 5, item 1: stacked panel detail, no
+                                        // backstack push, no base-page switch. Back from the
+                                        // detail returns to this panel popup.
+                                        if (onPanelDetail != null) onPanelDetail(entity.entityId)
+                                        else navigate(Screen.EntityDetail(entity.entityId))
+                                    }
                                 }
                             }
                         }
@@ -382,7 +388,15 @@ fun FavoritesSection(
         }
         val standard = resolved - wideMedia.toSet()
         for ((wideIndex, media) in wideMedia.withIndex()) {
-            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+            // Feedback round 22, item 4: keyed by entity id, so a
+            // card slot can never be reused for a different entity
+            // (an unkeyed positional slot kept the previous
+            // entity's tap closure — tapping Lamp opened the
+            // Garage Door panel). TabTileGrid was already keyed;
+            // these row loops were not.
+            key(media.entityId) {
+                HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+            }
             Spacer(Modifier.height(spacing))
         }
         // Feedback round 20, item 5: wide-aware rows. A WIDE card
@@ -396,14 +410,20 @@ fun FavoritesSection(
         while (i < standard.size) {
             if (vm.cardSize("home", standard[i].entityId) == CardSize.WIDE) {
                 val member = standard[i]
-                Box(Modifier.fillMaxWidth().resizeSettle()) {
-                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
-                    if (arrangeMode) {
-                        CardResizeHandle(
-                            CardSize.WIDE,
-                            { vm.setCardSize("home", member.entityId, it) },
-                            Modifier.align(Alignment.BottomEnd),
-                        )
+                // Feedback round 22, item 4: keyed by entity id —
+                // an unkeyed slot reused for a different entity
+                // kept the previous entity's tap closure (tapping
+                // Lamp opened the Garage Door panel).
+                key(member.entityId) {
+                    Box(Modifier.fillMaxWidth().resizeSettle()) {
+                        HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                        if (arrangeMode) {
+                            CardResizeHandle(
+                                CardSize.WIDE,
+                                { vm.setCardSize("home", member.entityId, it) },
+                                Modifier.align(Alignment.BottomEnd),
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(spacing))
@@ -422,22 +442,26 @@ fun FavoritesSection(
                 Row {
                     for ((colIdx, member) in row.withIndex()) {
                         val size = vm.cardSize("home", member.entityId)
-                        Box(
-                            Modifier.weight(1f).resizeSettle()
-                                .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
-                        ) {
-                            HomeRoomCard(
-                                vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
-                                modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
-                                arrangeMode = arrangeMode,
-                                onArrangeToggle = { arrangeMode = !arrangeMode },
-                            )
-                            if (arrangeMode) {
-                                CardResizeHandle(
-                                    size,
-                                    { vm.setCardSize("home", member.entityId, it) },
-                                    Modifier.align(Alignment.BottomEnd),
+                        // Feedback round 22, item 4: keyed by
+                        // entity id (see the WIDE branch above).
+                        key(member.entityId) {
+                            Box(
+                                Modifier.weight(1f).resizeSettle()
+                                    .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                            ) {
+                                HomeRoomCard(
+                                    vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
+                                    modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                                    arrangeMode = arrangeMode,
+                                    onArrangeToggle = { arrangeMode = !arrangeMode },
                                 )
+                                if (arrangeMode) {
+                                    CardResizeHandle(
+                                        size,
+                                        { vm.setCardSize("home", member.entityId, it) },
+                                        Modifier.align(Alignment.BottomEnd),
+                                    )
+                                }
                             }
                         }
                         if (member != row.last()) Spacer(Modifier.width(spacing))

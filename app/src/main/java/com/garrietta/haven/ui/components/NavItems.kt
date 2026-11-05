@@ -302,6 +302,24 @@ fun tabSlideOffsets(direction: Int?, contentWidthPx: Int, railWidthPx: Int): Pai
 ): Int? = barItems.indexOfFirst { it.screen == current }.takeIf { it >= 0 }
 
 /**
+ * Feedback round 22, item 6: the unfolded rail's green indicator
+ * NEVER disappears. When the current screen is not a bar tab (a
+ * popup, detail panel, or sub-screen is open), [selectedNavIndex]
+ * returns null — and the old call site passed that null straight
+ * through, so the capsule vanished (the 2026-11-05 runs showed
+ * no capsule on any icon while a popup was open and after it
+ * closed). The fallback is the last on-tab screen (never null —
+ * it starts at Home), resolved fresh against the current bar
+ * list; if even that screen is no longer in the bar, index 0
+ * (Home) is the final fallback. Pure, unit-tested.
+ */
+fun railSelectedIndexWithFallback(
+    onTabIndex: Int?,
+    lastRailTabScreen: Screen,
+    barItems: List<NavItem>,
+): Int = onTabIndex ?: selectedNavIndex(lastRailTabScreen, barItems) ?: 0
+
+/**
  * Feedback round 17, item 3: the unfolded rail indicator's top
  * offset from its item index — pure, unit-tested. The rail column
  * is 12dp top padding + 48dp rows (no spacedBy, so itemSpacing is

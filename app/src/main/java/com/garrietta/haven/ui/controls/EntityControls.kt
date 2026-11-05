@@ -145,6 +145,16 @@ fun Double.formatTemp(): String =
     if (this % 1.0 == 0.0) "${this.toInt()}°" else "%.1f°".format(this)
 
 fun HaEntity.stateText(): String {
+    // Feedback round 22, item 7: an unavailable/unknown entity
+    // renders clean ("Unavailable" / "Unknown") with NO unit
+    // suffix — the sensor branch below appended
+    // unit_of_measurement blindly, so a dead temperature sensor
+    // read "unavailable °F" on its card. The guard is first, for
+    // every domain: no state below this point can carry a unit.
+    // dialogHeaderState delegates here for non-weather entities,
+    // so headers get the same clean string.
+    if (state.equals("unavailable", ignoreCase = true)) return "Unavailable"
+    if (state.equals("unknown", ignoreCase = true)) return "Unknown"
     val unit = attrString("unit_of_measurement")
     return when (domain) {
         "sensor" -> if (unit != null) "$state $unit" else state

@@ -473,13 +473,23 @@ fun Modifier.hideHeroWhenMorphSource(id: String): Modifier = composed {
 fun Modifier.hideBodyWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenCardId.current
     val cardAlpha = LocalMorphCardAlpha.current
-    graphicsLayer {
-        // Round 21, item 8: the alpha lambda is invoked ONLY
-        // here, inside graphicsLayer — never during composition —
-        // so the progress read costs no recomposition (same
-        // pattern as hideHeroWhenMorphSource's progress read).
-        // No morph (null hidden id) falls through to 1f.
-        alpha = if (id == hiddenId) morphCardAlpha(cardAlpha()) else 1f
+    if (id == hiddenId) {
+        // Feedback round 22, item 3: the progress read happens
+        // HERE, during composition — not inside graphicsLayer.
+        // The graphicsLayer-only read never re-evaluated on
+        // device (#132: the source tile stayed fully visible
+        // behind the open popup at rest), so the alpha now comes
+        // from a composition-observed read: this card — and only
+        // this card — recomposes per animation frame while it is
+        // the hidden source, and the alpha follows morphCardAlpha
+        // exactly (gone by progress 0.4, back over the last 40%
+        // of exit, fully visible at progress 0 before any state
+        // clears). Non-source cards never read the progress, so
+        // they pay no per-frame recomposition cost.
+        val alpha = cardAlpha()
+        graphicsLayer { this.alpha = alpha }
+    } else {
+        graphicsLayer { alpha = 1f }
     }
 }
 
@@ -497,13 +507,23 @@ fun Modifier.hideBodyWhenMorphSource(id: String): Modifier = composed {
 fun Modifier.hideWhenMorphSource(id: String): Modifier = composed {
     val hiddenId = LocalHiddenCardId.current
     val cardAlpha = LocalMorphCardAlpha.current
-    graphicsLayer {
-        // Round 21, item 8: the alpha lambda is invoked ONLY
-        // here, inside graphicsLayer — never during composition —
-        // so the progress read costs no recomposition (same
-        // pattern as hideHeroWhenMorphSource's progress read).
-        // No morph (null hidden id) falls through to 1f.
-        alpha = if (id == hiddenId) morphCardAlpha(cardAlpha()) else 1f
+    if (id == hiddenId) {
+        // Feedback round 22, item 3: the progress read happens
+        // HERE, during composition — not inside graphicsLayer.
+        // The graphicsLayer-only read never re-evaluated on
+        // device (#132: the source tile stayed fully visible
+        // behind the open popup at rest), so the alpha now comes
+        // from a composition-observed read: this card — and only
+        // this card — recomposes per animation frame while it is
+        // the hidden source, and the alpha follows morphCardAlpha
+        // exactly (gone by progress 0.4, back over the last 40%
+        // of exit, fully visible at progress 0 before any state
+        // clears). Non-source cards never read the progress, so
+        // they pay no per-frame recomposition cost.
+        val alpha = cardAlpha()
+        graphicsLayer { this.alpha = alpha }
+    } else {
+        graphicsLayer { alpha = 1f }
     }
 }
 
@@ -1332,8 +1352,8 @@ fun morphCardAlpha(progress: Float): Float =
  * beats the thermostat popout. Pure, so the priority is
  * unit-tested (see Round21LogicTest).
  */
-fun topMorphSourceId(panelDetailId: String?, detailId: String?, popoutId: String?): String? =
-    panelDetailId ?: detailId ?: popoutId
+fun topMorphSourceId(panelDetailId: String?, detailId: String?, popoutId: String?, cameraDialogId: String? = null): String? =
+    panelDetailId ?: detailId ?: popoutId ?: cameraDialogId
 
 /**
  * Round 21, item 8: the topmost morph's progress, same priority
@@ -1545,8 +1565,20 @@ fun MorphSurface(
                 } else {
                     background
                 }
+                // Feedback round 22, item 3: on close the container
+                // does NOT fade to transparent (the old
+                // morphPanelContainerAlphaClose ramped it to 0 by
+                // p = 0.25, so the shrinking surface vanished
+                // mid-flight and the tile popped back as a
+                // white/cream flash). The fromBackground lerp above
+                // already cross-fades the surface into the source
+                // tile's exact container color as p -> 0, so the
+                // surface lands on the tile seamlessly; the alpha
+                // stays 1 through the close and the lerp does the
+                // handoff. Open keeps its fade-in over the first
+                // 15% (the tile shows through the scrim at small p).
                 val containerAlpha = if (isClosing) {
-                    morphPanelContainerAlphaClose(p)
+                    1f
                 } else {
                     morphPanelContainerAlphaOpen(p)
                 }

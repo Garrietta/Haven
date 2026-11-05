@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -933,7 +934,15 @@ private fun RoomSectionGrid(
         }
         val standard = members - wideMedia.toSet()
         for ((wideIndex, media) in wideMedia.withIndex()) {
-            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+            // Feedback round 22, item 4: keyed by entity id, so a
+            // card slot can never be reused for a different entity
+            // (an unkeyed positional slot kept the previous
+            // entity's tap closure — tapping Lamp opened the
+            // Garage Door panel). TabTileGrid was already keyed;
+            // these row loops were not.
+            key(media.entityId) {
+                HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+            }
             Spacer(Modifier.height(spacing))
         }
         // Feedback round 20, item 5: wide-aware rows, same rule
@@ -947,14 +956,18 @@ private fun RoomSectionGrid(
         while (i < standard.size) {
             if (vm.cardSize(scope, standard[i].entityId) == CardSize.WIDE) {
                 val member = standard[i]
-                Box(Modifier.fillMaxWidth().resizeSettle()) {
-                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
-                    if (arrangeMode) {
-                        CardResizeHandle(
-                            CardSize.WIDE,
-                            { vm.setCardSize(scope, member.entityId, it) },
-                            Modifier.align(Alignment.BottomEnd),
-                        )
+                // Feedback round 22, item 4: keyed by entity id
+                // (see the wide-media loop above).
+                key(member.entityId) {
+                    Box(Modifier.fillMaxWidth().resizeSettle()) {
+                        HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                        if (arrangeMode) {
+                            CardResizeHandle(
+                                CardSize.WIDE,
+                                { vm.setCardSize(scope, member.entityId, it) },
+                                Modifier.align(Alignment.BottomEnd),
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(spacing))
@@ -973,22 +986,26 @@ private fun RoomSectionGrid(
                 Row {
                     for ((colIdx, member) in row.withIndex()) {
                         val size = vm.cardSize(scope, member.entityId)
-                        Box(
-                            Modifier.weight(1f).resizeSettle()
-                                .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
-                        ) {
-                            HomeRoomCard(
-                                vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
-                                modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
-                                arrangeMode = arrangeMode,
-                                onArrangeToggle = { arrangeMode = !arrangeMode },
-                            )
-                            if (arrangeMode) {
-                                CardResizeHandle(
-                                    size,
-                                    { vm.setCardSize(scope, member.entityId, it) },
-                                    Modifier.align(Alignment.BottomEnd),
+                        // Feedback round 22, item 4: keyed by
+                        // entity id (see the wide-media loop above).
+                        key(member.entityId) {
+                            Box(
+                                Modifier.weight(1f).resizeSettle()
+                                    .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                            ) {
+                                HomeRoomCard(
+                                    vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
+                                    modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                                    arrangeMode = arrangeMode,
+                                    onArrangeToggle = { arrangeMode = !arrangeMode },
                                 )
+                                if (arrangeMode) {
+                                    CardResizeHandle(
+                                        size,
+                                        { vm.setCardSize(scope, member.entityId, it) },
+                                        Modifier.align(Alignment.BottomEnd),
+                                    )
+                                }
                             }
                         }
                         if (member != row.last()) Spacer(Modifier.width(spacing))
@@ -1121,7 +1138,10 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
     val position = display.attrDouble("media_position")
     val duration = display.attrDouble("media_duration")
     val volume = display.attrDouble("volume_level")
-    val interactionSource = remember { MutableInteractionSource() }
+    // Feedback round 22, item 4: keyed on entityId — a slot reused for a
+    // different entity must never keep the previous entity's interaction
+    // state or tap closure (tapping Lamp opened the Garage Door panel).
+    val interactionSource = remember(entityId) { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val reduceMotion = com.garrietta.haven.ui.components.LocalReduceMotion.current
     val pressScale by androidx.compose.animation.core.animateFloatAsState(
@@ -1417,7 +1437,8 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         roomCustom.tilePresets, roomCustom.domainTilePresets, display, isDark, scheme, accent,
     )
     val shapeAction = shapeTapAction(vm, entity)
-    val interactionSource = remember { MutableInteractionSource() }
+    // Feedback round 22, item 4: keyed on entityId (see the media card above).
+    val interactionSource = remember(entityId) { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val reduceMotion = com.garrietta.haven.ui.components.LocalReduceMotion.current
     val pressScale by androidx.compose.animation.core.animateFloatAsState(
@@ -1425,7 +1446,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         animationSpec = if (reduceMotion) androidx.compose.animation.core.spring(stiffness = 10_000f, dampingRatio = 1f) else pressBounce(),
         label = "roomCardPress",
     )
-    val badgeInteraction = remember { MutableInteractionSource() }
+    val badgeInteraction = remember(entityId) { MutableInteractionSource() }
     val badgePressed by badgeInteraction.collectIsPressedAsState()
     val badgeScale by androidx.compose.animation.core.animateFloatAsState(
         if (badgePressed) 0.92f else 1f,
@@ -1452,7 +1473,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     val cardOutline = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain)
         ?: homeCardShapeByIndex(gridIndex)
     val isPolygonCard = cardOutline !is RoundedCornerShape
-    var confirmUnlock by remember { mutableStateOf(false) }
+    var confirmUnlock by remember(entityId) { mutableStateOf(false) }
     Surface(
         // Card-outline shape (2026-10-30 picker): a per-entity
         // override beats the global default; without either, the
@@ -1509,7 +1530,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
             // panel, long-press opens the panel); only the visible
             // inner background is removed, so the card reads as
             // one coherent surface with the badge directly in it.
-            val zoneInteraction = remember { MutableInteractionSource() }
+            val zoneInteraction = remember(entityId) { MutableInteractionSource() }
             val zoneModifier = when {
                 isBinary -> Modifier.fillMaxWidth()
                     .combinedClickable(
@@ -1662,7 +1683,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
             // item 7). Non-binary cards keep their surface-level
             // routing; this zone is harmless there (same openPanel
             // target). Taps are swallowed while in Arrange mode.
-            val textZoneInteraction = remember { MutableInteractionSource() }
+            val textZoneInteraction = remember(entityId) { MutableInteractionSource() }
             Column(
                 Modifier.fillMaxWidth().combinedClickable(
                     interactionSource = textZoneInteraction,

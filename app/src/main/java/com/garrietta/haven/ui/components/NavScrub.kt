@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -127,7 +128,7 @@ fun scrollVisibilityAfter(isVisible: Boolean, deltaYPx: Float, thresholdPx: Floa
  * visible exactly when no modal is open AND scrolling has not hidden
  * it.
  */
-class ScrollVisibilityState(private val thresholdPx: Float) {
+class ScrollVisibilityState(val thresholdPx: Float) {
     var isVisible by mutableStateOf(true)
         private set
 
@@ -140,6 +141,63 @@ class ScrollVisibilityState(private val thresholdPx: Float) {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             isVisible = scrollVisibilityAfter(isVisible, available.y, thresholdPx)
             return Offset.Zero
+        }
+
+        // Feedback round 22, item 5: the at-top leftover. A
+        // downward finger drag on a page that is already at the
+        // top — or has too few items to scroll at all (the
+        // Climate tab) — is never offered to onPreScroll as
+        // scrollable delta: the child consumes nothing and the
+        // leftover arrives here, in onPostScroll. Without this
+        // branch the bar stayed hidden until a Back press, because
+        // no scroll event ever carried the downward delta. The
+        // same threshold rule applies to the leftover, so a
+        // sub-threshold jitter never twitches the bar.
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            isVisible = scrollVisibilityAfter(isVisible, available.y, thresholdPx)
+            return Offset.Zero
+        }
+    }
+}
+
+/**
+ * Feedback round 22, item 5: fallback downward-drag detector.
+ * The nested-scroll pipeline (onPreScroll + onPostScroll above)
+ * covers every scrollable page, but a page with no scrollable at
+ * all dispatches no nested-scroll events — so a downward swipe
+ * there would never reach the bar. This passive observer sits on
+ * the scaffold content and watches raw finger travel: a downward
+ * drag past the same 8dp threshold shows the bar immediately.
+ * It NEVER consumes a pointer change, so scrolling, taps, and
+ * drag-to-dismiss all behave exactly as before — it only reads.
+ */
+fun Modifier.showPillOnSwipeDown(state: ScrollVisibilityState): Modifier = pointerInput(state) {
+    // `awaitPointerEventScope` is a member of PointerInputScope in
+    // Compose UI 1.8 (not a top-level import) — it is called directly
+    // inside the pointerInput block.
+    awaitPointerEventScope {
+        var downY = 0f
+        var tracking = false
+        while (true) {
+            val event = awaitPointerEvent()
+            for (change in event.changes) {
+                when {
+                    change.changedToDown() -> {
+                        downY = change.position.y
+                        tracking = true
+                    }
+                    // Finger left the screen (up or cancel) — stop tracking.
+                    // `changedToUpOrCanceled()` no longer exists in Compose
+                    // UI 1.8; `pressed == false` covers both endings.
+                    !change.pressed -> tracking = false
+                    tracking && change.pressed -> {
+                        if (change.position.y - downY > state.thresholdPx) {
+                            state.reset()
+                            tracking = false
+                        }
+                    }
+                }
+            }
         }
     }
 }
