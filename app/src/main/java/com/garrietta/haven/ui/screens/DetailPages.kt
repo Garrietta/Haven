@@ -88,6 +88,7 @@ import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
 import com.garrietta.haven.ui.components.isDarkBackdrop
@@ -149,16 +150,19 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
         }
         return
     }
-    // Feedback round 4, item 2: the preset badge pair for this
-    // entity (or null) — every badge and toggle on this page
-    // carries the card's exact theme instead of reverting to
-    // the default green. (Climate renders ThermostatPopout,
-    // which resolves its own pair internally.)
+    // Feedback round 4, item 2: the badge pair for this entity
+    // — every badge and toggle on this page carries the card's
+    // exact theme instead of reverting to the default green.
+    // (Climate renders ThermostatPopout, which resolves its own
+    // pair internally.) Feedback round 17, item 1: the TILE's
+    // pair (tileBadgePair), not the preset-only override — the
+    // old null fallback sent headers to the hash accent (eufy
+    // read yellow in panels while its tile read muted green).
     val detailCustom = rememberCardCustom(vm)
-    val detailBadge = detailBadgeOverride(
-        detailCustom.tilePresets, entity,
+    val detailBadge = tileBadgePair(
+        detailCustom.tilePresets, detailCustom.domainTilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
-        detailCustom.domainTilePresets,
+        MaterialTheme.colorScheme, accentFor(entity.entityId),
     )
     // Feedback round 5, items 2 + 4: the assigned tile color itself (preset container), gated
     // by the same active rules as the badge pair — the detail toggle track (item 2) and the
@@ -214,13 +218,15 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit) {
 private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -> Unit) {
     // Dialog-owned sizing/scroll: plain column, no fillMaxSize,
     // no status-bars padding, no own scroll (2026-10-30 round).
-    // Feedback round 4, item 2: same preset pair as the generic
-    // detail page, resolved locally (this page takes vm + entity).
+    // Feedback round 4, item 2: same pair as the generic detail
+    // page, resolved locally (this page takes vm + entity).
+    // Feedback round 17, item 1: the tile pair, not the
+    // preset-only override (see the detail page above).
     val weatherCustom = rememberCardCustom(vm)
-    val weatherBadge = detailBadgeOverride(
-        weatherCustom.tilePresets, entity,
+    val weatherBadge = tileBadgePair(
+        weatherCustom.tilePresets, weatherCustom.domainTilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
-        weatherCustom.domainTilePresets,
+        MaterialTheme.colorScheme, accentFor(entity.entityId),
     )
     Column(
         Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
@@ -518,7 +524,10 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
     val isClosed = entity.state == "closed" || position == 0
     val isOpen = entity.state == "open" || position == 100
     Column {
-        Text("Garage door · ${entity.stateText()}", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Feedback round 17, item 2: the "Garage door · <state>"
+        // line is GONE — it duplicated DetailPopupHeader
+        // ("Garage Door / <state>") directly above. The position
+        // line stays: the header carries no position.
         if (position != null) {
             Text("$position% open", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

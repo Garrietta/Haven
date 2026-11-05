@@ -131,9 +131,14 @@ import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.DiscoverySource
 import com.garrietta.haven.data.isLightShownOnHome
 import com.garrietta.haven.isLive
+import com.garrietta.haven.data.cleanDeviceName
+import com.garrietta.haven.data.deviceCountLabel
 import com.garrietta.haven.data.isHomeRoomEntity
+import com.garrietta.haven.ui.components.CardTapRoute
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.cardTapRoute
+import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.weatherConditionColorThemed
 import com.garrietta.haven.ui.components.isDarkBackdrop
@@ -832,7 +837,7 @@ private fun RoomSectionGrid(
         }
         val standard = members - wideMedia.toSet()
         for ((wideIndex, media) in wideMedia.withIndex()) {
-            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex)
+            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, navigate = navigate)
             Spacer(Modifier.height(spacing))
         }
         for ((rowIdx, row) in standard.chunked(columns).withIndex()) {
@@ -922,7 +927,7 @@ fun homeCardShapeByIndex(index: Int): RoundedCornerShape = generalCardShape(inde
  * the card opens the detail panel, like every other card.
  */
 @Composable
-fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) {
+fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, navigate: ((Screen) -> Unit)? = null) {
     val liveEntity by vm.entityFlow(entityId).collectAsState()
     val entity = liveEntity ?: return
     val snap = vm.travelSnapshots[entity.entityId]
@@ -996,7 +1001,12 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0) 
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = { vm.openPopup(entity.entityId) },
+                // Feedback round 17, item 2: media taps open
+                // the detail page (MediaPageControl) like
+                // every other domain — the old tap-to-sheet
+                // was the same inconsistency as vacuum/cover.
+                // Long-press keeps the settings sheet.
+                onClick = { if (navigate != null) navigate(Screen.EntityDetail(entity.entityId)) else vm.openPopup(entity.entityId) },
                 onLongClick = { vm.openPopup(entity.entityId) },
             ),
     ) {
@@ -1153,25 +1163,35 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     val scheme = MaterialTheme.colorScheme
     val isDark = isDarkBackdrop(scheme.background)
     val isBinary = display.domain in setOf("light", "switch", "input_boolean", "fan")
-    // Round 4: light panels open via navigate (detail panel with
-    // vertical pill + status cards); every other domain keeps the
-    // sheet/popup path. Climate opens the primary dial panel on
-    // BOTH tap and long-press.
-    // Follow-up A (2026-11-03): an explicit onOpenPanel override
-    // replaces the routing wholesale (surface tap, surface
-    // long-press, badge long-press). The Home Status panel passes
+    // Feedback round 17, item 2: taps ALWAYS open the control
+    // panel (climate popout, vacuum panel for vacuum.t2292,
+    // detail page for everything else) — the old binary-only
+    // rule sent vacuum/cover/media taps to the settings sheet
+    // while Lamp/Ecobee taps opened full panels, the
+    // inconsistency filmed on the 2026-11-04 runs. The sheet
+    // (openSheet) is long-press/pencil only now. Follow-up A
+    // (2026-11-03): an explicit onOpenPanel override replaces
+    // the routing wholesale (surface tap, surface long-press,
+    // badge long-press). The Home Status panel passes
     // navigate-to-detail so panel cards never open a sheet UNDER
-    // the opaque detail panel (the sheet block renders before the
-    // detail block, so a sheet opened from inside a panel would
-    // paint underneath it and read as a dead tap until back
-    // reveals it). Badge-zone taps (toggle/toggleCover) and the
-    // switch stay live as on the home page. Default null keeps
-    // every existing call site byte-identical.
+    // the opaque detail panel (the sheet block renders before
+    // the detail block, so a sheet opened from inside a panel
+    // would paint underneath it and read as a dead tap until
+    // back reveals it). Badge-zone taps (toggle/toggleCover)
+    // and the switch stay live as on the home page. Default
+    // null keeps every existing call site byte-identical.
     val openPanel: () -> Unit = onOpenPanel ?: {
-        if (display.domain == "climate") vm.openClimatePopout(entity.entityId)
-        else if (isBinary) navigate(Screen.EntityDetail(entity.entityId))
-        else vm.openPopup(entity.entityId)
+        when (cardTapRoute(display.domain, entity.entityId)) {
+            CardTapRoute.CLIMATE_POPOUT -> vm.openClimatePopout(entity.entityId)
+            CardTapRoute.VACUUM_PANEL -> navigate(Screen.VacuumPanel)
+            CardTapRoute.ENTITY_DETAIL -> navigate(Screen.EntityDetail(entity.entityId))
+        }
     }
+    // Feedback round 17, item 2: the sheet is long-press only
+    // (or the header pencil). With an onOpenPanel override the
+    // override still wins — a sheet from inside a panel would
+    // paint underneath it and read as a dead tap.
+    val openSheet: () -> Unit = onOpenPanel ?: { vm.openPopup(entity.entityId) }
     // §1 container + badge: the domain table wins where it has a
     // row; temperature/humidity sensors bypass it (standing law)
     // and fall through to the existing semantic pipeline below.
@@ -1230,18 +1250,14 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     }
     val nameColor = ensureContrast(scheme.onSurface, container, 4.5f)
     val statusColor = ensureContrast(scheme.onSurfaceVariant, container, 4.5f)
-    val (badgeBg, badgeGlyph) = if (presetActive) {
-        presetBadgeColors(roomPreset!!, isDark)
-    } else if (roomPreset != null) {
-        // Preset set but off: the INACTIVE pair, matching the gray
-        // container above (feedback round 2, item 1).
-        val inactive = inactiveCardColors(isDark)
-        inactive.badgeBg to inactive.badgeGlyph
-    } else if (cardColors != null) {
-        cardColors.badgeBg to cardColors.badgeGlyph
-    } else {
-        badgeColors(scheme, display, accent)
-    }
+    // Feedback round 17, item 1: the badge pair is the shared
+    // tile rule (tileBadgePair) — the exact pair the traveler
+    // and headers now carry, so card, flight, and destination
+    // can never disagree (the eufy yellow was the tile using
+    // this rule while headers used the hash fallback).
+    val (badgeBg, badgeGlyph) = tileBadgePair(
+        roomCustom.tilePresets, roomCustom.domainTilePresets, display, isDark, scheme, accent,
+    )
     val shapeAction = shapeTapAction(vm, entity)
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -1314,13 +1330,15 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 // Round 4 split zones (binary cards): the badge row
                 // below owns tap-to-toggle, the text zone below owns
                 // tap-to-panel, and long-press ANYWHERE opens the
-                // panel — so this surface-level tap is the panel
-                // fallback for taps on card padding only. Climate
-                // opens the dial panel on both tap and long-press.
-                // (The old tap-anywhere-toggles model for lights is
-                // deliberately replaced by the zone split.)
+                // settings sheet (round 17, item 2 — the old
+                // long-press-opens-panel rule is gone) — so this
+                // surface-level tap is the panel fallback for taps
+                // on card padding only. Climate's tap still opens
+                // the dial panel. (The old tap-anywhere-toggles
+                // model for lights is deliberately replaced by the
+                // zone split.)
                 onClick = { openPanel() },
-                onLongClick = { openPanel() },
+                onLongClick = { openSheet() },
             ),
     ) {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (isPolygonCard) 28.dp else 16.dp)) {
@@ -1339,14 +1357,14 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                         interactionSource = zoneInteraction,
                         indication = null,
                         onClick = { vm.toggle(entity.entityId) },
-                        onLongClick = { openPanel() },
+                        onLongClick = { openSheet() },
                     )
                 display.domain == "cover" -> Modifier.fillMaxWidth()
                     .combinedClickable(
                         interactionSource = zoneInteraction,
                         indication = null,
                         onClick = { vm.toggleCover(entity.entityId) },
-                        onLongClick = { openPanel() },
+                        onLongClick = { openSheet() },
                     )
                 else -> Modifier
             }
@@ -1371,7 +1389,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                             interactionSource = badgeInteraction,
                             indication = null,
                             onClick = shapeAction,
-                            onLongClick = { openPanel() },
+                            onLongClick = { openSheet() },
                         ) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1490,7 +1508,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                     interactionSource = textZoneInteraction,
                     indication = null,
                     onClick = { openPanel() },
-                    onLongClick = { openPanel() },
+                    onLongClick = { openSheet() },
                 ),
             ) {
             Text(
@@ -2537,7 +2555,7 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(area.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                        Text("${members.size} devices", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(deviceCountLabel(members.size), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2616,7 +2634,13 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
                             Text("No entities match \"$addQuery\".", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         candidates.forEach { candidate ->
-                            val deviceName = deviceInfo[entityDevices[candidate.entityId]]?.name
+                            // Feedback round 17, item 4: the
+                            // subtitle is omitted when the
+                            // registry name is null, blank, or
+                            // the literal string "null" — the
+                            // 2026-11-04 runs rendered "null"
+                            // verbatim under entity names.
+                            val deviceName = cleanDeviceName(deviceInfo[entityDevices[candidate.entityId]]?.name)
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.weight(1f)) {
                                     Text(candidate.friendlyName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2649,7 +2673,7 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
                         .padding(12.dp),
                 ) {
                     Text("No room", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Text("${unassigned.size} devices", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(deviceCountLabel(unassigned.size), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     unassigned.forEach { member ->
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {

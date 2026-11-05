@@ -89,19 +89,22 @@ class NavItemsTest {
     @Test
     fun settingsSubmenusMapToSettingsForRailHighlight() {
         // Feedback round 15, item 4: every Settings submenu keeps
-        // the Settings rail highlight.
+        // the Settings rail highlight. Feedback round 17,
+        // item 3, OVERRIDES the round-15 Browse carve-out for
+        // exactly four destinations: Dashboards, Areas, Search,
+        // and UserTabs now map to Settings too (Manage home page
+        // and Rooms & areas cleared the indicator on the
+        // 2026-11-04 runs).
         for (screen in listOf(
             Screen.HomeEditor, Screen.RoomManager, Screen.TabManager,
+            Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs,
             Screen.AutomationBuilder, Screen.SceneBuilder, Screen.ScriptBuilder,
             Screen.HelperBuilder, Screen.UpdatesPanel,
         )) {
             assertEquals(Screen.Settings, navActiveScreen(screen))
         }
-        // Browse destinations keep the nothing-selected rule.
-        assertEquals(Screen.Dashboards, navActiveScreen(Screen.Dashboards))
-        assertEquals(Screen.Areas, navActiveScreen(Screen.Areas))
-        assertEquals(Screen.Search, navActiveScreen(Screen.Search))
-        assertEquals(Screen.UserTabs, navActiveScreen(Screen.UserTabs))
+        // The remaining browse destinations keep the
+        // nothing-selected rule.
         assertEquals(Screen.DashboardEdit, navActiveScreen(Screen.DashboardEdit))
         assertEquals(Screen.AreaDetail("area.bedroom"), navActiveScreen(Screen.AreaDetail("area.bedroom")))
         // Ordinary destinations map to themselves.

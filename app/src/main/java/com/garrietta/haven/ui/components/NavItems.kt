@@ -92,15 +92,23 @@ fun pillBarItems(
  * reached from Settings — map back to Settings, so the Settings
  * rail icon keeps its active highlight while the user is inside
  * any Settings submenu (the 2026-11-04 video showed it dropping
- * off). Browse destinations (Dashboards, Areas, Search, UserTabs,
- * DashboardEdit, AreaDetail, CameraClips) deliberately do NOT map:
- * they keep the existing nothing-selected rule, so a Browse page
- * never reads as Settings. Every other screen maps to itself.
+ * off). Feedback round 17, item 3, EXTENDS the mapping to the
+ * Browse destinations reached from Settings (Dashboards, Areas,
+ * Search, UserTabs): opening Manage home page or Rooms & areas
+ * cleared the green indicator entirely on the 2026-11-04 runs,
+ * and those pages are Settings-owned too. Only DashboardEdit,
+ * AreaDetail, and CameraClips keep the nothing-selected rule
+ * (true detail pages, not Settings submenus). Every other screen
+ * maps to itself.
  */
 fun navActiveScreen(current: Screen): Screen = when (current) {
     Screen.HomeEditor,
     Screen.RoomManager,
     Screen.TabManager,
+    Screen.Dashboards,
+    Screen.Areas,
+    Screen.Search,
+    Screen.UserTabs,
     Screen.AutomationBuilder,
     Screen.SceneBuilder,
     Screen.ScriptBuilder,
@@ -228,6 +236,48 @@ fun tabSlideOffsets(direction: Int?, contentWidthPx: Int, railWidthPx: Int): Pai
     current: Screen,
     barItems: List<NavItem>,
 ): Int? = barItems.indexOfFirst { it.screen == current }.takeIf { it >= 0 }
+
+/**
+ * Feedback round 17, item 3: the unfolded rail indicator's top
+ * offset from its item index — pure, unit-tested. The rail column
+ * is 12dp top padding + 48dp rows (no spacedBy, so itemSpacing is
+ * 0) and the indicator pill is 32dp tall centered on the 48dp
+ * row ((48 − 32) / 2 = 8dp), so the pill top for index i is
+ * 12 + i × 48 + 8 = 20 + i × 48 dp. This REPLACES the old
+ * boundsInWindow measurement: measured icon rects went stale
+ * across bar-list changes and the pill-enter translation, which
+ * cleared the indicator or parked it on the wrong tab (the
+ * 2026-11-04 runs showed Home displayed with the highlight off
+ * Home, and no highlight at all on Rooms & areas). Index math
+ * cannot go stale: it is exact whenever the column is not
+ * scrolling, which the six-tab cap guarantees (12 + 6 × 48 + 12
+ * = 312dp of content, far below any unfolded viewport).
+ */
+fun railIndicatorTop(index: Int): Dp = 20.dp + 48.dp * index
+
+/**
+ * Feedback round 17, item 2: the card/tile tap-routing decision
+ * table — pure, unit-tested, shared by HomeRoomCard and
+ * EntityTile so taps can never disagree between surfaces.
+ * Climate opens its dial popout; the eufy vacuum (the single
+ * vacuum panel, [VACUUM_ID]) opens the vacuum panel; every other
+ * controllable domain opens its full detail page. Cameras are
+ * NOT in this table: EntityTile routes them to fullscreen /
+ * the front-door dialog before reaching it, and HomeRoomCards
+ * never carry cameras. Long-press keeps the sheet (openPopup)
+ * on both surfaces — this table is tap-only.
+ */
+enum class CardTapRoute {
+    CLIMATE_POPOUT,
+    VACUUM_PANEL,
+    ENTITY_DETAIL,
+}
+
+fun cardTapRoute(domain: String, entityId: String): CardTapRoute = when {
+    domain == "climate" -> CardTapRoute.CLIMATE_POPOUT
+    domain == "vacuum" && entityId == com.garrietta.haven.data.VACUUM_ID -> CardTapRoute.VACUUM_PANEL
+    else -> CardTapRoute.ENTITY_DETAIL
+}
 
 /** Folded pill presentation styles (Stage C nav customization). */
  enum class NavStyle(val key: String) {

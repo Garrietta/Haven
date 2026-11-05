@@ -20,8 +20,12 @@ import com.garrietta.haven.ui.components.popupDragDetector
 import com.garrietta.haven.ui.components.popupSideAnchor
 import com.garrietta.haven.ui.components.shouldDismissDrag
 import com.garrietta.haven.ui.components.ShapePrefs
+import com.garrietta.haven.ui.components.LocalModalActive
 import com.garrietta.haven.ui.components.MorphSurface
 import com.garrietta.haven.ui.components.badgeRectInRow
+import com.garrietta.haven.ui.components.morphPanelContainerAlphaOpen
+import com.garrietta.haven.ui.components.morphSourceBadge
+import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.hideWhileTraveling
@@ -37,6 +41,7 @@ import com.garrietta.haven.ui.components.NavPillGeometry
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.navActiveScreen
 import com.garrietta.haven.ui.components.navPillGeometry
+import com.garrietta.haven.ui.components.railIndicatorTop
 import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.tabSlideDirection
 import com.garrietta.haven.ui.components.tabSlideOffsets
@@ -63,6 +68,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -1157,6 +1163,10 @@ fun HavenApp(vm: HavenViewModel) {
                 label = "pillExit",
             )
             CompositionLocalProvider(
+                // Feedback round 17, item 6: dashboard chrome
+                // hides competing affordances (the Favorites
+                // edit pencil) while any modal is open.
+                LocalModalActive provides modalActive,
                 LocalCardBounds provides cardBounds,
                 LocalCardShapes provides cardShapes,
                 LocalCardColors provides cardColors,
@@ -1255,7 +1265,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // the panel container fades (p < 0.25) and the
                 // card badge shows through — so the traveler
                 // fades with the container on close (see
-                // TravelingHeader's isClosing curve), landing as
+                // the traveler's isClosing curve, see MorphSurface), landing as
                 // a short crossfade onto the coincident card badge
                 // instead of a doubled badge.
                 LocalMorphCardAlpha provides 1f,
@@ -1508,10 +1518,12 @@ fun HavenApp(vm: HavenViewModel) {
                 // one-third), and on unfolded the leftward travel
                 // adds the 84dp rail width so the page clears the
                 // left edge too. The rail draws on top (zIndex,
-                // see the VerticalSidePill call site), so sliding
-                // pages pass UNDER the pill: the pill's own shape
-                // is the only thing obscuring the transition, and
-                // there is no clip line at the content boundary.
+                // see the VerticalSidePill call site). Round 17,
+                // item 6, SUPERSEDES the old no-clip rule for the
+                // ghosting symptom: the transition below is now
+                // clipped to the content area (see there), so
+                // sliding pages can no longer spill into the rail
+                // zone and ghost behind the pill.
                 // Resting page positioning is unchanged (content
                 // still starts right of the rail). Any switch
                 // involving a non-tab screen keeps Round 4's fixed
@@ -1553,12 +1565,35 @@ fun HavenApp(vm: HavenViewModel) {
                         targetState = base,
                         transitionSpec = {
                             val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }.take(2)).map { it.screen }
+                            // Feedback round 17, item 6: NO fades,
+                            // CLIPPED. The old slide + fade let the
+                            // outgoing and incoming pages show
+                            // through each other mid-transition
+                            // (readable ghost text — Settings over
+                            // Manage home page on the 2026-11-04
+                            // runs), and SizeTransform(clip =
+                            // false) let sliding pages spill past
+                            // the content boundary into the rail
+                            // zone, visible above and below the
+                            // floating pill. Opaque slides keep the
+                            // directional character (full travel
+                            // for tabs, one-third for the rest)
+                            // with no see-through overlap, and
+                            // clip = true bounds the travel to the
+                            // content area — the same fade removal
+                            // also ends the back-navigation page
+                            // fade that flashed cards
+                            // semi-transparent on return to Home.
+                            // This SUPERSEDES round 3's no-clip
+                            // choice for exactly this symptom; the
+                            // slide directions and offsets are
+                            // untouched.
                             when (val direction = tabSlideDirection(barScreens, initialState, targetState)) {
-                                1, -1 -> ((slideInHorizontally(initialOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).first }) + fadeIn()) togetherWith
-                                    (slideOutHorizontally(targetOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).second }) + fadeOut()))
-                                else -> ((slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn()) togetherWith
-                                    (slideOutHorizontally(targetOffsetX = { -it / 3 }) + fadeOut()))
-                            }.using(SizeTransform(clip = false))
+                                1, -1 -> (slideInHorizontally(initialOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).first }) togetherWith
+                                    slideOutHorizontally(targetOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).second }))
+                                else -> (slideInHorizontally(initialOffsetX = { it / 3 }) togetherWith
+                                    slideOutHorizontally(targetOffsetX = { -it / 3 }))
+                            }.using(SizeTransform(clip = true))
                         },
                         label = "topLevelScreen",
                     ) { screen -> content(screen) }
@@ -1632,7 +1667,7 @@ fun HavenApp(vm: HavenViewModel) {
             // full-screen (see PanelOverlay). No scrim: the opaque
             // panel covers the page at rest. The badge still
             // travels into the panel's header (see
-            // TravelingHeader) while the panel morphs — both, not
+            // MorphSurface's traveler slot) while the panel morphs — both, not
             // one or the other. Feedback round 7: drag-to-dismiss
             // (Koda now-playing port) and Back dismiss; the back
             // arrow is gone (see PanelOverlay/CenteredPopup).
@@ -1650,7 +1685,6 @@ fun HavenApp(vm: HavenViewModel) {
                         progress = dragProgressFor(sheetProgress),
                         source = anim.source ?: cardBounds[anim.id],
                         overlayOrigin = overlayOrigin,
-                        panelBackground = MaterialTheme.colorScheme.background,
                         fromBackground = anim.sourceColor,
                         onDismiss = { dismissSheet() },
                         dragHandle = sheetHandle,
@@ -1685,24 +1719,28 @@ fun HavenApp(vm: HavenViewModel) {
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                     onPanelPlaced = { sheetPanelBounds = it },
                     landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                    // Feedback round 17, item 1: the badge travels
+                    // INSIDE the morph surface now (see
+                    // MorphSurface), pinned to its header slot
+                    // instead of lerping across the panel as a
+                    // sibling overlay. Renders at the source badge
+                    // until the live header reports the target —
+                    // never a gap, never a pop.
+                    travelerTarget = heroTarget?.takeIf { it.first == anim.id }?.second,
+                    traveler = {
+                        TravelingBadgeContent(
+                            vm, anim.id, heroBounds[anim.id],
+                            heroTarget?.takeIf { it.first == anim.id }?.second,
+                            progress = dragProgressFor(sheetProgress),
+                            onDismiss = { dismissSheet() },
+                        )
+                    },
                 ) {
                     EntityPopupSheetContent(
                         vm, navigate, anim.id, panelBounds = sheetPanelBounds,
                         onDetails = { dismissSheetInstant() },
                     )
                 }
-                // Traveling header, above the panel: the card's
-                // badge travels to the panel's header as ONE
-                // element. Renders at the source rect until the
-                // live header reports the target — never a gap,
-                // never a pop.
-                TravelingHeader(
-                    vm, anim.id, heroBounds[anim.id],
-                    heroTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = dragProgressFor(sheetProgress), overlayOrigin,
-                    onDismiss = { dismissSheet() },
-                    isClosing = sheetExiting && !sheetDrag.settling,
-                )
                 // Traveling arc, above the panel (see TravelingArc).
                 TravelingArc(
                     vm, anim.id, arcBounds[anim.id],
@@ -1761,7 +1799,6 @@ fun HavenApp(vm: HavenViewModel) {
                         progress = dragProgressFor(detailProgress),
                         source = detailSource,
                         overlayOrigin = overlayOrigin,
-                        panelBackground = MaterialTheme.colorScheme.background,
                         fromBackground = anim.sourceColor,
                         onDismiss = { dismissDetail() },
                         dragHandle = detailHandle,
@@ -1792,23 +1829,24 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
                     landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    // Feedback round 4, item 4: suppressed for
+                    // sub-panel sources (the destination badge
+                    // renders from frame 0 there, so a traveler
+                    // would double it); otherwise the badge rides
+                    // inside the surface (round 17, item 1).
+                    travelerTarget = if (detailFromPanel) null else heroTarget?.takeIf { it.first == anim.entityId }?.second,
+                    traveler = if (detailFromPanel) null else ({
+                        TravelingBadgeContent(
+                            vm, anim.entityId, heroBounds[anim.entityId],
+                            heroTarget?.takeIf { it.first == anim.entityId }?.second,
+                            progress = dragProgressFor(detailProgress),
+                            onDismiss = { dismissDetail() },
+                        )
+                    }),
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                         content(anim.screen)
                     }
-                }
-                // Feedback round 4, item 4: suppressed for
-                // sub-panel sources (see the gate above); the arc
-                // is weather-only and weather cards never sit in a
-                // sub-panel, so it keeps its existing rule.
-                if (!detailFromPanel) {
-                    TravelingHeader(
-                        vm, anim.entityId, heroBounds[anim.entityId],
-                        heroTarget?.takeIf { it.first == anim.entityId }?.second,
-                        progress = dragProgressFor(detailProgress), overlayOrigin,
-                        onDismiss = { dismissDetail() },
-                        isClosing = detailExiting && !detailDrag.settling,
-                    )
                 }
                 TravelingArc(
                     vm, anim.entityId, arcBounds[anim.entityId],
@@ -1844,7 +1882,6 @@ fun HavenApp(vm: HavenViewModel) {
                         progress = dragProgressFor(panelDetailProgress),
                         source = panelDetailSource,
                         overlayOrigin = overlayOrigin,
-                        panelBackground = MaterialTheme.colorScheme.background,
                         fromBackground = anim.sourceColor,
                         onDismiss = { dismissPanelDetail() },
                         dragHandle = panelDetailHandle,
@@ -1892,7 +1929,6 @@ fun HavenApp(vm: HavenViewModel) {
                         progress = dragProgressFor(popoutProgress),
                         source = anim.source ?: cardBounds[anim.id],
                         overlayOrigin = overlayOrigin,
-                        panelBackground = MaterialTheme.colorScheme.background,
                         fromBackground = anim.sourceColor,
                         onDismiss = { dismissPopout() },
                         dragHandle = popoutHandle,
@@ -1918,22 +1954,23 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                     landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                    // Round 17, item 1: the climate badge rides
+                    // inside the surface (see the sheet block).
+                    travelerTarget = heroTarget?.takeIf { it.first == anim.id }?.second,
+                    traveler = {
+                        TravelingBadgeContent(
+                            vm, anim.id, heroBounds[anim.id],
+                            heroTarget?.takeIf { it.first == anim.id }?.second,
+                            progress = dragProgressFor(popoutProgress),
+                            onDismiss = { dismissPopout() },
+                        )
+                    },
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
                         onClose = { dismissPopout() },
                     )
                 }
-                // Traveling header, above the panel (see the sheet
-                // block): the climate card's badge travels to the
-                // panel's title row as ONE element.
-                TravelingHeader(
-                    vm, anim.id, heroBounds[anim.id],
-                    heroTarget?.takeIf { it.first == anim.id }?.second,
-                    progress = dragProgressFor(popoutProgress), overlayOrigin,
-                    onDismiss = { dismissPopout() },
-                    isClosing = popoutExiting && !popoutDrag.settling,
-                )
                 } // else: folded full-screen morph (feedback item 3)
             }
             // Camera live-feed panel (2026-11-01 panels round): the
@@ -2211,11 +2248,17 @@ private fun EntityPopupSheetContent(
                 // Feedback round 11, item 3: the one icon path.
                 val sheetIcon = entityIcon(sheetCustom.iconKeys, entity)
                 // Feedback round 4, item 2: the sheet header badge
-                // carries the card's preset pair, like every card.
-                val sheetBadgeOverride = detailBadgeOverride(
-                    sheetCustom.tilePresets, entity,
+                // carries the card's pair, like every card.
+                // Feedback round 17, item 1: the TILE's exact
+                // pair (tileBadgePair), not the preset-only
+                // override — the old detailBadgeOverride
+                // returned null with no preset, so headers fell
+                // back to the hash accent and eufy read YELLOW
+                // in the sheet while its tile read muted green.
+                val sheetBadgeOverride = tileBadgePair(
+                    sheetCustom.tilePresets, sheetCustom.domainTilePresets, entity,
                     isDarkBackdrop(MaterialTheme.colorScheme.background),
-                    sheetCustom.domainTilePresets,
+                    MaterialTheme.colorScheme, accent,
                 )
                 // Feedback round 5, item 4: the sheet's controls carry
                 // the assigned tile color itself (ungated — see
@@ -2367,7 +2410,7 @@ private fun EntityPopupSheetContent(
  *   early on close (gone by p = 0.85), so no panel content ever
  *   appears at full opacity over the card on the first frame.
  *   Destination headers hide only their badge while traveling
- *   (see TravelingHeader), never their text.
+ *   (see MorphSurface's traveler slot), never their text.
  * - Travel targets: [heroTargetReporter]/[arcTargetReporter] are
  *   provided around the LIVE content (never a measurement frame):
  *   the content is laid out at target geometry, so its header's
@@ -2428,6 +2471,16 @@ private fun PanelOverlay(
     // Feedback round 11, item 2: the source tile's outline, passed
     // through to MorphSurface so the exit lands on its corners.
     landingShape: androidx.compose.ui.graphics.Shape? = null,
+    // Feedback round 17, item 1: the traveling badge, now rendered
+    // INSIDE the morph surface (see MorphSurface). [travelerTarget]
+    // is the live header ROW rect reported via [heroTargetReporter]
+    // (null until the header first reports — the fallback below
+    // then sits the traveler on the source badge, the round-7 gap
+    // fix, instead of vanishing); [traveler] is the badge content.
+    // Both declared before the content lambda (round 5 lesson).
+    // Null pair = no traveler (camera, panel-detail).
+    travelerTarget: Rect? = null,
+    traveler: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -2461,6 +2514,13 @@ private fun PanelOverlay(
                 isClosing = isClosing,
                 onPlaced = onPanelPlaced,
                 landingShape = landingShape,
+                // Round 17, item 1: the header slot for the
+                // in-surface traveler — the live header row's
+                // badge (48dp, see DetailPopupHeader), or the
+                // source badge until the header reports.
+                travelerRect = travelerTarget?.let { badgeRectInRow(it, with(density) { 48.dp.toPx() }) }
+                    ?: morphSourceBadge(from, with(density) { 56.dp.toPx() }),
+                traveler = traveler,
             ) {
                 CompositionLocalProvider(
                     LocalHeroTarget provides heroTargetReporter,
@@ -2553,7 +2613,7 @@ private fun PanelOverlay(
  * threshold; internal polygons keep their sizes (shrinking the
  * disc would break the dual-number row and grab targets — the
  * window shrink + side anchor deliver the complaint, not a disc
- * resize). No TravelingHeader/Arc on this path (a traveler flying
+ * resize). No traveler on this path (a traveler flying
  * to a side popup reads wrong), and two badge-visibility guards
  * replace them: LocalMorphProgress is pinned to 1f inside the
  * popup, so destination headers wearing hideWhileTraveling render
@@ -2580,7 +2640,6 @@ private fun CenteredPopup(
     progress: () -> Float,
     source: Rect?,
     overlayOrigin: Offset,
-    panelBackground: Color,
     onDismiss: () -> Unit,
     onPanelPlaced: ((Rect) -> Unit)? = null,
     // Feedback round 7: drag handle (null = no drag; every current
@@ -2595,12 +2654,13 @@ private fun CenteredPopup(
     isClosing: Boolean = false,
     // Feedback round 16, item 4a: the source tile's container
     // color, captured at open (null = sourceless/camera: keep the
-    // panel color throughout). The Surface keeps its panel color;
-    // the content wrapper below draws this lerp over it, so the
-    // unfolded popup — which previously had no source-color lerp
-    // at all — starts at the tile's own color instead of flashing
-    // panel cream over the hidden tile on exit. Declared before
-    // the content lambda (round 5 lesson).
+    // container color throughout). The Surface keeps its
+    // elevated container color (round 17, item 1); the content
+    // wrapper below draws this lerp over it, so the unfolded
+    // popup — which previously had no source-color lerp at all —
+    // starts at the tile's own color instead of flashing panel
+    // cream over the hidden tile on exit. Declared before the
+    // content lambda (round 5 lesson).
     fromBackground: Color? = null,
     content: @Composable () -> Unit,
 ) {
@@ -2666,8 +2726,15 @@ private fun CenteredPopup(
                 // the Surface clip would cap a 36dp tile landing
                 // at 28dp. The soft shadow follows this outline;
                 // the visible corners follow the morph clip.
+                // Feedback round 17, item 1: the container is the
+                // ELEVATED surfaceContainerHigh with a 1dp
+                // outlineVariant border — the old background color
+                // blended invisibly into the black dashboard (the
+                // 2026-11-04 "pure #000000" popup), so the popup
+                // never reads as a surface of its own.
                 shape = RoundedCornerShape(36.dp),
-                color = panelBackground,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 shadowElevation = 16.dp,
                 modifier = Modifier
                     .fillMaxWidth(0.62f)
@@ -2713,6 +2780,19 @@ private fun CenteredPopup(
                             translationY = morph.translationY
                             scaleX = morph.scaleX
                             scaleY = morph.scaleY
+                            // Feedback round 17, item 1: the
+                            // container alpha, mirroring
+                            // MorphSurface — the old opaque-from-
+                            // frame-0 surface sat on the tile as a
+                            // blank tile-colored rect on open and
+                            // a solid dark slab on close (the
+                            // 2026-11-04 empty blue rectangle and
+                            // eufy black box). Now the real tile
+                            // shows through the scrim at small p
+                            // and the surface fades in as it grows
+                            // (out over the final 25% on close),
+                            // so the source card is never blanked.
+                            alpha = if (isClosing) morphPanelContainerAlphaClose(p) else morphPanelContainerAlphaOpen(p)
                         } else {
                             val enter = centeredPopupEnter(p, null, popupCenter, distancePx)
                             translationX = enter.offset.x
@@ -2737,21 +2817,27 @@ private fun CenteredPopup(
             ) {
                 // Feedback round 16, item 4a: the color-lerp
                 // rect. It covers the Surface exactly (same
-                // size, drawn over the panel color), lerping
-                // from the tile's captured color to the panel
+                // size, drawn over the container color), lerping
+                // from the tile's captured color to the container
                 // color over the first 35% of the morph —
                 // mirroring MorphSurface's fromBackground rule.
                 // Progress is read ONLY in this draw block,
                 // never during composition (round 6 rule), so
                 // the morph still runs on the RenderThread.
-                // At rest (p = 1) the rect IS the panel color,
-                // so the settled panel is byte-identical to
-                // before; sourceless popups pass null and draw
-                // the panel color throughout.
+                // At rest (p = 1) the rect IS the container
+                // color; sourceless popups pass null and draw
+                // the container color throughout. (Round 17:
+                // the lerp target moved from background to
+                // surfaceContainerHigh with the Surface itself,
+                // or the settled panel would still read as
+                // background under its new border. The color is
+                // read here, in composable scope — drawBehind
+                // cannot read MaterialTheme.)
+                val containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 Box(
                     Modifier.fillMaxSize().drawBehind {
                         val p = progress().coerceIn(0f, 1f)
-                        drawRect(lerp(fromBackground ?: panelBackground, panelBackground, morphPanelBackgroundBlend(p)))
+                        drawRect(lerp(fromBackground ?: containerColor, containerColor, morphPanelBackgroundBlend(p)))
                     },
                 ) {
                 // Pin destination-header visibility: with no
@@ -2849,136 +2935,84 @@ private fun CenteredPopup(
  * dismiss); its click disables once fully handed off (progress
  * 1), so the destination header's own badge owns taps at rest.
  */
+/**
+ * Feedback round 17, item 1: the traveling badge CONTENT (badge
+ * only, no positioning). The old TravelingHeader positioned the
+ * badge with its own window-space badge-to-badge lerp as a
+ * sibling above the panel; that path cut across the panel
+ * mid-flight while the surface's own header slot hugged the
+ * shrinking rect's top-left — the badge "floating over the
+ * center of the shrinking panel" on the 2026-11-04 runs.
+ * Positioning now lives in MorphSurface ([travelerLocalRect]):
+ * PanelOverlay passes this content in as its traveler slot.
+ * This composable only resolves the badge: open-time snapshot
+ * first (like every traveler color), the one icon path (so it
+ * can never show the domain glyph while the tile shows a custom
+ * icon), and the tile's exact pair ([tileBadgePair]) so the
+ * badge can never flash the hash accent mid-flight (eufy AE
+ * C10's muted green became bright yellow) or jump at the 2%
+ * handoff. [tileSource] is the old near-square test (tile badge
+ * vs card header row) for the shape morph. Renders nothing when
+ * the entity is unknown; the destination badge still renders
+ * at rest. Dismiss-tappable, like the old traveler at rest.
+ */
 @Composable
-private fun TravelingHeader(
+private fun TravelingBadgeContent(
     vm: HavenViewModel,
     entityId: String,
     source: Rect?,
     target: Rect?,
     progress: () -> Float,
-    overlayOrigin: Offset,
     onDismiss: () -> Unit,
-    // Round 6 close-tail fade (reconciled curve): on close, the
-    // traveler fades with the panel CONTAINER
-    // (morphPanelContainerAlphaClose: opaque until p = 0.25, then
-    // out over the final 25%), so that in the close window — when
-    // the stationary card badge shows through the fading panel —
-    // the traveler crossfades onto the coincident card badge
-    // instead of doubling it. 1f on enter (no effect). The old
-    // alphaScale parameter is gone: the curve is computed here,
-    // inside graphicsLayer, from the progress lambda.
-    isClosing: Boolean = false,
 ) {
     // Snapshot-first (see the ViewModel KDoc): the live flow is
     // only the first-frame fallback before the open effect
     // captures, and it is read as a plain value, never collected
     // — so unrelated state emissions never recompose the flight.
     val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
-    // Round 7 traveler-missing guard: a card that never reported
-    // bounds (source null) used to render no traveler while its own
-    // badge stayed hidden for the whole morph
-    // (hideHeroWhenMorphSource) — the icon vanished for the entire
-    // flight. Fall back to the destination rect: the traveler sits
-    // on the panel header from frame 0, coinciding with the
-    // destination badge (hidden until the 2% handoff), so no
-    // doubling forms and the badge never vanishes.
-    val effectiveSource = source ?: target
-    if (effectiveSource == null) return
-    // Round 4 origin guard: a never-reported source rect lerps
-    // from (0, 0) — the window origin, over the back arrow —
-    // so a zero-size source renders nothing instead of a badge
-    // that appears to spawn at the origin and drop into place.
-    if (effectiveSource.width <= 0f || effectiveSource.height <= 0f) return
-    // No target yet (live header not yet reported): sit exactly on
-    // the source badge rect instead of vanishing — returning early
-    // here left a gap where no header showed at all, then the
-    // traveler popped in mid-path (the 2026-10-30 verdict's icon
-    // jump). Once the target arrives the same lerp carries it
-    // continuously to the dialog header.
-    val targetRect = target ?: effectiveSource
-    val density = LocalDensity.current
     // Tile sources report their square badge rect; card sources
     // report their wide header row. A near-square source is a
     // tile badge (domain polygon); a wide source is a card header
     // (state polygon already) — see TravelingBadge for why this
-    // matters. The badge path is badge-rect to badge-rect, never
-    // row-rect to row-rect: row heights differ (64/56/48dp), so
-    // row travel always popped the badge size at the handoff.
-    val tileSource = effectiveSource.width < effectiveSource.height * 1.5f
-    val sourceBadge = if (tileSource) effectiveSource
-        else badgeRectInRow(effectiveSource, with(density) { 56.dp.toPx() })
-    val targetBadge = badgeRectInRow(targetRect, with(density) { 48.dp.toPx() })
+    // matters. Null source and target (header never reported)
+    // falls back to tile-like, matching PanelOverlay's square
+    // fallback source rect.
+    val effectiveSource = source ?: target
+    val tileSource = effectiveSource?.let { it.width < it.height * 1.5f } ?: true
     val accent = accentFor(entity.entityId)
-    // Feedback round 4, item 2: the traveler carries the preset
-    // pair when one is active for this entity (resolved against
-    // the open-time snapshot, like every other traveler color),
-    // so it matches the destination header badge exactly and
-    // cannot jump at the 2% handoff.
+    // Feedback round 17, item 1: the tile's exact pair, resolved
+    // against the open-time snapshot, so the traveler matches
+    // the destination header badge exactly and cannot jump at
+    // the 2% handoff.
     val travelerCustom = rememberCardCustom(vm)
-    val travelerBadgeOverride = detailBadgeOverride(
-        travelerCustom.tilePresets, entity,
+    val travelerBadgePair = tileBadgePair(
+        travelerCustom.tilePresets, travelerCustom.domainTilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
-        travelerCustom.domainTilePresets,
+        MaterialTheme.colorScheme, accent,
     )
-    // Badge only (2026-11-01 polish round): the name/state text
-    // used to ride beside the badge here, but the destination
-    // header now shows its own text from frame 0 — keeping the
-    // traveler's text would double it through the flight.
-    // Round 6 placement: the Box is laid out ONCE at the TARGET
-    // badge rect (static offset/size — these change only when the
-    // live header first reports, never per frame); ALL per-frame
-    // motion is the graphicsLayer transform below, driven by the
-    // progress lambda, so the flight costs no Measure/Layout pass.
-    Box(
-        Modifier
-            .offset {
-                IntOffset(
-                    (targetBadge.left - overlayOrigin.x).roundToInt(),
-                    (targetBadge.top - overlayOrigin.y).roundToInt(),
-                )
-            }
-            .size(with(density) { targetBadge.width.toDp() }, with(density) { targetBadge.height.toDp() })
-            .graphicsLayer {
-                val p = progress().coerceIn(0f, 1f)
-                val rect = lerpRect(sourceBadge, targetBadge, p)
-                transformOrigin = TransformOrigin(0f, 0f)
-                translationX = rect.left - targetBadge.left
-                translationY = rect.top - targetBadge.top
-                scaleX = if (targetBadge.width > 0f) rect.width / targetBadge.width else 1f
-                scaleY = if (targetBadge.height > 0f) rect.height / targetBadge.height else 1f
-                alpha = heroHeaderAlpha(p) * (if (isClosing) morphPanelContainerAlphaClose(p) else 1f)
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        // Always dismiss-tappable: at rest the traveler is
-        // invisible (alpha 0) but sits exactly over the destination
-        // badge, whose own tap also dismisses — so the tap target
-        // is identical either way, and no per-frame alpha read in
-        // composition is needed to gate it.
-        TravelingBadge(
-            entity,
-            // Feedback round 11, item 3: the traveler resolves
-            // through the one icon path, so it can never show the
-            // domain glyph while the tile shows a custom icon.
-            entityIcon(travelerCustom.iconKeys, entity),
-            accent,
-            progress,
-            tileSource,
-            modifier = Modifier.size(with(density) { targetBadge.width.toDp() })
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { onDismiss() },
-            badgeOverride = travelerBadgeOverride,
-        )
-    }
+    TravelingBadge(
+        entity,
+        // Feedback round 11, item 3: the traveler resolves
+        // through the one icon path, so it can never show the
+        // domain glyph while the tile shows a custom icon.
+        entityIcon(travelerCustom.iconKeys, entity),
+        accent,
+        progress,
+        tileSource,
+        modifier = Modifier.fillMaxSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onDismiss() },
+        badgeOverride = travelerBadgePair,
+    )
 }
 
 /**
  * The traveling weather arc (2026-10-29 verdict-fix round): the
  * Home weather card's dial panel travels into the pop-up's dial
  * panel as ONE element — the arc visibly moves, never doubles.
- * Mirrors TravelingHeader exactly: the card-side panel rect
+ * Mirrors the traveling-badge pattern exactly: the card-side panel rect
  * (reported by WeatherControl via reportArcBounds) lerps to the
  * live panel's panel rect on the same progress, the panel content
  * (condition-tinted box + Dial) fills the target rect and scales
@@ -2997,7 +3031,7 @@ private fun TravelingHeader(
  * rest of the pop-up content; the badge + arc panel are the
  * traveling elements. Round 6: placement is static at the target
  * rect; only the graphicsLayer transform animates (see
- * TravelingHeader), and the close-tail fade follows the same
+ * the traveling badge), and the close-tail fade follows the same
  * reconciled container curve.
  */
 @Composable
@@ -3012,12 +3046,12 @@ private fun TravelingArc(
 ) {
     val entity = vm.travelSnapshots[entityId] ?: vm.states.value[entityId] ?: return
     if (entity.domain != "weather") return
-    // Round 7: same traveler-missing guard as TravelingHeader —
+    // Round 7: same traveler-missing guard as the old header —
     // sit on the destination rect when the card never reported
     // bounds, so the arc never vanishes for the whole morph.
     val effectiveSource = source ?: target
     if (effectiveSource == null) return
-    // Same no-target rule as TravelingHeader: sit on the source
+    // Same no-target rule as the old header: sit on the source
     // rect until the live panel reports, never a gap.
     val targetRect = target ?: effectiveSource
     val density = LocalDensity.current
@@ -4174,18 +4208,6 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     LaunchedEffect(Unit) {
         if (!reduceMotion) pillEnter.animateTo(1f, springSpatial())
     }
-    // Measured icon positions, in window coordinates: the pill
-    // origin is subtracted, so the indicator stays correct while
-    // the column scrolls. The indicator anchors to the ICON rect,
-    // not the whole item row: a fixed 56dp x 32dp pill around the
-    // icon only, so the highlight never stretches into a tall
-    // vertical capsule and never changes shape across tabs.
-    var pillOrigin by remember { mutableStateOf(0f) }
-    // Feedback round 16, item 9: keyed by SCREEN, not by
-    // index — the old index keys went stale the moment the
-    // bar list changed (add/pin/remove), so the indicator
-    // glided to the previous item's rect: the off-by-one.
-    var iconRects by remember { mutableStateOf<Map<Screen, androidx.compose.ui.geometry.Rect>>(emptyMap()) }
     // Expressive-menus round, item 5: the unfolded rail scrubs
     // exactly like the folded pill bar (drag along the rail to
     // pick a tab, commit on release, haptic tick per tab). The
@@ -4201,7 +4223,6 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
         },
     )
     val scrubIndex = scrub.hoveredTab ?: currentIndex
-    val targetIconRect = items.getOrNull(scrubIndex)?.let { iconRects[it.screen] }
     val density = LocalDensity.current
     // Follow-up B (2026-11-03): the rail's selection glide uses
     // Koda's bar spec (expressive fast spatial) instead of the
@@ -4213,10 +4234,21 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
     // keeps the stiff snap.
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
         else kodaBarSpec()
-    // Icon is 24dp tall, pill is 32dp: center the pill on the icon
-    // (4dp overhang top and bottom).
+    // Feedback round 17, item 3: the indicator offset comes from
+    // the item INDEX ([railIndicatorTop]), never from measured
+    // window rects. The old boundsInWindow measurements went
+    // stale across bar-list changes and the pill-enter
+    // translation, clearing the indicator or parking it on the
+    // wrong tab (Home displayed with the highlight off Home on
+    // the 2026-11-04 runs). Index math cannot go stale, and the
+    // glide animation above still carries the motion. The
+    // indicator anchors to the icon oval: a fixed 56dp x 32dp
+    // pill around the icon only, so the highlight never
+    // stretches into a tall vertical capsule and never changes
+    // shape across tabs. No selection (index out of range)
+    // hides the indicator, same as before.
     val indicatorTop by animateFloatAsState(
-        targetIconRect?.let { it.top - pillOrigin - with(density) { 4.dp.toPx() } } ?: 0f,
+        if (scrubIndex in items.indices) with(density) { railIndicatorTop(scrubIndex).toPx() } else 0f,
         animationSpec = indicatorSpec,
         label = "sidePillTop",
     )
@@ -4267,7 +4299,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
             shadowElevation = 6.dp,
         ) {
             Box(
-                Modifier.onGloballyPositioned { pillOrigin = it.boundsInWindow().top },
+                Modifier,
             ) {
                 // The indicator: one fixed 56dp x 32dp pill around
                 // the selected icon, behind the items. Centered on
@@ -4275,7 +4307,9 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                 // padding each side, so TopCenter is the icon
                 // center); strictly bounded to the icon oval, never
                 // stretching to row height, never clipping the rail.
-                if (targetIconRect != null) {
+                // Round 17, item 3: positioned by index math
+                // (railIndicatorTop), not measured rects.
+                if (scrubIndex in items.indices) {
                     Box(
                         Modifier.align(Alignment.TopCenter)
                             .offset { IntOffset(0, indicatorTop.roundToInt()) }
@@ -4338,8 +4372,10 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, onSelect
                                     if (highlighted) item.icon else item.outlinedIcon,
                                     contentDescription = item.label,
                                     tint = contentColor,
-                                    modifier = Modifier.size(24.dp)
-                                        .onGloballyPositioned { iconRects = iconRects + (item.screen to it.boundsInWindow()) },
+                                    // Round 17, item 3: no rect
+                                    // reporting anymore — the
+                                    // indicator is index math.
+                                    modifier = Modifier.size(24.dp),
                                 )
                                 // Stage E §9: same condition dot as the
                                 // folded pill — never a count.

@@ -467,8 +467,13 @@ class HaClient(
                 val maker = d.optString("manufacturer")
                 if (maker.isNotEmpty()) deviceToMaker[id] = maker
                 // Device info for device-aware search (item 3).
+                // Feedback round 17, item 4: the literal string
+                // "null" is NOT a name — HA carries it in
+                // registry name fields, and the picker rendered
+                // it verbatim. Mirrors the device_id "null" guard
+                // below: a "null" name is treated as absent.
                 val displayName = d.optString("name_by_user").ifEmpty { d.optString("name") }
-                if (displayName.isNotEmpty()) {
+                if (displayName.isNotEmpty() && !displayName.equals("null", ignoreCase = true)) {
                     deviceInfoById[id] = HaDeviceInfo(
                         displayName,
                         d.optString("model").ifEmpty { null },

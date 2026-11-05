@@ -66,6 +66,7 @@ import com.garrietta.haven.ui.components.DialogTitleText
 import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.LocalHeroTarget
@@ -107,12 +108,15 @@ import com.garrietta.haven.ui.controls.stateText
 @Composable
 fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) {
     // Feedback round 4, item 2: the header badge carries the
-    // card's preset pair, like every other detail header.
+    // card's pair, like every other detail header. Feedback
+    // round 17, item 1: the tile pair, not the preset-only
+    // override (see DetailPages.kt — the null fallback sent
+    // headers to the hash accent).
     val popoutCustom = rememberCardCustom(vm)
-    val popoutBadge = detailBadgeOverride(
-        popoutCustom.tilePresets, entity,
+    val popoutBadge = tileBadgePair(
+        popoutCustom.tilePresets, popoutCustom.domainTilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
-        popoutCustom.domainTilePresets,
+        MaterialTheme.colorScheme, accentFor(entity.entityId),
     )
     // Feedback round 5, item 4: the tile preset accent tints the
     // stepper pills below the disc, like the other popup elements.

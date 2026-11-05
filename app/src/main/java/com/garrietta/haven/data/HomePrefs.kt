@@ -176,16 +176,40 @@ fun resolveEntityAreas(
  * devices; cameras live in the hero, weather in its block, people in
  * who's-home, and the system domains below are never room devices:
  * zone (zone.home renders as the "Home / 1" tile), sun (the "Sun /
- * Above horizon" tile), and update (firmware/instance rows such as
- * "Home Assistant / Unknown"). Excluding them here — and from the
- * RoomManager unassigned list, so its counts agree with Home — keeps
- * "No room" to real unassigned devices only. Pure, unit-tested.
+ * Above horizon" tile), and update (firmware/instance rows).
+ * Feedback round 17, item 5, closes the standing residual:
+ * conversation.home_assistant ("Home Assistant", state unknown)
+ * is the actual "Home Assistant / Unknown" tile under No room
+ * (the brief's sensor.home_assistant does not exist in the
+ * registry — both ids are excluded outright), and any
+ * unknown/unavailable entity in a system-service domain
+ * (conversation, stt, tts, notify) is excluded too — those are
+ * HA services, never room devices. The state rule is NARROW
+ * on purpose: an unavailable real device (an offline switch,
+ * a dead media player) still shows under No room, so it can be
+ * assigned. Excluding them here — and from the RoomManager
+ * unassigned list, so its counts agree with Home — keeps "No
+ * room" to real unassigned devices only. Pure, unit-tested.
  */
-fun isHomeRoomEntity(entity: HaEntity): Boolean =
-    entity.domain !in setOf(
+fun isHomeRoomEntity(entity: HaEntity): Boolean {
+    if (entity.entityId == "sensor.home_assistant" || entity.entityId == "conversation.home_assistant") return false
+    if (entity.domain in setOf("conversation", "stt", "tts", "notify") &&
+        (entity.state == "unknown" || entity.state == "unavailable")
+    ) return false
+    return entity.domain !in setOf(
         "camera", "weather", "person", "device_tracker",
         "zone", "sun", "update",
     )
+}
+
+/**
+ * Feedback round 17, item 4: the device-count label for room
+ * headers ("1 device", never "1 devices"). Pure, unit-tested.
+ */
+fun deviceCountLabel(count: Int): String = when (count) {
+    1 -> "1 device"
+    else -> "$count devices"
+}
 
 /**
  * Default exclusion for the Home Lights section: indicator lights, not room

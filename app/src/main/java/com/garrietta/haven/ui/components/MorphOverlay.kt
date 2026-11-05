@@ -17,8 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.lerp
@@ -33,10 +36,14 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 
@@ -845,13 +852,83 @@ private fun CardCorners.toShape(): RoundedCornerShape =
  * the never-hidden source tile shows through beneath — the switch
  * crossfades onto the coincident tile instead of popping. At
  * progress 0 the shape IS the tile's shape in both cases.
+ *
+ * Feedback round 17, item 1: SCALE-AWARE. The graphicsLayer
+ * transform multiplies the clip's local radii by the layer scale,
+ * so the old absolute-dp corners rendered far too sharp mid-flight
+ * (a 28dp tile corner showed ~12dp at p = 0.25 on close, and ~6dp
+ * at p = 0 — the "tall sharp rectangle" on the 2026-11-04 Ecobee
+ * close, never landing on the squircle). The local radii now
+ * divide out the layer scale ([scaleX]/[scaleY], from the same
+ * rect lerp the transform uses), so the VISIBLE radius follows
+ * the landing × (1 − p) ramp exactly on both axes (elliptical
+ * [CornerRadius]: x divides by scaleX, y by scaleY). Dp → px
+ * happens in createOutline, where density is available. Polygon
+ * landings are proportional paths, so they were never affected
+ * and keep the early return above.
  */
-fun morphSurfaceShape(progress: Float, landingShape: Shape?): Shape {
+/** The four elliptical corner radii of [morphSurfaceShape], in px. */
+data class SurfaceCornerRadii(
+    val topStart: CornerRadius,
+    val topEnd: CornerRadius,
+    val bottomEnd: CornerRadius,
+    val bottomStart: CornerRadius,
+)
+
+/**
+ * Feedback round 17, item 1: the scale-aware corner radii for
+ * [morphSurfaceShape], extracted as a pure function so unit
+ * tests can pin the division math without constructing an
+ * Outline (whose RoundRect constructor builds an Android Path,
+ * unmocked on the JVM — elliptical radii in particular trip it).
+ * Null exactly when [morphSurfaceShape] returns the landing
+ * shape itself (polygon landing inside the fade window).
+ */
+fun morphSurfaceRadii(
+    progress: Float,
+    landingShape: Shape?,
+    scaleX: Float = 1f,
+    scaleY: Float = 1f,
+    density: Density,
+): SurfaceCornerRadii? {
+    val p = progress.coerceIn(0f, 1f)
+    if (landingShape != null && roundedLandingCorners(landingShape) == null && p < 0.1f) {
+        return null
+    }
+    val corners = morphSurfaceCorners(p, roundedLandingCorners(landingShape))
+    val sx = if (scaleX > 0f) scaleX else 1f
+    val sy = if (scaleY > 0f) scaleY else 1f
+    with(density) {
+        fun rx(c: Dp): Float = (c.toPx() / sx).coerceAtLeast(0f)
+        fun ry(c: Dp): Float = (c.toPx() / sy).coerceAtLeast(0f)
+        return SurfaceCornerRadii(
+            topStart = CornerRadius(rx(corners.topStart), ry(corners.topStart)),
+            topEnd = CornerRadius(rx(corners.topEnd), ry(corners.topEnd)),
+            bottomEnd = CornerRadius(rx(corners.bottomEnd), ry(corners.bottomEnd)),
+            bottomStart = CornerRadius(rx(corners.bottomStart), ry(corners.bottomStart)),
+        )
+    }
+}
+
+fun morphSurfaceShape(progress: Float, landingShape: Shape?, scaleX: Float = 1f, scaleY: Float = 1f): Shape {
     val p = progress.coerceIn(0f, 1f)
     if (landingShape != null && roundedLandingCorners(landingShape) == null && p < 0.1f) {
         return landingShape
     }
-    return morphSurfaceCorners(p, roundedLandingCorners(landingShape)).toShape()
+    return object : Shape {
+        override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+            val r = morphSurfaceRadii(progress, landingShape, scaleX, scaleY, density)!!
+            return Outline.Rounded(
+                RoundRect(
+                    left = 0f, top = 0f, right = size.width, bottom = size.height,
+                    topLeftCornerRadius = r.topStart,
+                    topRightCornerRadius = r.topEnd,
+                    bottomRightCornerRadius = r.bottomEnd,
+                    bottomLeftCornerRadius = r.bottomStart,
+                ),
+            )
+        }
+    }
 }
 
 /**
@@ -1023,6 +1100,89 @@ fun Modifier.hideWhileTraveling(): Modifier = composed {
 fun badgeRectInRow(row: Rect, badgeSizePx: Float): Rect {
     val top = row.top + ((row.height - badgeSizePx) / 2f).coerceAtLeast(0f)
     return Rect(row.left, top, row.left + badgeSizePx, top + badgeSizePx)
+}
+
+/**
+ * Feedback round 17, item 1: a morph source's badge rect. Tile
+ * sources report their square badge rect directly; card sources
+ * report their wide header row, so the badge is the row's leading
+ * square ([badgeRectInRow]) — the same near-square test the old
+ * TravelingHeader used for its tileSource split, now shared so
+ * the surface and the traveler agree about the source badge.
+ * Pure, unit-tested.
+ */
+fun morphSourceBadge(source: Rect, badgeSizePx: Float): Rect =
+    if (source.width < source.height * 1.5f) source
+    else badgeRectInRow(source, badgeSizePx)
+
+/**
+ * Feedback round 17, item 1: the traveler blend factor. The
+ * traveler starts exactly on the source badge (k = 0 at p = 0 —
+ * no frame-0 pop) and converges onto the morphing surface's
+ * header slot by p = 0.3 (k = 1), riding the slot for the rest
+ * of the flight in both directions. On close the close-tail fade
+ * (container alpha out over the final 25%) hides the last
+ * stretch, so the return to the linear path below p = 0.3 is
+ * never visible as a landing pop. Pure, unit-tested.
+ */
+fun travelerBlend(progress: Float): Float =
+    smoothstep(0f, 0.3f, progress.coerceIn(0f, 1f))
+
+/**
+ * Feedback round 17, item 1: the traveling badge's rect in the
+ * morph surface's LOCAL coordinates (target space), at
+ * [progress] (0 = card, 1 = target). The old TravelingHeader
+ * lerped badge-to-badge in window space, which cut across the
+ * panel mid-flight while the surface's own header slot hugged
+ * the shrinking rect's top-left — the badge "floating over the
+ * center of the shrinking panel" on the 2026-11-04 runs. This
+ * rect instead rides the surface: its window-mapped position
+ * blends from the linear badge path to the surface's header-slot
+ * path ([travelerBlend]), and its size stays the linear badge
+ * size (badges must not squash under the surface's non-uniform
+ * scale). The caller lays the traveler out at the target slot
+ * and transforms it onto this rect per frame (see MorphSurface),
+ * so the net window rect is exactly: position = blend of linear
+ * and slot paths, size = linear badge size, at every frame.
+ * At p = 0 the rect maps back to the source badge exactly; at
+ * p = 1 it is the target slot exactly. Pure, unit-tested.
+ */
+fun travelerLocalRect(
+    sourceBadge: Rect,
+    targetBadge: Rect,
+    source: Rect,
+    target: Rect,
+    progress: Float,
+): Rect {
+    val p = progress.coerceIn(0f, 1f)
+    val rect = lerpRect(source, target, p)
+    val scaleX = if (target.width > 0f) rect.width / target.width else 1f
+    val scaleY = if (target.height > 0f) rect.height / target.height else 1f
+    val sx = if (scaleX > 0f) scaleX else 1f
+    val sy = if (scaleY > 0f) scaleY else 1f
+    // Linear badge path (window space): the old behavior, exact
+    // at both ends.
+    val linLeft = sourceBadge.left + (targetBadge.left - sourceBadge.left) * p
+    val linTop = sourceBadge.top + (targetBadge.top - sourceBadge.top) * p
+    val linWidth = sourceBadge.width + (targetBadge.width - sourceBadge.width) * p
+    val linHeight = sourceBadge.height + (targetBadge.height - sourceBadge.height) * p
+    // Surface header-slot path (window space): the slot's fixed
+    // target-local offset, carried by the surface's own rect lerp.
+    val slotLocalLeft = targetBadge.left - target.left
+    val slotLocalTop = targetBadge.top - target.top
+    val slotLeft = rect.left + slotLocalLeft * sx
+    val slotTop = rect.top + slotLocalTop * sy
+    // Blend position; size stays linear (no squash).
+    val k = travelerBlend(p)
+    val winLeft = linLeft + (slotLeft - linLeft) * k
+    val winTop = linTop + (slotTop - linTop) * k
+    // Inverse-map the desired window rect into surface-local
+    // coordinates: the surface transform maps it back exactly.
+    val localLeft = (winLeft - rect.left) / sx
+    val localTop = (winTop - rect.top) / sy
+    val localWidth = linWidth / sx
+    val localHeight = linHeight / sy
+    return Rect(localLeft, localTop, localLeft + localWidth, localTop + localHeight)
 }
 
 /**
@@ -1260,6 +1420,17 @@ fun MorphSurface(
     // [LocalCardShapes], resolved by the caller). The clip lerps
     // into it so the exit lands on the tile's own corners.
     landingShape: Shape? = null,
+    // Feedback round 17, item 1: the traveling badge, locked
+    // INSIDE this surface's scaled coordinate space (it used to
+    // be a sibling overlay with its own badge-to-badge lerp,
+    // which cut across the panel mid-flight while the surface's
+    // header slot hugged the shrinking rect's top-left).
+    // [travelerRect] is the TARGET badge rect in window
+    // coordinates (the header slot); [traveler] is the badge
+    // content. Both declared before the content lambda (round 5
+    // lesson). Null = no traveler (camera, panel-detail).
+    travelerRect: Rect? = null,
+    traveler: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -1280,7 +1451,9 @@ fun MorphSurface(
                 translationY = rect.top - target.top
                 scaleX = if (target.width > 0f) rect.width / target.width else 1f
                 scaleY = if (target.height > 0f) rect.height / target.height else 1f
-                shape = morphSurfaceShape(p, landingShape)
+                // Round 17: the clip divides out the layer scale,
+                // so visible corners follow the landing ramp.
+                shape = morphSurfaceShape(p, landingShape, scaleX, scaleY)
                 clip = true
             }
             .drawBehind {
@@ -1319,6 +1492,38 @@ fun MorphSurface(
                 }
             } else {
                 content()
+            }
+        }
+        // Traveling badge, INSIDE the surface transform (round
+        // 17, item 1): laid out statically at the target slot,
+        // then mapped per frame onto travelerLocalRect — the
+        // badge rides the surface's header slot instead of
+        // cutting across the panel. NOT inside the content Box
+        // above (which carries the content-alpha fade): the
+        // traveler has its own handoff alpha below. Progress is
+        // read ONLY in graphicsLayer (round 7 rule), so the
+        // flight costs no layout or recomposition per frame.
+        if (traveler != null && travelerRect != null) {
+            val slotLocalLeft = travelerRect.left - target.left
+            val slotLocalTop = travelerRect.top - target.top
+            Box(
+                Modifier
+                    .offset { IntOffset(slotLocalLeft.roundToInt(), slotLocalTop.roundToInt()) }
+                    .size(with(density) { travelerRect.width.toDp() }, with(density) { travelerRect.height.toDp() })
+                    .graphicsLayer {
+                        val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
+                        val sourceBadge = morphSourceBadge(source, with(density) { 56.dp.toPx() })
+                        val local = travelerLocalRect(sourceBadge, travelerRect, source, target, p)
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        translationX = local.left - slotLocalLeft
+                        translationY = local.top - slotLocalTop
+                        scaleX = if (travelerRect.width > 0f) local.width / travelerRect.width else 1f
+                        scaleY = if (travelerRect.height > 0f) local.height / travelerRect.height else 1f
+                        alpha = heroHeaderAlpha(p) * (if (isClosing) morphPanelContainerAlphaClose(p) else 1f)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                traveler()
             }
         }
     }

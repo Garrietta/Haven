@@ -2,9 +2,11 @@ package com.garrietta.haven.ui.components
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -526,12 +528,124 @@ class MorphMathTest {
         val poly = androidx.compose.ui.graphics.RectangleShape
         // In the fade window the shape IS the tile's outline.
         assertTrue(morphSurfaceShape(0.05f, poly) === poly)
-        // While opaque the outline stays soft and rounded.
-        assertEquals(CardCorners(14.dp, 14.dp, 14.dp, 14.dp), roundedLandingCorners(morphSurfaceShape(0.5f, poly)))
+        assertNull(morphSurfaceRadii(0.05f, poly, density = Density(1f)))
+        // While opaque the outline stays soft and rounded — read
+        // via the radii function (round 17: the shape divides
+        // radii by the surface scale, so past the fade window it
+        // is no longer a RoundedCornerShape, and Outline
+        // construction itself is unmocked on the JVM).
+        val mid = morphSurfaceRadii(0.5f, poly, density = Density(1f))!!
+        assertEquals(14f, mid.topStart.x, 0.001f)
+        assertEquals(14f, mid.topEnd.x, 0.001f)
+        assertEquals(14f, mid.bottomEnd.x, 0.001f)
+        assertEquals(14f, mid.bottomStart.x, 0.001f)
         // A corner landing resolves through the corner lerp.
-        assertEquals(CardCorners(8.dp, 8.dp, 8.dp, 8.dp), roundedLandingCorners(morphSurfaceShape(0f, generalCardShape(4))))
+        val tile = morphSurfaceRadii(0f, generalCardShape(4), density = Density(1f))!!
+        assertEquals(8f, tile.topStart.x, 0.001f)
+        assertEquals(8f, tile.topStart.y, 0.001f)
         // A popup over a polygon tile never goes sharp.
         assertEquals(CardCorners(28.dp, 28.dp, 28.dp, 28.dp), roundedLandingCorners(morphPopupShape(0f, poly)))
+    }
+
+    @Test
+    fun morphSurfaceShape_scaleAwareCornersLandOnTileCorners() {
+        // Feedback round 17, item 1: the local radii are divided
+        // by the surface scale, so the VISIBLE corners — local
+        // radius times scale — interpolate 0 -> landing exactly.
+        // Mid-morph, 28dp landing, scaleX 0.5 / scaleY 0.25,
+        // density 2: local rx 28dp (56px), local ry 56dp (112px);
+        // visible rx 56px * 0.5 = 28px = 14dp, visible ry
+        // 112px * 0.25 = 28px = 14dp — the 0.5-lerp corner.
+        val scaled = morphSurfaceRadii(
+            0.5f, androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+            scaleX = 0.5f, scaleY = 0.25f, density = Density(2f),
+        )!!
+        assertEquals(56f, scaled.topStart.x, 0.001f)
+        assertEquals(112f, scaled.topStart.y, 0.001f)
+        assertEquals(28f, scaled.topStart.x * 0.5f, 0.001f)
+        assertEquals(28f, scaled.topStart.y * 0.25f, 0.001f)
+        // At rest the radii are zero at any scale.
+        val rest = morphSurfaceRadii(
+            1f, androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+            scaleX = 0.5f, scaleY = 0.25f, density = Density(2f),
+        )!!
+        assertEquals(0f, rest.topStart.x, 0.001f)
+        assertEquals(0f, rest.topStart.y, 0.001f)
+        // Scale 1 is byte-identical to the old behavior.
+        val unit = morphSurfaceRadii(
+            0.5f, androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+            density = Density(1f),
+        )!!
+        assertEquals(14f, unit.topStart.x, 0.001f)
+        assertEquals(14f, unit.topStart.y, 0.001f)
+    }
+
+    // Feedback round 17, item 1: the traveler blend factor.
+
+    @Test
+    fun travelerBlend_startsOnSourceAndConvergesByPointThree() {
+        assertEquals(0f, travelerBlend(0f), 0.001f)
+        assertEquals(0.5f, travelerBlend(0.15f), 0.001f)
+        assertEquals(1f, travelerBlend(0.3f), 0.001f)
+        assertEquals(1f, travelerBlend(1f), 0.001f)
+        assertEquals(0f, travelerBlend(-0.5f), 0.001f)
+        assertEquals(1f, travelerBlend(1.5f), 0.001f)
+    }
+
+    @Test
+    fun morphSourceBadge_tileReportsItselfRowReportsLeadingSquare() {
+        // Near-square tile: the badge rect itself.
+        val tile = Rect(100f, 800f, 300f, 1000f)
+        assertEquals(tile, morphSourceBadge(tile, 56f))
+        // Wide header row: the leading square, vertically centered.
+        val row = Rect(100f, 800f, 900f, 900f)
+        assertEquals(Rect(100f, 822f, 156f, 878f), morphSourceBadge(row, 56f))
+    }
+
+    @Test
+    fun travelerLocalRect_mapsBackToSourceTargetAndSlot() {
+        // Tile 400x200, panel 1080x1200; both badges 48x48.
+        val source = Rect(100f, 800f, 500f, 1000f)
+        val target = Rect(0f, 1200f, 1080f, 2400f)
+        val sourceBadge = Rect(112f, 812f, 160f, 860f)
+        val targetBadge = Rect(48f, 1248f, 96f, 1296f)
+        // Surface-map a local rect back to window space, exactly
+        // as MorphSurface's outer transform does: window =
+        // rect.left + local * (rect.size / target.size).
+        fun windowMapped(p: Float): Rect {
+            val local = travelerLocalRect(sourceBadge, targetBadge, source, target, p)
+            val rect = lerpRect(source, target, p)
+            val sx = rect.width / target.width
+            val sy = rect.height / target.height
+            return Rect(
+                rect.left + local.left * sx, rect.top + local.top * sy,
+                rect.left + local.right * sx, rect.top + local.bottom * sy,
+            )
+        }
+        // At p = 0 the traveler sits exactly on the source badge
+        // (no frame-0 pop); at p = 1 exactly on the target slot.
+        val atZero = windowMapped(0f)
+        assertEquals(sourceBadge.left, atZero.left, 0.01f)
+        assertEquals(sourceBadge.top, atZero.top, 0.01f)
+        assertEquals(sourceBadge.right, atZero.right, 0.01f)
+        assertEquals(sourceBadge.bottom, atZero.bottom, 0.01f)
+        val atOne = windowMapped(1f)
+        assertEquals(targetBadge.left, atOne.left, 0.01f)
+        assertEquals(targetBadge.top, atOne.top, 0.01f)
+        assertEquals(targetBadge.right, atOne.right, 0.01f)
+        assertEquals(targetBadge.bottom, atOne.bottom, 0.01f)
+        // Mid-flight the blend has converged (k = 1 past 0.3),
+        // so the window rect is the surface's header-slot path
+        // with the LINEAR badge size — never the linear path
+        // (80, 1030) and never squashed by the surface scale.
+        val mid = windowMapped(0.5f)
+        val rect = lerpRect(source, target, 0.5f)
+        val slotLeft = rect.left + (targetBadge.left - target.left) * (rect.width / target.width)
+        val slotTop = rect.top + (targetBadge.top - target.top) * (rect.height / target.height)
+        assertEquals(slotLeft, mid.left, 0.01f)
+        assertEquals(slotTop, mid.top, 0.01f)
+        assertEquals(48f, mid.width, 0.01f)
+        assertEquals(48f, mid.height, 0.01f)
     }
 
     // Feedback round 2, item 6: popup side-anchoring buckets the

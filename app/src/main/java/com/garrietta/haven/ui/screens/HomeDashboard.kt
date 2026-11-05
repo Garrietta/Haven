@@ -70,6 +70,7 @@ import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.attachDeviceInfo
 import com.garrietta.haven.data.semanticStateFor
 import com.garrietta.haven.data.semanticVisual
+import com.garrietta.haven.ui.components.LocalModalActive
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailPopupTitleHeader
@@ -319,19 +320,26 @@ fun FavoritesSection(
         // Visual-fidelity round §2: the Manage TEXT button is
         // replaced by the mockup's circular pencil button (40dp
         // surfaceContainerHigh circle, Outlined Edit icon) opening
-        // the same sheet.
-        Box(
-            Modifier.size(40.dp).clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .clickable { managing = true },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Outlined.Edit,
-                contentDescription = "Manage favorites",
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(20.dp),
-            )
+        // the same sheet. Feedback round 17, item 6: the pencil
+        // HIDES while any modal is open — the old always-visible
+        // pencil sat right next to a popup's own header pencil
+        // under the scrim (the 2026-11-04 overlap), and the scrim
+        // already blocks its taps, so nothing is lost. The title
+        // carries weight(1f), so hiding causes no reflow.
+        if (!LocalModalActive.current) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .clickable { managing = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.Edit,
+                    contentDescription = "Manage favorites",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
     Spacer(Modifier.height(8.dp))
@@ -359,7 +367,7 @@ fun FavoritesSection(
         }
         val standard = resolved - wideMedia.toSet()
         for ((wideIndex, media) in wideMedia.withIndex()) {
-            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex)
+            HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, navigate = navigate)
             Spacer(Modifier.height(spacing))
         }
         for ((rowIdx, row) in standard.chunked(columns).withIndex()) {

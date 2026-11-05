@@ -103,6 +103,16 @@ val LocalReduceMotion = compositionLocalOf { false }
  */
 val LocalWideLayout = compositionLocalOf { false }
 
+/**
+ * Feedback round 17, item 6: true while any modal overlay is open
+ * (sheet, detail, panel-detail, or popout). Provided by HavenApp
+ * from its modal state; dashboard chrome reads it to suppress
+ * competing affordances underneath a modal — the Favorites edit
+ * pencil hides while a popup is open, so no two pencils are ever
+ * visible at once. Default false (no modal).
+ */
+val LocalModalActive = compositionLocalOf { false }
+
 /** Stable per-entity accent color, hashed from the entity id (same idea as Relay's palettes).
  * Not a scheme role: an identity palette — each entity keeps its accent across launches. */
 private val ACCENTS = listOf(
@@ -445,6 +455,62 @@ fun badgeColors(
             // on branch is byte-identical to the old else branch.
             else scheme.surfaceContainerHighest to scheme.onSurfaceVariant
         else -> accent.copy(alpha = 0.22f) to accent
+    }
+}
+
+/**
+ * Feedback round 17, item 1: the domain-matrix card colors for
+ * badge purposes, with the dashboard tile's temperature/humidity
+ * bypass — temp/humidity sensors keep their coral/sky badge
+ * pipeline ([badgeColors]) instead of a matrix row, exactly as
+ * HomeRoomCard computes its own cardColors. Every badge pair
+ * below resolves through this, so tiles, travelers, and headers
+ * can never disagree about the matrix row.
+ */
+fun badgeCardColors(entity: HaEntity, isDark: Boolean): com.garrietta.haven.data.DomainCardColors? {
+    if (entity.domain == "sensor") {
+        val kind = sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName)
+        if (kind == SensorKind.TEMPERATURE || kind == SensorKind.HUMIDITY) return null
+    }
+    return com.garrietta.haven.data.domainCardColors(entity, isDark)
+}
+
+/**
+ * Feedback round 17, item 1: the dashboard tile's EXACT badge
+ * pair, as one shared resolution for tiles, traveling badges,
+ * and destination headers. This is HomeRoomCard's four-branch
+ * rule, factored out: a preset active for the state wins
+ * ([presetBadgeColors]); a preset set but inactive renders the
+ * matrix INACTIVE gray pair (never the custom on-color, never
+ * the hash accent); otherwise the domain-matrix pair
+ * ([badgeCardColors]); otherwise the semantic fallback
+ * ([badgeColors], hash accent). Before this round the traveler
+ * and headers resolved only through [detailBadgeOverride]
+ * (preset-gated, null otherwise), so a preset-less entity showed
+ * its matrix color on the tile and the hash accent in flight —
+ * the eufy AE C10 tile's muted green became bright yellow
+ * mid-morph (2026-11-04 folded run). Resolving every badge
+ * through this function makes that divergence impossible: the
+ * traveler and the destination header carry the tile's pair, so
+ * neither the flight nor the 2% handoff can change color.
+ * Pure, unit-tested (Round17LogicTest).
+ */
+fun tileBadgePair(
+    presets: Map<String, String>,
+    domainPresets: Map<String, String>,
+    entity: HaEntity,
+    isDark: Boolean,
+    scheme: androidx.compose.material3.ColorScheme,
+    accent: Color,
+): Pair<Color, Color> {
+    val preset = com.garrietta.haven.data.tilePresetFor(presets, entity.entityId, domainPresets, entity.domain)
+    val presetActive = preset != null && com.garrietta.haven.data.presetAppliesForState(entity.domain, entity.state)
+    val cardColors = badgeCardColors(entity, isDark)
+    return when {
+        presetActive -> com.garrietta.haven.data.presetBadgeColors(preset, isDark)
+        preset != null -> com.garrietta.haven.data.inactiveCardColors(isDark).let { it.badgeBg to it.badgeGlyph }
+        cardColors != null -> cardColors.badgeBg to cardColors.badgeGlyph
+        else -> badgeColors(scheme, entity, accent)
     }
 }
 

@@ -57,6 +57,7 @@ import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
+import com.garrietta.haven.data.VACUUM_ID
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalShapePrefs
@@ -223,6 +224,15 @@ private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -
         // Event History toggle) as the Home hero — not the legacy
         // fullscreen viewer. Every other camera keeps fullscreen.
         "camera" -> if (entity.entityId == FRONT_DOOR_LIVE_VIEW_ID) vm.openCameraDialog(entity.entityId) else vm.openCameraFullscreen(entity.entityId)
+        // Feedback round 17, item 2: the eufy vacuum opens its
+        // full panel on tap like every other domain — the old
+        // fallthrough sent it to the settings sheet (the
+        // 2026-11-04 inconsistency). Other vacuums keep the
+        // generic detail page; the openPopup fallback stays for
+        // Boards cards, which have no navigator (removing it
+        // would make Boards taps do nothing).
+        "vacuum" -> if (entity.entityId == VACUUM_ID && navigate != null) navigate(Screen.VacuumPanel)
+            else if (navigate != null) navigate(Screen.EntityDetail(entity.entityId)) else vm.openPopup(entity.entityId)
         else -> if (navigate != null) navigate(Screen.EntityDetail(entity.entityId)) else vm.openPopup(entity.entityId)
     }
 }

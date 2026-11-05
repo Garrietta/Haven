@@ -16,6 +16,20 @@ package com.garrietta.haven.data
  */
 data class HaDeviceInfo(val name: String, val model: String?, val manufacturer: String?)
 
+/**
+ * Feedback round 17, item 4: a device subtitle is only shown
+ * when it is a real name. HA carries the literal STRING "null"
+ * in registry name fields (same class as the device_id "null"
+ * case guarded below and in HaClient), and the picker rendered
+ * it verbatim under entity names on the 2026-11-04 runs. Null,
+ * blank, and literal-"null" all collapse to null so the picker
+ * omits the subtitle line entirely. Pure, unit-tested.
+ */
+fun cleanDeviceName(name: String?): String? {
+    if (name.isNullOrBlank() || name.equals("null", ignoreCase = true)) return null
+    return name
+}
+
 data class DeviceGroup(val deviceId: String, val info: HaDeviceInfo?, val entityIds: List<String>)
 
 /** Group live entities by their registry device id. Entities with no device id are dropped (they are entity-only rows). */

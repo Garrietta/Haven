@@ -2,6 +2,7 @@ package com.garrietta.haven.ui.controls
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -92,11 +93,23 @@ fun GarageDoorVisual(
             Spacer(Modifier.fillMaxWidth().height(frameHeight))
         }
         // Frame outline, drawn over the sliding content.
+        // Feedback round 17, item 2: the frame is REAL now —
+        // the old stub was an empty transparent Box, so at
+        // openFraction 1f the risen door left only the flat
+        // container background (the 2026-11-04 "empty dark blue
+        // box"). The 2dp outline and the top header track stay
+        // visible at every open fraction, so the control never
+        // renders as an empty box when open.
         Box(
             Modifier.fillMaxWidth().height(frameHeight)
-                .background(Color.Transparent),
-            contentAlignment = Alignment.BottomCenter,
-        ) {}
+                .border(2.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Box(
+                Modifier.fillMaxWidth().height(10.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(5.dp)),
+            )
+        }
     }
 }
 

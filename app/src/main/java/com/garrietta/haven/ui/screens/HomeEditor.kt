@@ -293,6 +293,15 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
                         val area = areas.firstOrNull { it.id == areaId } ?: continue
                         val key = "room:${area.id}"
                         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp)) {
+                            // Feedback round 17, item 4: the room
+                            // title above the field, so the row is
+                            // labeled even when the field is empty
+                            // and unfocused (the 2026-11-04 runs
+                            // showed bare "Display name" fields
+                            // with no room identity); the label
+                            // carries the room name too.
+                            Text(area.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 OutlinedTextField(
                                     value = displayNames[area.id] ?: "",
@@ -301,7 +310,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
                                         displayNames = vm.settingsStore.roomDisplayNames()
                                         vm.bumpHomePrefs()
                                     },
-                                    label = { Text("Display name") },
+                                    label = { Text("Display name (${area.name})") },
                                     placeholder = { Text(area.name) },
                                     singleLine = true,
                                     modifier = Modifier.weight(1f),
