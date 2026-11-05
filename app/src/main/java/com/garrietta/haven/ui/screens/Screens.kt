@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -113,6 +114,7 @@ import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.data.CardSize
 import com.garrietta.haven.data.tallCardHeightDp
+import com.garrietta.haven.data.tallPairHeightDp
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.UserTab
 import com.garrietta.haven.data.groupEntitiesByRoom
@@ -147,6 +149,8 @@ import com.garrietta.haven.ui.components.KodaMenuRow
 import com.garrietta.haven.ui.components.KodaMenuSection
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.theme.ExpressiveKind
+import com.garrietta.haven.ui.theme.springSpatial
+import androidx.compose.animation.animateContentSize
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.DiscoverySource
@@ -165,6 +169,7 @@ import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.reorderDrag
 import com.garrietta.haven.ui.components.resizePreviewScale
 import com.garrietta.haven.ui.components.resizeSettle
+import com.garrietta.haven.ui.components.slotSpringOffset
 import com.garrietta.haven.ui.components.weatherConditionColorThemed
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.legibleSecondaryOn
@@ -399,7 +404,7 @@ fun TodayScreen(
     homeLeftScrollState: ScrollState,
     homeRightScrollState: ScrollState,
     navigate: (Screen) -> Unit,
-    onSignInExpired: () -> Unit,
+    onReconnectTap: () -> Unit,
 ) {
     val states by vm.states.collectAsState()
     val connection by vm.connection.collectAsState()
@@ -478,7 +483,7 @@ fun TodayScreen(
     // LazyColumn and the unfolded scrolling Column.
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
+            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap)
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
@@ -644,8 +649,10 @@ fun TodayScreen(
         // circular pencil button, then the enabled Home sections
         // below in stored order. Each pane scrolls independently;
         // neither pane can strand an empty column (the left always
-        // has greeting/chips; the right has Favorites + sections
-        // on My Home, room grids on room views — round 18, item 1).
+        // has greeting/chips/cameras/status — round 25, item 5 keeps
+        // cameras + status there on room views too; the right has
+        // Favorites + sections on My Home, room grids on room views
+        // — round 18, item 1).
         // The room filter lives hoisted above both panes, so it
         // survives fold/unfold.
         Row(
@@ -654,10 +661,18 @@ fun TodayScreen(
             Column(
                 Modifier.weight(0.42f).verticalScroll(homeLeftScrollState),
             ) {
-                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
+                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap)
                 RoomFilterChips(roomChips)
                 Spacer(Modifier.height(12.dp))
-                if (showSection("cameras") && !isRoomView) CameraQuadrantHero(vm, navigate, states)
+                // Round 25, item 5 (scoped exception to round 18,
+                // item 1): on unfolded, Cameras + Home Status stay
+                // in the left pane on room views too — the left side
+                // never turns into an empty void when switching room
+                // chips. Only the right pane switches (Favorites +
+                // overview on My Home, the room's grid on room
+                // views); the other overview blocks still hide on
+                // room views, as before.
+                if (showSection("cameras")) CameraQuadrantHero(vm, navigate, states)
                 Spacer(Modifier.height(16.dp))
                 // Customization round, item 9: Home Status lives in
                 // the LEFT pane directly below the cameras on
@@ -667,8 +682,8 @@ fun TodayScreen(
                 // never renders twice. Default order cameras ->
                 // status -> favorites already holds in
                 // HOME_SECTION_ORDER_DEFAULT and is unchanged.
-                // Round 18, item 1: both hide on room views.
-                if (showSection("status") && !isRoomView) HomeStatusSection(vm, states, navigate)
+                // Round 25, item 5: stays visible on room views.
+                if (showSection("status")) HomeStatusSection(vm, states, navigate)
             }
             Spacer(Modifier.width(16.dp))
             BoxWithConstraints(Modifier.weight(0.58f)) {
@@ -893,16 +908,31 @@ internal fun ArrangeableCardCell(
     onSizeChange: ((CardSize) -> Unit)?,
     onReorderMove: ((dxSteps: Int, dySteps: Int) -> Unit)?,
     modifier: Modifier = Modifier,
+    // Round 25, item 7: the card's display position — the slot
+    // spring keys off this, so a card animates into its new slot
+    // only when its position actually changes (scrolling never
+    // triggers it). Null = no slot animation.
+    slotKey: Any? = null,
     content: @Composable () -> Unit,
 ) {
     var preview by remember(entityId) { mutableStateOf<Offset?>(null) }
+    // Round 25, item 7: the drag state hoisted so the slot spring
+    // stays off while THIS card is the dragged one (its position
+    // is owned by the drag offset, not the slot animation).
+    var dragging by remember(entityId) { mutableStateOf(false) }
     val (previewScaleX, previewScaleY) = resizePreviewScale(size, preview)
     Box(
         modifier
             .resizeSettle()
-            .reorderDrag(arrangeMode && onReorderMove != null, rowHeightPx, onMove = { dx, dy ->
-                onReorderMove?.invoke(dx, dy)
-            })
+            .slotSpringOffset(slotKey, !dragging)
+            .reorderDrag(
+                arrangeMode && onReorderMove != null,
+                rowHeightPx,
+                onDragStateChange = { dragging = it },
+                onMove = { dx, dy ->
+                    onReorderMove?.invoke(dx, dy)
+                },
+            )
             .graphicsLayer {
                 scaleX = previewScaleX
                 scaleY = previewScaleY
@@ -1026,6 +1056,7 @@ private fun RoomSectionGrid(
                     // only vertical steps move it (one slot each).
                     { _, dy -> vm.moveRoomEntity(areaId, displayOrderIds, media.entityId, dy) },
                     Modifier.fillMaxWidth(),
+                slotKey = displayOrderIds.indexOf(media.entityId),
                 ) {
                     HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, cardSize = vm.cardSize(scope, media.entityId), arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
                 }
@@ -1061,6 +1092,7 @@ private fun RoomSectionGrid(
                         // it (one slot each).
                         { _, dy -> vm.moveRoomEntity(areaId, displayOrderIds, member.entityId, dy) },
                         Modifier.fillMaxWidth(),
+                    slotKey = displayOrderIds.indexOf(member.entityId),
                     ) {
                         HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, cardSize = CardSize.WIDE, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                     }
@@ -1087,7 +1119,13 @@ private fun RoomSectionGrid(
                     i++
                     flatIdx++
                 }
-                Row {
+                // Round 25, item 6: the paired row is
+                // height(IntrinsicSize.Max) — the TALL card
+                // fills the row height and the stacked NORMALs
+                // space themselves, so the TALL card's top edge
+                // aligns with the first NORMAL's top and its
+                // bottom edge with the second NORMAL's bottom.
+                Row(Modifier.height(IntrinsicSize.Max)) {
                     key(tall.entityId) {
                         ArrangeableCardCell(
                             tall.entityId,
@@ -1099,13 +1137,14 @@ private fun RoomSectionGrid(
                             // stacked column (±1), vertical moves
                             // past the whole pair (±columns).
                             { dx, dy -> vm.moveRoomEntity(areaId, displayOrderIds, tall.entityId, dx + dy * columns) },
-                            Modifier.weight(1f),
+                            Modifier.weight(1f).fillMaxHeight().heightIn(min = tallPairHeightDp(spacing)),
+                        slotKey = displayOrderIds.indexOf(tall.entityId),
                         ) {
-                            HomeRoomCard(vm, tall.entityId, navigate, gridIndex = tallIdx, cardSize = CardSize.TALL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                            HomeRoomCard(vm, tall.entityId, navigate, gridIndex = tallIdx, cardSize = CardSize.TALL, modifier = Modifier.fillMaxSize(), tallHeight = tallPairHeightDp(spacing), arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                         }
                     }
                     Spacer(Modifier.width(spacing))
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing)) {
                         for ((stackIdx, member) in stacked.withIndex()) {
                             // Feedback round 22, item 4: keyed by
                             // entity id (see the wide-media loop).
@@ -1126,11 +1165,11 @@ private fun RoomSectionGrid(
                                         vm.moveRoomEntity(areaId, displayOrderIds, member.entityId, horizontal + dy)
                                     },
                                     Modifier.fillMaxWidth(),
+                                slotKey = displayOrderIds.indexOf(member.entityId),
                                 ) {
                                     HomeRoomCard(vm, member.entityId, navigate, gridIndex = stackedStart + stackIdx, cardSize = CardSize.NORMAL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                                 }
                             }
-                            if (member != stacked.last()) Spacer(Modifier.height(spacing))
                         }
                     }
                 }
@@ -1163,6 +1202,7 @@ private fun RoomSectionGrid(
                                 // (±columns).
                                 { dx, dy -> vm.moveRoomEntity(areaId, displayOrderIds, member.entityId, dx + dy * columns) },
                                 Modifier.weight(1f),
+                            slotKey = displayOrderIds.indexOf(member.entityId),
                             ) {
                                 HomeRoomCard(vm, member.entityId, navigate, gridIndex = rowStart + colIdx, cardSize = size, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                             }
@@ -1491,7 +1531,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
  * which beats this alternating default.
  */
 @Composable
-fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, modifier: Modifier = Modifier, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, cardSize: CardSize = CardSize.NORMAL, onOpenPanel: (() -> Unit)? = null) {
+fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, modifier: Modifier = Modifier, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, cardSize: CardSize = CardSize.NORMAL, tallHeight: Dp? = null, onOpenPanel: (() -> Unit)? = null) {
     // Entity-scoped state (§6): this card recomposes only when
     // its own entity changes. An entity that vanished from state
     // renders nothing (membership rebuilds without it).
@@ -1666,15 +1706,34 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         // reads better than cut text. The polygon path keeps its
         // round-2 spacer/padding shift (inscribed-circle clip).
         modifier = modifier.fillMaxWidth()
-            // Round 24, item 6: TALL is an exact 284dp height on
-            // the card itself (two 136dp rows + 12dp spacing).
-            // The old heightIn(min = 136.dp) after the caller's
+            // Round 24, item 6: TALL is 284dp on the card itself
+            // (two 136dp rows + 12dp spacing). The old
+            // heightIn(min = 136.dp) after the caller's
             // fillMaxSize() clobbered the max height, so the card
             // measured to content height (~136dp) inside a 272dp
             // wrapper Box that has no background — TALL "didn't
             // do anything" for any card. The wrapper Box no
             // longer carries a height (the card is the height).
-            .then(if (cardSize == CardSize.TALL) Modifier.height(tallCardHeightDp()) else Modifier.heightIn(min = 136.dp))
+            // Round 25, item 6: the TALL height is a FLOOR
+            // (heightIn), not an exact height — the paired-row
+            // caller passes tallHeight = 136*2 + spacing and
+            // fillMaxSize, so the card fills its cell exactly
+            // when the stacked neighbors grow past 284dp. The
+            // round-24 failure cannot recur: the floor IS the
+            // TALL height, so the card never measures to content
+            // height again.
+            .then(if (cardSize == CardSize.TALL) Modifier.heightIn(min = tallHeight ?: tallCardHeightDp()) else Modifier.heightIn(min = 136.dp))
+            // Round 25, item 7: the Surface animates its own size
+            // changes on the spatial spring — the clipping crop.
+            // Before this, only the wrapper Box animated (via
+            // resizeSettle) while the Surface snapped to its target
+            // size instantly: a growing card overflowed its cell
+            // mid-animation and the neighboring card painted over
+            // it, chopping the Ecobee text in half on Wide/Tall/
+            // Normal switches. Animating the Surface itself means
+            // the card never overflows its cell, so no text is
+            // ever clipped mid-drag.
+            .animateContentSize(springSpatial())
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, cardOutline)
             .reportCardColor(entity.entityId, container)
@@ -1954,7 +2013,7 @@ private fun GreetingBlock(
     connection: ConnectionState,
     showGreeting: Boolean,
     hasCachedContent: Boolean,
-    onSignInExpired: (() -> Unit)?,
+    onReconnectTap: (() -> Unit)?,
 ) {
     if (showGreeting) {
         Spacer(Modifier.height(16.dp))
@@ -1999,14 +2058,18 @@ private fun GreetingBlock(
                     )
                 }
             } else {
+                // Round 25, item 1: the tap reconnects in place
+                // (vm.reconnectNow — refresh + reconnect, tokens
+                // untouched). It NEVER signs out; signOut lives only
+                // on the Settings screen's explicit button.
                 Text(
-                    "Sign-in expired — tap to sign in again",
+                    "Sign-in expired — tap to reconnect",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp,
-                    modifier = if (onSignInExpired != null) Modifier.clickable(
+                    modifier = if (onReconnectTap != null) Modifier.clickable(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null,
-                    ) { onSignInExpired() } else Modifier,
+                    ) { onReconnectTap() } else Modifier,
                 )
             }
             else -> Text(

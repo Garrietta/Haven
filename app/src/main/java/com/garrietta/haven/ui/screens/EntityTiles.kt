@@ -209,23 +209,20 @@ fun TabTileGrid(
     // @Composable context, so a remember inside it does not
     // compile.
     val fixedIndexById = remember(cards) { tabTileGridIndices(cards) }
-    // Round 24, item 6: the column count for the reorder drag's
-    // vertical step (one full row) mirrors the Adaptive grid's
-    // minSize below, and the row height is one 136dp card plus
-    // the 12dp vertical spacing.
+    // Round 25, item 5: NORMAL cards lock to a 2-column grid on
+    // folded AND unfolded panes (GridCells.Fixed(2) below), so a
+    // single NORMAL card on the Climate tab occupies one column
+    // instead of stretching across the whole screen like a WIDE
+    // card. This supersedes the round-6 Adaptive rule (220dp wide
+    // / 160dp folded), which let one card take the full row, and
+    // the round-24 note below it. The reorder drag's vertical step
+    // is one full 2-column row, and the row height is one 136dp
+    // card plus the 12dp vertical spacing.
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val columns = if (LocalWideLayout.current) {
-            maxOf(1, (maxWidth / 220.dp).toInt())
-        } else {
-            maxOf(1, (maxWidth / 160.dp).toInt())
-        }
+        val columns = 2
         val rowHeightPx = with(LocalDensity.current) { (136.dp + 12.dp).toPx() }
     LazyVerticalGrid(
-        // Round 6: wide layouts flow at 220dp minimum tiles, so
-        // domain tabs (Thermostat/Cameras/Garage) spread across the
-        // full inner-fold width instead of jamming into a narrow
-        // 2-column strip with a stranded single tile.
-        columns = if (LocalWideLayout.current) GridCells.Adaptive(minSize = 220.dp) else GridCells.Adaptive(minSize = 160.dp),
+        columns = GridCells.Fixed(2),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 16.dp),
@@ -292,7 +289,15 @@ fun TabTileGrid(
                                     val steps = if (fullSpan) dy else dx + dy * columns
                                     onReorderMove?.invoke(cardIndex, (cardIndex + steps).coerceIn(cards.indices))
                                 },
+                                // Round 25, item 7: the lazy grid
+                                // animates reorders with the same
+                                // slot spring as the manual grids
+                                // (slot key = the card's index in
+                                // `cards`). animateItemPlacement
+                                // does not exist in this Compose
+                                // version (1.8.2).
                                 Modifier.fillMaxWidth(),
+                                slotKey = cardIndex,
                             ) {
                                 if (isWideMedia) {
                                     HomeRoomMediaCard(

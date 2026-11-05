@@ -125,3 +125,46 @@ fun resolveMorphSource(captured: Rect?, live: Rect?): Rect? = captured ?: live
  */
 fun shouldAutoPinNewTab(pinnedCount: Int, maxPinned: Int = 2): Boolean =
     pinnedCount < maxPinned
+
+/**
+ * Round 25, item 1: the alternate URL for the current connection
+ * target — the other side of the local/cloud pair. AUTO on Wi-Fi
+ * targets local, so its alternate is cloud (and vice versa off
+ * Wi-Fi); LOCAL's alternate is cloud, CLOUD's is local. When the
+ * alternate side is unset the current target is returned (there is
+ * nothing to fall back to, and the caller must not switch to null);
+ * when neither side is set the result is null.
+ */
+fun alternateConnectionTarget(
+    mode: ConnectionMode,
+    localUrl: String?,
+    cloudUrl: String?,
+    wifiConnected: Boolean,
+): String? {
+    val current = resolveConnectionTarget(mode, localUrl, cloudUrl, wifiConnected)
+    val other = when (current) {
+        localUrl -> cloudUrl
+        cloudUrl -> localUrl
+        // The current target came from a fallback (its own side was
+        // unset), so the "other side" is the side the mode prefers.
+        else -> if (wifiConnected) cloudUrl else localUrl
+    }
+    return other ?: current
+}
+
+/**
+ * Round 25, item 1: the auth-retry loop gives up after this many
+ * failed refresh attempts (~5 minutes of backoff) and only then
+ * surfaces "Your session expired. Please sign in again." A manual
+ * reconnect tap restarts the loop from attempt 0.
+ */
+const val MAX_AUTH_RETRIES = 8
+
+/**
+ * Round 25, item 1: backoff between auth-retry attempts — 2s, 5s,
+ * 10s, 30s, then 60s for every later attempt — so a transient
+ * drop retries quickly at first and never hammers the instance
+ * while it is down. Pure, unit-tested.
+ */
+fun authRetryDelayMs(attempt: Int): Long =
+    longArrayOf(2_000L, 5_000L, 10_000L, 30_000L, 60_000L)[attempt.coerceIn(0, 4)]

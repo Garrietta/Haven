@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.data.CardSize
 import com.garrietta.haven.data.snapCardSize
-import com.garrietta.haven.ui.theme.settleSpring
+import com.garrietta.haven.ui.theme.springSpatial
 import androidx.compose.animation.animateContentSize
 
 /**
@@ -144,5 +144,5 @@ fun resizePreviewScale(current: CardSize, drag: Offset?): Pair<Float, Float> {
     return if (pending == CardSize.WIDE) stretch to 1f else 1f to stretch
 }
 
-/** animateContentSize with the resize settle, for card wrappers. */
-fun Modifier.resizeSettle(): Modifier = animateContentSize(settleSpring())
+/** Round 25, item 7: animateContentSize with the spatial spring, for card wrappers. */
+fun Modifier.resizeSettle(): Modifier = animateContentSize(springSpatial())

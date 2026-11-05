@@ -30,6 +30,17 @@ enum class CardSize { NORMAL, WIDE, TALL }
  */
 fun tallCardHeightDp(): androidx.compose.ui.unit.Dp = 284.dp
 
+/**
+ * Round 25, item 6: the TALL height for a paired row, spacing-
+ * aware — 136dp * 2 + the grid's spacing. With the folded 12dp
+ * spacing this is 284dp (== [tallCardHeightDp]); with the
+ * unfolded right pane's 14dp spacing it is 286dp, so the TALL
+ * card's edges align exactly with its two stacked NORMAL
+ * neighbors (136 + 14 + 136). Pure, unit-tested.
+ */
+fun tallPairHeightDp(spacing: androidx.compose.ui.unit.Dp): androidx.compose.ui.unit.Dp =
+    136.dp * 2 + spacing
+
 /** Persistence key for one card placement: page scope + entity id. */
 fun cardSizeKey(scope: String, entityId: String): String = "$scope:$entityId"
 

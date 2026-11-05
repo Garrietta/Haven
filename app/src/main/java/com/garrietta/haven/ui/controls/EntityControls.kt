@@ -14,6 +14,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -320,6 +321,10 @@ fun PressablePillButton(
     // transports and D-pads pass the squircle for the big central
     // button + flanking-button language of the reference player.
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(50),
+    // Round 25, item 4: an optional 1dp outline around the pill
+    // (the thermostat steppers use it so the fill reads against the
+    // popup background at rest). Null = no outline, as before.
+    borderColor: Color? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -348,6 +353,7 @@ fun PressablePillButton(
             .graphicsLayer(scaleX = scale, scaleY = scale)
             .clip(shape)
             .background(containerColor)
+            .then(if (borderColor != null) Modifier.border(1.dp, borderColor, shape) else Modifier)
             .clickable(interactionSource = interactionSource, indication = LocalIndication.current, enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -378,6 +384,10 @@ fun ExpressiveStepper(
     // byte-identical (tile steppers pass nothing).
     containerColor: androidx.compose.ui.graphics.Color? = null,
     contentColor: androidx.compose.ui.graphics.Color? = null,
+    // Round 25, item 4: an optional 1dp outline so the fill reads
+    // against the popup background at rest (the thermostat popout
+    // passes outlineVariant). Null = no outline, as before.
+    outlineColor: androidx.compose.ui.graphics.Color? = null,
 ) {
     PressablePillButton(
         onClick = onClick,
@@ -385,6 +395,7 @@ fun ExpressiveStepper(
         height = height,
         containerColor = containerColor ?: MaterialTheme.colorScheme.secondaryContainer,
         contentColor = contentColor ?: MaterialTheme.colorScheme.onSecondaryContainer,
+        borderColor = outlineColor,
     ) {
         Text(
             symbol,

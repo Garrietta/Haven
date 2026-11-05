@@ -2136,7 +2136,7 @@ private fun ScreenContent(
     onSignOut: () -> Unit,
 ) {
     when (screen) {
-        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onSignInExpired = onSignOut)
+        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() })
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)
@@ -2158,7 +2158,7 @@ private fun ScreenContent(
         Screen.Energy -> EnergyScreen(vm)
         Screen.RoomsTabs -> RoomsTabsScreen(vm, goBack, navigate)
         Screen.HomeEditor -> HomeEditorScreen(vm, goBack, navigate)
-        is Screen.RoomTab -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onSignInExpired = onSignOut)
+        is Screen.RoomTab -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() })
         // Detail pages replaced the old generic detail screen: per-domain
         // pages (climate still routes to its thermostat page inside).
         is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack, navigate)

@@ -42,7 +42,12 @@ import com.garrietta.haven.data.TokenStore
 import com.garrietta.haven.data.connectionLabel
 import com.garrietta.haven.data.connectionModeFromKey
 import com.garrietta.haven.data.isLocalAddress
+import com.garrietta.haven.data.alternateConnectionTarget
+import com.garrietta.haven.data.authRetryDelayMs
+import com.garrietta.haven.data.MAX_AUTH_RETRIES
+import com.garrietta.haven.data.parseStateCache
 import com.garrietta.haven.data.resolveConnectionTarget
+import com.garrietta.haven.data.serializeStateCache
 import com.garrietta.haven.data.shouldAutoPinNewTab
 import com.garrietta.haven.data.HavenNotificationManager
 import com.garrietta.haven.data.Placement
@@ -64,6 +69,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -828,6 +835,55 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Round 25, item 2: loads the cold-start state cache
+     * (filesDir/haven_state_cache.json) into the client's flows
+     * synchronously, before first composition. Best effort — a
+     * missing or corrupt file means "no cache", never a crash.
+     * Called from init right after loadDiskSnapshots().
+     */
+    private fun loadStateCache() {
+        try {
+            val file = java.io.File(getApplication<Application>().filesDir, "haven_state_cache.json")
+            if (!file.isFile) return
+            val data = parseStateCache(file.readText()) ?: return
+            client.restoreCachedStates(data.states, data.areas, data.entityAreas)
+        } catch (_: Exception) {
+            // Disk cache is best effort; never block startup.
+        }
+    }
+
+    /** Last state-cache write, for the 10s persist throttle below. */
+    private var lastStateCachePersistMs: Long = 0L
+
+    /**
+     * Round 25, item 2: persists the latest states + areas +
+     * entityAreas to haven_state_cache.json, throttled to at most
+     * one write per 10 seconds (state_changed events arrive far
+     * more often than the cache needs to move). Skips empty
+     * states — a blank write would poison the next cold start.
+     * Runs on Dispatchers.IO; best effort, never fatal.
+     */
+    private fun persistStateCacheThrottled(
+        states: Map<String, com.garrietta.haven.data.HaEntity>,
+        areas: List<com.garrietta.haven.data.HaArea>,
+        entityAreas: Map<String, String>,
+    ) {
+        if (states.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (now - lastStateCachePersistMs < 10_000L) return
+        lastStateCachePersistMs = now
+        val text = serializeStateCache(states, areas, entityAreas)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = java.io.File(getApplication<Application>().filesDir, "haven_state_cache.json")
+                file.writeText(text)
+            } catch (_: Exception) {
+                // Disk cache is best effort.
+            }
+        }
+    }
+
     private fun persistSnapshot(entityId: String, bitmap: android.graphics.Bitmap) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -915,6 +971,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         // load them before any composition runs (2026-11-01 polish
         // round). Best effort — see loadDiskSnapshots.
         loadDiskSnapshots()
+        // Round 25, item 2: the state cache loads alongside the
+        // snapshots, before first composition — TodayScreen,
+        // heroCameras, and the camera quadrants paint cached data
+        // on frame 0, and the socket updates silently behind.
+        loadStateCache()
+        // Round 25, item 2: persist the cache whenever the flows
+        // move (the throttle inside keeps it to one write per 10s).
+        viewModelScope.launch {
+            combine(client.states, client.areas, client.entityAreas) { s, a, ea -> Triple(s, a, ea) }
+                .collect { (s, a, ea) -> persistStateCacheThrottled(s, a, ea) }
+        }
         // Dashboard choice must be wired before autoConnect: connect ->
         // auth_ok -> refreshLovelace reads the preference on its first run.
         client.preferredLovelacePath = settingsStore.selectedDashboardPath
@@ -949,6 +1016,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         client.stateChangedListener = { event ->
             notificationManager.onStateChanged(event, wasLocallyActuated(event.entityId))
         }
+        // Round 25, item 1: auth rejections and transport drops
+        // retry through the ViewModel — never sign out, never clear
+        // tokens. Wired before autoConnect so no early failure is
+        // missed.
+        client.onAuthInvalid = { startAuthRetryLoop() }
+        client.onTransportFailure = { handleTransportFailure() }
         autoConnect()
     }
 
@@ -1431,22 +1504,123 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun refreshAndConnect(url: String) {
-        viewModelScope.launch {
-            val ok = exchangeToken(
-                url,
-                FormBody.Builder()
-                    .add("grant_type", "refresh_token")
-                    .add("refresh_token", tokenStore.refreshToken ?: "")
-                    .add("client_id", OAUTH_CLIENT_ID)
-                    .build(),
-            )
-            if (ok) {
-                client.connect(url, tokenStore.accessToken!!)
-            } else {
-                // Refresh failed; fall back to asking for sign-in again.
+    /**
+     * Round 25, item 1: the auth-retry loop's job handle. Only one
+     * loop runs at a time — starting a new one (manual tap, fresh
+     * auth_invalid) cancels the old. signOut() cancels it too, so a
+     * retry can never reconnect after an explicit sign-out.
+     */
+    private var authRetryJob: Job? = null
+
+    /** Round 25, item 1: last AUTO fallback switch, for the 30s cooldown. */
+    private var lastFallbackAtMs: Long = 0L
+
+    /**
+     * Round 25, item 1: manual reconnect — the connection status
+     * line under the greeting calls this, never signOut(). Attempts
+     * a token refresh + reconnect immediately, without clearing
+     * tokenStore; a transient failure keeps retrying with backoff
+     * in the background (see [authRetryLoop]).
+     */
+    fun reconnectNow() {
+        startAuthRetryLoop()
+    }
+
+    private fun startAuthRetryLoop() {
+        authRetryJob?.cancel()
+        authRetryJob = viewModelScope.launch { authRetryLoop() }
+    }
+
+    /**
+     * Round 25, item 1: refresh + reconnect with backoff. Tries
+     * the current target first; in AUTO, tries the alternate URL
+     * before waiting. After MAX_AUTH_RETRIES failed attempts the
+     * refresh token is presumed dead and the app surfaces "Your
+     * session expired. Please sign in again." — the only path that
+     * asks for a fresh sign-in, and only after ~5 minutes of
+     * retries. Cancelled by signOut() and by a successful connect.
+     * With no refresh token stored at all (long-lived-token
+     * login), there is nothing to retry — it gives up immediately.
+     */
+    private suspend fun authRetryLoop() {
+        if (tokenStore.refreshToken == null) {
+            isAuthenticated = false
+            authError = "Your session expired. Please sign in again."
+            return
+        }
+        var attempt = 0
+        while (true) {
+            val target = connectionTarget() ?: tokenStore.instanceUrl ?: return
+            if (tryRefresh(target)) {
+                client.connect(target, tokenStore.accessToken!!)
+                return
+            }
+            if (connectionMode == ConnectionMode.AUTO) {
+                val alt = alternateConnectionTarget()
+                if (alt != null && alt != target && tryRefresh(alt)) {
+                    lastAutoTarget = alt
+                    client.connect(alt, tokenStore.accessToken!!)
+                    return
+                }
+            }
+            attempt++
+            if (attempt >= MAX_AUTH_RETRIES) {
                 isAuthenticated = false
                 authError = "Your session expired. Please sign in again."
+                return
+            }
+            delay(authRetryDelayMs(attempt - 1))
+        }
+    }
+
+    /** Round 25, item 1: one refresh-token exchange against [url]. False when no refresh token is stored. */
+    private suspend fun tryRefresh(url: String): Boolean {
+        val refresh = tokenStore.refreshToken ?: return false
+        return exchangeToken(
+            url,
+            FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("refresh_token", refresh)
+                .add("client_id", OAUTH_CLIENT_ID)
+                .build(),
+        )
+    }
+
+    /** Round 25, item 1: the alternate URL for the current target (pure helper in Round16Logic). */
+    private fun alternateConnectionTarget(): String? = alternateConnectionTarget(
+        connectionMode, connectionLocalUrl, connectionCloudUrl, isWifiConnected(),
+    )
+
+    /**
+     * Round 25, item 1: the socket dropped on the current URL.
+     * In AUTO, switch to the alternate URL immediately (the same
+     * token works through both) — at most once per 30 seconds, so
+     * a flapping link cannot ping-pong between URLs. In
+     * LOCAL/CLOUD the client's own same-URL backoff handles the
+     * retry.
+     */
+    private fun handleTransportFailure() {
+        if (connectionMode != ConnectionMode.AUTO) return
+        val alt = alternateConnectionTarget() ?: return
+        val current = connectionTarget() ?: return
+        if (alt == current) return
+        val now = System.currentTimeMillis()
+        if (now - lastFallbackAtMs < 30_000L) return
+        lastFallbackAtMs = now
+        lastAutoTarget = alt
+        val token = tokenStore.accessToken ?: return
+        client.connect(alt, token)
+    }
+
+    private fun refreshAndConnect(url: String) {
+        viewModelScope.launch {
+            if (tryRefresh(url)) {
+                client.connect(url, tokenStore.accessToken!!)
+            } else {
+                // Refresh failed; retry with backoff (+ the
+                // alternate URL in AUTO) instead of stranding the
+                // app in "Sign-in expired" — see authRetryLoop.
+                startAuthRetryLoop()
             }
         }
     }
@@ -1472,6 +1646,11 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOut() {
+        // Round 25, item 1: the auth-retry loop must never
+        // reconnect after an explicit sign-out — cancel it first.
+        // signOut stays strictly on the Settings button; nothing
+        // else in the app calls it.
+        authRetryJob?.cancel()
         client.disconnect()
         tokenStore.clear()
         isAuthenticated = false

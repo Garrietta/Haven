@@ -877,6 +877,16 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen)
     val vacuumPanelCustom = rememberCardCustom(vm)
     val vacuumPanelAccent = detailPageAccent(vacuumPanelCustom.tilePresets, vacuum, isDarkBackdrop(MaterialTheme.colorScheme.background), vacuumPanelCustom.domainTilePresets)
     val vacuumPanelPillContent = if (vacuumPanelAccent != null) MaterialTheme.colorScheme.onSurface else null
+    // Round 25, item 3: all 7 hero buttons get a distinct
+    // contrasting fill at rest. Measured, not guessed: the
+    // secondaryContainer default is ~1.0:1 against the popup's
+    // surfaceContainerHigh in BOTH themes (light 0xFFDCE5D0 vs
+    // 0xFFDDE5D0; dark 0xFF2A352A vs 0xFF2B2B2B) — the buttons
+    // blended into the popup until pressed. primaryContainer
+    // (tonal green, like the Garage Door buttons) reads clearly
+    // in both themes; a set tile preset still wins, as before.
+    val vacuumHeroFill = vacuumPanelAccent ?: MaterialTheme.colorScheme.primaryContainer
+    val vacuumHeroContent = vacuumPanelPillContent ?: MaterialTheme.colorScheme.onPrimaryContainer
     // Lidar map: the map camera's latest snapshot, cache-first like
     // the camera hero — a snapshot, never claimed as a live render.
     LaunchedEffect(VACUUM_MAP_CAMERA_ID) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
@@ -942,7 +952,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen)
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
                         PanelBodyText("Map snapshot not available yet.")
                         Spacer(Modifier.height(8.dp))
-                        PillAction("Refresh map", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
+                        PillAction("Refresh map", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
                     }
                 }
             }
@@ -950,34 +960,27 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen)
                 Modifier.weight(0.52f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                PillAction("Start", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
-                PillAction("Pause", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
-                PillAction("Return to Base", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
+                PillAction("Start", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
+                PillAction("Pause", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
+                PillAction("Return to Base", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SquircleAction("Empty Dust Bin", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
-                    SquircleAction("Wash Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_WASH_MOP_BUTTON_ID) }
+                    SquircleAction("Empty Dust Bin", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
+                    SquircleAction("Wash Mop", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_WASH_MOP_BUTTON_ID) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SquircleAction("Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
-                    SquircleAction("Stop Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
+                    SquircleAction("Dry Mop", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
+                    SquircleAction("Stop Dry Mop", containerColor = vacuumHeroFill, contentColor = vacuumHeroContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
-        // Round 24, item 2: Cleaning setup + Consumables
-        // compacted into a 2-column grid of cards on wide
-        // screens so the popup needs minimal scrolling; stacked
-        // on narrow screens, where a consumable row (label +
-        // bar + Reset pill) needs the full width.
-        if (LocalWideLayout.current) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) { VacuumCleaningSetupCard(vm, states) }
-                Column(Modifier.weight(1f)) { VacuumConsumablesCard(vm, states, vacuumPanelAccent, vacuumPanelPillContent) }
-            }
-        } else {
-            VacuumCleaningSetupCard(vm, states)
-            VacuumConsumablesCard(vm, states, vacuumPanelAccent, vacuumPanelPillContent)
-        }
+        // Round 25, item 3: EXPLICIT REVERSAL of round 24, item 2's
+        // 2-column grid for setup/consumables — Cleaning setup +
+        // Consumables stack full-width again on every posture, so
+        // mode chips and consumable progress bars never truncate.
+        // The 2-column top hero above stays.
+        VacuumCleaningSetupCard(vm, states)
+        VacuumConsumablesCard(vm, states, vacuumPanelAccent, vacuumPanelPillContent)
         PanelCard {
         PanelSectionTitle("Options")
         for ((id, label) in listOf(

@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -66,6 +68,7 @@ import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.CardSize
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.tallPairHeightDp
 import com.garrietta.haven.data.HomeStatusCategory
 import com.garrietta.haven.ui.components.CardResizeHandle
 import com.garrietta.haven.ui.components.generalCardShape
@@ -429,6 +432,7 @@ fun FavoritesSection(
                     // only vertical steps move it (one slot each).
                     { _, dy -> moveFavoriteByDisplayDelta(media.entityId, dy) },
                     Modifier.fillMaxWidth(),
+                slotKey = displayOrderIds.indexOf(media.entityId),
                 ) {
                     HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, cardSize = vm.cardSize("home", media.entityId), arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
                 }
@@ -466,6 +470,7 @@ fun FavoritesSection(
                         // it (one slot each).
                         { _, dy -> moveFavoriteByDisplayDelta(member.entityId, dy) },
                         Modifier.fillMaxWidth(),
+                    slotKey = displayOrderIds.indexOf(member.entityId),
                     ) {
                         HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, cardSize = CardSize.WIDE, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                     }
@@ -492,7 +497,13 @@ fun FavoritesSection(
                     i++
                     flatIdx++
                 }
-                Row {
+                // Round 25, item 6: the paired row is
+                // height(IntrinsicSize.Max) — the TALL card
+                // fills the row height and the stacked NORMALs
+                // space themselves, so the TALL card's top edge
+                // aligns with the first NORMAL's top and its
+                // bottom edge with the second NORMAL's bottom.
+                Row(Modifier.height(IntrinsicSize.Max)) {
                     key(tall.entityId) {
                         ArrangeableCardCell(
                             tall.entityId,
@@ -504,13 +515,14 @@ fun FavoritesSection(
                             // stacked column (±1), vertical moves
                             // past the whole pair (±columns).
                             { dx, dy -> moveFavoriteByDisplayDelta(tall.entityId, dx + dy * columns) },
-                            Modifier.weight(1f),
+                            Modifier.weight(1f).fillMaxHeight().heightIn(min = tallPairHeightDp(spacing)),
+                        slotKey = displayOrderIds.indexOf(tall.entityId),
                         ) {
-                            HomeRoomCard(vm, tall.entityId, navigate, gridIndex = tallIdx, cardSize = CardSize.TALL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                            HomeRoomCard(vm, tall.entityId, navigate, gridIndex = tallIdx, cardSize = CardSize.TALL, modifier = Modifier.fillMaxSize(), tallHeight = tallPairHeightDp(spacing), arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                         }
                     }
                     Spacer(Modifier.width(spacing))
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(spacing)) {
                         for ((stackIdx, member) in stacked.withIndex()) {
                             // Feedback round 22, item 4: keyed by
                             // entity id (see the WIDE branch above).
@@ -531,11 +543,11 @@ fun FavoritesSection(
                                         moveFavoriteByDisplayDelta(member.entityId, horizontal + dy)
                                     },
                                     Modifier.fillMaxWidth(),
+                                slotKey = displayOrderIds.indexOf(member.entityId),
                                 ) {
                                     HomeRoomCard(vm, member.entityId, navigate, gridIndex = stackedStart + stackIdx, cardSize = CardSize.NORMAL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                                 }
                             }
-                            if (member != stacked.last()) Spacer(Modifier.height(spacing))
                         }
                     }
                 }
@@ -568,6 +580,7 @@ fun FavoritesSection(
                                 // (±columns).
                                 { dx, dy -> moveFavoriteByDisplayDelta(member.entityId, dx + dy * columns) },
                                 Modifier.weight(1f),
+                            slotKey = displayOrderIds.indexOf(member.entityId),
                             ) {
                                 HomeRoomCard(vm, member.entityId, navigate, gridIndex = rowStart + colIdx, cardSize = size, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                             }

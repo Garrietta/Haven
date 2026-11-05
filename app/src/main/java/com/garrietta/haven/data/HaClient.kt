@@ -56,6 +56,24 @@ class HaClient(
     val states: StateFlow<Map<String, HaEntity>> = _states.asStateFlow()
 
     /**
+     * Round 25, item 2: restores the cold-start disk cache into the
+     * flows before first composition, so TodayScreen, heroCameras,
+     * and the camera quadrants have last-known data on frame 0.
+     * Only non-empty parts are applied (a partial cache must never
+     * blank a part that already arrived). The live get_states and
+     * registry fetches overwrite wholesale once connected.
+     */
+    fun restoreCachedStates(
+        states: Map<String, HaEntity>,
+        areas: List<HaArea>,
+        entityAreas: Map<String, String>,
+    ) {
+        if (states.isNotEmpty()) _states.value = states
+        if (areas.isNotEmpty()) _areas.value = areas
+        if (entityAreas.isNotEmpty()) _entityAreas.value = entityAreas
+    }
+
+    /**
      * Feedback round 19, item 6: one parsed `state_changed`
      * event per applied state update, for the notification
      * manager. Fires ONLY when the event is applied to [_states]:
@@ -65,6 +83,21 @@ class HaClient(
      * listens (the state flow itself is untouched either way).
      */
     var stateChangedListener: ((StateChangeEvent) -> Unit)? = null
+
+    /**
+     * Round 25, item 1: the WebSocket rejected the token (auth_invalid).
+     * The ViewModel retries the refresh + reconnect loop; the client
+     * itself never signs out and never clears tokens.
+     */
+    var onAuthInvalid: (() -> Unit)? = null
+
+    /**
+     * Round 25, item 1: the socket dropped or failed on the current
+     * URL (non-manual close). The ViewModel may switch to the
+     * alternate URL when ConnectionMode.AUTO is active; the client's
+     * own same-URL scheduleReconnect still runs underneath.
+     */
+    var onTransportFailure: (() -> Unit)? = null
 
     private val _areas = MutableStateFlow<List<HaArea>>(emptyList())
     val areas: StateFlow<List<HaArea>> = _areas.asStateFlow()
@@ -197,6 +230,14 @@ class HaClient(
     private var token: String = ""
     private var manualDisconnect = false
     private var reconnectJob: Job? = null
+    /**
+     * Round 25, item 1: same-URL reconnect backoff grows with
+     * consecutive failures (3s, 6s, 12s, 24s, 48s, capped at 60s)
+     * and resets on a successful connect or auth_ok, so a
+     * transient drop retries quickly the first time and never
+     * hammers the instance while it is down.
+     */
+    private var reconnectAttempts = 0
     private val nextId = AtomicInteger(1)
     private val pending = ConcurrentHashMap<Int, (JSONObject) -> Unit>()
 
@@ -215,6 +256,11 @@ class HaClient(
 
     fun connect(url: String, accessToken: String) {
         manualDisconnect = false
+        // Round 25, item 1: an explicit connect (manual reconnect,
+        // URL switch, refresh success) supersedes any pending
+        // same-URL backoff and resets its attempt count.
+        reconnectJob?.cancel()
+        reconnectAttempts = 0
         instanceUrl = url.trimEnd('/')
         token = accessToken
         openSocket()
@@ -262,6 +308,10 @@ class HaClient(
                     // "Reconnecting…" rather than a failure banner.
                     _connection.value = ConnectionState.Error(t.message ?: "Connection failed", retrying = true)
                     scheduleReconnect()
+                    // Round 25, item 1: the ViewModel may switch to
+                    // the alternate URL (AUTO) — it cancels the
+                    // pending same-URL retry when it does.
+                    onTransportFailure?.invoke()
                 }
             }
 
@@ -270,6 +320,8 @@ class HaClient(
                 if (!manualDisconnect) {
                     _connection.value = ConnectionState.Error("Connection closed", retrying = true)
                     scheduleReconnect()
+                    // Round 25, item 1: see onFailure above.
+                    onTransportFailure?.invoke()
                 }
             }
         })
@@ -277,8 +329,14 @@ class HaClient(
 
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true) return
+        // Round 25, item 1: exponential backoff on the same URL —
+        // 3s, 6s, 12s, 24s, 48s, then 60s — instead of the old
+        // fixed 3s retry. The attempt count resets on connect()
+        // and on auth_ok, so a fresh failure starts fast again.
+        val delayMs = minOf(3_000L shl reconnectAttempts.coerceIn(0, 5), 60_000L)
         reconnectJob = scope.launch {
-            delay(3000)
+            delay(delayMs)
+            reconnectAttempts++
             if (!manualDisconnect) openSocket()
         }
     }
@@ -314,11 +372,18 @@ class HaClient(
                 send(JSONObject().put("type", "auth").put("access_token", token))
             }
             "auth_ok" -> {
+                // Round 25, item 1: a live session resets the
+                // same-URL backoff — the next failure starts fast.
+                reconnectAttempts = 0
                 _connection.value = ConnectionState.Connected
                 afterAuth()
             }
             "auth_invalid" -> {
                 _connection.value = ConnectionState.Error("Sign-in rejected. Check the token or sign in again.")
+                // Round 25, item 1: hand the rejection to the
+                // ViewModel's refresh + reconnect loop. The client
+                // never signs out and never clears tokens here.
+                onAuthInvalid?.invoke()
             }
             "result" -> {
                 val id = msg.optInt("id", -1)

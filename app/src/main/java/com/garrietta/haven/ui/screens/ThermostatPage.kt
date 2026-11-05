@@ -22,6 +22,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,10 +35,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
@@ -90,6 +87,7 @@ import com.garrietta.haven.ui.components.heatSetpointOnContainer
 import com.garrietta.haven.ui.theme.StateShape
 import com.garrietta.haven.ui.theme.stateShape
 import com.garrietta.haven.ui.controls.ExpressiveStepper
+import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.applyClimateSetpoint
 import com.garrietta.haven.ui.controls.dialogHeaderState
 import com.garrietta.haven.ui.controls.entityIcon
@@ -423,7 +421,7 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
         // inside the dial face, never on the radial. The scallop
         // itself is untouched (the user likes it).
         Spacer(Modifier.height(16.dp))
-        ThermostatSteppers(dialState, popoutAccent)
+        ThermostatSteppers(dialState, popoutAccent, outlineColor = MaterialTheme.colorScheme.outlineVariant)
         // The Heat/Cool bar + out-of-range note live BELOW the disc
         // with 28dp of daylight (the bar used to live inside the
         // disc, where its square corners crossed the scallop's
@@ -438,7 +436,7 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
                 Text("Mode", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(4.dp))
-                SegmentedOptionBar(
+                FilledOptionRow(
                     options = orderedHvacModes(modes).map { it to formatHvacMode(it) },
                     selected = entity.state,
                     onSelect = { vm.setClimateHvacMode(entity.entityId, it) },
@@ -453,7 +451,7 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
                 Text("Fan", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(4.dp))
-                SegmentedOptionBar(
+                FilledOptionRow(
                     options = orderedFanModes(fanModes).map {
                         it to it.replace('_', ' ').replaceFirstChar { c -> c.uppercase() }
                     },
@@ -485,20 +483,23 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
 }
 
 /**
- * One M3 segmented pill bar (2026-11-01 round 1): the replacement
- * for the Mode/Fan dropdown pills and for the setpoint selector.
- * [options] are (value, label) pairs in display order; [selected]
- * is the current value; [activeColors] optionally tints a
- * segment's active container/content (the Heat/Cool selector bar
- * passes the heat/cool setpoint tokens so each side reads in its
- * own color — otherwise the scheme defaults apply). Options the
- * thermostat does not report never render: callers filter to the
- * entity's hvac_modes / fan_modes first, so a segment can never
- * send a mode HA would reject.
+ * Round 25, item 4: the wireframe SegmentedOptionBar is gone —
+ * Mode / Fan / Heat-Cool are solid Material 3 Expressive filled
+ * pill buttons (PressablePillButton, like PanelPill):
+ * secondaryContainer unselected, primaryContainer — or the
+ * caller's domain-tinted pair via [activeColors] — selected,
+ * 8dp spacing, zero thin wireframe borders. The service calls are
+ * the caller's; only the styling moves. [options] are (value,
+ * label) pairs in display order; [selected] is the current value;
+ * [activeColors] optionally tints a selected option's container /
+ * content (the Heat/Cool bar passes the heat/cool setpoint tokens
+ * so each side reads in its own color — otherwise the scheme
+ * defaults apply). Options the thermostat does not report never
+ * render: callers filter to the entity's hvac_modes / fan_modes
+ * first, so a button can never send a mode HA would reject.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SegmentedOptionBar(
+private fun FilledOptionRow(
     options: List<Pair<String, String>>,
     selected: String?,
     onSelect: (String) -> Unit,
@@ -506,36 +507,29 @@ private fun SegmentedOptionBar(
     activeColors: ((String) -> Pair<Color, Color>?)? = null,
 ) {
     if (options.isEmpty()) return
-    SingleChoiceSegmentedButtonRow(modifier) {
-        for ((index, option) in options.withIndex()) {
-            val (value, label) = option
-            val active = activeColors?.invoke(value)
-            SegmentedButton(
-                selected = selected == value,
+    val scheme = MaterialTheme.colorScheme
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((value, label) in options) {
+            val isSelected = selected == value
+            val active = if (isSelected) activeColors?.invoke(value) else null
+            PressablePillButton(
                 onClick = { onSelect(value) },
-                shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                colors = if (active != null) {
-                    SegmentedButtonDefaults.colors(
-                        activeContainerColor = active.first,
-                        activeContentColor = active.second,
-                    )
-                } else {
-                    // Unified selected treatment (hotfix): the
-                    // default secondaryContainer reads as dim grey
-                    // on this dark palette, so a selected Mode/Fan
-                    // segment looked unselected next to the
-                    // saturated Heat/Cool setpoint segments. Every
-                    // bar now selects with the same weight — filled
-                    // container + checkmark + semibold label — with
-                    // the hue semantic on the setpoint bar (heat/
-                    // cool) and palette-primary elsewhere.
-                    SegmentedButtonDefaults.colors(
-                        activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                        activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                },
-                label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            )
+                modifier = Modifier.weight(1f),
+                height = 48.dp,
+                containerColor = active?.first
+                    ?: if (isSelected) scheme.primaryContainer else scheme.secondaryContainer,
+                contentColor = active?.second
+                    ?: if (isSelected) scheme.onPrimaryContainer else scheme.onSecondaryContainer,
+                contentPadding = PaddingValues(horizontal = 12.dp),
+            ) {
+                Text(
+                    label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontSize = 14.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
         }
     }
 }
@@ -608,6 +602,10 @@ fun ThermostatHero(
 private fun ThermostatSteppers(
     state: ThermostatDialState,
     accent: Color?,
+    // Round 25, item 4: a subtle 1dp outline so the stepper fill
+    // reads against the popup background at rest. The popout passes
+    // outlineVariant; the Hero passes nothing (unchanged).
+    outlineColor: Color? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Row(
@@ -619,12 +617,14 @@ private fun ThermostatSteppers(
             onClick = { state.stepActive(-1f) },
             containerColor = accent,
             contentColor = if (accent != null) scheme.onSurface else null,
+            outlineColor = outlineColor,
         )
         ExpressiveStepper(
             "+",
             onClick = { state.stepActive(1f) },
             containerColor = accent,
             contentColor = if (accent != null) scheme.onSurface else null,
+            outlineColor = outlineColor,
         )
     }
 }
@@ -902,7 +902,7 @@ private fun ThermostatBelowDial(state: ThermostatDialState) {
     if (state.heatCool) {
         Spacer(Modifier.height(28.dp))
         val scheme = MaterialTheme.colorScheme
-        SegmentedOptionBar(
+        FilledOptionRow(
             options = listOf(
                 SetpointSelector.HEATING.name to "Heat ${state.heat.value.toDouble().formatTemp()}",
                 SetpointSelector.COOLING.name to "Cool ${state.cool.value.toDouble().formatTemp()}",
