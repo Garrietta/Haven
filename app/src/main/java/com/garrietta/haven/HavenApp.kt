@@ -9,7 +9,7 @@ import com.garrietta.haven.ui.components.PopupDismissConnection
 import com.garrietta.haven.ui.components.LocalCardColors
 import com.garrietta.haven.ui.components.LocalCardShapes
 import com.garrietta.haven.ui.components.centeredPopupEnter
-import com.garrietta.haven.ui.components.morphCardAlpha
+import com.garrietta.haven.ui.components.morphTileAlpha
 import com.garrietta.haven.ui.components.topMorphProgress
 import com.garrietta.haven.ui.components.topMorphSourceId
 import com.garrietta.haven.ui.components.morphCloseContentAlpha
@@ -1187,6 +1187,11 @@ fun HavenApp(vm: HavenViewModel) {
             val hiddenMorphSourceId: String? = topMorphSourceId(
                 panelDetailAnim?.entityId, detailAnim?.entityId, popoutAnim?.id, vm.cameraDialogId,
             )
+            // Feedback round 23, item 1: the topmost morph's closing
+            // flag, shared by LocalMorphClosing and the
+            // LocalMorphCardAlpha curve below (morphTileAlpha) so the
+            // two can never disagree about direction.
+            val morphClosing = detailExiting || panelDetailExiting || popoutExiting
             CompositionLocalProvider(
                 // Feedback round 17, item 6: dashboard chrome
                 // hides competing affordances (the Favorites
@@ -1216,6 +1221,10 @@ fun HavenApp(vm: HavenViewModel) {
                 // card fades out by progress 0.4 (morphCardAlpha)
                 // and back in over the last 40% of exit, leaving
                 // a blank slot in the grid where the tile was.
+                // Feedback round 23, item 1: the return is now
+                // the exit curve (morphExitCardAlpha) — the tile
+                // fades back in over [0.85, 0], from the moment
+                // the panel content is gone.
                 // The grid never reflows around the blank (the
                 // hide is alpha-only, layout unchanged), and the
                 // card is fully visible again at progress 0,
@@ -1259,7 +1268,7 @@ fun HavenApp(vm: HavenViewModel) {
                 // crossfade toward mid-gesture. The camera dialog
                 // is deliberately absent, as before: it never sets
                 // a hidden id, so no badge reads this for it.
-                LocalMorphClosing provides (detailExiting || panelDetailExiting || popoutExiting),
+                LocalMorphClosing provides morphClosing,
                 // Feedback round 18, item 5 (EXPLICIT REVERSAL of
                 // round 11, item 1): the progress IS finger-
                 // tracked while dragging — dragProgressFor reads
@@ -1307,14 +1316,19 @@ fun HavenApp(vm: HavenViewModel) {
                 // instead of a doubled badge.
                 // Round 21, item 8 SUPERSEDES the never-hides half
                 // of this rule: the card alpha is now the
-                // morphCardAlpha curve of the topmost morph's
+                // morphTileAlpha curve of the topmost morph's
                 // progress (gone by 0.4 on enter, back over the
                 // last 40% of exit) — the tile becomes the popup.
+                // Feedback round 23, item 1: the close half is
+                // now morphExitCardAlpha, not morphCardAlpha — the
+                // tile fades back in over [0.85, 0], the moment
+                // the panel content is gone, instead of waiting
+                // until 0.4 behind a bare solid-color surface.
                 // The surface-cover half is unchanged, and the
                 // card is fully visible at progress 0, before any
                 // dismiss clears state, so no blank frame follows
                 // the landing.
-                LocalMorphCardAlpha provides { morphCardAlpha(rootMorphProgress()) },
+                LocalMorphCardAlpha provides { morphTileAlpha(rootMorphProgress(), morphClosing) },
             ) {
             // Overlay root: its root-coordinate origin anchors every
             // traveler rect. All panel overlays below render inside
@@ -2553,7 +2567,14 @@ private fun CenteredPopup(
                         // the popup's 28dp corners into the
                         // source tile's corners, so the exit
                         // lands on the tile's own outline.
+                        // Feedback round 23, item 2: the clip
+                        // divides out the layer scale (see
+                        // morphPopupShape) — the scales below are
+                        // captured from the sourced branch; the
+                        // sourceless branch keeps 1f.
                         val p = progress()
+                        var popupScaleX = 1f
+                        var popupScaleY = 1f
                         if (source != null) {
                             val targetLeft = overlayOrigin.x + (overlayWidthPx - size.width) / 2f
                             val targetTop = overlayOrigin.y + (overlayHeightPx - size.height) / 2f
@@ -2567,6 +2588,8 @@ private fun CenteredPopup(
                             translationY = morph.translationY
                             scaleX = morph.scaleX
                             scaleY = morph.scaleY
+                            popupScaleX = morph.scaleX
+                            popupScaleY = morph.scaleY
                             // Feedback round 17, item 1: the
                             // container alpha, mirroring
                             // MorphSurface — the old opaque-from-
@@ -2597,7 +2620,7 @@ private fun CenteredPopup(
                             scaleY = enter.scale
                             alpha = enter.alpha
                         }
-                        shape = morphPopupShape(p, landingShape)
+                        shape = morphPopupShape(p, landingShape, popupScaleX, popupScaleY)
                         clip = true
                     }
                     .onGloballyPositioned { coords ->

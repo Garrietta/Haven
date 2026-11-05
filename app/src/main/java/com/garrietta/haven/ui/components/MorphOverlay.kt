@@ -1032,6 +1032,78 @@ fun morphPopupShape(progress: Float, landingShape: Shape?): Shape {
 }
 
 /**
+ * Feedback round 23, item 2: the four elliptical corner radii of
+ * the centered popup's clip with a layer scale, in px — the popup
+ * twin of [morphSurfaceRadii] (round 17, item 1). The centered
+ * popup's graphicsLayer scales the whole layer (including its
+ * clip) by the tileMorphTransform scale, so the old scale-blind
+ * clip rendered the landing corners multiplied by the scale: a
+ * 28dp tile corner showed ~17-21dp at landing for a lamp tile
+ * (scale ~0.6-0.75), and a wide tile (Climate Ecobee: scaleX > 1,
+ * scaleY ~0.3) landed stretched in x and squashed in y — then the
+ * tile appeared with its true corners and the shape visibly
+ * snapped on every exit. The local radii divide out the layer
+ * scale, so the VISIBLE corners follow the morphPopupCorners ramp
+ * exactly (28dp at rest down to the tile's own corners at
+ * landing), on both axes. Polygon/null landings keep the popup's
+ * soft 28dp (same rule as [morphPopupCorners]); the popup never
+ * switches to a polygon outline. Progress is clamped first; a
+ * non-positive scale reads as 1, so a degenerate rect can never
+ * divide by zero or flip a radius negative. Pure, unit-tested.
+ */
+fun morphPopupRadii(
+    progress: Float,
+    landingShape: Shape?,
+    scaleX: Float = 1f,
+    scaleY: Float = 1f,
+    density: Density,
+): SurfaceCornerRadii {
+    val p = progress.coerceIn(0f, 1f)
+    val corners = morphPopupCorners(p, roundedLandingCorners(landingShape))
+    val sx = if (scaleX > 0f) scaleX else 1f
+    val sy = if (scaleY > 0f) scaleY else 1f
+    with(density) {
+        fun rx(c: Dp): Float = (c.toPx() / sx).coerceAtLeast(0f)
+        fun ry(c: Dp): Float = (c.toPx() / sy).coerceAtLeast(0f)
+        return SurfaceCornerRadii(
+            topStart = CornerRadius(rx(corners.topStart), ry(corners.topStart)),
+            topEnd = CornerRadius(rx(corners.topEnd), ry(corners.topEnd)),
+            bottomEnd = CornerRadius(rx(corners.bottomEnd), ry(corners.bottomEnd)),
+            bottomStart = CornerRadius(rx(corners.bottomStart), ry(corners.bottomStart)),
+        )
+    }
+}
+
+/**
+ * Feedback round 23, item 2: the centered popup's clip shape at
+ * [progress] for a tile outline of [landingShape], with the layer
+ * scale ([scaleX]/[scaleY], from the same tileMorphTransform the
+ * graphicsLayer uses) divided out — see [morphPopupRadii]. The
+ * two-argument overload is the scale-1 case (sourceless popups,
+ * which fade + scale in place); the sourced CenteredPopup branch
+ * must use this overload with the morph's own scales, or the
+ * landing corners render multiplied by the scale and the tile
+ * snaps to its true corners when the surface is removed.
+ */
+fun morphPopupShape(progress: Float, landingShape: Shape?, scaleX: Float, scaleY: Float): Shape {
+    val p = progress.coerceIn(0f, 1f)
+    return object : Shape {
+        override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+            val r = morphPopupRadii(p, landingShape, scaleX, scaleY, density)
+            return Outline.Rounded(
+                RoundRect(
+                    left = 0f, top = 0f, right = size.width, bottom = size.height,
+                    topLeftCornerRadius = r.topStart,
+                    topRightCornerRadius = r.topEnd,
+                    bottomRightCornerRadius = r.bottomEnd,
+                    bottomLeftCornerRadius = r.bottomStart,
+                ),
+            )
+        }
+    }
+}
+
+/**
  * Alpha for the traveling header at [progress]: fully visible
  * through the morph, handing off to the pop-up's own header only
  * over the last 2% ([0.98, 1.0]) — the 2026-10-30 verdict round's
@@ -1397,6 +1469,29 @@ fun morphCloseContentAlpha(progress: Float): Float =
  */
 fun morphExitCardAlpha(progress: Float): Float =
     1f - smoothstep(0f, 0.85f, progress)
+
+/**
+ * Feedback round 23, item 1: the source tile's alpha for the
+ * topmost morph at [progress], with the close direction wired to
+ * the curve that was written for it. On OPEN ([closing] false)
+ * the tile follows [morphCardAlpha] (gone by 0.4, as the surface
+ * grows). On CLOSE ([closing] true) it follows
+ * [morphExitCardAlpha] (hidden exactly while panel content is
+ * still visible, fading in over [0.85, 0] as the surface shrinks
+ * back onto the slot). The old provider used [morphCardAlpha] for
+ * both directions, so on close the tile stayed invisible until
+ * progress 0.4 while the content was already gone by 0.85
+ * ([morphCloseContentAlpha]) and the container stayed fully opaque
+ * — a bare solid-color shape (solid yellow for the lamps) for 45%
+ * of the close, then the tile popping back in one frame.
+ * [morphExitCardAlpha] was written in round 4 for exactly this
+ * handoff and had zero call sites; this selector is its first use.
+ * The caller is the root LocalMorphCardAlpha provider
+ * (HavenApp.kt), which reads the same closing flags as
+ * LocalMorphClosing. Pure, unit-tested.
+ */
+fun morphTileAlpha(progress: Float, closing: Boolean): Float =
+    if (closing) morphExitCardAlpha(progress) else morphCardAlpha(progress)
 
 /**
  * Surface-background alpha for a morphing surface at [progress]:
