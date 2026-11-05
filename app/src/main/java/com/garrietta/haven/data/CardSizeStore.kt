@@ -1,22 +1,34 @@
 package com.garrietta.haven.data
 
 import android.content.Context
+import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 import kotlin.math.abs
 
 /**
  * Feedback round 20, item 5: resizable cards. A card's size is one
  * of three grid-expressible spans — NORMAL (one column), WIDE (a
- * full row), or TALL (the 136dp floor doubled to 272dp minimum).
- * A true multi-row tall span is NOT expressible: LazyVerticalGrid
- * has no row spanning, and the manual row grids size rows by
- * their tallest card — so TALL is a minimum height, never a row
- * span, and a tall card's row-mate stays top-aligned at 136dp.
- * A wide card never shifts its neighbors' grid indices (which
- * drive corner variants): indices come from position in the
- * card list, never from row layout.
+ * full row), or TALL (284dp: two 136dp rows plus one 12dp spacing,
+ * round 24 item 6 — the old 272dp minimum never rendered because
+ * the card's heightIn(min = 136dp) clobbered the wrapper's
+ * fillMaxSize; TALL is now an exact height on the card itself).
+ * A true multi-row tall span is NOT expressible in LazyVerticalGrid:
+ * it has no row spanning, so a tall cell's row-mate stays
+ * top-aligned at 136dp there. The manual row grids (Favorites,
+ * RoomSectionGrid) DO pair a TALL card with two stacked NORMAL
+ * cards in the adjacent column. A wide card never shifts its
+ * neighbors' grid indices (which drive corner variants): indices
+ * come from position in the card list, never from row layout.
  */
 enum class CardSize { NORMAL, WIDE, TALL }
+
+/**
+ * Round 24, item 6: a TALL card is exactly two NORMAL rows plus
+ * one grid spacing: 136dp * 2 + 12dp = 284dp. The two stacked
+ * NORMAL cards beside it in a paired row measure 136 + 12 + 136
+ * = 284dp, so the pair is flush. Pure, unit-tested.
+ */
+fun tallCardHeightDp(): androidx.compose.ui.unit.Dp = 284.dp
 
 /** Persistence key for one card placement: page scope + entity id. */
 fun cardSizeKey(scope: String, entityId: String): String = "$scope:$entityId"

@@ -43,11 +43,16 @@ import androidx.compose.animation.animateContentSize
  * normal, down = tall, up = normal) with a live preview label
  * while dragging; the size change itself settles on the
  * established settle spring.
+ * Round 24, item 6: the live drag delta is also reported to
+ * [onPreview] on every move (null on release/cancel), so the
+ * card wrapper can stretch the tile toward the pending size
+ * under the finger before it snaps on release.
  */
 @Composable
 fun CardResizeHandle(
     current: CardSize,
     onSizeChange: (CardSize) -> Unit,
+    onPreview: ((Offset?) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var drag by remember(current) { mutableStateOf<Offset?>(null) }
@@ -86,12 +91,15 @@ fun CardResizeHandle(
                             onDragEnd = {
                                 val target = drag?.let { snapCardSize(current, it.x, it.y) } ?: current
                                 drag = null
+                                onPreview?.invoke(null)
                                 if (target != current) onSizeChange(target)
                             },
-                            onDragCancel = { drag = null },
+                            onDragCancel = { drag = null; onPreview?.invoke(null) },
                         ) { change, dragAmount ->
                             change.consume()
-                            drag = (drag ?: Offset.Zero) + dragAmount
+                            val next = (drag ?: Offset.Zero) + dragAmount
+                            drag = next
+                            onPreview?.invoke(next)
                         }
                     },
             ) {
@@ -113,6 +121,27 @@ fun CardResizeHandle(
             }
         }
     }
+}
+
+/**
+ * Round 24, item 6: the live resize preview scale for a card
+ * wrapper, from the handle's current drag delta. The pending
+ * size comes from the same [snapCardSize] rule as the release
+ * snap; the scale stretches toward it — up to 1.8x on the
+ * pending axis at a full 96px drag — so the tile visibly
+ * stretches toward Wide, Tall, or back to Normal under the
+ * finger before snapping into place on release. A pending
+ * Normal (or no drag) reads as no stretch: the card is already
+ * at its current size, and the label above the grip names the
+ * target. Pure, unit-tested.
+ */
+fun resizePreviewScale(current: CardSize, drag: Offset?): Pair<Float, Float> {
+    if (drag == null) return 1f to 1f
+    val pending = snapCardSize(current, drag.x, drag.y)
+    if (pending == current || pending == CardSize.NORMAL) return 1f to 1f
+    val progress = (maxOf(kotlin.math.abs(drag.x), kotlin.math.abs(drag.y)) / 96f).coerceIn(0f, 1f)
+    val stretch = 1f + 0.8f * progress
+    return if (pending == CardSize.WIDE) stretch to 1f else 1f to stretch
 }
 
 /** animateContentSize with the resize settle, for card wrappers. */

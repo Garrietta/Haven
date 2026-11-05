@@ -3,6 +3,7 @@ package com.garrietta.haven.ui.screens
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Garage
+import androidx.compose.ui.geometry.Offset
 import com.garrietta.haven.ui.components.NavStyle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.Notifications
@@ -38,6 +39,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -105,20 +107,25 @@ import com.garrietta.haven.ui.controls.DialogActionButtons
 import com.garrietta.haven.ui.controls.MediaSquircle
 import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.ServiceSlider
+import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
 import com.garrietta.haven.ui.components.tabIconPairForKey
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.data.CardSize
+import com.garrietta.haven.data.tallCardHeightDp
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.UserTab
 import com.garrietta.haven.data.groupEntitiesByRoom
 import com.garrietta.haven.ui.components.shapeLabel
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Code
@@ -132,6 +139,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
+import com.garrietta.haven.data.UpdateSummary
 import com.garrietta.haven.data.updatesSummary
 import com.garrietta.haven.ui.components.KodaMenuDivider
 import com.garrietta.haven.ui.components.KodaMenuGroup
@@ -154,6 +162,8 @@ import com.garrietta.haven.ui.components.cardTapRoute
 import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.components.CardResizeHandle
 import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.reorderDrag
+import com.garrietta.haven.ui.components.resizePreviewScale
 import com.garrietta.haven.ui.components.resizeSettle
 import com.garrietta.haven.ui.components.weatherConditionColorThemed
 import com.garrietta.haven.ui.components.isDarkBackdrop
@@ -858,6 +868,58 @@ private fun WeatherBlock(weather: HaEntity, vm: HavenViewModel, navigate: (Scree
     Spacer(Modifier.height(16.dp))
 }
 
+/**
+ * Round 24, item 6: the shared Arrange-mode cell wrapper for the
+ * manual grids (FavoritesSection, RoomSectionGrid) and the lazy
+ * tab grid. One place owns the two Arrange gestures, so the three
+ * grids cannot drift apart again:
+ * - the resize handle, with the live animated preview (the tile
+ *   stretches toward the pending Wide/Tall/Normal under the
+ *   finger via [resizePreviewScale] and settles on release);
+ * - drag-to-reorder ([reorderDrag]), which reports threshold
+ *   crossings to [onReorderMove] for the caller to persist.
+ * Outside Arrange mode (or with no move callback) the wrapper is
+ * just the resize-settle Box the grids already used. Callers pass
+ * the card itself as [content] and the row height in px (one
+ * 136dp row + spacing) for the vertical reorder step. The
+ * [modifier] carries the cell's layout (weight / fillMaxWidth).
+ */
+@Composable
+internal fun ArrangeableCardCell(
+    entityId: String,
+    size: CardSize,
+    arrangeMode: Boolean,
+    rowHeightPx: Float,
+    onSizeChange: ((CardSize) -> Unit)?,
+    onReorderMove: ((dxSteps: Int, dySteps: Int) -> Unit)?,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    var preview by remember(entityId) { mutableStateOf<Offset?>(null) }
+    val (previewScaleX, previewScaleY) = resizePreviewScale(size, preview)
+    Box(
+        modifier
+            .resizeSettle()
+            .reorderDrag(arrangeMode && onReorderMove != null, rowHeightPx, onMove = { dx, dy ->
+                onReorderMove?.invoke(dx, dy)
+            })
+            .graphicsLayer {
+                scaleX = previewScaleX
+                scaleY = previewScaleY
+            },
+    ) {
+        content()
+        if (arrangeMode && onSizeChange != null) {
+            CardResizeHandle(
+                size,
+                onSizeChange,
+                onPreview = { preview = it },
+                Modifier.align(Alignment.BottomEnd),
+            )
+        }
+    }
+}
+
 /** One room section as a mockup-language grid: heading + rows of
  * [columns] cards (2 folded / Fold8, 3 on EXPANDED). A plain Column,
  * so it slots into both the folded LazyColumn (as one item per room)
@@ -895,7 +957,14 @@ private fun RoomSectionGrid(
     // memoized in TodayScreen). Cards below still collect their
     // own entity flows, so resolving here costs no card
     // recomposition on unrelated updates.
-    val members = memberIds.mapNotNull { states[it] }
+    // Round 24, item 6: the stored drag-reorder resolves against
+    // the HA member list (resolveOrder keeps new members and
+    // drops removed ones), so a dragged reorder survives a
+    // restart and a new entity never vanishes from an old order.
+    val members = resolveOrder(vm.roomEntityOrder(areaId), memberIds).mapNotNull { states[it] }
+    // Round 24, item 6: one full row height including spacing,
+    // in px, for the reorder drag's vertical step.
+    val rowHeightPx = with(LocalDensity.current) { (136.dp + spacing).toPx() }
     Column {
         // Stage E §9: room dot for an important alert in this room
         // (unlocked lock, open door/window, triggered alarm) — never a
@@ -933,6 +1002,12 @@ private fun RoomSectionGrid(
                 (member.state == "playing" || member.entityId in vm.favorites)
         }
         val standard = members - wideMedia.toSet()
+        // Round 24, item 6: the display order the drag-reorder
+        // persists against — wide-media rows first, then the
+        // standard grid in row order. moveRoomEntity moves within
+        // this order and stores it, so the grid re-lays-out live
+        // and the order survives a restart.
+        val displayOrderIds = (wideMedia + standard).map { it.entityId }
         for ((wideIndex, media) in wideMedia.withIndex()) {
             // Feedback round 22, item 4: keyed by entity id, so a
             // card slot can never be reused for a different entity
@@ -941,7 +1016,19 @@ private fun RoomSectionGrid(
             // Garage Door panel). TabTileGrid was already keyed;
             // these row loops were not.
             key(media.entityId) {
-                HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+                ArrangeableCardCell(
+                    media.entityId,
+                    vm.cardSize(scope, media.entityId),
+                    arrangeMode,
+                    rowHeightPx,
+                    { vm.setCardSize(scope, media.entityId, it) },
+                    // Full-width row: no horizontal neighbor, so
+                    // only vertical steps move it (one slot each).
+                    { _, dy -> vm.moveRoomEntity(areaId, displayOrderIds, media.entityId, dy) },
+                    Modifier.fillMaxWidth(),
+                ) {
+                    HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, cardSize = vm.cardSize(scope, media.entityId), arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+                }
             }
             Spacer(Modifier.height(spacing))
         }
@@ -951,6 +1038,11 @@ private fun RoomSectionGrid(
         // before, gridIndex still counts flat position in the
         // standard list. With no wide cards this reproduces the
         // old chunked loop exactly.
+        // Round 24, item 6: a TALL card pairs with up to two
+        // stacked NORMAL cards in the adjacent column (284dp =
+        // 136 + 12 + 136, flush), and every cell is an
+        // ArrangeableCardCell (live resize preview + drag
+        // reorder, persisted through moveRoomEntity).
         var flatIdx = 0
         var i = 0
         while (i < standard.size) {
@@ -959,25 +1051,96 @@ private fun RoomSectionGrid(
                 // Feedback round 22, item 4: keyed by entity id
                 // (see the wide-media loop above).
                 key(member.entityId) {
-                    Box(Modifier.fillMaxWidth().resizeSettle()) {
-                        HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
-                        if (arrangeMode) {
-                            CardResizeHandle(
-                                CardSize.WIDE,
-                                { vm.setCardSize(scope, member.entityId, it) },
-                                Modifier.align(Alignment.BottomEnd),
-                            )
-                        }
+                    ArrangeableCardCell(
+                        member.entityId,
+                        CardSize.WIDE,
+                        arrangeMode,
+                        rowHeightPx,
+                        { vm.setCardSize(scope, member.entityId, it) },
+                        // Full-width row: only vertical steps move
+                        // it (one slot each).
+                        { _, dy -> vm.moveRoomEntity(areaId, displayOrderIds, member.entityId, dy) },
+                        Modifier.fillMaxWidth(),
+                    ) {
+                        HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, cardSize = CardSize.WIDE, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                     }
                 }
                 Spacer(Modifier.height(spacing))
                 i++
                 flatIdx++
+            } else if (vm.cardSize(scope, standard[i].entityId) == CardSize.TALL && columns >= 2) {
+                // Paired row: the TALL card (284dp) in one column
+                // and up to two stacked NORMAL cards in the other.
+                // A second TALL card is never stacked — it gets
+                // its own paired row on the next pass.
+                val tall = standard[i]
+                val tallIdx = flatIdx
+                i++
+                flatIdx++
+                val stacked = mutableListOf<HaEntity>()
+                val stackedStart = flatIdx
+                while (i < standard.size && stacked.size < 2 &&
+                    vm.cardSize(scope, standard[i].entityId) != CardSize.WIDE &&
+                    vm.cardSize(scope, standard[i].entityId) != CardSize.TALL
+                ) {
+                    stacked.add(standard[i])
+                    i++
+                    flatIdx++
+                }
+                Row {
+                    key(tall.entityId) {
+                        ArrangeableCardCell(
+                            tall.entityId,
+                            CardSize.TALL,
+                            arrangeMode,
+                            rowHeightPx,
+                            { vm.setCardSize(scope, tall.entityId, it) },
+                            // Tall card: horizontal swaps with the
+                            // stacked column (±1), vertical moves
+                            // past the whole pair (±columns).
+                            { dx, dy -> vm.moveRoomEntity(areaId, displayOrderIds, tall.entityId, dx + dy * columns) },
+                            Modifier.weight(1f),
+                        ) {
+                            HomeRoomCard(vm, tall.entityId, navigate, gridIndex = tallIdx, cardSize = CardSize.TALL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                        }
+                    }
+                    Spacer(Modifier.width(spacing))
+                    Column(Modifier.weight(1f)) {
+                        for ((stackIdx, member) in stacked.withIndex()) {
+                            // Feedback round 22, item 4: keyed by
+                            // entity id (see the wide-media loop).
+                            key(member.entityId) {
+                                ArrangeableCardCell(
+                                    member.entityId,
+                                    CardSize.NORMAL,
+                                    arrangeMode,
+                                    rowHeightPx,
+                                    { vm.setCardSize(scope, member.entityId, it) },
+                                    // Stacked card: vertical swaps
+                                    // with its column neighbor (±1);
+                                    // a left drag swaps with the
+                                    // tall card (-(position + 1));
+                                    // right has no neighbor.
+                                    { dx, dy ->
+                                        val horizontal = if (dx < 0) dx * (stackIdx + 1) else 0
+                                        vm.moveRoomEntity(areaId, displayOrderIds, member.entityId, horizontal + dy)
+                                    },
+                                    Modifier.fillMaxWidth(),
+                                ) {
+                                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = stackedStart + stackIdx, cardSize = CardSize.NORMAL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                                }
+                            }
+                            if (member != stacked.last()) Spacer(Modifier.height(spacing))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(spacing))
             } else {
                 val row = mutableListOf<HaEntity>()
                 val rowStart = flatIdx
                 while (i < standard.size && row.size < columns &&
-                    vm.cardSize(scope, standard[i].entityId) != CardSize.WIDE
+                    vm.cardSize(scope, standard[i].entityId) != CardSize.WIDE &&
+                    vm.cardSize(scope, standard[i].entityId) != CardSize.TALL
                 ) {
                     row.add(standard[i])
                     i++
@@ -989,23 +1152,19 @@ private fun RoomSectionGrid(
                         // Feedback round 22, item 4: keyed by
                         // entity id (see the wide-media loop above).
                         key(member.entityId) {
-                            Box(
-                                Modifier.weight(1f).resizeSettle()
-                                    .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                            ArrangeableCardCell(
+                                member.entityId,
+                                size,
+                                arrangeMode,
+                                rowHeightPx,
+                                { vm.setCardSize(scope, member.entityId, it) },
+                                // Horizontal swaps with the row-mate
+                                // (±1); vertical moves a whole row
+                                // (±columns).
+                                { dx, dy -> vm.moveRoomEntity(areaId, displayOrderIds, member.entityId, dx + dy * columns) },
+                                Modifier.weight(1f),
                             ) {
-                                HomeRoomCard(
-                                    vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
-                                    modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
-                                    arrangeMode = arrangeMode,
-                                    onArrangeToggle = { arrangeMode = !arrangeMode },
-                                )
-                                if (arrangeMode) {
-                                    CardResizeHandle(
-                                        size,
-                                        { vm.setCardSize(scope, member.entityId, it) },
-                                        Modifier.align(Alignment.BottomEnd),
-                                    )
-                                }
+                                HomeRoomCard(vm, member.entityId, navigate, gridIndex = rowStart + colIdx, cardSize = size, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                             }
                         }
                         if (member != row.last()) Spacer(Modifier.width(spacing))
@@ -1090,7 +1249,7 @@ fun homeCardShapeByIndex(index: Int): RoundedCornerShape = generalCardShape(inde
  * the card opens the detail panel, like every other card.
  */
 @Composable
-fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, modifier: Modifier = Modifier, navigate: (Screen) -> Unit) {
+fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, modifier: Modifier = Modifier, cardSize: CardSize = CardSize.NORMAL, navigate: (Screen) -> Unit) {
     val liveEntity by vm.entityFlow(entityId).collectAsState()
     val entity = liveEntity ?: return
     val snap = vm.travelSnapshots[entity.entityId]
@@ -1161,7 +1320,11 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
             // (was a fixed height — a TALL-resized media card left
             // a 136dp card in a 272dp box). Content stays
             // top-aligned when the card grows.
-            .heightIn(min = 136.dp)
+            // Round 24, item 6: TALL is an exact 284dp height on
+            // the card itself (see HomeRoomCard — the old
+            // heightIn(min) after the caller's fillMaxSize
+            // clobbered the max height, so TALL did nothing).
+            .then(if (cardSize == CardSize.TALL) Modifier.height(tallCardHeightDp()) else Modifier.heightIn(min = 136.dp))
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, mediaCardOutline)
             .reportCardColor(entity.entityId, container)
@@ -1184,7 +1347,9 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
                 onLongClick = { onArrangeToggle?.invoke() },
             ),
     ) {
-        Column(Modifier.padding(12.dp)) {
+        // Round 24, item 6: the Column fills the Surface height
+        // so a TALL card's weight spacer below has slack to take.
+        Column(Modifier.fillMaxSize().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(48.dp).background(
@@ -1246,7 +1411,12 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            // Round 24, item 6: a TALL media card pushes its
+            // progress/volume bar to the bottom with a weight
+            // spacer, so the card visually expands to double
+            // height instead of leaving the extra space blank.
+            if (cardSize == CardSize.TALL) Spacer(Modifier.weight(1f))
+            else Spacer(Modifier.height(8.dp))
             // One bar only, from real attributes: progress while
             // playing (position advances; a paused bar would be
             // stale), else volume when the player reports it.
@@ -1321,7 +1491,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
  * which beats this alternating default.
  */
 @Composable
-fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, modifier: Modifier = Modifier, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, onOpenPanel: (() -> Unit)? = null) {
+fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, modifier: Modifier = Modifier, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, cardSize: CardSize = CardSize.NORMAL, onOpenPanel: (() -> Unit)? = null) {
     // Entity-scoped state (§6): this card recomposes only when
     // its own entity changes. An entity that vanished from state
     // renders nothing (membership rebuilds without it).
@@ -1496,7 +1666,15 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         // reads better than cut text. The polygon path keeps its
         // round-2 spacer/padding shift (inscribed-circle clip).
         modifier = modifier.fillMaxWidth()
-            .heightIn(min = 136.dp)
+            // Round 24, item 6: TALL is an exact 284dp height on
+            // the card itself (two 136dp rows + 12dp spacing).
+            // The old heightIn(min = 136.dp) after the caller's
+            // fillMaxSize() clobbered the max height, so the card
+            // measured to content height (~136dp) inside a 272dp
+            // wrapper Box that has no background — TALL "didn't
+            // do anything" for any card. The wrapper Box no
+            // longer carries a height (the card is the height).
+            .then(if (cardSize == CardSize.TALL) Modifier.height(tallCardHeightDp()) else Modifier.heightIn(min = 136.dp))
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, cardOutline)
             .reportCardColor(entity.entityId, container)
@@ -1521,7 +1699,9 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 onLongClick = { onArrangeToggle?.invoke() },
             ),
     ) {
-        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (isPolygonCard) 28.dp else 16.dp)) {
+        // Round 24, item 6: the Column fills the Surface height
+        // so a TALL card's weight spacer below has slack to take.
+        Column(Modifier.fillMaxSize().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (isPolygonCard) 28.dp else 16.dp)) {
             // §1: NO inner sub-box. Round 4's badge zone wore a
             // surfaceContainerHighest background + 24dp corners +
             // 8dp padding — the "wide rectangular inner sub-box"
@@ -1676,7 +1856,12 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 }
             }
             } // badge-zone Box
-            Spacer(Modifier.height(if (isPolygonCard) 4.dp else 16.dp))
+            // Round 24, item 6: a TALL card pushes its title /
+            // status to the bottom with a weight spacer, so the
+            // card visually expands to double height instead of
+            // leaving the extra space blank below the text.
+            if (cardSize == CardSize.TALL) Spacer(Modifier.weight(1f))
+            else Spacer(Modifier.height(if (isPolygonCard) 4.dp else 16.dp))
             // Round 4 split zone, lower half: tapping the name or
             // status text opens the expanded panel (binary cards);
             // long-press anywhere enters Arrange mode (round 21,
@@ -1897,6 +2082,349 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
     }
 }
 
+/**
+ * Round 24, item 5: Settings sections are their own
+ * composables so SettingsScreen can lay them in one column on
+ * narrow screens and two columns on wide screens. Nothing here
+ * is new — each section is the old SettingsScreen block, moved
+ * verbatim (the Thermostat section is the exception: it moved
+ * to ThermostatDisplayRangeRows in the thermostat popout).
+ */
+@Composable
+private fun SettingsAppearanceSection(
+    themeMode: String,
+    reduceMotion: Boolean,
+    onThemeMode: (String) -> Unit,
+    onReduceMotion: (Boolean) -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColor: (Boolean) -> Unit,
+) {
+    KodaMenuSection("Appearance")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((value, label) in listOf("system" to "System", "light" to "Light", "dark" to "Dark")) {
+            FilterChip(
+                selected = themeMode == value,
+                onClick = { onThemeMode(value) },
+                label = { Text(label) },
+            )
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "appearance-motion",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.Autorenew,
+            title = "Reduce motion",
+            subtitle = "Keep animations instant and minimal",
+            onClick = null,
+            trailing = { Switch(checked = reduceMotion, onCheckedChange = onReduceMotion) },
+            flat = true,
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "appearance-dynamic-color",
+            badgeKind = ExpressiveKind.SUNNY,
+            icon = Icons.Filled.Palette,
+            title = "Dynamic color",
+            subtitle = "Follow your wallpaper colors instead of Haven's fixed sage and lime palette. Off by default.",
+            onClick = null,
+            trailing = { Switch(checked = dynamicColor, onCheckedChange = onDynamicColor) },
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsBadgesSection(vm: HavenViewModel) {
+    // Stage E §9: condition badges — a dot, never a count.
+    // Device badges are the tiles' own state badges (always on:
+    // they carry tap actions, so they are not a preference).
+    KodaMenuSection("Badges")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "badges-nav",
+            badgeKind = ExpressiveKind.FLOWER,
+            icon = Icons.Filled.Visibility,
+            title = "Navigation badges",
+            subtitle = "Dot on the Home tab when a lock is unlocked, a door or window is open, or the alarm is triggered.",
+            onClick = null,
+            trailing = { Switch(checked = vm.badgeNav, onCheckedChange = { vm.badgeNav = it }) },
+            flat = true,
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "badges-room",
+            badgeKind = ExpressiveKind.WAVE,
+            icon = Icons.Filled.Home,
+            title = "Room badges",
+            subtitle = "Dot on a room heading when that room has an unlocked lock, open door or window, or triggered alarm.",
+            onClick = null,
+            trailing = { Switch(checked = vm.badgeRoom, onCheckedChange = { vm.badgeRoom = it }) },
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsConnectionSection(
+    vm: HavenViewModel,
+    connection: ConnectionState,
+    onOpenDialog: () -> Unit,
+) {
+    KodaMenuSection("Connection")
+    KodaMenuGroup {
+        // Feedback round 16, item 7: the Instance row is
+        // tappable and shows Local vs Cloud for the
+        // EFFECTIVE target (anything not a local address
+        // reads Cloud). The subtitle recomputes when
+        // connectionPrefsVersion bumps (switch/save), so
+        // it always shows the live target, not a stale
+        // stored URL.
+        val connTick = vm.connectionPrefsVersion
+        val (connLabel, connTarget) = remember(connTick) { vm.connectionDisplay() }
+        KodaMenuRow(
+            badgeKey = "connection-instance",
+            badgeKind = ExpressiveKind.CLOUD,
+            icon = Icons.Filled.Wifi,
+            title = "Instance",
+            subtitle = connTarget?.let { "$connLabel · $it" } ?: "—",
+            onClick = onOpenDialog,
+            flat = true,
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "connection-status",
+            badgeKind = ExpressiveKind.CLOUD,
+            icon = Icons.Filled.Wifi,
+            title = "Status",
+            subtitle = when (connection) {
+                is ConnectionState.Connected -> "Connected"
+                is ConnectionState.Connecting -> "Connecting…"
+                is ConnectionState.Authenticating -> "Signing in…"
+                is ConnectionState.Error -> (connection as ConnectionState.Error).message
+                else -> "Disconnected"
+            },
+            onClick = null,
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsHomePageSection(navigate: (Screen) -> Unit) {
+    KodaMenuSection("Home page")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "home-manage",
+            badgeKind = ExpressiveKind.SUNNY,
+            icon = Icons.Filled.Home,
+            title = "Manage home page",
+            subtitle = "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
+            onClick = { navigate(Screen.HomeEditor) },
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsRoomsSection(navigate: (Screen) -> Unit) {
+    KodaMenuSection("Rooms")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "rooms-manage",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.GridView,
+            title = "Rooms & tabs",
+            subtitle = "Rooms (saved to Home Assistant itself) and custom tabs, in one place — pick whether each one pins as a room chip, a navigation tab, or stays hidden.",
+            onClick = { navigate(Screen.RoomsTabs) },
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsNotificationsSection(vm: HavenViewModel) {
+    KodaMenuSection("Notifications")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "notif-garage",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.Garage,
+            title = "Garage & door alerts",
+            subtitle = "Notify when a garage door or door opens",
+            onClick = null,
+            flat = true,
+            trailing = {
+                // Feedback round 16, item 3: default
+                // switch–text buffer.
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = vm.notifyGarage, onCheckedChange = { vm.notifyGarage = it })
+            },
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "notif-motion",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.AutoMirrored.Filled.DirectionsRun,
+            title = "Motion alerts",
+            subtitle = "Notify when a motion sensor detects motion",
+            onClick = null,
+            flat = true,
+            trailing = {
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = vm.notifyMotion, onCheckedChange = { vm.notifyMotion = it })
+            },
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "notif-lights",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.Lightbulb,
+            title = "Automated light alerts",
+            subtitle = "Notify when a light turns off by automation or externally — never for your own taps",
+            onClick = null,
+            flat = true,
+            trailing = {
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = vm.notifyLights, onCheckedChange = { vm.notifyLights = it })
+            },
+        )
+        KodaMenuDivider()
+        NotificationPermissionRow()
+    }
+}
+
+@Composable
+private fun SettingsShapesSection(vm: HavenViewModel) {
+    KodaMenuSection("Shapes")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "shapes-badge",
+            badgeKind = ExpressiveKind.SUNNY,
+            icon = Icons.Filled.Palette,
+            title = "Badge shape",
+            subtitle = shapeLabel(vm.settingsStore.globalBadgeShape) ?: "Domain default",
+            onClick = { vm.openShapePicker(null, false) },
+            flat = true,
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "shapes-card",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.GridView,
+            title = "Card shape",
+            subtitle = shapeLabel(vm.settingsStore.globalCardShape) ?: "Default corners",
+            onClick = { vm.openShapePicker(null, true) },
+            flat = true,
+        )
+        KodaMenuDivider()
+        // Feedback round 15, item 5: per-domain defaults —
+        // badge shape, card shape, and tile color for one
+        // entity type (e.g. light), applying to every
+        // entity of that domain unless it has its own
+        // Card settings. Per-entity settings still win.
+        KodaMenuRow(
+            badgeKey = "shapes-domain",
+            badgeKind = ExpressiveKind.SUNNY,
+            icon = Icons.Filled.Tune,
+            title = "Domain defaults",
+            subtitle = "Default shapes and colors by entity type",
+            onClick = { vm.openDomainDefaults() },
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsBrowseSection(navigate: (Screen) -> Unit) {
+    KodaMenuSection("Browse")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "browse-boards",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.Dashboard,
+            title = "Boards",
+            subtitle = "Your Lovelace dashboards",
+            onClick = { navigate(Screen.Dashboards) },
+            flat = true,
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "browse-areas",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.GridView,
+            title = "Areas",
+            subtitle = "Rooms and their entities",
+            onClick = { navigate(Screen.Areas) },
+            flat = true,
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "browse-search",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.Search,
+            title = "Search",
+            subtitle = "Find any entity",
+            onClick = { navigate(Screen.Search) },
+            flat = true,
+        )
+        KodaMenuDivider()
+        KodaMenuRow(
+            badgeKey = "browse-usertabs",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.GridView,
+            title = "User tabs",
+            subtitle = "Your custom tabs",
+            onClick = { navigate(Screen.UserTabs) },
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsCreateHubSection(navigate: (Screen) -> Unit) {
+    // Round 24, item 5: the four Create rows collapsed into
+    // one hub row — the builders themselves are unchanged,
+    // they just open from the hub screen now.
+    KodaMenuSection("Create")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "create-hub",
+            badgeKind = ExpressiveKind.WAVE,
+            icon = Icons.Filled.Autorenew,
+            title = "Automations, scenes & helpers",
+            subtitle = "Guided builders for automations, scenes, scripts, and helpers — no YAML, no web UI.",
+            onClick = { navigate(Screen.BuilderHub) },
+            flat = true,
+        )
+    }
+}
+
+@Composable
+private fun SettingsSystemSection(
+    vm: HavenViewModel,
+    updateSummary: UpdateSummary,
+    navigate: (Screen) -> Unit,
+) {
+    KodaMenuSection("System")
+    KodaMenuGroup {
+        KodaMenuRow(
+            badgeKey = "system-updates",
+            badgeKind = ExpressiveKind.BUN,
+            icon = Icons.Filled.SystemUpdate,
+            title = "System Updates",
+            subtitle = if (updateSummary.available == 0) {
+                "Everything is up to date (${updateSummary.total} sources tracked)"
+            } else {
+                "${updateSummary.available} update${if (updateSummary.available == 1) "" else "s"} available"
+            },
+            onClick = { navigate(Screen.UpdatesPanel) },
+            flat = true,
+        )
+    }
+}
+
 @Composable
 fun SettingsScreen(
     vm: HavenViewModel,
@@ -1932,480 +2460,147 @@ fun SettingsScreen(
         item {
             Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
-            KodaMenuSection("Appearance")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for ((value, label) in listOf("system" to "System", "light" to "Light", "dark" to "Dark")) {
-                    FilterChip(
-                        selected = themeMode == value,
-                        onClick = { onThemeMode(value) },
-                        label = { Text(label) },
-                    )
+            // Round 24, item 5: two columns on wide screens
+            // (left: Appearance through Notifications, right:
+            // Shapes through System plus Sign out), one column
+            // on narrow screens, same section order either way.
+            // The Thermostat section is gone from here — it
+            // lives in the thermostat popout now — and Create
+            // is one hub row.
+            if (LocalWideLayout.current) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        SettingsAppearanceSection(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor)
+                        Spacer(Modifier.height(16.dp))
+                        SettingsBadgesSection(vm)
+                        Spacer(Modifier.height(16.dp))
+                        SettingsConnectionSection(vm, connection) { connectionDialog = true }
+                        Spacer(Modifier.height(16.dp))
+                        SettingsHomePageSection(navigate)
+                        Spacer(Modifier.height(16.dp))
+                        SettingsRoomsSection(navigate)
+                        Spacer(Modifier.height(16.dp))
+                        SettingsNotificationsSection(vm)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        SettingsShapesSection(vm)
+                        Spacer(Modifier.height(16.dp))
+                        SettingsBrowseSection(navigate)
+                        Spacer(Modifier.height(16.dp))
+                        SettingsCreateHubSection(navigate)
+                        Spacer(Modifier.height(16.dp))
+                        SettingsSystemSection(vm, updateSummary, navigate)
+                        Spacer(Modifier.height(24.dp))
+                        OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "Haven v1.0 (debug). Native client — no WebView. Energy view, admin panels, widgets, Wear/Auto, and voice satellite are later rounds.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-            }
-            Spacer(Modifier.height(8.dp))
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "appearance-motion",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.Autorenew,
-                    title = "Reduce motion",
-                    subtitle = "Keep animations instant and minimal",
-                    onClick = null,
-                    trailing = { Switch(checked = reduceMotion, onCheckedChange = onReduceMotion) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "appearance-dynamic-color",
-                    badgeKind = ExpressiveKind.SUNNY,
-                    icon = Icons.Filled.Palette,
-                    title = "Dynamic color",
-                    subtitle = "Follow your wallpaper colors instead of Haven's fixed sage and lime palette. Off by default.",
-                    onClick = null,
-                    trailing = { Switch(checked = dynamicColor, onCheckedChange = onDynamicColor) },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            // Stage E §9: condition badges — a dot, never a count.
-            // Device badges are the tiles' own state badges (always on:
-            // they carry tap actions, so they are not a preference).
-            KodaMenuSection("Badges")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "badges-nav",
-                    badgeKind = ExpressiveKind.FLOWER,
-                    icon = Icons.Filled.Visibility,
-                    title = "Navigation badges",
-                    subtitle = "Dot on the Home tab when a lock is unlocked, a door or window is open, or the alarm is triggered.",
-                    onClick = null,
-                    trailing = { Switch(checked = vm.badgeNav, onCheckedChange = { vm.badgeNav = it }) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "badges-room",
-                    badgeKind = ExpressiveKind.WAVE,
-                    icon = Icons.Filled.Home,
-                    title = "Room badges",
-                    subtitle = "Dot on a room heading when that room has an unlocked lock, open door or window, or triggered alarm.",
-                    onClick = null,
-                    trailing = { Switch(checked = vm.badgeRoom, onCheckedChange = { vm.badgeRoom = it }) },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("Connection")
-            KodaMenuGroup {
-                // Feedback round 16, item 7: the Instance row is
-                // tappable and shows Local vs Cloud for the
-                // EFFECTIVE target (anything not a local address
-                // reads Cloud). The subtitle recomputes when
-                // connectionPrefsVersion bumps (switch/save), so
-                // it always shows the live target, not a stale
-                // stored URL.
-                val connTick = vm.connectionPrefsVersion
-                val (connLabel, connTarget) = remember(connTick) { vm.connectionDisplay() }
-                KodaMenuRow(
-                    badgeKey = "connection-instance",
-                    badgeKind = ExpressiveKind.CLOUD,
-                    icon = Icons.Filled.Wifi,
-                    title = "Instance",
-                    subtitle = connTarget?.let { "$connLabel · $it" } ?: "—",
-                    onClick = { connectionDialog = true },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "connection-status",
-                    badgeKind = ExpressiveKind.CLOUD,
-                    icon = Icons.Filled.Wifi,
-                    title = "Status",
-                    subtitle = when (connection) {
-                        is ConnectionState.Connected -> "Connected"
-                        is ConnectionState.Connecting -> "Connecting…"
-                        is ConnectionState.Authenticating -> "Signing in…"
-                        is ConnectionState.Error -> (connection as ConnectionState.Error).message
-                        else -> "Disconnected"
-                    },
-                    onClick = null,
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("Home page")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "home-manage",
-                    badgeKind = ExpressiveKind.SUNNY,
-                    icon = Icons.Filled.Home,
-                    title = "Manage home page",
-                    subtitle = "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
-                    onClick = { navigate(Screen.HomeEditor) },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("Rooms")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "rooms-manage",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.GridView,
-                    title = "Rooms & tabs",
-                    subtitle = "Rooms (saved to Home Assistant itself) and custom tabs, in one place — pick whether each one pins as a room chip, a navigation tab, or stays hidden.",
-                    onClick = { navigate(Screen.RoomsTabs) },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("Notifications")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "notif-garage",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.Garage,
-                    title = "Garage & door alerts",
-                    subtitle = "Notify when a garage door or door opens",
-                    onClick = null,
-                    flat = true,
-                    trailing = {
-                        // Feedback round 16, item 3: default
-                        // switch–text buffer.
-                        Spacer(Modifier.width(12.dp))
-                        Switch(checked = vm.notifyGarage, onCheckedChange = { vm.notifyGarage = it })
-                    },
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "notif-motion",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.AutoMirrored.Filled.DirectionsRun,
-                    title = "Motion alerts",
-                    subtitle = "Notify when a motion sensor detects motion",
-                    onClick = null,
-                    flat = true,
-                    trailing = {
-                        Spacer(Modifier.width(12.dp))
-                        Switch(checked = vm.notifyMotion, onCheckedChange = { vm.notifyMotion = it })
-                    },
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "notif-lights",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.Lightbulb,
-                    title = "Automated light alerts",
-                    subtitle = "Notify when a light turns off by automation or externally — never for your own taps",
-                    onClick = null,
-                    flat = true,
-                    trailing = {
-                        Spacer(Modifier.width(12.dp))
-                        Switch(checked = vm.notifyLights, onCheckedChange = { vm.notifyLights = it })
-                    },
-                )
-                KodaMenuDivider()
-                NotificationPermissionRow()
-            }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("Shapes")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "shapes-badge",
-                    badgeKind = ExpressiveKind.SUNNY,
-                    icon = Icons.Filled.Palette,
-                    title = "Badge shape",
-                    subtitle = shapeLabel(vm.settingsStore.globalBadgeShape) ?: "Domain default",
-                    onClick = { vm.openShapePicker(null, false) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "shapes-card",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.GridView,
-                    title = "Card shape",
-                    subtitle = shapeLabel(vm.settingsStore.globalCardShape) ?: "Default corners",
-                    onClick = { vm.openShapePicker(null, true) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                // Feedback round 15, item 5: per-domain defaults —
-                // badge shape, card shape, and tile color for one
-                // entity type (e.g. light), applying to every
-                // entity of that domain unless it has its own
-                // Card settings. Per-entity settings still win.
-                KodaMenuRow(
-                    badgeKey = "shapes-domain",
-                    badgeKind = ExpressiveKind.SUNNY,
-                    icon = Icons.Filled.Tune,
-                    title = "Domain defaults",
-                    subtitle = "Default shapes and colors by entity type",
-                    onClick = { vm.openDomainDefaults() },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            // Round 6: thermostat display-range override. The dial
-            // axis normally follows the decade formula in
-            // thermostatDisplayRange (66/67° setpoints → 50–80°);
-            // these two values, when BOTH set, pin the axis instead
-            // on the popout, the sheet dial, and detail (all three
-            // read resolveThermostatDisplayRange). Display-range
-            // only: live setpoints are never touched. State is kept
-            // locally here and written straight to
-            // vm.settingsStore, so SettingsScreen's signature is
-            // unchanged.
-            KodaMenuSection("Thermostat")
-            var thermoMin by remember { mutableStateOf(vm.settingsStore.thermostatDisplayMin) }
-            var thermoMax by remember { mutableStateOf(vm.settingsStore.thermostatDisplayMax) }
-            val thermoClampedMin = thermoMin?.coerceIn(40f, 100f)
-            val thermoClampedMax = thermoMax?.coerceIn(40f, 100f)
-            val thermoOverrideText = if (thermoClampedMin != null && thermoClampedMax != null && thermoClampedMin < thermoClampedMax) {
-                "${thermoClampedMin.toInt()}–${thermoClampedMax.toInt()}°"
             } else {
-                null
-            }
-            // The Automatic range, when exactly one climate entity
-            // is present, so the status line can name the effective
-            // window; with zero or several climates the status stays
-            // generic rather than guessing which thermostat it means.
-            val thermoFormulaText: String? = run {
-                val climates = updateStates.values.filter { it.domain == "climate" }
-                if (climates.size != 1) return@run null
-                val climate = climates.first()
-                val cMin = climate.attrDouble("min_temp")?.toFloat() ?: 10f
-                val cMax = climate.attrDouble("max_temp")?.toFloat() ?: 30f
-                val low = climate.attrDouble("target_temp_low")?.toFloat()
-                val high = climate.attrDouble("target_temp_high")?.toFloat()
-                val setpoints = if (low != null && high != null) {
-                    listOf(low, high)
-                } else {
-                    listOfNotNull(climate.attrDouble("temperature")?.toFloat())
-                }
-                val r = thermostatDisplayRange(cMin, cMax, setpoints)
-                "${r.start.toInt()}–${r.endInclusive.toInt()}°"
-            }
-            val thermoStatus = when {
-                thermoOverrideText != null ->
-                    "Override ($thermoOverrideText) — pinned on the thermostat dial, sheet, and detail, whatever the setpoints are."
-                thermoMin != null && thermoMax != null ->
-                    "Override values do not form a valid range (minimum must be below maximum) — using Automatic" +
-                        (thermoFormulaText?.let { " ($it from setpoints)" } ?: "") + "."
-                thermoMin != null || thermoMax != null ->
-                    "Only one override value is set — Automatic governs until both minimum and maximum are set" +
-                        (thermoFormulaText?.let { " ($it from setpoints)" } ?: "") + "."
-                thermoFormulaText != null ->
-                    "Automatic ($thermoFormulaText from setpoints) — the dial range follows your setpoints."
-                else ->
-                    "Automatic — the dial range follows your setpoints."
-            }
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "thermostat-range",
-                    badgeKind = ExpressiveKind.SUNNY,
-                    icon = Icons.Filled.Thermostat,
-                    title = "Dial range",
-                    subtitle = thermoStatus,
-                    onClick = null,
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "thermostat-min",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.Thermostat,
-                    title = "Display minimum",
-                    subtitle = "Low end of the dial axis. Tap −/+ to set an override (starts at 50°); 1° steps, clamped to 40–100°.",
-                    onClick = null,
-                    trailing = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = {
-                                val base = thermoMin
-                                val next = if (base == null) 50f else (base - 1f).coerceIn(40f, 100f)
-                                thermoMin = next
-                                vm.settingsStore.thermostatDisplayMin = next
-                            }) { Text("−") }
-                            Text(
-                                thermoMin?.let { "${it.toInt()}°" } ?: "Automatic",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            TextButton(onClick = {
-                                val base = thermoMin
-                                val next = if (base == null) 50f else (base + 1f).coerceIn(40f, 100f)
-                                thermoMin = next
-                                vm.settingsStore.thermostatDisplayMin = next
-                            }) { Text("+") }
-                        }
-                    },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "thermostat-max",
-                    badgeKind = ExpressiveKind.WAVE,
-                    icon = Icons.Filled.Thermostat,
-                    title = "Display maximum",
-                    subtitle = "High end of the dial axis. Tap −/+ to set an override (starts at 80°); 1° steps, clamped to 40–100°.",
-                    onClick = null,
-                    trailing = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = {
-                                val base = thermoMax
-                                val next = if (base == null) 80f else (base - 1f).coerceIn(40f, 100f)
-                                thermoMax = next
-                                vm.settingsStore.thermostatDisplayMax = next
-                            }) { Text("−") }
-                            Text(
-                                thermoMax?.let { "${it.toInt()}°" } ?: "Automatic",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            TextButton(onClick = {
-                                val base = thermoMax
-                                val next = if (base == null) 80f else (base + 1f).coerceIn(40f, 100f)
-                                thermoMax = next
-                                vm.settingsStore.thermostatDisplayMax = next
-                            }) { Text("+") }
-                        }
-                    },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "thermostat-reset",
-                    badgeKind = ExpressiveKind.CLOUD,
-                    icon = Icons.Filled.Thermostat,
-                    title = "Reset to Automatic",
-                    subtitle = "Clear the minimum/maximum override; the dial range follows your setpoints again.",
-                    onClick = {
-                        thermoMin = null
-                        thermoMax = null
-                        vm.settingsStore.thermostatDisplayMin = null
-                        vm.settingsStore.thermostatDisplayMax = null
-                    },
-                    flat = true,
+                SettingsAppearanceSection(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor)
+                Spacer(Modifier.height(16.dp))
+                SettingsBadgesSection(vm)
+                Spacer(Modifier.height(16.dp))
+                SettingsConnectionSection(vm, connection) { connectionDialog = true }
+                Spacer(Modifier.height(16.dp))
+                SettingsHomePageSection(navigate)
+                Spacer(Modifier.height(16.dp))
+                SettingsRoomsSection(navigate)
+                Spacer(Modifier.height(16.dp))
+                SettingsNotificationsSection(vm)
+                Spacer(Modifier.height(16.dp))
+                SettingsShapesSection(vm)
+                Spacer(Modifier.height(16.dp))
+                SettingsBrowseSection(navigate)
+                Spacer(Modifier.height(16.dp))
+                SettingsCreateHubSection(navigate)
+                Spacer(Modifier.height(16.dp))
+                SettingsSystemSection(vm, updateSummary, navigate)
+                Spacer(Modifier.height(24.dp))
+                OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Haven v1.0 (debug). Native client — no WebView. Energy view, admin panels, widgets, Wear/Auto, and voice satellite are later rounds.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("Browse")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "browse-boards",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.Dashboard,
-                    title = "Boards",
-                    subtitle = "Your Lovelace dashboards",
-                    onClick = { navigate(Screen.Dashboards) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "browse-areas",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.GridView,
-                    title = "Areas",
-                    subtitle = "Rooms and their entities",
-                    onClick = { navigate(Screen.Areas) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "browse-search",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.Search,
-                    title = "Search",
-                    subtitle = "Find any entity",
-                    onClick = { navigate(Screen.Search) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "browse-usertabs",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.GridView,
-                    title = "User tabs",
-                    subtitle = "Your custom tabs",
-                    onClick = { navigate(Screen.UserTabs) },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("Create")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "create-automation",
-                    badgeKind = ExpressiveKind.WAVE,
-                    icon = Icons.Filled.Autorenew,
-                    title = "Automation",
-                    subtitle = "Guided builder: pick a trigger, a condition, and an action — no YAML, no web UI.",
-                    onClick = { navigate(Screen.AutomationBuilder) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "create-scene",
-                    badgeKind = ExpressiveKind.WAVE,
-                    icon = Icons.Filled.Palette,
-                    title = "Scene",
-                    subtitle = "Capture the current state of your devices",
-                    onClick = { navigate(Screen.SceneBuilder) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "create-script",
-                    badgeKind = ExpressiveKind.WAVE,
-                    icon = Icons.Filled.Code,
-                    title = "Script",
-                    subtitle = "A reusable sequence of actions",
-                    onClick = { navigate(Screen.ScriptBuilder) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "create-helper",
-                    badgeKind = ExpressiveKind.WAVE,
-                    icon = Icons.Filled.Build,
-                    title = "Helper",
-                    subtitle = "Input booleans, numbers, timers, and more",
-                    onClick = { navigate(Screen.HelperBuilder) },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            KodaMenuSection("System")
-            KodaMenuGroup {
-                KodaMenuRow(
-                    badgeKey = "system-updates",
-                    badgeKind = ExpressiveKind.BUN,
-                    icon = Icons.Filled.SystemUpdate,
-                    title = "System Updates",
-                    subtitle = if (updateSummary.available == 0) {
-                        "Everything is up to date (${updateSummary.total} sources tracked)"
-                    } else {
-                        "${updateSummary.available} update${if (updateSummary.available == 1) "" else "s"} available"
-                    },
-                    onClick = { navigate(Screen.UpdatesPanel) },
-                    flat = true,
-                )
-            }
-            Spacer(Modifier.height(24.dp))
-            OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "Haven v1.0 (debug). Native client — no WebView. Energy view, admin panels, widgets, Wear/Auto, and voice satellite are later rounds.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
     // Feedback round 16, item 7: the connection switcher.
     if (connectionDialog) {
         ConnectionDialog(vm, onDismiss = { connectionDialog = false })
+    }
+}
+
+/**
+ * Round 24, item 5: the builder hub — the old Create section
+ * as its own screen, reached from Settings' single
+ * "Automations, scenes & helpers" row. The four builders are
+ * unchanged; this is just their entry point.
+ */
+@Composable
+fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().background(MaterialTheme.colorScheme.background)) {
+        DetailTopBar("Automations, scenes & helpers", onBack)
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = 16.dp),
+        ) {
+            item {
+                Text(
+                    "Guided builders — no YAML, no web UI. Pick one to start.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                KodaMenuGroup {
+                    KodaMenuRow(
+                        badgeKey = "create-automation",
+                        badgeKind = ExpressiveKind.WAVE,
+                        icon = Icons.Filled.Autorenew,
+                        title = "Automation",
+                        subtitle = "Guided builder: pick a trigger, a condition, and an action — no YAML, no web UI.",
+                        onClick = { navigate(Screen.AutomationBuilder) },
+                        flat = true,
+                    )
+                    KodaMenuDivider()
+                    KodaMenuRow(
+                        badgeKey = "create-scene",
+                        badgeKind = ExpressiveKind.WAVE,
+                        icon = Icons.Filled.Palette,
+                        title = "Scene",
+                        subtitle = "Capture the current state of your devices",
+                        onClick = { navigate(Screen.SceneBuilder) },
+                        flat = true,
+                    )
+                    KodaMenuDivider()
+                    KodaMenuRow(
+                        badgeKey = "create-script",
+                        badgeKind = ExpressiveKind.WAVE,
+                        icon = Icons.Filled.Code,
+                        title = "Script",
+                        subtitle = "A reusable sequence of actions",
+                        onClick = { navigate(Screen.ScriptBuilder) },
+                        flat = true,
+                    )
+                    KodaMenuDivider()
+                    KodaMenuRow(
+                        badgeKey = "create-helper",
+                        badgeKind = ExpressiveKind.WAVE,
+                        icon = Icons.Filled.Build,
+                        title = "Helper",
+                        subtitle = "Input booleans, numbers, timers, and more",
+                        onClick = { navigate(Screen.HelperBuilder) },
+                        flat = true,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2752,6 +2947,27 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
         else { message = ok; messageIsError = false }
     }
 
+    // Round 24, item 5: display-name + icon mirrors (moved
+    // here from Manage home page, whose duplicate Rooms block
+    // is gone) and the Up/Down reorder (mirrors HomeEditor's
+    // moveRoom: swap with the neighbour in stored room order,
+    // write setRoomOrder + bumpHomePrefs so the order persists).
+    var displayNames by remember { mutableStateOf(vm.settingsStore.roomDisplayNames()) }
+    var roomIcons by remember { mutableStateOf(vm.settingsStore.roomIconKeys()) }
+    fun moveRoom(areaId: String, up: Boolean) {
+        val order = resolveOrder(vm.settingsStore.roomOrder(), areas.map { it.id }).toMutableList()
+        val i = order.indexOf(areaId)
+        val j = if (up) i - 1 else i + 1
+        if (i < 0 || j < 0 || j >= order.size) return
+        order[i] = order[j].also { order[j] = order[i] }
+        vm.settingsStore.setRoomOrder(order)
+        vm.bumpHomePrefs()
+    }
+    // Round 24, item 5: rooms render in stored order (new rooms
+    // append at the end via resolveOrder's canonical fallback).
+    val orderedAreas = resolveOrder(vm.settingsStore.roomOrder(), areas.map { it.id })
+        .mapNotNull { id -> areas.firstOrNull { it.id == id } }
+
     // Status-bar inset: same missing-inset class as the clips screen
     // (this root Column was the only other DetailTopBar screen
     // without one — every sibling pads its root).
@@ -2805,7 +3021,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                     Spacer(Modifier.height(12.dp))
                 }
             }
-            items(areas) { area ->
+            items(orderedAreas) { area ->
                 val members = entityAreas.filter { it.value == area.id }.keys
                     .mapNotNull { states[it] }
                     .sortedBy { it.friendlyName }
@@ -2815,6 +3031,15 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                         .padding(12.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Round 24, item 5: the room's chosen icon
+                        // leads its heading (same as the Home room
+                        // heading), so the picker's choice is
+                        // visible where the room is managed.
+                        val roomIcon = roomIcons[area.id]?.let { tabIconPairForKey(it)?.first }
+                        if (roomIcon != null) {
+                            Icon(roomIcon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                        }
                         Text(area.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                         Text(deviceCountLabel(members.size), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -2844,6 +3069,76 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                                 messageIsError = false
                             }
                         }) { Text(if (deleteArmed == area.id) "Confirm delete" else "Delete") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // Round 24, item 5: display name + icon picker
+                    // + Up/Down reorder, moved here from Manage
+                    // home page (the duplicate Rooms block there is
+                    // gone). Display overrides only — renaming a
+                    // room here never renames it in Home Assistant
+                    // (the Rename field above does that); the hide
+                    // switch is gone — PlacementSelector Hidden
+                    // below covers visibility.
+                    OutlinedTextField(
+                        value = displayNames[area.id] ?: "",
+                        onValueChange = { value ->
+                            vm.settingsStore.setRoomDisplayName(area.id, value.ifBlank { null })
+                            displayNames = vm.settingsStore.roomDisplayNames()
+                            vm.bumpHomePrefs()
+                        },
+                        label = { Text("Display name (${area.name})") },
+                        placeholder = { Text(area.name) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        var iconMenu by remember { mutableStateOf(false) }
+                        val currentIcon = roomIcons[area.id]
+                        Box {
+                            OutlinedButton(onClick = { iconMenu = true }) {
+                                val pair = currentIcon?.let { tabIconPairForKey(it) }
+                                if (pair != null) {
+                                    Icon(pair.first, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Text(TAB_ICON_OPTIONS.firstOrNull { it.key == currentIcon }?.label ?: "Automatic icon")
+                            }
+                            DropdownMenu(expanded = iconMenu, onDismissRequest = { iconMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Automatic icon") },
+                                    onClick = {
+                                        vm.settingsStore.setRoomIconKey(area.id, null)
+                                        roomIcons = vm.settingsStore.roomIconKeys()
+                                        vm.bumpHomePrefs()
+                                        iconMenu = false
+                                    },
+                                )
+                                for (option in TAB_ICON_OPTIONS) {
+                                    DropdownMenuItem(
+                                        text = { Text(option.label) },
+                                        leadingIcon = {
+                                            tabIconPairForKey(option.key)?.first?.let {
+                                                Icon(it, null, modifier = Modifier.size(18.dp))
+                                            }
+                                        },
+                                        onClick = {
+                                            vm.settingsStore.setRoomIconKey(area.id, option.key)
+                                            roomIcons = vm.settingsStore.roomIconKeys()
+                                            vm.bumpHomePrefs()
+                                            iconMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        IconButton(onClick = { moveRoom(area.id, true) }) {
+                            Icon(Icons.Filled.ArrowUpward, "Move up", modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = { moveRoom(area.id, false) }) {
+                            Icon(Icons.Filled.ArrowDownward, "Move down", modifier = Modifier.size(20.dp))
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     members.forEach { member ->

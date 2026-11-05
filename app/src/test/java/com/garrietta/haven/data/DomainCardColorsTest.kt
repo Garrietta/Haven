@@ -11,12 +11,11 @@ import org.junit.Test
 /**
  * UI rewrite round §2: the user's complete state-based color matrix
  * for Home cards. Every badge glyph must clear 4.5:1 against its
- * badge background in both themes — EXCEPT the inactive dark pair
- * (#8C9188 on #2A2F28, ~4.2:1), whose hexes are user-specified and
- * are kept and reported rather than altered; that pair must still
- * clear the 3:1 icon floor. Temperature/humidity sensors keep their
- * semantic path; binary sensors and generic sensors keep the
- * existing pipeline.
+ * badge background in both themes — including the inactive row,
+ * whose glyph follows the container rule since round 24, item 1
+ * (sage container light, vibrant container-hue tint dark).
+ * Temperature/humidity sensors keep their semantic path; binary
+ * sensors and generic sensors keep the existing pipeline.
  */
 class DomainCardColorsTest {
 
@@ -57,16 +56,45 @@ class DomainCardColorsTest {
                 val colors = domainCardColors(e, isDark)
                 assertNotNull("${e.entityId} ${e.state} dark=$isDark must resolve", colors)
                 val ratio = contrastRatio(colors!!.badgeGlyph, colors.badgeBg)
-                // The inactive dark pair is user-specified (~4.2:1):
-                // it must clear the 3:1 icon floor, not 4.5:1.
-                val floor = if (isDark && colors.container == Color(0xFF1C201B)) 3.0f else 4.5f
                 assertTrue(
-                    "${e.entityId} ${e.state} dark=$isDark glyph contrast $ratio below $floor:1",
-                    ratio >= floor,
+                    "${e.entityId} ${e.state} dark=$isDark glyph contrast $ratio below 4.5:1",
+                    ratio >= 4.5f,
                 )
                 assertNotNull(colors.container)
             }
         }
+    }
+
+    @Test
+    fun inactiveGlyphMatchesContainer() {
+        // Round 24, item 1: the inactive row follows the same
+        // glyph rule as the active rows — the glyph IS the
+        // card's container color in light mode, and a vibrant
+        // tint of the container's hue in dark mode. A closed
+        // garage door (preset-inactive) and a docked vacuum
+        // never render a plain white/gray icon on their sage
+        // cards again. (Cover closed without a preset resolves
+        // to the LOCKED row, not INACTIVE, so the inactive
+        // assertions use a light that is off and a docked
+        // vacuum, which both resolve to INACTIVE.)
+        val offLight = domainCardColors(entity("light.a", "off"), false)!!
+        assertEquals(Color(0xFFE6EBD3), offLight.container)
+        assertEquals(Color(0xFFE6EBD3), offLight.badgeGlyph)
+        val dockedLight = domainCardColors(entity("vacuum.a", "docked"), false)!!
+        assertEquals(Color(0xFFE6EBD3), dockedLight.badgeGlyph)
+        val dockedDark = domainCardColors(entity("vacuum.a", "docked"), true)!!
+        val (h, _, _) = rgbToHsl(dockedDark.container.red, dockedDark.container.green, dockedDark.container.blue)
+        val (gh, _, gl) = rgbToHsl(dockedDark.badgeGlyph.red, dockedDark.badgeGlyph.green, dockedDark.badgeGlyph.blue)
+        val hueDistance = run {
+            val d = kotlin.math.abs(gh - h) % 360f
+            minOf(d, 360f - d)
+        }
+        assertTrue("dark inactive glyph hue $gh must match container hue $h", hueDistance <= 1f)
+        assertTrue("dark inactive glyph lightness $gl must be the 0.72 bright tint", gl > 0.70f && gl < 0.74f)
+        assertTrue(
+            "dark inactive glyph must clear 4.5:1",
+            contrastRatio(dockedDark.badgeGlyph, dockedDark.badgeBg) >= 4.5f,
+        )
     }
 
     @Test
@@ -81,13 +109,21 @@ class DomainCardColorsTest {
         val off = domainCardColors(entity("light.living_room", "off"), false)!!
         assertEquals(Color(0xFFE6EBD3), off.container)
         assertEquals(Color(0xFF52564E), off.badgeBg)
-        assertEquals(Color.White, off.badgeGlyph)
+        // Round 24, item 1: the inactive light glyph IS the
+        // container now (was plain White — the garage-door /
+        // eufy mismatch on sage cards).
+        assertEquals(Color(0xFFE6EBD3), off.badgeGlyph)
         val offDark = domainCardColors(entity("light.living_room", "off"), true)!!
         assertEquals(Color(0xFF1C201B), offDark.container)
         // Reconciliation: dark badge polygon #2A2F28 (visible
-        // against the #1C201B card) with glyph #8C9188.
+        // against the #1C201B card). Round 24, item 1: the glyph
+        // is no longer the flat #8C9188 gray — it is the
+        // container's hue at full saturation and 0.72 lightness
+        // (a vibrant sage tint; its hue/lightness/contrast are
+        // pinned independently by inactiveGlyphMatchesContainer).
         assertEquals(Color(0xFF2A2F28), offDark.badgeBg)
-        assertEquals(Color(0xFF8C9188), offDark.badgeGlyph)
+        val (oh, _, _) = rgbToHsl(offDark.container.red, offDark.container.green, offDark.container.blue)
+        assertEquals(hslToColor(oh, 1.0f, 0.72f), offDark.badgeGlyph)
     }
 
     @Test

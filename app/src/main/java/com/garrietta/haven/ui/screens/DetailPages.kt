@@ -560,15 +560,27 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
         // are unchanged, with the same invalid-direction law.
         // Feedback round 5, item 4: the slatted door fill is the tile color (the video-3
         // garage detail: sky blue door), else the scheme primary as before.
-        GarageDoorVisual(
-            openFraction = openClamped,
-            onToggle = { vm.toggleCover(entity.entityId) },
-            width = 160.dp,
-            height = 180.dp,
-            doorColor = pageAccent ?: MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Round 24, item 2: split hero — the door visual left
+        // (150x168) and Open / Close / Stop stacked vertically
+        // in a column on the right, opposite the animated door.
+        // Actuation is unchanged (same service calls, same
+        // invalid-direction law below), and no confirmation was
+        // added (decided against, permanently).
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            GarageDoorVisual(
+                openFraction = openClamped,
+                onToggle = { vm.toggleCover(entity.entityId) },
+                width = 150.dp,
+                height = 168.dp,
+                doorColor = pageAccent ?: MaterialTheme.colorScheme.primary,
+            )
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
             // Invalid-direction actions are disabled AND dimmed to
             // 0.38 alpha (2026-11-01 hotfix): on this dark dynamic
             // palette secondaryContainer and surfaceContainerHighest
@@ -581,7 +593,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
             // surfaceContainerHighest treatment — the invalid-direction law is untouched.
             PressablePillButton(
                 onClick = { vm.callService("cover", "open_cover", entity.entityId) },
-                modifier = Modifier.alpha(if (isOpen) 0.38f else 1f),
+                modifier = Modifier.fillMaxWidth().alpha(if (isOpen) 0.38f else 1f),
                 height = 56.dp,
                 enabled = !isOpen,
                 containerColor = if (isOpen) MaterialTheme.colorScheme.surfaceContainerHighest else (pageAccent ?: MaterialTheme.colorScheme.secondaryContainer),
@@ -592,7 +604,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
             }
             PressablePillButton(
                 onClick = { vm.callService("cover", "close_cover", entity.entityId) },
-                modifier = Modifier.alpha(if (isClosed) 0.38f else 1f),
+                modifier = Modifier.fillMaxWidth().alpha(if (isClosed) 0.38f else 1f),
                 height = 56.dp,
                 enabled = !isClosed,
                 containerColor = if (isClosed) MaterialTheme.colorScheme.surfaceContainerHighest else (pageAccent ?: MaterialTheme.colorScheme.secondaryContainer),
@@ -603,12 +615,14 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
             }
             PressablePillButton(
                 onClick = { vm.callService("cover", "stop_cover", entity.entityId) },
+                modifier = Modifier.fillMaxWidth(),
                 height = 56.dp,
                 containerColor = pageAccent ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             ) {
                 Text("Stop", fontWeight = FontWeight.SemiBold)
+            }
             }
         }
         if (position != null) {

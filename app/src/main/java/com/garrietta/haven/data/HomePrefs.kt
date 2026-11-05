@@ -124,6 +124,26 @@ fun resolveOrder(stored: List<String>, canonical: List<String>): List<String> {
 }
 
 /**
+ * Round 24, item 6: moves [item] by [delta] positions within
+ * [list] (negative = toward the start), clamping at both ends.
+ * A move that would not change the position returns the list
+ * unchanged (same instance); an unknown item returns the list
+ * unchanged. Pure, unit-tested. The drag-reorder gesture calls
+ * this once per threshold crossing, so a long drag walks the
+ * card across the grid one slot at a time.
+ */
+fun <T> movedByDelta(list: List<T>, item: T, delta: Int): List<T> {
+    val i = list.indexOf(item)
+    if (i < 0 || delta == 0) return list
+    val j = (i + delta).coerceIn(list.indices)
+    if (i == j) return list
+    val out = list.toMutableList()
+    val moved = out.removeAt(i)
+    out.add(j, moved)
+    return out
+}
+
+/**
  * Groups entities by their HA area (2026-10-30 Home reorg):
  * area id -> members, with null for entities assigned to no area.
  * Pure: the Today screen filters domains (cameras to the hero,

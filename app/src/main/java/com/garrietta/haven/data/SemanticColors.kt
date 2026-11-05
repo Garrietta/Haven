@@ -276,23 +276,40 @@ private enum class MatrixRow(
 /** A matrix row as card colors, with the glyph rule applied. */
 private fun MatrixRow.toCardColors(isDark: Boolean): DomainCardColors {
     val badgeBg = if (isDark) darkBadge else lightBadge
-    val glyph = if (this == MatrixRow.INACTIVE) {
-        if (isDark) Color(0xFF8C9188) else Color.White
-    } else if (isDark) {
-        darkInk
+    val container = if (isDark) darkContainer else lightContainer
+    val glyph = if (isDark) {
+        if (this == MatrixRow.INACTIVE) {
+            // Round 24, item 1: the inactive dark glyph follows
+            // the preset dark rule (the container's hue at full
+            // saturation and 0.72 HSL lightness — see
+            // presetBadgeColors) instead of the flat #8C9188
+            // gray, so a closed garage door or a docked vacuum
+            // carries a vibrant tint of its own sage container
+            // instead of a plain gray icon. The bright tint
+            // clears 4.5:1 on the dark badge (pinned by
+            // DomainCardColorsTest).
+            val (h, _, _) = rgbToHsl(container.red, container.green, container.blue)
+            hslToColor(h, 1.0f, 0.72f)
+        } else {
+            darkInk
+        }
     } else {
-        // Feedback round 4, item 3 — SUPERSEDES the rewrite matrix's
-        // active-light #FFFFFF glyph rule: the badge glyph is the
-        // card's pastel container color ("as green as the switch"
-        // — the switch thumb already uses the container, see
-        // domainSwitchColors/presetSwitchColors), while the badge
-        // polygon stays deep tonal ink. Every light active pair
-        // still clears 4.5:1 (pastel on deep ink), pinned by
-        // DomainCardColorsTest. Dark is untouched: a dark container
-        // glyph would fail on the light badge.
+        // Feedback round 4, item 3 — EXTENDED by round 24,
+        // item 1 to the INACTIVE row: the badge glyph is the
+        // card's pastel container color ("as green as the
+        // switch" — the switch thumb already uses the
+        // container, see domainSwitchColors/presetSwitchColors),
+        // while the badge polygon stays deep tonal ink. The
+        // inactive light pair is sage #E6EBD3 on #52564E
+        // (~6:1), so a closed garage door or a docked vacuum
+        // never renders a plain white icon on its sage card.
+        // Every light pair still clears 4.5:1 (pastel on deep
+        // ink), pinned by DomainCardColorsTest. Dark is
+        // untouched: a dark container glyph would fail on the
+        // light badge.
         lightContainer
     }
-    return DomainCardColors(if (isDark) darkContainer else lightContainer, badgeBg, glyph)
+    return DomainCardColors(container, badgeBg, glyph)
 }
 
 /**

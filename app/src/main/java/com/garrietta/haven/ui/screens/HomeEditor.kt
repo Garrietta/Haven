@@ -50,8 +50,6 @@ import com.garrietta.haven.data.HomeStatusCategory
 import com.garrietta.haven.data.isIndicatorLight
 import com.garrietta.haven.data.isLightShownOnHome
 import com.garrietta.haven.data.resolveOrder
-import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
-import com.garrietta.haven.ui.components.tabIconPairForKey
 
 /**
  * Home page editor, following the Settings -> Manage tabs pattern: reached
@@ -70,21 +68,19 @@ import com.garrietta.haven.ui.components.tabIconPairForKey
 @Composable
 fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
-    val areas by vm.areas.collectAsState()
     var welcome by remember { mutableStateOf(vm.settingsStore.homeWelcomeMessage) }
     var hidden by remember { mutableStateOf(migrateRound3Hidden(vm.settingsStore.homeHiddenSections)) }
     var overrides by remember { mutableStateOf(vm.settingsStore.homeLightOverrides()) }
-    // Stage G: arrangement + room presentation state. Rendered orders
-    // resolve against the canonical lists at render time, so areas
-    // that arrive after first composition still slot in correctly.
+    // Stage G: arrangement state. Rendered orders resolve
+    // against the canonical lists at render time, so sections
+    // that arrive after first composition still slot in
+    // correctly. (Round 24, item 5: room display names, icons,
+    // and order moved to Rooms & tabs — the duplicate Rooms
+    // block here is gone.)
     var sectionOrder by remember { mutableStateOf(migrateRound3SectionOrder(vm.settingsStore.homeSectionOrder())) }
-    var displayNames by remember { mutableStateOf(vm.settingsStore.roomDisplayNames()) }
-    var roomIcons by remember { mutableStateOf(vm.settingsStore.roomIconKeys()) }
-    var roomOrder by remember { mutableStateOf(vm.settingsStore.roomOrder()) }
     var showFavoritesSheet by remember { mutableStateOf(false) }
     val lights = states.values.filter { it.domain == "light" }.sortedBy { it.friendlyName }
     val resolvedSectionOrder = resolveOrder(sectionOrder, HOME_SECTION_ORDER_DEFAULT)
-    val resolvedRoomOrder = resolveOrder(roomOrder, areas.map { it.id })
     // Swap helper: moves [key] one slot toward the start/end of the
     // stored order (rooms included as swappable neighbours even
     // though rooms have no toggle row of their own).
@@ -96,16 +92,6 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         order[i] = order[j].also { order[j] = order[i] }
         sectionOrder = order
         vm.settingsStore.setHomeSectionOrder(order)
-        vm.bumpHomePrefs()
-    }
-    fun moveRoom(areaId: String, up: Boolean) {
-        val order = resolvedRoomOrder.toMutableList()
-        val i = order.indexOf(areaId)
-        val j = if (up) i - 1 else i + 1
-        if (i < 0 || j < 0 || j >= order.size) return
-        order[i] = order[j].also { order[j] = order[i] }
-        roomOrder = order
-        vm.settingsStore.setRoomOrder(order)
         vm.bumpHomePrefs()
     }
 
@@ -271,120 +257,6 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         }
         item {
             Spacer(Modifier.height(24.dp))
-            Text("Rooms", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Home is organized by room. Hide a room here to drop its whole section; create, rename, delete, and assign rooms in Settings → Rooms & areas (changes carry over to Home Assistant itself).",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-        }
-        item {
-            // Same grouped container as the sections above.
-            // Stage G: each room row is a presentation editor —
-            // display name (empty = the HA name), icon picker, order
-            // buttons, hide switch. Nothing here touches HA area IDs:
-            // these are display overrides only, so renaming a room
-            // here never renames it in Home Assistant.
-            Box(
-                Modifier.fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(24.dp))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                Column {
-                    for (areaId in resolvedRoomOrder) {
-                        val area = areas.firstOrNull { it.id == areaId } ?: continue
-                        val key = "room:${area.id}"
-                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp)) {
-                            // Feedback round 17, item 4: the room
-                            // title above the field, so the row is
-                            // labeled even when the field is empty
-                            // and unfocused (the 2026-11-04 runs
-                            // showed bare "Display name" fields
-                            // with no room identity); the label
-                            // carries the room name too.
-                            Text(area.name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                            Spacer(Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = displayNames[area.id] ?: "",
-                                    onValueChange = { value ->
-                                        vm.settingsStore.setRoomDisplayName(area.id, value.ifBlank { null })
-                                        displayNames = vm.settingsStore.roomDisplayNames()
-                                        vm.bumpHomePrefs()
-                                    },
-                                    label = { Text("Display name (${area.name})") },
-                                    placeholder = { Text(area.name) },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Switch(
-                                    checked = key !in hidden,
-                                    onCheckedChange = { shown ->
-                                        hidden = if (shown) hidden - key else hidden + key
-                                        vm.settingsStore.homeHiddenSections = hidden
-                                        vm.bumpHomePrefs()
-                                    },
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                var iconMenu by remember { mutableStateOf(false) }
-                                val currentIcon = roomIcons[area.id]
-                                Box {
-                                    OutlinedButton(onClick = { iconMenu = true }) {
-                                        val pair = currentIcon?.let { tabIconPairForKey(it) }
-                                        if (pair != null) {
-                                            Icon(pair.first, null, modifier = Modifier.size(18.dp))
-                                            Spacer(Modifier.width(6.dp))
-                                        }
-                                        Text(TAB_ICON_OPTIONS.firstOrNull { it.key == currentIcon }?.label ?: "Automatic icon")
-                                    }
-                                    DropdownMenu(expanded = iconMenu, onDismissRequest = { iconMenu = false }) {
-                                        DropdownMenuItem(
-                                            text = { Text("Automatic icon") },
-                                            onClick = {
-                                                vm.settingsStore.setRoomIconKey(area.id, null)
-                                                roomIcons = vm.settingsStore.roomIconKeys()
-                                                vm.bumpHomePrefs()
-                                                iconMenu = false
-                                            },
-                                        )
-                                        for (option in TAB_ICON_OPTIONS) {
-                                            DropdownMenuItem(
-                                                text = { Text(option.label) },
-                                                leadingIcon = {
-                                                    tabIconPairForKey(option.key)?.first?.let {
-                                                        Icon(it, null, modifier = Modifier.size(18.dp))
-                                                    }
-                                                },
-                                                onClick = {
-                                                    vm.settingsStore.setRoomIconKey(area.id, option.key)
-                                                    roomIcons = vm.settingsStore.roomIconKeys()
-                                                    vm.bumpHomePrefs()
-                                                    iconMenu = false
-                                                },
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(Modifier.weight(1f))
-                                IconButton(onClick = { moveRoom(area.id, true) }) {
-                                    Icon(Icons.Filled.ArrowUpward, "Move up", modifier = Modifier.size(20.dp))
-                                }
-                                IconButton(onClick = { moveRoom(area.id, false) }) {
-                                    Icon(Icons.Filled.ArrowDownward, "Move down", modifier = Modifier.size(20.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            Spacer(Modifier.height(24.dp))
             Text("Lights", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text(
@@ -455,9 +327,6 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                     vm.resetCustomization()
                     hidden = vm.settingsStore.homeHiddenSections
                     sectionOrder = vm.settingsStore.homeSectionOrder()
-                    displayNames = vm.settingsStore.roomDisplayNames()
-                    roomIcons = vm.settingsStore.roomIconKeys()
-                    roomOrder = vm.settingsStore.roomOrder()
                 },
             ) {
                 Text("Reset home customization")

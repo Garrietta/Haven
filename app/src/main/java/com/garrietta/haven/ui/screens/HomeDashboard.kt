@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
@@ -387,6 +388,29 @@ fun FavoritesSection(
                 (member.state == "playing" || member.entityId in vm.favorites)
         }
         val standard = resolved - wideMedia.toSet()
+        // Round 24, item 6: the display order the drag-reorder
+        // maps through — wide-media rows first, then the standard
+        // grid in row order — and one full row height in px for
+        // the reorder drag's vertical step.
+        val displayOrderIds = (wideMedia + standard).map { it.entityId }
+        val rowHeightPx = with(LocalDensity.current) { (136.dp + spacing).toPx() }
+        // Round 24, item 6: a drag reports a delta in DISPLAY
+        // positions, but moveFavorite moves within vm.favorites
+        // — and the display order is a permutation of favorites
+        // (wide-media rows always render first). Map the delta
+        // through the target entity: the card lands on the same
+        // neighbor it was dragged onto, and the move persists
+        // through moveFavorite.
+        fun moveFavoriteByDisplayDelta(entityId: String, displayDelta: Int) {
+            val fromDisplay = displayOrderIds.indexOf(entityId)
+            if (fromDisplay < 0) return
+            val toDisplay = (fromDisplay + displayDelta).coerceIn(displayOrderIds.indices)
+            val targetId = displayOrderIds[toDisplay]
+            val fromFav = vm.favorites.indexOf(entityId)
+            val toFav = vm.favorites.indexOf(targetId)
+            if (fromFav < 0 || toFav < 0 || fromFav == toFav) return
+            vm.moveFavorite(entityId, toFav - fromFav)
+        }
         for ((wideIndex, media) in wideMedia.withIndex()) {
             // Feedback round 22, item 4: keyed by entity id, so a
             // card slot can never be reused for a different entity
@@ -395,7 +419,19 @@ fun FavoritesSection(
             // Garage Door panel). TabTileGrid was already keyed;
             // these row loops were not.
             key(media.entityId) {
-                HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+                ArrangeableCardCell(
+                    media.entityId,
+                    vm.cardSize("home", media.entityId),
+                    arrangeMode,
+                    rowHeightPx,
+                    { vm.setCardSize("home", media.entityId, it) },
+                    // Full-width row: no horizontal neighbor, so
+                    // only vertical steps move it (one slot each).
+                    { _, dy -> moveFavoriteByDisplayDelta(media.entityId, dy) },
+                    Modifier.fillMaxWidth(),
+                ) {
+                    HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, cardSize = vm.cardSize("home", media.entityId), arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode }, navigate = navigate)
+                }
             }
             Spacer(Modifier.height(spacing))
         }
@@ -405,6 +441,11 @@ fun FavoritesSection(
         // position in the standard list, so a wide card never
         // shifts its neighbors' corner variants. With no wide
         // cards this reproduces the old chunked loop exactly.
+        // Round 24, item 6: a TALL card pairs with up to two
+        // stacked NORMAL cards in the adjacent column (284dp =
+        // 136 + 12 + 136, flush), and every cell is an
+        // ArrangeableCardCell (live resize preview + drag
+        // reorder, persisted through moveFavorite).
         var flatIdx = 0
         var i = 0
         while (i < standard.size) {
@@ -415,25 +456,96 @@ fun FavoritesSection(
                 // kept the previous entity's tap closure (tapping
                 // Lamp opened the Garage Door panel).
                 key(member.entityId) {
-                    Box(Modifier.fillMaxWidth().resizeSettle()) {
-                        HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
-                        if (arrangeMode) {
-                            CardResizeHandle(
-                                CardSize.WIDE,
-                                { vm.setCardSize("home", member.entityId, it) },
-                                Modifier.align(Alignment.BottomEnd),
-                            )
-                        }
+                    ArrangeableCardCell(
+                        member.entityId,
+                        CardSize.WIDE,
+                        arrangeMode,
+                        rowHeightPx,
+                        { vm.setCardSize("home", member.entityId, it) },
+                        // Full-width row: only vertical steps move
+                        // it (one slot each).
+                        { _, dy -> moveFavoriteByDisplayDelta(member.entityId, dy) },
+                        Modifier.fillMaxWidth(),
+                    ) {
+                        HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx, cardSize = CardSize.WIDE, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                     }
                 }
                 Spacer(Modifier.height(spacing))
                 i++
                 flatIdx++
+            } else if (vm.cardSize("home", standard[i].entityId) == CardSize.TALL && columns >= 2) {
+                // Paired row: the TALL card (284dp) in one column
+                // and up to two stacked NORMAL cards in the other.
+                // A second TALL card is never stacked — it gets
+                // its own paired row on the next pass.
+                val tall = standard[i]
+                val tallIdx = flatIdx
+                i++
+                flatIdx++
+                val stacked = mutableListOf<HaEntity>()
+                val stackedStart = flatIdx
+                while (i < standard.size && stacked.size < 2 &&
+                    vm.cardSize("home", standard[i].entityId) != CardSize.WIDE &&
+                    vm.cardSize("home", standard[i].entityId) != CardSize.TALL
+                ) {
+                    stacked.add(standard[i])
+                    i++
+                    flatIdx++
+                }
+                Row {
+                    key(tall.entityId) {
+                        ArrangeableCardCell(
+                            tall.entityId,
+                            CardSize.TALL,
+                            arrangeMode,
+                            rowHeightPx,
+                            { vm.setCardSize("home", tall.entityId, it) },
+                            // Tall card: horizontal swaps with the
+                            // stacked column (±1), vertical moves
+                            // past the whole pair (±columns).
+                            { dx, dy -> moveFavoriteByDisplayDelta(tall.entityId, dx + dy * columns) },
+                            Modifier.weight(1f),
+                        ) {
+                            HomeRoomCard(vm, tall.entityId, navigate, gridIndex = tallIdx, cardSize = CardSize.TALL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                        }
+                    }
+                    Spacer(Modifier.width(spacing))
+                    Column(Modifier.weight(1f)) {
+                        for ((stackIdx, member) in stacked.withIndex()) {
+                            // Feedback round 22, item 4: keyed by
+                            // entity id (see the WIDE branch above).
+                            key(member.entityId) {
+                                ArrangeableCardCell(
+                                    member.entityId,
+                                    CardSize.NORMAL,
+                                    arrangeMode,
+                                    rowHeightPx,
+                                    { vm.setCardSize("home", member.entityId, it) },
+                                    // Stacked card: vertical swaps
+                                    // with its column neighbor (±1);
+                                    // a left drag swaps with the
+                                    // tall card (-(position + 1));
+                                    // right has no neighbor.
+                                    { dx, dy ->
+                                        val horizontal = if (dx < 0) dx * (stackIdx + 1) else 0
+                                        moveFavoriteByDisplayDelta(member.entityId, horizontal + dy)
+                                    },
+                                    Modifier.fillMaxWidth(),
+                                ) {
+                                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = stackedStart + stackIdx, cardSize = CardSize.NORMAL, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
+                                }
+                            }
+                            if (member != stacked.last()) Spacer(Modifier.height(spacing))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(spacing))
             } else {
                 val row = mutableListOf<HaEntity>()
                 val rowStart = flatIdx
                 while (i < standard.size && row.size < columns &&
-                    vm.cardSize("home", standard[i].entityId) != CardSize.WIDE
+                    vm.cardSize("home", standard[i].entityId) != CardSize.WIDE &&
+                    vm.cardSize("home", standard[i].entityId) != CardSize.TALL
                 ) {
                     row.add(standard[i])
                     i++
@@ -445,23 +557,19 @@ fun FavoritesSection(
                         // Feedback round 22, item 4: keyed by
                         // entity id (see the WIDE branch above).
                         key(member.entityId) {
-                            Box(
-                                Modifier.weight(1f).resizeSettle()
-                                    .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                            ArrangeableCardCell(
+                                member.entityId,
+                                size,
+                                arrangeMode,
+                                rowHeightPx,
+                                { vm.setCardSize("home", member.entityId, it) },
+                                // Horizontal swaps with the row-mate
+                                // (±1); vertical moves a whole row
+                                // (±columns).
+                                { dx, dy -> moveFavoriteByDisplayDelta(member.entityId, dx + dy * columns) },
+                                Modifier.weight(1f),
                             ) {
-                                HomeRoomCard(
-                                    vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
-                                    modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
-                                    arrangeMode = arrangeMode,
-                                    onArrangeToggle = { arrangeMode = !arrangeMode },
-                                )
-                                if (arrangeMode) {
-                                    CardResizeHandle(
-                                        size,
-                                        { vm.setCardSize("home", member.entityId, it) },
-                                        Modifier.align(Alignment.BottomEnd),
-                                    )
-                                }
+                                HomeRoomCard(vm, member.entityId, navigate, gridIndex = rowStart + colIdx, cardSize = size, arrangeMode = arrangeMode, onArrangeToggle = { arrangeMode = !arrangeMode })
                             }
                         }
                         if (member != row.last()) Spacer(Modifier.width(spacing))

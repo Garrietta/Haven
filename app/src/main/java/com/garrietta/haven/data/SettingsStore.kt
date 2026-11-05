@@ -309,6 +309,50 @@ class SettingsStore(context: Context) {
         prefs.edit().putString("room_order_json", arr.toString()).apply()
     }
 
+    /**
+     * Round 24, item 6: per-room ENTITY order (which card sits
+     * where inside one room's grid), as a JSON object mapping
+     * area id (or "unassigned" for No room) to an ordered array
+     * of entity ids. Like roomOrder, this is presentation only —
+     * HA area membership never changes. A missing or corrupt
+     * entry loads as empty (the HA order is the fallback, via
+     * resolveOrder at the render site); unknown ids are dropped
+     * there, never here.
+     */
+    fun roomEntityOrders(): Map<String, List<String>> {
+        val raw = prefs.getString("room_entity_order_json", null) ?: return emptyMap()
+        return try {
+            val obj = org.json.JSONObject(raw)
+            val out = mutableMapOf<String, List<String>>()
+            for (key in obj.keys()) {
+                val arr = obj.optJSONArray(key) ?: continue
+                val ids = mutableListOf<String>()
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).ifEmpty { null }?.let { ids.add(it) }
+                }
+                out[key] = ids
+            }
+            out
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun roomEntityOrder(areaId: String?): List<String> =
+        roomEntityOrders()[areaId ?: "unassigned"] ?: emptyList()
+
+    fun setRoomEntityOrder(areaId: String?, entityIds: List<String>) {
+        val all = roomEntityOrders().toMutableMap()
+        all[areaId ?: "unassigned"] = entityIds
+        val obj = org.json.JSONObject()
+        for ((k, v) in all) {
+            val arr = org.json.JSONArray()
+            for (id in v) arr.put(id)
+            obj.put(k, arr)
+        }
+        prefs.edit().putString("room_entity_order_json", obj.toString()).apply()
+    }
+
     // ---- Shape picker (Settings -> Shapes, per-entity detail) ----
 
     /** Global default badge shape key, or null = the domain default. */

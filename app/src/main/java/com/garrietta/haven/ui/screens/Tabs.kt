@@ -129,6 +129,9 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
                 sizeFor = { vm.cardSize("tab:${tab.id}", it) },
                 onSizeChange = { id, size -> vm.setCardSize("tab:${tab.id}", id, size) },
                 onArrangeToggle = { arrangeMode = !arrangeMode },
+                // Round 24, item 6: drag reorder in Arrange mode,
+                // persisted through moveCardInTab.
+                onReorderMove = { from, to -> vm.moveCardInTab(tab.id, from, to) },
             ) { yaml ->
                 TabCardView(vm, yaml, states, navigate)
             }

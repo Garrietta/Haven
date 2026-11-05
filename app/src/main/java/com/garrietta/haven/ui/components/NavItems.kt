@@ -138,6 +138,7 @@ fun navActiveScreen(current: Screen): Screen = when (current) {
     Screen.SceneBuilder,
     Screen.ScriptBuilder,
     Screen.HelperBuilder,
+    Screen.BuilderHub,
     Screen.UpdatesPanel,
     -> Screen.Settings
     else -> current

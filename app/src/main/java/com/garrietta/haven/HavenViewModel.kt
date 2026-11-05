@@ -48,6 +48,7 @@ import com.garrietta.haven.data.HavenNotificationManager
 import com.garrietta.haven.data.Placement
 import com.garrietta.haven.data.placementFromKey
 import com.garrietta.haven.data.tabPlacementFor
+import com.garrietta.haven.data.movedByDelta
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.RoomBarItem
@@ -113,6 +114,12 @@ sealed class Screen {
     data object SceneBuilder : Screen()
     data object ScriptBuilder : Screen()
     data object HelperBuilder : Screen()
+    /** Round 24, item 5: the builder hub — one entry point to
+     * the four existing builders, reached from Settings' single
+     * "Automations, scenes & helpers" row. Not a destination tab
+     * and not the settings epic; just the old Create section as
+     * its own screen. */
+    data object BuilderHub : Screen()
 }
 
 /**
@@ -1020,6 +1027,38 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         list.add(j, id)
         favorites = list
         settingsStore.setFavoriteEntityIds(favorites)
+    }
+
+    // ---- Round 24, item 6: per-room entity order (drag reorder) ----
+
+    /**
+     * Per-room entity order, mirrored from the store so room
+     * grids recompose on change. The render site resolves this
+     * against the room's HA member list (resolveOrder), so a
+     * stored order never drops a new member or keeps a removed
+     * one. Null areaId = No room ("unassigned" key).
+     */
+    private var roomEntityOrdersState by mutableStateOf(settingsStore.roomEntityOrders())
+
+    fun roomEntityOrder(areaId: String?): List<String> =
+        roomEntityOrdersState[areaId ?: "unassigned"] ?: emptyList()
+
+    /**
+     * Moves [entityId] by [delta] positions within the room's
+     * CURRENT display order ([orderedMemberIds], as rendered —
+     * wide-media rows first, then the standard grid in row
+     * order) and persists the result, so a dragged reorder
+     * survives a restart. The stored order is over entity ids
+     * only, so it survives a card moving between the
+     * wide-media and standard sections (a play-state change).
+     * No-op when the entity is unknown or the move would not
+     * change its position.
+     */
+    fun moveRoomEntity(areaId: String?, orderedMemberIds: List<String>, entityId: String, delta: Int) {
+        val moved = movedByDelta(orderedMemberIds, entityId, delta)
+        if (moved === orderedMemberIds) return
+        settingsStore.setRoomEntityOrder(areaId, moved)
+        roomEntityOrdersState = settingsStore.roomEntityOrders()
     }
 
     // ---- Stage E badge preferences (persisting setters, like navStyle) ----

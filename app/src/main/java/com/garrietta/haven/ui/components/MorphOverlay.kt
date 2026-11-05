@@ -639,14 +639,20 @@ fun dragProgressAfterDelta(current: Float, dy: Float, dragRangePx: Float): Float
  * the source tile's top. Falls back to the target height when the
  * source is null or the range is degenerate (tile above target, which
  * cannot happen for a below-screen panel but is guarded anyway).
+ * Round 24, item 3: [minDragRangePx] floors the range — a tile
+ * whose top sits near the target top would otherwise scrub the
+ * whole morph in a few pixels of finger travel. Call sites pass
+ * 380.dp in px. Pure, unit-tested.
  */
 fun dragRangeForPanelOverlay(
     sourceTop: Float?,
     targetTop: Float,
     targetHeight: Float,
+    minDragRangePx: Float = 0f,
 ): Float {
     val range = if (sourceTop != null) sourceTop - targetTop else targetHeight
-    return if (range > 0f) range else targetHeight.coerceAtLeast(1f)
+    val ranged = if (range > 0f) range else targetHeight.coerceAtLeast(1f)
+    return maxOf(ranged, minDragRangePx).coerceAtLeast(1f)
 }
 
 /**
@@ -654,18 +660,24 @@ fun dragRangeForPanelOverlay(
  * travel of the surface center from its placed position to the tile
  * center. Falls back to the placed height when either center is
  * unknown or the range is degenerate (tile centered on the popup).
+ * Round 24, item 3: [minDragRangePx] floors the range — a
+ * vertically-centered tile (Standing Lamp) has a near-zero center
+ * distance, so without the floor a small finger movement scrubbed
+ * the whole morph 3–4x too fast ("very fast, incredibly rapid").
+ * Call sites pass 380.dp in px. Pure, unit-tested.
  */
 fun dragRangeForCenteredPopup(
     placedCenterY: Float?,
     tileCenterY: Float?,
     placedHeight: Float,
+    minDragRangePx: Float = 0f,
 ): Float {
     val range = if (placedCenterY != null && tileCenterY != null) {
         kotlin.math.abs(placedCenterY - tileCenterY)
     } else {
         placedHeight
     }
-    return range.coerceAtLeast(1f)
+    return maxOf(range.coerceAtLeast(1f), minDragRangePx)
 }
 
 /**
@@ -1489,9 +1501,58 @@ fun morphExitCardAlpha(progress: Float): Float =
  * The caller is the root LocalMorphCardAlpha provider
  * (HavenApp.kt), which reads the same closing flags as
  * LocalMorphClosing. Pure, unit-tested.
+ *
+ * Round 24, item 3 — SUPERSEDES the fade above: the round-23
+ * fade did NOT close the flash on device (diagnosed in code,
+ * not re-tuned). The tile alpha reads the ANIMATABLE
+ * (rootMorphProgress reads detailProgress.value etc.), but the
+ * SURFACES render with the finger-tracked drag progress
+ * (dragProgressFor). During a drag the tile sits at 0
+ * (animatable still 1f, closing false) — consistent by luck.
+ * On release-with-commit, dismissDetail snaps the animatable
+ * to the released drag progress (e.g. 0.3) and flips exiting
+ * BEFORE the settle runs, so the tile alpha JUMPS 0 ->
+ * morphExitCardAlpha(0.3) = 0.65 in one frame (0.96 at drag
+ * progress 0.1) while the container is still a small solid
+ * shape mid-flight — the pop Garrett still sees. Round 23
+ * assumed every close starts at p = 1 (the tap-outside/Back
+ * path); the drag path enters the exit curve mid-way, at high
+ * alpha. A second mismatch: during the drag-settle, isClosing
+ * is false (settling), so the container follows the OPEN fade
+ * (out over [0.15, 0]) while the tile follows the EXIT fade —
+ * both partially visible at once. Any fade curve keyed on the
+ * animatable has this jump, so the handoff is now BINARY: the
+ * tile is completely invisible whenever progress > 0.01 on
+ * BOTH enter and exit, and the morphing container (see
+ * [morphSwapContainerAlpha]) is the single visible card until
+ * the exact frame it lands (progress <= 0.01), when the
+ * stationary card swaps in with zero overlap. The [closing]
+ * parameter is retained for call-site stability; the rule is
+ * direction-independent by design.
  */
 fun morphTileAlpha(progress: Float, closing: Boolean): Float =
-    if (closing) morphExitCardAlpha(progress) else morphCardAlpha(progress)
+    if (progress.coerceIn(0f, 1f) <= 0.01f) 1f else 0f
+
+/**
+ * Round 24, item 3: the morphing popup container's alpha for
+ * the tile-swap handoff (see [morphTileAlpha]). The container
+ * stays fully opaque all the way down to progress 0.01 — on
+ * BOTH enter and exit, and through the drag-settle (where
+ * isClosing is false and the old code followed the open fade,
+ * so the container dissolved while the tile faded in) — while
+ * its background lerps to fromBackground (the source card's
+ * exact container color) over [0, 0.35]. At progress just
+ * above 0.01 the container sits at the tile's rect in the
+ * tile's color with no content yet, so it IS the tile
+ * visually; at 0.01 and below it is gone and the stationary
+ * card (alpha 1) shows. No frame has both, no frame has
+ * neither, on any dismiss path. Sourceless popups do NOT use
+ * this — they keep the centeredPopupEnter fade + scale, since
+ * there is no tile to swap with. Pure, unit-tested
+ * (Round24LogicTest).
+ */
+fun morphSwapContainerAlpha(progress: Float): Float =
+    if (progress.coerceIn(0f, 1f) <= 0.01f) 0f else 1f
 
 /**
  * Surface-background alpha for a morphing surface at [progress]:
@@ -1670,13 +1731,15 @@ fun MorphSurface(
                 // tile's exact container color as p -> 0, so the
                 // surface lands on the tile seamlessly; the alpha
                 // stays 1 through the close and the lerp does the
-                // handoff. Open keeps its fade-in over the first
-                // 15% (the tile shows through the scrim at small p).
-                val containerAlpha = if (isClosing) {
-                    1f
-                } else {
-                    morphPanelContainerAlphaOpen(p)
-                }
+                // handoff. Round 24, item 3 — SUPERSEDES the open
+                // fade too (the sentence above is history): the
+                // container is the single visible card until
+                // landing (see morphSwapContainerAlpha) — opaque
+                // down to p = 0.01 on enter, exit, and the
+                // drag-settle alike, so no fade window can
+                // disagree with the tile's binary handoff. At
+                // p <= 0.01 the tile (alpha 1) shows instead.
+                val containerAlpha = morphSwapContainerAlpha(p)
                 drawRect(blended.copy(alpha = blended.alpha * containerAlpha))
             }
             .then(

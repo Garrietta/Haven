@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -117,6 +119,41 @@ import org.json.JSONObject
  * cards with no entity (markdown, area), and unparseable YAML (which keeps
  * its repair link instead of vanishing).
  */
+/**
+ * Round 24, item 4: the flattened entity-id list for a tab's
+ * cards, in emission order — the grid positions that feed
+ * [generalCardShape]. Pure, so the index assignment is
+ * unit-testable. Mirrors the [TabTileGrid] loop exactly: gauge
+ * and button cards and unparseable YAML contribute no ids (they
+ * render through fallbackCard, never as tiles); every other
+ * card contributes its [cardEntityIds] in order, including ids
+ * whose entity is currently missing from states (they still
+ * emit a MissingEntityTile and still consume an index). A
+ * duplicate id keeps its FIRST index.
+ */
+internal fun tabTileGridIndices(cards: List<String>): Map<String, Int> {
+    val out = mutableMapOf<String, Int>()
+    var index = 0
+    for (yaml in cards) {
+        val parsed = try {
+            parseCardYaml(yaml)
+        } catch (e: Exception) {
+            null
+        }
+        val type = parsed?.optString("type") ?: ""
+        val ids = if (parsed == null || type == "gauge" || type == "button") {
+            emptyList()
+        } else {
+            cardEntityIds(parsed)
+        }
+        for (id in ids) {
+            if (id !in out) out[id] = index
+            index++
+        }
+    }
+    return out
+}
+
 @Composable
 fun TabTileGrid(
     vm: HavenViewModel,
@@ -132,8 +169,57 @@ fun TabTileGrid(
     // Round 21, item 7: long-press on any tab tile enters
     // Arrange mode (the Arrange button on UserTabScreen is gone).
     onArrangeToggle: (() -> Unit)? = null,
+    // Round 24, item 6: drag reorder in Arrange mode — (from,
+    // to) are CARD positions in `cards` (a multi-entity card
+    // moves as one unit); the UserTabScreen call site wires it
+    // to vm.moveCardInTab(tab.id, from, to).
+    onReorderMove: ((from: Int, to: Int) -> Unit)? = null,
     fallbackCard: @Composable (String) -> Unit,
 ) {
+    // Round 24, item 4: the grid index for every tile is
+    // precomputed from the flattened entity list BEFORE any
+    // item block is emitted, and item lambdas read their
+    // immutable index from this map by entity id. The old
+    // code declared `var tileIndex = 0` in this scope and
+    // did `gridIndex = tileIndex++` INSIDE the item {}
+    // lambdas — but a LazyVerticalGrid item lambda re-runs
+    // on its own card's recomposition (a popup open/close,
+    // a state update) without this scope re-running, so the
+    // shared counter had moved on and the card got a
+    // different gridIndex -> a different generalCardShape
+    // corner variant on every cycle. Defined shapes were
+    // immune (the picker override ignores gridIndex),
+    // which is exactly the reported symptom: "this one I
+    // defined the card shape. This one is on the default.
+    // So when it's default card shape, it changes every
+    // time." The map is recomputed from `cards` whenever
+    // the list changes; an item lambda that re-invokes
+    // without the scope re-running keeps its captured map,
+    // which maps the same list to the same indices.
+    // (Background tabs cannot overwrite the maps: HavenApp
+    // renders exactly one screen through AnimatedContent,
+    // so an inactive tab is never composed. Home's
+    // Favorites and room sections CAN both report one
+    // entity with different stable indices — but those
+    // indices never mutate, so the resting shape never
+    // changes there; only the morph landing shape can
+    // differ by surface, which no video reported.)
+    // NOTE: this remember MUST live here, in TabTileGrid's
+    // body — the LazyVerticalGrid content lambda is not a
+    // @Composable context, so a remember inside it does not
+    // compile.
+    val fixedIndexById = remember(cards) { tabTileGridIndices(cards) }
+    // Round 24, item 6: the column count for the reorder drag's
+    // vertical step (one full row) mirrors the Adaptive grid's
+    // minSize below, and the row height is one 136dp card plus
+    // the 12dp vertical spacing.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val columns = if (LocalWideLayout.current) {
+            maxOf(1, (maxWidth / 220.dp).toInt())
+        } else {
+            maxOf(1, (maxWidth / 160.dp).toInt())
+        }
+        val rowHeightPx = with(LocalDensity.current) { (136.dp + 12.dp).toPx() }
     LazyVerticalGrid(
         // Round 6: wide layouts flow at 220dp minimum tiles, so
         // domain tabs (Thermostat/Cameras/Garage) spread across the
@@ -145,10 +231,7 @@ fun TabTileGrid(
         contentPadding = PaddingValues(bottom = 16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        // Expressive-menus round, item 6: grid position feeds the
-        // general card shape's rotating 12dp corner.
-        var tileIndex = 0
-        for (yaml in cards) {
+        for ((cardIndex, yaml) in cards.withIndex()) {
             val parsed = try {
                 parseCardYaml(yaml)
             } catch (e: Exception) {
@@ -184,48 +267,58 @@ fun TabTileGrid(
                         val isWideMedia = entity.domain == "media_player" &&
                             (entity.state == "playing" || entity.entityId in vm.favorites)
                         val cardSize = sizeFor?.invoke(id) ?: CardSize.NORMAL
+                        // Round 24, item 6: a full-span card has
+                        // no horizontal neighbor, so only vertical
+                        // steps move it; a TALL card has no lazy
+                        // row spanning (Round 20 limit — it takes
+                        // the 284dp cell height and its row-mate
+                        // stays top-aligned), but its drag step is
+                        // still one full row.
+                        val fullSpan = cardSize == CardSize.WIDE || isWideMedia
                         item(
                             key = id,
                             span = {
-                                if (cardSize == CardSize.WIDE || isWideMedia) GridItemSpan(maxLineSpan)
+                                if (fullSpan) GridItemSpan(maxLineSpan)
                                 else GridItemSpan(1)
                             },
                         ) {
-                            Box(
-                                Modifier.resizeSettle()
-                                    .then(if (cardSize == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                            ArrangeableCardCell(
+                                id,
+                                cardSize,
+                                arrangeMode,
+                                rowHeightPx,
+                                { onSizeChange?.invoke(id, it) },
+                                { dx, dy ->
+                                    val steps = if (fullSpan) dy else dx + dy * columns
+                                    onReorderMove?.invoke(cardIndex, (cardIndex + steps).coerceIn(cards.indices))
+                                },
+                                Modifier.fillMaxWidth(),
                             ) {
                                 if (isWideMedia) {
                                     HomeRoomMediaCard(
-                                        vm, entity.entityId, gridIndex = tileIndex++,
+                                        vm, entity.entityId, gridIndex = fixedIndexById[id] ?: 0,
+                                        cardSize = cardSize,
                                         arrangeMode = arrangeMode,
                                         onArrangeToggle = onArrangeToggle,
-                                        modifier = if (cardSize == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
                                         navigate = navigate,
                                     )
                                 } else {
                                     HomeRoomCard(
-                                        vm, entity.entityId, navigate, gridIndex = tileIndex++,
-                                        modifier = if (cardSize == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                                        vm, entity.entityId, navigate, gridIndex = fixedIndexById[id] ?: 0,
+                                        cardSize = cardSize,
                                         arrangeMode = arrangeMode,
                                         onArrangeToggle = onArrangeToggle,
-                                    )
-                                }
-                                if (arrangeMode && onSizeChange != null) {
-                                    CardResizeHandle(
-                                        cardSize,
-                                        { onSizeChange(id, it) },
-                                        Modifier.align(Alignment.BottomEnd),
                                     )
                                 }
                             }
                         }
                     } else {
-                        item(key = "missing:$id") { MissingEntityTile(id, gridIndex = tileIndex++) }
+                        item(key = "missing:$id") { MissingEntityTile(id, gridIndex = fixedIndexById[id] ?: 0) }
                     }
                 }
             }
         }
+    }
     }
 }
 

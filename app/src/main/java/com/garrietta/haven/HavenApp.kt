@@ -28,7 +28,7 @@ import com.garrietta.haven.ui.components.LocalPopupDragHandle
 import com.garrietta.haven.ui.components.LocalPopupDragRangePx
 import com.garrietta.haven.ui.components.morphHeaderBadgeAlpha
 import com.garrietta.haven.ui.components.MorphSurface
-import com.garrietta.haven.ui.components.morphPanelContainerAlphaOpen
+import com.garrietta.haven.ui.components.morphSwapContainerAlpha
 import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.components.fallbackFromRect
@@ -269,6 +269,7 @@ import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
 import com.garrietta.haven.ui.screens.AutomationBuilderScreen
+import com.garrietta.haven.ui.screens.BuilderHubScreen
 import com.garrietta.haven.ui.screens.CameraClipsScreen
 import com.garrietta.haven.ui.screens.DashboardEditScreen
 import com.garrietta.haven.ui.screens.DashboardsScreen
@@ -617,12 +618,16 @@ fun HavenApp(vm: HavenViewModel) {
             arcTarget = null
         }
         // Animated dismisses: Back, the back arrow, and Close all use
-        // these. The progress animates 1 -> 0 on the settle spring
-        // (feedback round 7: Koda's calm 0.95/350, replacing
-        // springBounds for dismisses; opens stay on springBounds),
-        // snapped under reduce-motion; only then is the trigger
-        // cleared, and only if the generation + identity still
-        // match the morph that started (see above).
+        // these. The progress animates 1 -> 0 on the popup morph
+        // spring (round 24, item 3: popupMorphSpring 500/0.85, the
+        // same spring as the open — so a swipe-down dismiss settles
+        // into the tile at the exact same calm speed as tap-outside
+        // or Back. The old settleSpring 350/0.95 was Koda's player
+        // settle; the speed mismatch Garrett heard was mostly the
+        // degenerate drag range, but the close spring now matches
+        // the open spring too), snapped under reduce-motion; only
+        // then is the trigger cleared, and only if the generation
+        // + identity still match the morph that started (see above).
         // Feedback round 7 drag-aware prologue (the single choke
         // point — Back, badge tap, scrim tap, and drag release all
         // land here): if a drag is in flight, mark settling BEFORE
@@ -654,7 +659,7 @@ fun HavenApp(vm: HavenViewModel) {
                         detailDrag.pulling = false
                     }
                     if (reduceMotion) detailProgress.snapTo(0f)
-                    else detailProgress.animateTo(0f, settleSpring())
+                    else detailProgress.animateTo(0f, popupMorphSpring())
                 } finally {
                     detailExiting = false
                     detailDrag.settling = false
@@ -682,7 +687,7 @@ fun HavenApp(vm: HavenViewModel) {
                         popoutDrag.pulling = false
                     }
                     if (reduceMotion) popoutProgress.snapTo(0f)
-                    else popoutProgress.animateTo(0f, settleSpring())
+                    else popoutProgress.animateTo(0f, popupMorphSpring())
                 } finally {
                     popoutExiting = false
                     popoutDrag.settling = false
@@ -726,7 +731,7 @@ fun HavenApp(vm: HavenViewModel) {
                         panelDetailDrag.pulling = false
                     }
                     if (reduceMotion) panelDetailProgress.snapTo(0f)
-                    else panelDetailProgress.animateTo(0f, settleSpring())
+                    else panelDetailProgress.animateTo(0f, popupMorphSpring())
                 } finally {
                     panelDetailExiting = false
                     panelDetailDrag.settling = false
@@ -2171,6 +2176,9 @@ private fun ScreenContent(
         Screen.SceneBuilder -> SceneBuilderScreen(vm, goBack)
         Screen.ScriptBuilder -> ScriptBuilderScreen(vm, goBack)
         Screen.HelperBuilder -> HelperBuilderScreen(vm, goBack)
+        // Round 24, item 5: the builder hub (Settings' single
+        // "Automations, scenes & helpers" row opens it).
+        Screen.BuilderHub -> BuilderHubScreen(vm, goBack, navigate)
     }
 }
 
@@ -2319,6 +2327,11 @@ private fun PanelOverlay(
                 overlayOrigin.y + targetHeightPx,
             )
             val from = source ?: fallbackFromRect(target, with(density) { 80.dp.toPx() })
+            // Round 24, item 3: the drag range is floored at
+            // 380.dp — a tile whose top sits near the target top
+            // would otherwise scrub the whole morph in a few
+            // pixels of finger travel.
+            val minDragRangePx = with(density) { 380.dp.toPx() }
             MorphSurface(
                 source = from,
                 target = target,
@@ -2336,11 +2349,12 @@ private fun PanelOverlay(
                     // Feedback round 18, item 5: header
                     // drag-to-dismiss (see LocalPopupDragHandle).
                     LocalPopupDragHandle provides dragHandle,
-                    LocalPopupDragRangePx provides { dragRangeForPanelOverlay(source?.top, target.top, target.height) },
+                    LocalPopupDragRangePx provides { dragRangeForPanelOverlay(source?.top, target.top, target.height, minDragRangePx) },
                 ) {
                     // Feedback round 7: the drag range is the exact
-                    // top-edge travel from target to source tile.
-                    val dragRangePx = dragRangeForPanelOverlay(source?.top, target.top, target.height)
+                    // top-edge travel from target to source tile,
+                    // floored at 380.dp (round 24, item 3).
+                    val dragRangePx = dragRangeForPanelOverlay(source?.top, target.top, target.height, minDragRangePx)
                     if (scrollContent) {
                         // Feedback round 9, item 1 (ROOT CAUSE of
                         // round 7's dead drag): a NestedScrollConnection
@@ -2611,7 +2625,19 @@ private fun CenteredPopup(
                             // wanted) on exit; the lerp does the
                             // handoff. Open keeps its fade-in over
                             // the first 15%.
-                            alpha = if (isClosing) 1f else morphPanelContainerAlphaOpen(p)
+                            // Round 24, item 3 — SUPERSEDES both
+                            // fades above: the container is the
+                            // single visible card until landing
+                            // (see morphSwapContainerAlpha) — opaque
+                            // down to p = 0.01 on enter, exit, and
+                            // the drag-settle alike, while the
+                            // color-lerp rect carries it into the
+                            // tile's exact color. The tile itself
+                            // is binary (morphTileAlpha): invisible
+                            // above 0.01, visible at or below it.
+                            // The sourceless branch below keeps its
+                            // fade + scale (no tile to swap with).
+                            alpha = morphSwapContainerAlpha(p)
                         } else {
                             val enter = centeredPopupEnter(p, null, popupCenter, distancePx)
                             translationX = enter.offset.x
@@ -2663,12 +2689,17 @@ private fun CenteredPopup(
                 // travel of the surface center toward the tile
                 // center (placed height fallback before first
                 // placement; a drag cannot start before rest,
-                // which requires placement). Hoisted above the
+                // which requires placement). Round 24, item 3:
+                // floored at 380.dp — a vertically-centered tile
+                // (Standing Lamp) has a near-zero center distance
+                // and would otherwise scrub the whole morph in a
+                // few pixels of finger travel. Hoisted above the
                 // provider so the range lambda can close over it.
                 val centeredDragRangePx = dragRangeForCenteredPopup(
                     placedRect?.center?.y,
                     source?.center?.y,
                     placedRect?.height ?: overlayHeightPx,
+                    with(density) { 380.dp.toPx() },
                 )
                 // Pin destination-header visibility: with no
                 // traveler on this path, headers must render fully

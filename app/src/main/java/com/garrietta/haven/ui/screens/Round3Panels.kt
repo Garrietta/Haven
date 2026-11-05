@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -127,6 +129,7 @@ import com.garrietta.haven.data.unmappedTrackers
 import com.garrietta.haven.data.updateDisplayName
 import com.garrietta.haven.data.updatesSummary
 import com.garrietta.haven.data.vacuumTileLine
+import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.screens.rememberCardCustom
 import com.garrietta.haven.ui.components.isDarkBackdrop
@@ -195,10 +198,16 @@ private fun PillAction(
     // own — callers dim via Modifier.alpha, as the vacuum panel does).
     containerColor: androidx.compose.ui.graphics.Color? = null,
     contentColor: androidx.compose.ui.graphics.Color? = null,
+    // Round 24, item 2: the vacuum hero stacks the transport
+    // pills full-width in the right column, so the caller sizes
+    // the pill (fillMaxWidth) — the old row call sites pass
+    // nothing and are byte-identical.
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     PressablePillButton(
         onClick = onClick,
+        modifier = modifier,
         enabled = enabled,
         height = 56.dp,
         containerColor = containerColor ?: MaterialTheme.colorScheme.secondaryContainer,
@@ -206,6 +215,41 @@ private fun PillAction(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(label, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * Round 24, item 2: a labeled squircle action button for the
+ * vacuum hero's 2x2 dock grid — the MediaSquircle shape (28dp
+ * corners, same as the media transport), 56dp tall, with a
+ * two-line centered label so "Empty Dust Bin" wraps cleanly on
+ * narrow screens instead of clipping.
+ */
+@Composable
+private fun SquircleAction(
+    label: String,
+    containerColor: androidx.compose.ui.graphics.Color? = null,
+    contentColor: androidx.compose.ui.graphics.Color? = null,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    PressablePillButton(
+        onClick = onClick,
+        modifier = modifier,
+        height = 56.dp,
+        shape = MediaSquircle,
+        containerColor = containerColor ?: MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = contentColor ?: MaterialTheme.colorScheme.onSecondaryContainer,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            textAlign = TextAlign.Center,
+            lineHeight = 16.sp,
+        )
     }
 }
 
@@ -755,6 +799,65 @@ private fun PersonSheet(
 // ---- Full-screen panels (PanelOverlay owns scroll + back bar) ----
 
 /** Vacuum panel: lidar map snapshot, transport, dock actions, selectors, consumables, toggles, DND, lifetime stats. */
+/** Round 24, item 2: the Cleaning setup selector chips as
+ * their own card, so the vacuum panel can lay it beside the
+ * Consumables card in a 2-column grid on wide screens. */
+@Composable
+private fun VacuumCleaningSetupCard(vm: HavenViewModel, states: Map<String, HaEntity>) {
+    PanelCard {
+        PanelSectionTitle("Cleaning setup")
+        for ((id, label) in listOf(
+            VACUUM_CLEANING_MODE_ID to "Cleaning mode",
+            VACUUM_SUCTION_ID to "Suction level",
+            VACUUM_MOP_INTENSITY_ID to "Mop intensity",
+            VACUUM_WATER_LEVEL_ID to "Water level",
+            VACUUM_CLEAN_ROOM_ID to "Clean room",
+        )) {
+            val select = states[id]
+            if (select != null) SelectChips(select, vm, label)
+        }
+    }
+}
+
+/** Round 24, item 2: the Consumables bars as their own card
+ * (see VacuumCleaningSetupCard). */
+@Composable
+private fun VacuumConsumablesCard(
+    vm: HavenViewModel,
+    states: Map<String, HaEntity>,
+    accent: Color?,
+    pillContent: Color?,
+) {
+    PanelCard {
+        PanelSectionTitle("Consumables")
+        for (consumable in VACUUM_CONSUMABLES) {
+            val sensor = states[consumable.sensorId]
+            val remaining = sensor?.state?.toDoubleOrNull()
+            val fraction = consumableFraction(remaining, consumable.fullLifeHours)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(consumable.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        if (remaining != null) "${remaining.toInt()} h remaining" else "Remaining unknown",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    if (fraction != null) {
+                        LinearProgressIndicator(
+                            progress = { fraction.toFloat() },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                PillAction("Reset", containerColor = accent, contentColor = pillContent) { vm.callService("button", "press", consumable.resetButtonId) }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
 @Composable
 fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
@@ -813,88 +916,67 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen)
         } else {
             Spacer(Modifier.height(12.dp))
         }
+        // Round 24, item 2: split hero — the Lidar map left
+        // (weight 0.48, 24dp container, aspectRatio 0.85,
+        // ContentScale.Crop so the snapshot fills the frame
+        // with no black sidebars) and the actions right
+        // (weight 0.52): Start / Pause / Return stacked as
+        // full-width pills, then the dock actions as a compact
+        // 2x2 squircle grid. Service calls are byte-identical;
+        // only the layout moves.
         PanelSectionTitle("Lidar map")
-        if (mapBitmap != null) {
-            Image(
-                bitmap = mapBitmap.asImageBitmap(),
-                contentDescription = "Vacuum lidar map snapshot",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(24.dp)),
-            )
-        } else {
-            Box(
-                Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainer),
-                contentAlignment = Alignment.Center,
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (mapBitmap != null) {
+                Image(
+                    bitmap = mapBitmap.asImageBitmap(),
+                    contentDescription = "Vacuum lidar map snapshot",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.weight(0.48f).aspectRatio(0.85f).clip(RoundedCornerShape(24.dp)),
+                )
+            } else {
+                Box(
+                    Modifier.weight(0.48f).aspectRatio(0.85f).clip(RoundedCornerShape(24.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
+                        PanelBodyText("Map snapshot not available yet.")
+                        Spacer(Modifier.height(8.dp))
+                        PillAction("Refresh map", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
+                    }
+                }
+            }
+            Column(
+                Modifier.weight(0.52f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    PanelBodyText("Map snapshot not available yet.")
-                    Spacer(Modifier.height(8.dp))
-                    PillAction("Refresh map", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.refreshSnapshot(VACUUM_MAP_CAMERA_ID) }
+                PillAction("Start", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
+                PillAction("Pause", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
+                PillAction("Return to Base", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.fillMaxWidth()) { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SquircleAction("Empty Dust Bin", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
+                    SquircleAction("Wash Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_WASH_MOP_BUTTON_ID) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SquircleAction("Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
+                    SquircleAction("Stop Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent, modifier = Modifier.weight(1f)) { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
                 }
             }
         }
         Spacer(Modifier.height(16.dp))
-        PanelCard {
-        PanelSectionTitle("Transport")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillAction("Start", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_START_BUTTON_ID) }
-            PillAction("Pause", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_PAUSE_BUTTON_ID) }
-            PillAction("Return to Base", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_DOCK_BUTTON_ID) }
-        }
-        }
-        PanelCard {
-        PanelSectionTitle("Dock actions")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillAction("Empty Dust Bin", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_EMPTY_BIN_BUTTON_ID) }
-            PillAction("Wash Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_WASH_MOP_BUTTON_ID) }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillAction("Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_DRY_MOP_BUTTON_ID) }
-            PillAction("Stop Dry Mop", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", VACUUM_STOP_DRY_MOP_BUTTON_ID) }
-        }
-        }
-        PanelCard {
-        PanelSectionTitle("Cleaning setup")
-        for ((id, label) in listOf(
-            VACUUM_CLEANING_MODE_ID to "Cleaning mode",
-            VACUUM_SUCTION_ID to "Suction level",
-            VACUUM_MOP_INTENSITY_ID to "Mop intensity",
-            VACUUM_WATER_LEVEL_ID to "Water level",
-            VACUUM_CLEAN_ROOM_ID to "Clean room",
-        )) {
-            val select = states[id]
-            if (select != null) SelectChips(select, vm, label)
-        }
-        }
-        PanelCard {
-        PanelSectionTitle("Consumables")
-        for (consumable in VACUUM_CONSUMABLES) {
-            val sensor = states[consumable.sensorId]
-            val remaining = sensor?.state?.toDoubleOrNull()
-            val fraction = consumableFraction(remaining, consumable.fullLifeHours)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(consumable.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(
-                        if (remaining != null) "${remaining.toInt()} h remaining" else "Remaining unknown",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    if (fraction != null) {
-                        LinearProgressIndicator(
-                            progress = { fraction.toFloat() },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                PillAction("Reset", containerColor = vacuumPanelAccent, contentColor = vacuumPanelPillContent) { vm.callService("button", "press", consumable.resetButtonId) }
+        // Round 24, item 2: Cleaning setup + Consumables
+        // compacted into a 2-column grid of cards on wide
+        // screens so the popup needs minimal scrolling; stacked
+        // on narrow screens, where a consumable row (label +
+        // bar + Reset pill) needs the full width.
+        if (LocalWideLayout.current) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) { VacuumCleaningSetupCard(vm, states) }
+                Column(Modifier.weight(1f)) { VacuumConsumablesCard(vm, states, vacuumPanelAccent, vacuumPanelPillContent) }
             }
-            Spacer(Modifier.height(12.dp))
-        }
+        } else {
+            VacuumCleaningSetupCard(vm, states)
+            VacuumConsumablesCard(vm, states, vacuumPanelAccent, vacuumPanelPillContent)
         }
         PanelCard {
         PanelSectionTitle("Options")

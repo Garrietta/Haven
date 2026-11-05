@@ -19,29 +19,56 @@ import org.junit.Test
  * Android runtime. The device checks (no solid-yellow frame on
  * close, tile corners pixel-identical across open/close cycles)
  * are covered by the compile + device checks.
+ *
+ * Round 24, item 3 SUPERSEDES the item-1 fade: the tile-alpha
+ * tests below now pin the binary handoff (invisible above
+ * progress 0.01, visible at or below it), not the round-23
+ * exit fade. The morphPopupRadii tests are unchanged.
  */
 class Round23LogicTest {
 
-    // Item 1: on close the tile follows morphExitCardAlpha, not
-    // morphCardAlpha — it fades back in over [0.85, 0], from the
-    // moment the panel content is gone.
+    // Round 24, item 3 — SUPERSEDES the fade below: the round-23
+    // exit fade did NOT close the flash on device. The tile alpha
+    // reads the animatable while the surfaces render the
+    // finger-tracked drag progress, so a drag-release snap jumps
+    // the tile 0 -> morphExitCardAlpha(dragProgress) in one frame.
+    // The handoff is now binary on BOTH directions: invisible
+    // above progress 0.01, visible at or below it — the container
+    // (morphSwapContainerAlpha) is the single visible card until
+    // landing. The old fade assertions are kept as history in
+    // the comment, not as tests.
     @Test
-    fun tileAlpha_openFollowsCardAlpha() {
-        // Gone by 0.4 on open, exactly the old curve.
+    fun tileAlpha_binaryOnOpen() {
+        // Visible only at landing; invisible for the whole growth.
         assertEquals(1f, morphTileAlpha(0f, closing = false), 0.001f)
+        assertEquals(1f, morphTileAlpha(0.01f, closing = false), 0.001f)
+        assertEquals(0f, morphTileAlpha(0.011f, closing = false), 0.001f)
         assertEquals(0f, morphTileAlpha(0.4f, closing = false), 0.001f)
         assertEquals(0f, morphTileAlpha(1f, closing = false), 0.001f)
     }
 
     @Test
-    fun tileAlpha_closeFollowsExitAlpha() {
-        // Hidden at rest and while content is still visible.
+    fun tileAlpha_binaryOnClose() {
+        // The drag-snap case that round 23 missed: at the released
+        // drag progress (0.3, 0.1) the tile must STAY invisible —
+        // the old exit fade put it at 0.65 / 0.96 there, the pop.
         assertEquals(0f, morphTileAlpha(1f, closing = true), 0.001f)
         assertEquals(0f, morphTileAlpha(0.85f, closing = true), 0.001f)
-        // Halfway back by the midpoint of the return.
-        assertEquals(0.5f, morphTileAlpha(0.425f, closing = true), 0.001f)
+        assertEquals(0f, morphTileAlpha(0.3f, closing = true), 0.001f)
+        assertEquals(0f, morphTileAlpha(0.1f, closing = true), 0.001f)
+        assertEquals(0f, morphTileAlpha(0.011f, closing = true), 0.001f)
         // Fully visible at landing, before any dismiss clears state.
+        assertEquals(1f, morphTileAlpha(0.01f, closing = true), 0.001f)
         assertEquals(1f, morphTileAlpha(0f, closing = true), 0.001f)
+    }
+
+    @Test
+    fun tileAlpha_directionIndependent() {
+        // The binary rule is the same on enter and exit — no
+        // direction can disagree with the container.
+        for (p in listOf(0f, 0.01f, 0.05f, 0.5f, 1f)) {
+            assertEquals(morphTileAlpha(p, closing = false), morphTileAlpha(p, closing = true), 0.001f)
+        }
     }
 
     @Test
@@ -54,19 +81,24 @@ class Round23LogicTest {
         // Above 0.85 the content is visible and the tile is hidden.
         assertTrue(morphCloseContentAlpha(0.9f) > 0f)
         assertEquals(0f, morphTileAlpha(0.9f, closing = true), 0.001f)
-        // Below 0.85 the tile is back and the content is gone.
-        assertTrue(morphTileAlpha(0.5f, closing = true) > 0f)
+        // Below 0.85 the content is gone and the tile stays hidden
+        // until the 0.01 landing (round 24: the container, not the
+        // tile, is the visible card through the return).
         assertEquals(0f, morphCloseContentAlpha(0.5f), 0.001f)
+        assertEquals(0f, morphTileAlpha(0.5f, closing = true), 0.001f)
     }
 
     @Test
     fun tileAlpha_closeHasNoDeadZone() {
         // The old bug: at p = 0.6 on close, morphCardAlpha is 0
         // (tile invisible) while the content is already gone —
-        // a bare solid-color surface for 45% of the close. The
-        // exit curve has the tile already fading back in there.
-        assertTrue(morphTileAlpha(0.6f, closing = true) > 0f)
-        assertTrue(morphTileAlpha(0.7f, closing = true) > 0f)
+        // a bare solid-color surface for 45% of the close. Round
+        // 24: the tile stays invisible there BY DESIGN (the
+        // opaque container is the visible card), so the assertion
+        // is now that tile + container never leave a gap: the
+        // container is opaque wherever the tile is hidden.
+        assertEquals(0f, morphTileAlpha(0.6f, closing = true), 0.001f)
+        assertEquals(0f, morphTileAlpha(0.7f, closing = true), 0.001f)
     }
 
     // Item 2: the centered popup's clip divides out the layer
