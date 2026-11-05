@@ -1,7 +1,6 @@
 package com.garrietta.haven.ui.screens
 import com.garrietta.haven.data.detailBadgeOverride
 import com.garrietta.haven.data.detailPageAccent
-import com.garrietta.haven.ui.components.LocalSuppressTraveler
 import com.garrietta.haven.ui.components.compositeOver
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.ensureContrast
@@ -68,8 +67,11 @@ import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
-import com.garrietta.haven.ui.components.hideWhileTraveling
 import com.garrietta.haven.ui.components.LocalHeroTarget
+import com.garrietta.haven.ui.components.LocalPopupDragHandle
+import com.garrietta.haven.ui.components.LocalPopupDragRangePx
+import com.garrietta.haven.ui.components.morphHeaderBadgeAlpha
+import com.garrietta.haven.ui.components.popupDragDetector
 import com.garrietta.haven.ui.components.climateModeColor
 import com.garrietta.haven.ui.components.coolSetpointContainer
 import com.garrietta.haven.ui.components.coolSetpointOnContainer
@@ -125,9 +127,10 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
         isDarkBackdrop(MaterialTheme.colorScheme.background),
         popoutCustom.domainTilePresets,
     )
-    // Feedback round 4, item 4: with the traveler suppressed
-    // (detail from a sub-panel), the badge renders from frame 0.
-    val suppressTraveler = LocalSuppressTraveler.current
+    // Feedback round 18, item 5: header drag-to-dismiss (see
+    // LocalPopupDragHandle); null outside popups.
+    val popoutDragHandle = LocalPopupDragHandle.current
+    val popoutDragRangePx = LocalPopupDragRangePx.current
     val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
     val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
     val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
@@ -170,26 +173,36 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
     ) {
         Row(
             Modifier.fillMaxWidth()
-                .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) },
+                .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
+                .then(
+                    if (popoutDragHandle != null) {
+                        Modifier.popupDragDetector(
+                            popoutDragHandle.state,
+                            { dy -> popoutDragHandle.onDelta(dy, popoutDragRangePx()) },
+                            { v -> popoutDragHandle.onRelease(v, popoutDragRangePx()) },
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Badge by EVERY pop-up (2026-10-29 verdict overrules
-            // #68's deliberate pop-out exception): the traveling
-            // badge dissolves into this 48dp header badge exactly
+            // #68's deliberate pop-out exception): the badge
+            // dissolves into this 48dp header badge exactly
             // like every other pop-up header, and tapping it
-            // dismisses. Badge only hides while traveling
-            // (2026-11-01 polish round): the name/state text stays
-            // visible from the panel's first frame — hiding the
-            // whole row held the title back until the final 2%
-            // handoff window. No top-right X (2026-11-01 round 1
-            // panel chrome): the panel's back arrow + BackHandler
-            // are the dismiss paths.
+            // dismisses. Feedback round 18, item 4: no traveler —
+            // the badge renders in place and fades with the
+            // content curves (see morphHeaderBadgeAlpha). No
+            // top-right X (2026-11-01 round 1 panel chrome): the
+            // panel's back arrow + BackHandler are the dismiss
+            // paths.
             DomainBadge(
                 entity,
                 // Feedback round 11, item 3: the one icon path.
                 entityIcon(popoutCustom.iconKeys, entity),
                 accentFor(entity.entityId),
-                modifier = Modifier.size(48.dp).then(if (suppressTraveler) Modifier else Modifier.hideWhileTraveling()).clickable(
+                modifier = Modifier.size(48.dp).morphHeaderBadgeAlpha().clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) { onClose() },

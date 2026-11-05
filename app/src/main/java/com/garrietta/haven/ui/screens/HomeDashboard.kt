@@ -70,7 +70,6 @@ import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.attachDeviceInfo
 import com.garrietta.haven.data.semanticStateFor
 import com.garrietta.haven.data.semanticVisual
-import com.garrietta.haven.ui.components.LocalModalActive
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailPopupTitleHeader
@@ -216,7 +215,7 @@ fun HomeStatusPanelScreen(
         states.values.toList(),
         vm.settingsStore.homeLightOverrides(),
     ).firstOrNull { it.category.key == categoryKey }
-    Column(Modifier.padding(horizontal = 16.dp)) {
+    Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
         DetailPopupTitleHeader(item?.title ?: "Home Status")
         if (item == null) {
             Text(
@@ -320,26 +319,25 @@ fun FavoritesSection(
         // Visual-fidelity round §2: the Manage TEXT button is
         // replaced by the mockup's circular pencil button (40dp
         // surfaceContainerHigh circle, Outlined Edit icon) opening
-        // the same sheet. Feedback round 17, item 6: the pencil
-        // HIDES while any modal is open — the old always-visible
-        // pencil sat right next to a popup's own header pencil
-        // under the scrim (the 2026-11-04 overlap), and the scrim
-        // already blocks its taps, so nothing is lost. The title
-        // carries weight(1f), so hiding causes no reflow.
-        if (!LocalModalActive.current) {
-            Box(
-                Modifier.size(40.dp).clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .clickable { managing = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Outlined.Edit,
-                    contentDescription = "Manage favorites",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+        // the same sheet. Feedback round 18, item 3 (SUPERSEDES
+        // round 17, item 6, which hid the pencil while a modal
+        // was open): the pencil STAYS in composition always — the
+        // round-17 comment claimed hiding causes no reflow because
+        // the title carries weight(1f), but the grid DOES shift:
+        // the Row height changes from the 40dp pencil to the text
+        // height when hidden. Always composed = never shifts.
+        Box(
+            Modifier.size(40.dp).clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .clickable { managing = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Outlined.Edit,
+                contentDescription = "Manage favorites",
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
     Spacer(Modifier.height(8.dp))

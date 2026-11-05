@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -60,7 +61,10 @@ fun ScenesScreen(vm: HavenViewModel) {
     var sendStates by remember { mutableStateOf<Map<String, SceneSendState>>(emptyMap()) }
 
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
@@ -150,7 +154,10 @@ fun EnergyScreen(vm: HavenViewModel) {
     val totalWatts = power.sumOf { it.state.toDouble() }
 
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {

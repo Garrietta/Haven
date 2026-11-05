@@ -251,6 +251,15 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
     }
 }
 
+/**
+ * Feedback round 18, item 2: the detail-layout branch, pure so it
+ * is unit-testable. Numeric states (sensors) keep the two-column
+ * split (control left, history right); every non-numeric state
+ * (light, cover, media_player, lock, switch, fan, vacuum, and
+ * any non-numeric sensor state) uses the full popup width.
+ */
+internal fun useDetailTwoColumnLayout(state: String?): Boolean = state?.toDoubleOrNull() != null
+
 @Composable
 private fun DetailPageContent(
     vm: HavenViewModel,
@@ -266,47 +275,6 @@ private fun DetailPageContent(
     pageAccent: Color? = null,
 ) {
     val accent = accentFor(entity.entityId)
-    // Feedback round 11, item 3: the detail hero badge resolves
-    // through the one icon path, like the tile and the header.
-    val heroIcon = entityIcon(rememberCardCustom(vm).iconKeys, entity)
-    val hero: @Composable () -> Unit = {
-        // Lights get a brightness-tinted hero panel (kelvin + brightness
-        // scaled, same token as the tiles): the page's color is
-        // unmissable, not just the badge glyph.
-        val heroRow: @Composable () -> Unit = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                DomainBadge(
-                    entity,
-                    heroIcon,
-                    accent,
-                    modifier = Modifier.size(52.dp),
-                    badgeOverride = badgeOverride,
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(entity.stateText(), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-        if (entity.domain == "light") {
-            Box(
-                Modifier.fillMaxWidth().background(
-                    lightBrightnessContainer(
-                        MaterialTheme.colorScheme,
-                        entity.attrInt("color_temp_kelvin"),
-                        entity.attrInt("brightness")?.let { it * 100 / 255 },
-                        entity.state == "on",
-                    ),
-                    generalCardShape(0),
-                ).padding(16.dp),
-            ) {
-                heroRow()
-            }
-        } else {
-            heroRow()
-        }
-        Spacer(Modifier.height(16.dp))
-    }
     val control: @Composable () -> Unit = {
         when (entity.domain) {
             // Light detail panel (2026-11-01 round 1): the primary
@@ -399,34 +367,38 @@ private fun DetailPageContent(
             Spacer(Modifier.height(16.dp))
         }
     }
-    // No second state display (2026-10-29 verdict: the header shows
-    // icon + name + value once, never repeated below it): sensors
-    // and binary sensors show only their chart/Min/Current/Max
-    // (SensorTile with showHeader = false), and lights show only
-    // their bulb control (LightControl's own On/Off label is the
-    // control, not a second state row). Every other domain keeps
-    // its hero panel.
-    val noHeroDomains = setOf("sensor", "binary_sensor", "light")
     // Dialog-owned sizing/scroll (2026-10-30 round): the dialog
     // panel caps height at 85% and scrolls, so detail roots are plain
     // columns — no fillMaxSize, no status-bars padding, no own scroll.
     if (LocalWideLayout.current) {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
-            Row(Modifier.fillMaxWidth()) {
-                Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                    if (entity.domain !in noHeroDomains) hero()
-                    control()
+            // Feedback round 18, item 2: the two-column split
+            // applies ONLY to numeric states (sensors: control
+            // left, history right). Non-numeric entities (light,
+            // cover, media_player, lock, switch, fan, vacuum) use
+            // the full popup width — the old split crushed them
+            // into the left 50% column. The hero panel is gone
+            // for ALL domains: DetailPopupHeader already shows
+            // icon, title, and state (the Garage Door / TV
+            // duplicate is fixed by removal, not by gating).
+            if (useDetailTwoColumnLayout(entity.state)) {
+                Row(Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        control()
+                    }
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                        history()
+                    }
                 }
-                Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                    history()
-                }
+            } else {
+                control()
+                history()
             }
         }
     } else {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupHeader(entity, onBack, displayTitle = detailHeaderCustom(vm, entity).first, displayIcon = detailHeaderCustom(vm, entity).second, onEdit = detailHeaderCustom(vm, entity).third, badgeOverride = badgeOverride)
-            if (entity.domain !in noHeroDomains) hero()
             control()
             history()
             Spacer(Modifier.height(16.dp))
@@ -603,7 +575,7 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
  * surface reads (title + icon + pencil target).
  */
 @Composable
-private fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit> {
+internal fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit> {
     val custom = rememberCardCustom(vm)
     val base = if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity)
     val title = customTitleFor(custom.titles, entity.entityId, base)

@@ -1,6 +1,7 @@
 package com.garrietta.haven.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -49,7 +50,10 @@ fun AreasScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val entityAreas by vm.entityAreas.collectAsState()
     val unassignedCount = states.values.count { entityAreas[it.entityId] == null }
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
@@ -146,7 +150,12 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 (entityAreas[entity.entityId]?.let { areaId -> areas.firstOrNull { it.id == areaId }?.name?.lowercase()?.contains(q) } == true)
         }.sortedBy { it.friendlyName }.take(60)
     }
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
+    ) {
         Spacer(Modifier.height(16.dp))
         Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(12.dp))

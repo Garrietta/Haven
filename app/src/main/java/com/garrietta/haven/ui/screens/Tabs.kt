@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -210,7 +211,10 @@ private val TAB_CARD_TYPES = listOf(
 fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val visibleTabs = vm.userTabs.filter { !it.hidden }
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 96.dp),
     ) {
         item {
@@ -257,7 +261,10 @@ fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
     // (tabId, cardIndex, yaml) of the card currently in the YAML editor, if any.
     var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {

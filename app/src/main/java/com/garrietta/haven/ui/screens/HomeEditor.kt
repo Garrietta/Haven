@@ -109,7 +109,10 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit) {
     }
 
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {

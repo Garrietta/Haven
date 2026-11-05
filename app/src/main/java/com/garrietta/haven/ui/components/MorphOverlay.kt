@@ -225,16 +225,30 @@ val LocalMorphProgress = staticCompositionLocalOf<(() -> Float)?> { null }
 val LocalMorphClosing = staticCompositionLocalOf { false }
 
 /**
+ * Feedback round 18, item 5: the drag handle + range for popup
+ * header drag-to-dismiss. CenteredPopup and PanelOverlay provide
+ * these; popup header rows (DetailPopupHeader, the sheet header,
+ * the thermostat popout header) attach [popupDragDetector] to
+ * them so dragging down on a header scrubs the morph with the
+ * finger. Null handle = no drag (plain detail pages, which sit
+ * outside any popup). The range is a lambda because
+ * CenteredPopup's range depends on the placed rect, which only
+ * exists after first placement.
+ */
+val LocalPopupDragHandle = staticCompositionLocalOf<PopupDragHandle?> { null }
+val LocalPopupDragRangePx = staticCompositionLocalOf<() -> Float> { { 0f } }
+
+/**
  * Feedback round 4, item 4: whether the traveling header is
  * suppressed for this detail — true when the detail opened from
  * a sub-panel (Lights grid, Updates, vacuum/media/security/
  * greenhouse panels) or another detail, i.e. when the source
  * card lives in an overlay that is replaced by this detail,
- * not on the root dashboard. Destination header badges read
- * this: with no traveler in flight, the badge must render from
- * frame 0 (no hideWhileTraveling) instead of waiting for a
- * traveler that never comes. Defaults to false (dashboard and
- * ordinary-page sources keep the traveler).
+ * not on the root dashboard. Round 18, item 4 retired the
+ * traveler: header badges now always render in place and fade
+ * with the content curves (see morphHeaderBadgeAlpha), so this
+ * flag is retained dormant (providers still set it; no badge
+ * reads it anymore). Defaults to false.
  */
 val LocalSuppressTraveler = staticCompositionLocalOf { false }
 
@@ -252,11 +266,25 @@ val LocalMorphCardAlpha = staticCompositionLocalOf { 1f }
  * Writes only when the rect actually changed, so the post-layout
  * callback cannot schedule a recomposition loop.
  */
+/**
+ * Feedback round 18, item 7: whether a newly measured [Rect]
+ * differs from the stored one by more than 1f pixel on any edge.
+ * A null stored rect (first capture) always counts as different,
+ * so the first capture always lands; sub-pixel layout jitter
+ * afterwards never schedules a recomposition. Pure, unit-tested.
+ */
+fun rectDiffersByMoreThan1px(stored: Rect?, rect: Rect): Boolean =
+    stored == null ||
+        kotlin.math.abs(stored.left - rect.left) > 1f ||
+        kotlin.math.abs(stored.top - rect.top) > 1f ||
+        kotlin.math.abs(stored.right - rect.right) > 1f ||
+        kotlin.math.abs(stored.bottom - rect.bottom) > 1f
+
 fun Modifier.reportCardBounds(id: String): Modifier = composed {
     val bounds = LocalCardBounds.current
     onGloballyPositioned { coords: LayoutCoordinates ->
         val rect = coords.boundsInRoot()
-        if (bounds[id] != rect) bounds[id] = rect
+        if (rectDiffersByMoreThan1px(bounds[id], rect)) bounds[id] = rect
     }
 }
 
@@ -300,7 +328,7 @@ fun Modifier.reportHeroBounds(id: String): Modifier = composed {
     val bounds = LocalHeroBounds.current
     onGloballyPositioned { coords: LayoutCoordinates ->
         val rect = coords.boundsInRoot()
-        if (bounds[id] != rect) bounds[id] = rect
+        if (rectDiffersByMoreThan1px(bounds[id], rect)) bounds[id] = rect
     }
 }
 
@@ -959,13 +987,12 @@ fun morphPopupShape(progress: Float, landingShape: Shape?): Shape {
  * "Heat • Cool" state flashing under the "Ecobee" title). With a
  * 2% window the two copies coincide to sub-pixel accuracy at the
  * handoff: the traveler IS the header for the whole flight, and
- * the destination header (gated by [hideWhileTraveling], and the
- * arc panel by [dissolveIntoTraveler] = 1 − this curve) only
- * materializes as the traveler arrives. On exit the same curve
- * runs in reverse: the destination header hands back to the
- * traveler in the first 2% of the return, and the traveler
- * carries it home. Progress is clamped first, so spring
- * overshoot lands exactly on 0. Pure, unit-tested.
+ * the destination header only materializes as the traveler
+ * arrives. Round 18, item 4 retired the traveler that consumed
+ * this curve (header badges now fade in place instead); the
+ * curve itself is retained unit-tested. Progress is clamped
+ * first, so spring overshoot lands exactly on 0. Pure,
+ * unit-tested.
  */
 fun heroHeaderAlpha(progress: Float): Float =
     1f - smoothstep(0.98f, 1.0f, progress)
@@ -1070,20 +1097,22 @@ fun centeredPopupEnter(
 }
 
 /**
- * Hides a destination header while its traveling header is in
- * flight: alpha 0 for the whole morph except the final 2%
- * handoff window (1 − [heroHeaderAlpha]), 1 at rest and outside
- * any morph surface. Dialog headers (sheet, detail, thermostat
- * pop-out) wear this so the destination header can never compete
- * with its traveler — the header the user sees mid-flight is
- * always the traveling one, and the destination header appears
- * exactly as the traveler arrives at its rect. Measurement frames
- * read no progress (null) and are unaffected.
+ * Feedback round 18, item 4 (SUPERSEDES the round-17 traveling
+ * badge): popup header badges now render IN PLACE inside their
+ * header row and fade with the same content curves the morph
+ * surface uses — [morphEnterContentAlpha] on open,
+ * [morphCloseContentAlpha] on close ([LocalMorphClosing] picks
+ * the branch). At rest (progress 1, not closing) this is exactly
+ * 1, so headers render fully from frame 0 with no traveler
+ * handoff and no scaled-badge flash on folded morphs.
+ * Measurement frames read no progress (null) and are unaffected.
  */
-fun Modifier.hideWhileTraveling(): Modifier = composed {
+fun Modifier.morphHeaderBadgeAlpha(): Modifier = composed {
     val progress = LocalMorphProgress.current
+    val closing = LocalMorphClosing.current
     graphicsLayer {
-        alpha = if (progress == null) 1f else 1f - heroHeaderAlpha(progress())
+        val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
+        alpha = if (closing) morphCloseContentAlpha(p) else morphEnterContentAlpha(p)
     }
 }
 
@@ -1124,6 +1153,8 @@ fun morphSourceBadge(source: Rect, badgeSizePx: Float): Rect =
  * (container alpha out over the final 25%) hides the last
  * stretch, so the return to the linear path below p = 0.3 is
  * never visible as a landing pop. Pure, unit-tested.
+ * Round 18, item 4: the traveler rendering that consumed this
+ * is gone; the math is retained unit-tested.
  */
 fun travelerBlend(progress: Float): Float =
     smoothstep(0f, 0.3f, progress.coerceIn(0f, 1f))
@@ -1146,6 +1177,7 @@ fun travelerBlend(progress: Float): Float =
  * and slot paths, size = linear badge size, at every frame.
  * At p = 0 the rect maps back to the source badge exactly; at
  * p = 1 it is the target slot exactly. Pure, unit-tested.
+ * Round 18, item 4: retained unit-tested (see travelerBlend).
  */
 fun travelerLocalRect(
     sourceBadge: Rect,
@@ -1420,17 +1452,10 @@ fun MorphSurface(
     // [LocalCardShapes], resolved by the caller). The clip lerps
     // into it so the exit lands on the tile's own corners.
     landingShape: Shape? = null,
-    // Feedback round 17, item 1: the traveling badge, locked
-    // INSIDE this surface's scaled coordinate space (it used to
-    // be a sibling overlay with its own badge-to-badge lerp,
-    // which cut across the panel mid-flight while the surface's
-    // header slot hugged the shrinking rect's top-left).
-    // [travelerRect] is the TARGET badge rect in window
-    // coordinates (the header slot); [traveler] is the badge
-    // content. Both declared before the content lambda (round 5
-    // lesson). Null = no traveler (camera, panel-detail).
-    travelerRect: Rect? = null,
-    traveler: @Composable (() -> Unit)? = null,
+    // Feedback round 18, item 4: the round-17 traveling badge
+    // is GONE — header badges render in place and fade with the
+    // content curves (see morphHeaderBadgeAlpha), so this surface
+    // carries no traveler slot anymore.
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -1492,38 +1517,6 @@ fun MorphSurface(
                 }
             } else {
                 content()
-            }
-        }
-        // Traveling badge, INSIDE the surface transform (round
-        // 17, item 1): laid out statically at the target slot,
-        // then mapped per frame onto travelerLocalRect — the
-        // badge rides the surface's header slot instead of
-        // cutting across the panel. NOT inside the content Box
-        // above (which carries the content-alpha fade): the
-        // traveler has its own handoff alpha below. Progress is
-        // read ONLY in graphicsLayer (round 7 rule), so the
-        // flight costs no layout or recomposition per frame.
-        if (traveler != null && travelerRect != null) {
-            val slotLocalLeft = travelerRect.left - target.left
-            val slotLocalTop = travelerRect.top - target.top
-            Box(
-                Modifier
-                    .offset { IntOffset(slotLocalLeft.roundToInt(), slotLocalTop.roundToInt()) }
-                    .size(with(density) { travelerRect.width.toDp() }, with(density) { travelerRect.height.toDp() })
-                    .graphicsLayer {
-                        val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
-                        val sourceBadge = morphSourceBadge(source, with(density) { 56.dp.toPx() })
-                        val local = travelerLocalRect(sourceBadge, travelerRect, source, target, p)
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        translationX = local.left - slotLocalLeft
-                        translationY = local.top - slotLocalTop
-                        scaleX = if (travelerRect.width > 0f) local.width / travelerRect.width else 1f
-                        scaleY = if (travelerRect.height > 0f) local.height / travelerRect.height else 1f
-                        alpha = heroHeaderAlpha(p) * (if (isClosing) morphPanelContainerAlphaClose(p) else 1f)
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                traveler()
             }
         }
     }

@@ -17,6 +17,7 @@ import androidx.lifecycle.viewModelScope
 import com.garrietta.haven.data.ConnectionState
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_MAX_MS
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_STREAM_SWITCH_ID
+import com.garrietta.haven.data.motionSensorForCamera
 import com.garrietta.haven.data.HaClient
 import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.data.HaDiscovery
@@ -301,6 +302,27 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         entityFlowCache.getOrPut(id) {
             client.states.map { it[id] }.distinctUntilChanged()
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), client.states.value[id])
+        }
+
+    /**
+     * Feedback round 18, item 7: one camera's motion sensor as its
+     * own flow, so CameraQuadrant need not collect the whole states
+     * map for the motion pill. Resolves via [motionSensorForCamera]
+     * over the states + entityDevices flows; distinctUntilChanged
+     * means a state emission that leaves this camera's sensor
+     * untouched is a no-op. Cached per camera id like entityFlow.
+     */
+    private val motionSensorFlowCache = mutableMapOf<String, kotlinx.coroutines.flow.StateFlow<com.garrietta.haven.data.HaEntity?>>()
+
+    fun motionSensorFlow(cameraId: String): kotlinx.coroutines.flow.StateFlow<com.garrietta.haven.data.HaEntity?> =
+        motionSensorFlowCache.getOrPut(cameraId) {
+            kotlinx.coroutines.flow.combine(client.states, client.entityDevices) { states, devices ->
+                motionSensorForCamera(cameraId, states, devices)
+            }.distinctUntilChanged()
+                .stateIn(
+                    viewModelScope, SharingStarted.WhileSubscribed(5000),
+                    motionSensorForCamera(cameraId, client.states.value, client.entityDevices.value),
+                )
         }
     val lovelace = client.lovelace
     val lovelaceError = client.lovelaceError

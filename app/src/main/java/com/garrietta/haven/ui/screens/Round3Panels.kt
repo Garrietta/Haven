@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.garrietta.haven.DetailPopupHeader
 import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
@@ -759,7 +760,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val states by vm.states.collectAsState()
     val vacuum = states[VACUUM_ID]
     if (vacuum == null) {
-        Column(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
             DetailPopupTitleHeader("Robot vacuum")
             PanelBodyText("The vacuum is no longer available.")
         }
@@ -777,8 +778,19 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
     val battery = states[VACUUM_BATTERY_ID]?.state?.toIntOrNull()
     val dockStatus = states[VACUUM_DOCK_STATUS_ID]?.state
     val taskStatus = states[VACUUM_TASK_STATUS_ID]?.state
-    Column(Modifier.padding(horizontal = 16.dp)) {
-        DetailPopupTitleHeader(vacuum.friendlyName)
+    Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
+        // Feedback round 18, item 6: the vacuum panel gets the
+        // standard detail header (badge + edit pencil) instead of
+        // the title-only header — the badge and pencil were
+        // missing on this panel. The big state line below stays
+        // (it carries battery + state in one line, which the
+        // header's state text does not duplicate exactly).
+        DetailPopupHeader(
+            vacuum, onBack,
+            displayTitle = detailHeaderCustom(vm, vacuum).first,
+            displayIcon = detailHeaderCustom(vm, vacuum).second,
+            onEdit = detailHeaderCustom(vm, vacuum).third,
+        )
         Text(
             vacuumTileLine(vacuum.state, battery?.toString()),
             fontSize = 20.sp,
@@ -802,7 +814,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit) {
             Image(
                 bitmap = mapBitmap.asImageBitmap(),
                 contentDescription = "Vacuum lidar map snapshot",
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(24.dp)),
             )
         } else {

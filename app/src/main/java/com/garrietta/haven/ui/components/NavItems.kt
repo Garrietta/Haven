@@ -119,6 +119,18 @@ fun navActiveScreen(current: Screen): Screen = when (current) {
 }
 
 /**
+ * Feedback round 18, item 6: the rail/pill tap-back rule, pure so
+ * it is unit-testable. Tapping a bar icon navigates whenever the
+ * tapped tab's screen differs from the ACTUAL current screen —
+ * not the highlighted index. On a sub-screen (Manage home page,
+ * Rooms & areas) the highlighted tab is Settings while current
+ * is the sub-screen, so tapping the highlighted Settings icon
+ * navigates back to Settings instead of being swallowed by the
+ * old index-equality guard. Same-tab taps still no-op.
+ */
+internal fun shouldNavigateOnTabTap(tapped: Screen, current: Screen): Boolean = tapped != current
+
+/**
  * Follow-up B (2026-11-03): Koda's directional tab-slide rule,
  * pure so it is unit-testable. Rank = index in bar order
  * (Home, Scenes, Energy, Settings — Koda's visualTabOrder

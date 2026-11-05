@@ -76,7 +76,6 @@ import com.garrietta.haven.data.domainSwitchColors
 import com.garrietta.haven.data.hasImportantAlert
 import com.garrietta.haven.data.migrateRound3Hidden
 import com.garrietta.haven.data.migrateRound3SectionOrder
-import com.garrietta.haven.data.motionSensorForCamera
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.customIconKeyFor
@@ -177,7 +176,9 @@ import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.theme.polygonShape
 import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
+import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID
+import com.garrietta.haven.data.frontDoorResolverStates
 import com.garrietta.haven.data.resolveFrontDoorCameraSource
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.isRingCamera
@@ -510,23 +511,24 @@ fun TodayScreen(
     }
     // Room-filter chips (Gemini mockup round, 2026-11-01): "My Home"
     // plus one chip per visible room, in stored room order.
-    // Visual-fidelity round §4: the filter narrows the ROOM
-    // sections only — greeting, hero, weather, who's-home, Home
-    // Status, Favorites, and the Round 3 blocks always stay — so a
-    // chip tap never blanks the page. AND: "My Home" shows
-    // enabled Home sections and does NOT show the No room section
-    // (unassigned entities are not a visible room section under
-    // My Home); each chip filters the actual content below it
-    // (Living Room = only that room's entities; No room = only
-    // genuinely unassigned). Home Status and Favorites stay
-    // GLOBAL under any filter: they are Home-level summaries, not
-    // room sections.
+    // Feedback round 18, item 1 (SUPERSEDES the visual-fidelity
+    // §4 "filter narrows room sections only" rule): the filter is
+    // a VIEW SWITCH. "My Home" renders ONLY the overview sections
+    // (greeting, cameras, Home Status, Favorites, enabled overview
+    // blocks); individual room sections never render under it.
+    // A room view renders ONLY the greeting, the chips, and that
+    // room's grid — cameras, Home Status, Favorites, weather,
+    // who's-home, and the Round 3 blocks all hide. "No room" is a
+    // room view (unassigned entities only), never a My Home
+    // section.
     var roomFilter by remember { mutableStateOf<RoomFilter>(RoomFilter.All) }
-    val visibleRooms = when (val f = roomFilter) {
-        RoomFilter.All -> allRooms.filter { it.areaId != null }
-        is RoomFilter.Area -> allRooms.filter { it.areaId == f.id }
-        RoomFilter.Unassigned -> allRooms.filter { it.areaId == null }
-    }
+    // Feedback round 18, item 1 (DECIDED organization rule):
+    // "My Home" shows ONLY the overview sections — room sections
+    // never render under it (visibleRooms = emptyList()). A room
+    // view shows ONLY that room's grid; the overview blocks hide
+    // (isRoomView gates them at every render site below).
+    val isRoomView = isRoomViewFilter(roomFilter)
+    val visibleRooms = visibleRoomsFor(roomFilter, allRooms)
     // Chips actually shown: "My Home" + one per visible room.
     val roomChips: List<Triple<RoomFilter, String, String?>> = buildList {
         add(Triple(RoomFilter.All, "My Home", null))
@@ -552,10 +554,10 @@ fun TodayScreen(
     )
     if (!wide) {
         // Folded: ONE full-width LazyColumn (Round 4 unified Home;
-        // the 1200dp cap was removed in Round 6). Room-filter chips
-        // narrow visibleRooms below; greeting, hero, weather,
-        // who's-home, Home Status, Favorites, and the Round 3
-        // blocks always stay.
+        // the 1200dp cap was removed in Round 6). Feedback round
+        // 18, item 1: room-filter chips are a view switch — room
+        // views hide every overview block below; "My Home" hides
+        // every room section (visibleRooms is empty there).
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             LazyColumn(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp),
@@ -572,18 +574,18 @@ fun TodayScreen(
                 item { Spacer(Modifier.height(12.dp)) }
                 for (key in sectionOrder) {
                     when (key) {
-                        "cameras" -> if (showSection("cameras")) item { CameraQuadrantHero(vm, navigate, states) }
-                        "weather" -> weatherSection()
-                        "home" -> homeSection()
+                        "cameras" -> if (showSection("cameras") && !isRoomView) item { CameraQuadrantHero(vm, navigate, states) }
+                        "weather" -> if (!isRoomView) weatherSection()
+                        "home" -> if (!isRoomView) homeSection()
                         // Stage D: Home Status (real entities only,
                         // inline reveal) then Favorites, both hideable
                         // like every other section.
-                        "status" -> if (showSection("status")) item { HomeStatusSection(vm, states, navigate) }
-                        "favorites" -> if (showSection("favorites")) item { FavoritesSection(vm, states, navigate) }
-                        "round3-security" -> round3SecuritySection()
-                        "round3-vacuum" -> round3VacuumSection()
-                        "round3-media" -> round3MediaSection()
-                        "round3-greenhouse" -> round3GreenhouseSection()
+                        "status" -> if (showSection("status") && !isRoomView) item { HomeStatusSection(vm, states, navigate) }
+                        "favorites" -> if (showSection("favorites") && !isRoomView) item { FavoritesSection(vm, states, navigate) }
+                        "round3-security" -> if (!isRoomView) round3SecuritySection()
+                        "round3-vacuum" -> if (!isRoomView) round3VacuumSection()
+                        "round3-media" -> if (!isRoomView) round3MediaSection()
+                        "round3-greenhouse" -> if (!isRoomView) round3GreenhouseSection()
                         "rooms" -> for (section in visibleRooms) {
                             // Stable section keys (2026-11-01 round 1):
                             // a panel return must never recompose a room
@@ -610,9 +612,10 @@ fun TodayScreen(
         // circular pencil button, then the enabled Home sections
         // below in stored order. Each pane scrolls independently;
         // neither pane can strand an empty column (the left always
-        // has greeting/chips, the right always has Favorites or
-        // the sections below it). The room filter lives hoisted
-        // above both panes, so it survives fold/unfold.
+        // has greeting/chips; the right has Favorites + sections
+        // on My Home, room grids on room views — round 18, item 1).
+        // The room filter lives hoisted above both panes, so it
+        // survives fold/unfold.
         Row(
             Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
         ) {
@@ -622,7 +625,7 @@ fun TodayScreen(
                 GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
                 RoomFilterChips(roomChips, roomFilter) { roomFilter = it }
                 Spacer(Modifier.height(12.dp))
-                if (showSection("cameras")) CameraQuadrantHero(vm, navigate, states)
+                if (showSection("cameras") && !isRoomView) CameraQuadrantHero(vm, navigate, states)
                 Spacer(Modifier.height(16.dp))
                 // Customization round, item 9: Home Status lives in
                 // the LEFT pane directly below the cameras on
@@ -632,7 +635,8 @@ fun TodayScreen(
                 // never renders twice. Default order cameras ->
                 // status -> favorites already holds in
                 // HOME_SECTION_ORDER_DEFAULT and is unchanged.
-                if (showSection("status")) HomeStatusSection(vm, states, navigate)
+                // Round 18, item 1: both hide on room views.
+                if (showSection("status") && !isRoomView) HomeStatusSection(vm, states, navigate)
             }
             Spacer(Modifier.width(16.dp))
             BoxWithConstraints(Modifier.weight(0.58f)) {
@@ -645,7 +649,7 @@ fun TodayScreen(
                 Column(
                     Modifier.fillMaxSize().verticalScroll(homeRightScrollState),
                 ) {
-                    if (showSection("favorites")) {
+                    if (showSection("favorites") && !isRoomView) {
                         FavoritesSection(vm, states, navigate, columnsOverride = gridColumns, spacing = 14.dp)
                     }
                     for (key in sectionOrder) {
@@ -654,21 +658,23 @@ fun TodayScreen(
                             // placed by the panes themselves, never
                             // here; rooms render from visibleRooms
                             // (already room-filtered) below.
-                            "weather" -> if (showSection("weather") && weather != null) {
+                            // Round 18, item 1: every overview key
+                            // below hides on room views.
+                            "weather" -> if (showSection("weather") && weather != null && !isRoomView) {
                                 WeatherBlock(weather, vm, navigate)
                                 Spacer(Modifier.height(16.dp))
                             }
-                            "home" -> if (showSection("home") && homeTrackers.isNotEmpty()) {
+                            "home" -> if (showSection("home") && homeTrackers.isNotEmpty() && !isRoomView) {
                                 PresenceBlock(homeTrackers, states)
                                 Spacer(Modifier.height(16.dp))
                             }
                             // "status" is placed by the left pane
                             // (item 9) — never here, never twice.
                             "status" -> { }
-                            "round3-security" -> if (showSection("round3-security")) Round3SecurityBlock(vm, states, navigate)
-                            "round3-vacuum" -> if (showSection("round3-vacuum")) Round3VacuumBlock(vm, states, navigate)
-                            "round3-media" -> if (showSection("round3-media")) Round3MediaBlock(vm, states, navigate)
-                            "round3-greenhouse" -> if (showSection("round3-greenhouse")) Round3GreenhouseBlock(vm, states, navigate)
+                            "round3-security" -> if (showSection("round3-security") && !isRoomView) Round3SecurityBlock(vm, states, navigate)
+                            "round3-vacuum" -> if (showSection("round3-vacuum") && !isRoomView) Round3VacuumBlock(vm, states, navigate)
+                            "round3-media" -> if (showSection("round3-media") && !isRoomView) Round3MediaBlock(vm, states, navigate)
+                            "round3-greenhouse" -> if (showSection("round3-greenhouse") && !isRoomView) Round3GreenhouseBlock(vm, states, navigate)
                             "rooms" -> for (section in visibleRooms) {
                                 RoomSectionGrid(section.name, section.members, states, vm, gridColumns, navigate, section.iconKey, spacing = 14.dp)
                                 Spacer(Modifier.height(16.dp))
@@ -691,18 +697,34 @@ fun TodayScreen(
  * Unassigned = the "No room" section. Data objects/classes so chip
  * equality is structural, never string matching on room names.
  */
-private sealed interface RoomFilter {
+internal sealed interface RoomFilter {
     data object All : RoomFilter
     data class Area(val id: String) : RoomFilter
     data object Unassigned : RoomFilter
 }
 
 /**
+ * Feedback round 18, item 1: the room-filter rule, extracted pure
+ * so it is unit-testable. "My Home" (All) yields NO room sections
+ * — the overview blocks render instead; a room view yields only
+ * that room's section(s).
+ */
+internal fun visibleRoomsFor(filter: RoomFilter, allRooms: List<RoomSection>): List<RoomSection> =
+    when (filter) {
+        RoomFilter.All -> emptyList()
+        is RoomFilter.Area -> allRooms.filter { it.areaId == filter.id }
+        RoomFilter.Unassigned -> allRooms.filter { it.areaId == null }
+    }
+
+/** Feedback round 18, item 1: true for any room view (Area/Unassigned). */
+internal fun isRoomViewFilter(filter: RoomFilter): Boolean = filter != RoomFilter.All
+
+/**
  * Stage G: one Home room section with its presentation-layer
  * overrides applied (display name + icon key). areaId null = the
  * unassigned ("No room") section, which has no HA area to override.
  */
-private data class RoomSection(
+internal data class RoomSection(
     val areaId: String?,
     val name: String,
     val members: List<String>,
@@ -1737,7 +1759,10 @@ fun SettingsScreen(
     // The explanatory texts the old screen showed under each heading now
     // live as the rows' subtitles, so nothing is lost in the restyle.
     LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)
+            // Feedback round 18, item 6: opaque root so sub-screen
+            // transitions never overlap transparent text.
+            .background(MaterialTheme.colorScheme.background),
         // Feedback round 16, item 8: the last row (Instance
         // tile) must draw fully — the trailing reserve grows
         // 16dp -> 32dp so the final row clears the bottom edge.
@@ -2306,7 +2331,6 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
 
 @Composable
 private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier, corners: RoundedCornerShape = RoundedCornerShape(0.dp)) {
-    val states by vm.states.collectAsState()
     Box(
         modifier.padding(1.dp).clip(corners)
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -2326,6 +2350,19 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
         if (cameraId == null) {
             Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
         } else {
+            // Feedback round 18, item 7: per-entity flows instead
+            // of the whole states map — a state change on any
+            // other entity no longer recomposes this quadrant.
+            // The front-door trio feeds the SHARED resolver (same
+            // fallback/unavailable behavior as before); the motion
+            // sensor arrives on its own flow (see motionSensorFlow).
+            // Plain .value reads (not by-delegates) so the entity
+            // smart-casts in the overlay block below.
+            val entity = vm.entityFlow(cameraId).collectAsState().value
+            val ringMqtt = vm.entityFlow(FRONT_DOOR_RING_MQTT_CAMERA_ID).collectAsState().value
+            val liveView = vm.entityFlow(FRONT_DOOR_LIVE_VIEW_ID).collectAsState().value
+            val snapshotEntity = vm.entityFlow(FRONT_DOOR_SNAPSHOT_ID).collectAsState().value
+            val motionSensor = vm.motionSensorFlow(cameraId).collectAsState().value
             // Front Door live probe (Round 2): the Front Door
             // quadrant's static thumbnail comes from the dedicated
             // snapshot camera (camera.front_door_snapshot, "Ring
@@ -2341,10 +2378,11 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // target, morph keys, and cameraId stay on live_view,
             // so the panel (with its own unavailable state) still
             // opens and the dialog routing is untouched.
+            val frontDoorStates = frontDoorResolverStates(ringMqtt, liveView)
             val frontDoorDown = cameraId == FRONT_DOOR_LIVE_VIEW_ID &&
-                resolveFrontDoorCameraSource(states) == null
+                resolveFrontDoorCameraSource(frontDoorStates) == null
             val thumbnailId = if (cameraId == FRONT_DOOR_LIVE_VIEW_ID &&
-                states[FRONT_DOOR_SNAPSHOT_ID] != null
+                snapshotEntity != null
             ) FRONT_DOOR_SNAPSHOT_ID else cameraId
             val snap = vm.snapshotFor(thumbnailId)
             // Cache-first, fetch deferred (2026-11-01 polish round):
@@ -2361,7 +2399,6 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                 if (vm.snapshotFor(thumbnailId) != null) kotlinx.coroutines.delay(1000)
                 vm.refreshSnapshot(thumbnailId)
             }
-            val entity = states[cameraId]
             if (frontDoorDown) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Filled.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(26.dp))
@@ -2395,8 +2432,6 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // "Unavailable" quadrant would contradict it.
             if (entity != null && !frontDoorDown) {
                 val isRing = isRingCamera(entity)
-                val entityDevices by vm.entityDevices.collectAsState()
-                val motionSensor = motionSensorForCamera(cameraId, states, entityDevices)
                 Box(Modifier.fillMaxSize()) {
                     Box(
                         Modifier.align(Alignment.BottomStart).fillMaxWidth().height(56.dp)

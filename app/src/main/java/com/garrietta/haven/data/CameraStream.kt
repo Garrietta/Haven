@@ -136,6 +136,20 @@ fun resolveFrontDoorCameraSource(states: Map<String, HaEntity>): String? {
     return null
 }
 
+/**
+ * Feedback round 18, item 7: the per-entity map CameraQuadrant
+ * feeds the shared resolver above, now that the quadrant collects
+ * entity flows instead of the whole states map. Only the
+ * front-door trio is ever present (absent entities are simply
+ * omitted — the resolver treats a missing entry exactly like an
+ * unavailable one, so the fallback behavior is unchanged).
+ */
+fun frontDoorResolverStates(ringMqtt: HaEntity?, liveView: HaEntity?): Map<String, HaEntity> =
+    buildMap {
+        ringMqtt?.let { put(FRONT_DOOR_RING_MQTT_CAMERA_ID, it) }
+        liveView?.let { put(FRONT_DOOR_LIVE_VIEW_ID, it) }
+    }
+
 /** Watchdog cap for a Front Door live session: the switch auto-offs after this long even if the panel stays open. */
 const val FRONT_DOOR_LIVE_MAX_MS = 10 * 60 * 1000L
 
