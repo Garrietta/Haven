@@ -65,6 +65,8 @@ import com.garrietta.haven.ui.components.DialogTitleText
 import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.chartLineColor
+import com.garrietta.haven.ui.components.sensorKind
 import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
 import com.garrietta.haven.ui.components.LocalHeroTarget
@@ -836,7 +838,7 @@ private fun ThermostatSensorHistory(sensor: HaEntity, vm: HavenViewModel) {
         if (cached == null) {
             ShimmerBox(Modifier.fillMaxWidth().height(120.dp))
         } else if (cached.size >= 2) {
-            Sparkline(cached, accentFor(sensor.entityId), Modifier.fillMaxWidth().height(120.dp))
+            Sparkline(cached, chartLineColor(sensorKind(sensor.entityId, sensor.attrString("device_class"), sensor.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(120.dp))
             val mm = sparklineMinCurrentMax(cached)
             if (mm != null) {
                 Spacer(Modifier.height(4.dp))

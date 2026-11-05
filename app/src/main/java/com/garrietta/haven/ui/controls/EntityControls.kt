@@ -224,6 +224,7 @@ fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
         SensorKind.BATTERY -> Icons.Filled.BatteryFull
         SensorKind.POWER -> Icons.Filled.Bolt
         SensorKind.LIGHT -> Icons.Filled.WbSunny
+        SensorKind.PRESSURE -> Icons.Filled.Info
         SensorKind.OTHER -> Icons.Filled.Info
     }
     "binary_sensor" -> Icons.Filled.Visibility

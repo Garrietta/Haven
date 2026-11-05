@@ -241,7 +241,7 @@ fun climateModeColor(state: String, hvacAction: String?): Color = when {
  * LIGHT cover the other sensors with an obvious icon; anything
  * else is OTHER and keeps the muted badge pair.
  */
-enum class SensorKind { TEMPERATURE, HUMIDITY, BATTERY, POWER, LIGHT, OTHER }
+enum class SensorKind { TEMPERATURE, HUMIDITY, BATTERY, POWER, LIGHT, PRESSURE, OTHER }
 
 fun sensorKind(entityId: String, deviceClass: String?, friendlyName: String?): SensorKind {
     val id = entityId.lowercase()
@@ -254,6 +254,7 @@ fun sensorKind(entityId: String, deviceClass: String?, friendlyName: String?): S
         dc in setOf("power", "energy") || "_power" in id || "_energy" in id ||
             "power" in name || "energy" in name -> SensorKind.POWER
         dc == "illuminance" || "illuminance" in id || "illuminance" in name -> SensorKind.LIGHT
+        dc == "pressure" || "_pressure" in id || "pressure" in name -> SensorKind.PRESSURE
         else -> SensorKind.OTHER
     }
 }
@@ -279,6 +280,29 @@ fun sensorCardTint(kind: SensorKind): Color? = when (kind) {
     SensorKind.TEMPERATURE -> Color(0xFFEF5350)
     SensorKind.HUMIDITY -> Color(0xFF29B6F6)
     else -> null
+}
+
+/**
+ * Feedback round 20, item 2: the ONE chart-line color source. The
+ * 24h strips used accentFor(entityId) — a per-entity hash color —
+ * so two temperature sensors drew different lines (the 5179 sensor
+ * teal, the Temperature sensor red). Lines are keyed by
+ * measurement, never by entity: temperature and humidity use the
+ * exact badge-bypass hues; power, battery, illuminance, and
+ * pressure use their matrix rows' badge tones (pale on dark
+ * theme, deep ink on light theme, so the line reads on both);
+ * unclassified sensors share the MEDIA row tones, so any two
+ * like sensors still match. Badges themselves are untouched
+ * (they already follow the bypasses). Pure, unit-tested.
+ */
+fun chartLineColor(kind: SensorKind, isDark: Boolean): Color = when (kind) {
+    SensorKind.TEMPERATURE -> Color(0xFFEF5350)
+    SensorKind.HUMIDITY -> Color(0xFF29B6F6)
+    SensorKind.POWER -> if (isDark) Color(0xFFFFE082) else Color(0xFF261900)
+    SensorKind.BATTERY -> if (isDark) Color(0xFFA6F285) else Color(0xFF143800)
+    SensorKind.LIGHT -> if (isDark) Color(0xFFB8F397) else Color(0xFF1B3708)
+    SensorKind.PRESSURE -> if (isDark) Color(0xFFA5C8FF) else Color(0xFF001C3A)
+    SensorKind.OTHER -> if (isDark) Color(0xFFDAB9FF) else Color(0xFF2B1246)
 }
 
 /**

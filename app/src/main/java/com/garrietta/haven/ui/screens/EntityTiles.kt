@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,13 +56,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
+import com.garrietta.haven.data.CardSize
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.VACUUM_ID
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.CardResizeHandle
 import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.resizeSettle
 import com.garrietta.haven.data.inactiveCardColors
 import com.garrietta.haven.data.presetAppliesForState
 import com.garrietta.haven.data.presetBadgeColors
@@ -114,6 +118,12 @@ fun TabTileGrid(
     cards: List<String>,
     states: Map<String, HaEntity>,
     navigate: ((Screen) -> Unit)? = null,
+    // Feedback round 20, item 5: Arrange mode + resize, BEFORE
+    // the trailing fallbackCard lambda (round-5 lesson: new
+    // params never go after a lambda param).
+    arrangeMode: Boolean = false,
+    sizeFor: ((String) -> CardSize)? = null,
+    onSizeChange: ((String, CardSize) -> Unit)? = null,
     fallbackCard: @Composable (String) -> Unit,
 ) {
     LazyVerticalGrid(
@@ -155,13 +165,41 @@ fun TabTileGrid(
                         // unkeyed items recomposed into siblings'
                         // slots on a panel return, which read as
                         // clipped titles and one-frame badge flashes.
-                        item(key = id) {
-                            EntityTile(
-                                vm,
-                                entity,
-                                navigate = navigate,
-                                gridIndex = tileIndex++,
-                            )
+                        // Feedback round 20, item 5: a WIDE card
+                        // takes the full line span; a TALL card
+                        // stretches to a 272dp minimum (twice the
+                        // 136dp floor — Lazy grids have no row
+                        // span, so this is the tall variant).
+                        // The grid index still counts in card
+                        // order, so a wide card never shifts its
+                        // neighbors' corner variants.
+                        val cardSize = sizeFor?.invoke(id) ?: CardSize.NORMAL
+                        item(
+                            key = id,
+                            span = {
+                                if (cardSize == CardSize.WIDE) GridItemSpan(maxLineSpan)
+                                else GridItemSpan(1)
+                            },
+                        ) {
+                            Box(
+                                Modifier.resizeSettle()
+                                    .then(if (cardSize == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                            ) {
+                                EntityTile(
+                                    vm,
+                                    entity,
+                                    navigate = navigate,
+                                    gridIndex = tileIndex++,
+                                    modifier = if (cardSize == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                                )
+                                if (arrangeMode && onSizeChange != null) {
+                                    CardResizeHandle(
+                                        cardSize,
+                                        { onSizeChange(id, it) },
+                                        Modifier.align(Alignment.BottomEnd),
+                                    )
+                                }
+                            }
                         }
                     } else {
                         item(key = "missing:$id") { MissingEntityTile(id, gridIndex = tileIndex++) }
@@ -239,7 +277,7 @@ private fun openPage(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit)? = null, gridIndex: Int = 0) {
+fun EntityTile(vm: HavenViewModel, entity: HaEntity, modifier: Modifier = Modifier, navigate: ((Screen) -> Unit)? = null, gridIndex: Int = 0) {
     val accent = accentFor(entity.entityId)
     // Snapshot-held visuals (2026-10-30 verdict round, same rule as
     // cards): while this tile's morph is open, its badge, name,
@@ -310,7 +348,7 @@ fun EntityTile(vm: HavenViewModel, entity: HaEntity, navigate: ((Screen) -> Unit
         // (a shape-picker override still beats it, as on Home).
         shape = tileOutline,
         color = tileContainerColor,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
             .onGloballyPositioned { tileBounds = it.boundsInWindow() }
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, tileOutline)

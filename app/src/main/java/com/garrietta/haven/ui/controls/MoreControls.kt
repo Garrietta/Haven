@@ -70,6 +70,8 @@ import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.chartLineColor
+import com.garrietta.haven.ui.components.sensorKind
 import com.garrietta.haven.ui.components.dissolveIntoTraveler
 import com.garrietta.haven.ui.components.reportArcBounds
 import com.garrietta.haven.ui.components.sparklineMinCurrentMax
@@ -180,7 +182,7 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true,
         if (chartReady) {
             Column(Modifier.alpha(chartAlpha)) {
                 Spacer(Modifier.height(12.dp))
-                Sparkline(history, accent, Modifier.fillMaxWidth().height(64.dp))
+                Sparkline(history, chartLineColor(sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(64.dp))
                 val mm = sparklineMinCurrentMax(history)
                 if (mm != null) {
                     Spacer(Modifier.height(8.dp))

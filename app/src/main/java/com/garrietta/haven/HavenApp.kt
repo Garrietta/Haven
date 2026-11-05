@@ -344,20 +344,20 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
  * instant (item 4a): the morph surface starts at the tile's own
  * color instead of flashing panel cream over the hidden tile.
  */
-private class SheetAnim(val id: String, val source: Rect?, val sourceColor: Color? = null)
+private class SheetAnim(val id: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
 
 /** Open detail morph: the backstack screen plus its source card rect (same fallback rule as sheets). */
-private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?, val sourceColor: Color? = null)
+private class DetailAnim(val screen: Screen, val entityId: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
 
 /** Feedback round 5, item 1: a detail opened from a panel card, stacked above the panel overlay
  * WITHOUT touching the backstack. The panel stays the backstack top, so the base page never
  * switches to the panel page (the "middleman" screen). Back from this layer returns to the panel
  * popup, not Home. The source rect is captured at tap time from the panel card, same rule as
  * the detail block's open-captured rect. */
-private class PanelDetailAnim(val entityId: String, val source: Rect?, val sourceColor: Color? = null)
+private class PanelDetailAnim(val entityId: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
 
 /** Open thermostat pop-out morph: the climate entity plus its source card rect (same fallback rule as sheets). */
-private class PopoutAnim(val id: String, val source: Rect?, val sourceColor: Color? = null)
+private class PopoutAnim(val id: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
 
 @Composable
 fun HavenApp(vm: HavenViewModel) {
@@ -913,7 +913,7 @@ fun HavenApp(vm: HavenViewModel) {
                 vm.clearTravelSnapshot(prev.entityId)
             }
             if (prev?.entityId == entityId) return
-            panelDetailAnim = PanelDetailAnim(entityId, cardBounds[entityId], cardColors[entityId])
+            panelDetailAnim = PanelDetailAnim(entityId, cardBounds[entityId], cardColors[entityId], cardShapes[entityId])
         }
         val goBack: () -> Unit = {
             if (panelDetailAnim != null) dismissPanelDetail()
@@ -964,10 +964,10 @@ fun HavenApp(vm: HavenViewModel) {
         // over the hidden card) with no one-frame gap. The effects
         // below own only the progress animation.
         if (vm.popupEntityId != null && sheetAnim?.id != vm.popupEntityId) {
-            sheetAnim = SheetAnim(vm.popupEntityId!!, cardBounds[vm.popupEntityId!!], cardColors[vm.popupEntityId!!])
+            sheetAnim = SheetAnim(vm.popupEntityId!!, cardBounds[vm.popupEntityId!!], cardColors[vm.popupEntityId!!], cardShapes[vm.popupEntityId!!])
         }
         if (detailScreen != null && detailAnim?.screen != detailScreen) {
-            detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)], cardColors[detailEntityId(detailScreen)])
+            detailAnim = DetailAnim(detailScreen, detailEntityId(detailScreen), cardBounds[detailEntityId(detailScreen)], cardColors[detailEntityId(detailScreen)], cardShapes[detailEntityId(detailScreen)])
         }
         LaunchedEffect(vm.popupEntityId) {
             val id = vm.popupEntityId
@@ -1032,7 +1032,7 @@ fun HavenApp(vm: HavenViewModel) {
         // capture synchronously, animate progress 0 -> 1 on the bounds
         // spring (snapped under reduce-motion).
         if (vm.climatePopoutId != null && popoutAnim?.id != vm.climatePopoutId) {
-            popoutAnim = PopoutAnim(vm.climatePopoutId!!, cardBounds[vm.climatePopoutId!!], cardColors[vm.climatePopoutId!!])
+            popoutAnim = PopoutAnim(vm.climatePopoutId!!, cardBounds[vm.climatePopoutId!!], cardColors[vm.climatePopoutId!!], cardShapes[vm.climatePopoutId!!])
         }
         LaunchedEffect(vm.climatePopoutId) {
             val id = vm.climatePopoutId
@@ -1796,7 +1796,7 @@ fun HavenApp(vm: HavenViewModel) {
                         dragHandle = sheetHandle,
                         isClosing = sheetExiting && !sheetDrag.settling,
                         onPanelPlaced = { sheetPanelBounds = it },
-                        landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                        landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                     ) {
                         EntityPopupSheetContent(
                             vm, navigate, anim.id, panelBounds = sheetPanelBounds,
@@ -1824,7 +1824,7 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                     onPanelPlaced = { sheetPanelBounds = it },
-                    landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                    landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                 ) {
                     EntityPopupSheetContent(
                         vm, navigate, anim.id, panelBounds = sheetPanelBounds,
@@ -1893,7 +1893,7 @@ fun HavenApp(vm: HavenViewModel) {
                         onDismiss = { dismissDetail() },
                         dragHandle = detailHandle,
                         isClosing = detailExiting && !detailDrag.settling,
-                        landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                             content(anim.screen)
@@ -1918,7 +1918,7 @@ fun HavenApp(vm: HavenViewModel) {
                     dragHandle = detailHandle,
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
-                    landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                         content(anim.screen)
@@ -1962,7 +1962,7 @@ fun HavenApp(vm: HavenViewModel) {
                         onDismiss = { dismissPanelDetail() },
                         dragHandle = panelDetailHandle,
                         isClosing = panelDetailExiting && !panelDetailDrag.settling,
-                        landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
                             DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
@@ -1977,7 +1977,7 @@ fun HavenApp(vm: HavenViewModel) {
                     sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                     isClosing = panelDetailExiting && !panelDetailDrag.settling,
                     dragHandle = panelDetailHandle,
-                    landingShape = cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides true) {
                         DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() })
@@ -2009,7 +2009,7 @@ fun HavenApp(vm: HavenViewModel) {
                         onDismiss = { dismissPopout() },
                         dragHandle = popoutHandle,
                         isClosing = popoutExiting && !popoutDrag.settling,
-                        landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                        landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                     ) {
                         ThermostatPopoutContent(
                             vm, anim.id,
@@ -2029,7 +2029,7 @@ fun HavenApp(vm: HavenViewModel) {
                     dragHandle = popoutHandle,
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
-                    landingShape = cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                    landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,

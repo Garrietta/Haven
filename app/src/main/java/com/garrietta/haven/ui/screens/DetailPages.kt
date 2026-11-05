@@ -88,6 +88,8 @@ import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.chartLineColor
+import com.garrietta.haven.ui.components.sensorKind
 import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
@@ -717,7 +719,7 @@ private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
             label = "historyStripReveal",
         )
         Column(Modifier.alpha(stripAlpha)) {
-            Sparkline(points, accentFor(entity.entityId), Modifier.fillMaxWidth().height(120.dp))
+            Sparkline(points, chartLineColor(sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(120.dp))
             Spacer(Modifier.height(4.dp))
             if (mm != null) {
                 Text(

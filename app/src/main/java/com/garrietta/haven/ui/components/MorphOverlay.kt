@@ -960,6 +960,23 @@ fun morphSurfaceShape(progress: Float, landingShape: Shape?, scaleX: Float = 1f,
 }
 
 /**
+ * Feedback round 20, item 1: the morph exit landing shape. Bounds and
+ * container color were already captured at open (round 16); the shape
+ * was the one input read live from the global entity-keyed map at
+ * close time, so any intervening write — another rendering of the
+ * same entity on a different page (a Home card's grid index differs
+ * from a tab tile's), or the prefs fallback when the entry is absent
+ * — landed the exit on a different shape than the source tile
+ * renders, and the never-hidden tile snapped to its own shape when
+ * the surface was removed: the tab-card shape change on every popup
+ * exit. The captured-at-open shape wins; the live map and prefs
+ * are fallbacks only (e.g. a source that never reported a shape).
+ * Pure, unit-tested.
+ */
+fun resolveLandingShape(captured: Shape?, reported: Shape?, prefs: Shape?): Shape? =
+    captured ?: reported ?: prefs
+
+/**
  * Feedback round 11, item 2: the centered popup's clip shape at
  * [progress] for a tile outline of [landingShape]. Corner outlines
  * lerp per [morphPopupCorners]; polygon outlines keep the popup's

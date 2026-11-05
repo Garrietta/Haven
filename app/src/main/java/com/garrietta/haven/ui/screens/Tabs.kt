@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -46,6 +47,7 @@ import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +86,9 @@ import org.json.JSONObject
 fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit) {
     val tab = vm.userTabs.firstOrNull { it.id == tabId }
     val states by vm.states.collectAsState()
+    // Feedback round 20, item 5: Arrange mode shows the drag
+    // handles; exiting keeps sizes (they live in prefs).
+    var arrangeMode by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         if (tab == null) {
             Spacer(Modifier.height(16.dp))
@@ -100,6 +105,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             // verdict's "hermostat" frame). Titles stay fully
             // rendered through the whole morph and at rest.
             Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            TextButton(onClick = { arrangeMode = !arrangeMode }) { Text(if (arrangeMode) "Done" else "Arrange") }
             OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Edit") }
         }
         Spacer(Modifier.height(12.dp))
@@ -112,7 +118,12 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             // Tab pages render Apple Home-style tiles (tap = full page,
             // long-press = detail sheet); cards that can't tile
             // keep their card rendering below.
-            TabTileGrid(vm, tab.cards, states, navigate) { yaml ->
+            TabTileGrid(
+                vm, tab.cards, states, navigate,
+                arrangeMode = arrangeMode,
+                sizeFor = { vm.cardSize("tab:${tab.id}", it) },
+                onSizeChange = { id, size -> vm.setCardSize("tab:${tab.id}", id, size) },
+            ) { yaml ->
                 TabCardView(vm, yaml, states, navigate)
             }
         }
@@ -268,6 +279,10 @@ internal fun TabEditorCard(
     var newCardType by remember { mutableStateOf("tile") }
     var newCardTypeExpanded by remember { mutableStateOf(false) }
     var newCardEntity by remember { mutableStateOf("") }
+    // Feedback round 20, item 4: multi-select set, keyed by tab so a
+    // selection never leaks into another tab's editor. Lives here,
+    // outside the filtered list, so it survives query changes.
+    var selectedCardEntities by remember(tab.id) { mutableStateOf(setOf<String>()) }
     var typeMenuFor by remember { mutableStateOf<Int?>(null) }
     Card(
         shape = generalCardShape(0),
@@ -401,6 +416,10 @@ internal fun TabEditorCard(
                     EntityPickerField(
                         states = states,
                         value = newCardEntity,
+                        selected = selectedCardEntities,
+                        onToggleSelect = { id ->
+                            selectedCardEntities = toggleEntitySelection(selectedCardEntities, id)
+                        },
                         onValueChange = { newCardEntity = it },
                         onSelect = { newCardEntity = it },
                         deviceNames = pickerDeviceNames,
@@ -408,39 +427,76 @@ internal fun TabEditorCard(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Button(onClick = {
-                val yaml = buildString {
-                    append("type: ").append(newCardType).append("\n")
-                    if (newCardEntity.isNotBlank()) {
-                        if (newCardType == "entities" || newCardType == "glance") {
-                            append("entities:\n  - ").append(newCardEntity.trim()).append("\n")
-                        } else {
-                            append("entity: ").append(newCardEntity.trim()).append("\n")
-                        }
+            // One YAML builder for both paths, so a multi-added card
+            // is byte-identical to the same card added singly.
+            fun cardYamlFor(entityId: String): String = buildString {
+                append("type: ").append(newCardType).append("\n")
+                if (entityId.isNotBlank()) {
+                    if (newCardType == "entities" || newCardType == "glance") {
+                        append("entities:\n  - ").append(entityId.trim()).append("\n")
+                    } else {
+                        append("entity: ").append(entityId.trim()).append("\n")
                     }
                 }
-                vm.addCardToTab(tab.id, yaml)
-                newCardEntity = ""
-            }) { Text("Add card") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = {
+                    vm.addCardToTab(tab.id, cardYamlFor(newCardEntity))
+                    newCardEntity = ""
+                }) { Text("Add card") }
+                if (selectedCardEntities.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        for (id in selectedCardEntities) {
+                            vm.addCardToTab(tab.id, cardYamlFor(id))
+                        }
+                        selectedCardEntities = emptySet()
+                    }) { Text("Add ${selectedCardEntities.size} cards") }
+                }
+            }
         }
     }
 }
 
 /**
+ * Feedback round 20, item 4: pure multi-select toggle. The
+ * selection is a set of entity ids held by the caller, outside
+ * the filtered list — so filtering can never drop a selected
+ * entity, and toggling never disturbs other members. Pure,
+ * unit-tested.
+ */
+internal fun toggleEntitySelection(selected: Set<String>, id: String): Set<String> =
+    if (id in selected) selected - id else selected + id
+
+/**
  * Entity picker: type to filter by name or id, tap a match to fill it in.
- * The dropdown caps at 8 matches so a broad query never covers the screen.
+ * The suggestion list caps at 8 matches so a broad query never covers the screen.
+ *
+ * Feedback round 20, item 3: suggestions render INLINE in the card's
+ * own Column, never in a DropdownMenu Popup. The Popup stole focus
+ * on every open, so each keystroke — which reopened it with new
+ * matches — closed the keyboard. An inline list filters underneath
+ * the field while focus and the keyboard stay put.
+ *
+ * Feedback round 20, item 4: multi-select. When [onToggleSelect] is
+ * given, every row carries a checkbox; tapping a row toggles that
+ * entity in [selected] without touching the query, so the selection
+ * survives filtering (selection lives in the caller, keyed by
+ * entity id, never in the filtered list). Rows are keyed by entity
+ * id so a checkbox never swaps slots with a sibling on re-filter.
  */
 @Composable
 private fun EntityPickerField(
     states: Map<String, HaEntity>,
     value: String,
+    selected: Set<String> = emptySet(),
+    onToggleSelect: ((String) -> Unit)? = null,
     onValueChange: (String) -> Unit,
     onSelect: (String) -> Unit,
     // Customization round, item 3: device names also match, so a
     // device name in the picker finds its entities.
     deviceNames: Map<String, String> = emptyMap(),
 ) {
-    var expanded by remember { mutableStateOf(false) }
     val matches = remember(value, deviceNames) {
         if (value.isBlank()) {
             emptyList()
@@ -452,25 +508,49 @@ private fun EntityPickerField(
             }.take(8)
         }
     }
-    OutlinedTextField(
-        value = value,
-        onValueChange = {
-            onValueChange(it)
-            expanded = true
-        },
-        label = { Text("Entity (optional)") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    DropdownMenu(expanded = expanded && matches.isNotEmpty(), onDismissRequest = { expanded = false }) {
-        for (entity in matches) {
-            DropdownMenuItem(
-                text = { Text("${entity.friendlyName} (${entity.entityId})") },
-                onClick = {
-                    onSelect(entity.entityId)
-                    expanded = false
-                },
-            )
+    Column(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text("Entity (optional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (value.isNotBlank() && matches.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            for (entity in matches) {
+                key(entity.entityId) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            if (onToggleSelect != null) onToggleSelect(entity.entityId)
+                            else onSelect(entity.entityId)
+                        },
+                    ) {
+                        if (onToggleSelect != null) {
+                            Checkbox(
+                                checked = entity.entityId in selected,
+                                onCheckedChange = { onToggleSelect(entity.entityId) },
+                            )
+                        }
+                        Text(
+                            "${entity.friendlyName} (${entity.entityId})",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+            if (onToggleSelect != null && selected.isNotEmpty()) {
+                Text(
+                    "${selected.size} selected",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

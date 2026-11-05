@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -58,9 +61,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
+import com.garrietta.haven.data.CardSize
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.HomeStatusCategory
+import com.garrietta.haven.ui.components.CardResizeHandle
 import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.resizeSettle
 import com.garrietta.haven.data.deriveHomeStatus
 import com.garrietta.haven.data.isHomeRoomEntity
 import com.garrietta.haven.data.groupEntitiesByDevice
@@ -311,11 +317,17 @@ fun FavoritesSection(
     spacing: Dp = 12.dp,
 ) {
     var managing by remember { mutableStateOf(false) }
+    // Feedback round 20, item 5: Arrange mode shows the drag
+    // handles; exiting keeps sizes (they live in prefs).
+    var arrangeMode by remember { mutableStateOf(false) }
     val columns = columnsOverride ?: 2
     val resolved = vm.favorites.mapNotNull { states[it] }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Favorites", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+        // Feedback round 20, item 5: Arrange toggles the resize
+        // handles; the pencil stays always-composed (round 18).
+        TextButton(onClick = { arrangeMode = !arrangeMode }) { Text(if (arrangeMode) "Done" else "Arrange") }
         // Visual-fidelity round §2: the Manage TEXT button is
         // replaced by the mockup's circular pencil button (40dp
         // surfaceContainerHigh circle, Outlined Edit icon) opening
@@ -368,18 +380,68 @@ fun FavoritesSection(
             HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, navigate = navigate)
             Spacer(Modifier.height(spacing))
         }
-        for ((rowIdx, row) in standard.chunked(columns).withIndex()) {
-            Row {
-                for ((colIdx, member) in row.withIndex()) {
-                    Box(Modifier.weight(1f)) { HomeRoomCard(vm, member.entityId, navigate, gridIndex = rowIdx * columns + colIdx) }
-                    if (member != row.last()) Spacer(Modifier.width(spacing))
+        // Feedback round 20, item 5: wide-aware rows. A WIDE card
+        // takes its own full-width row; consecutive non-wide
+        // cards chunk as before. gridIndex still counts flat
+        // position in the standard list, so a wide card never
+        // shifts its neighbors' corner variants. With no wide
+        // cards this reproduces the old chunked loop exactly.
+        var flatIdx = 0
+        var i = 0
+        while (i < standard.size) {
+            if (vm.cardSize("home", standard[i].entityId) == CardSize.WIDE) {
+                val member = standard[i]
+                Box(Modifier.fillMaxWidth().resizeSettle()) {
+                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx)
+                    if (arrangeMode) {
+                        CardResizeHandle(
+                            CardSize.WIDE,
+                            { vm.setCardSize("home", member.entityId, it) },
+                            Modifier.align(Alignment.BottomEnd),
+                        )
+                    }
                 }
-                repeat(columns - row.size) {
-                    Spacer(Modifier.width(spacing))
-                    Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(spacing))
+                i++
+                flatIdx++
+            } else {
+                val row = mutableListOf<HaEntity>()
+                val rowStart = flatIdx
+                while (i < standard.size && row.size < columns &&
+                    vm.cardSize("home", standard[i].entityId) != CardSize.WIDE
+                ) {
+                    row.add(standard[i])
+                    i++
+                    flatIdx++
                 }
+                Row {
+                    for ((colIdx, member) in row.withIndex()) {
+                        val size = vm.cardSize("home", member.entityId)
+                        Box(
+                            Modifier.weight(1f).resizeSettle()
+                                .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                        ) {
+                            HomeRoomCard(
+                                vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
+                                modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                            )
+                            if (arrangeMode) {
+                                CardResizeHandle(
+                                    size,
+                                    { vm.setCardSize("home", member.entityId, it) },
+                                    Modifier.align(Alignment.BottomEnd),
+                                )
+                            }
+                        }
+                        if (member != row.last()) Spacer(Modifier.width(spacing))
+                    }
+                    repeat(columns - row.size) {
+                        Spacer(Modifier.width(spacing))
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+                Spacer(Modifier.height(spacing))
             }
-            Spacer(Modifier.height(spacing))
         }
     }
     Spacer(Modifier.height(16.dp))

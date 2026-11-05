@@ -26,7 +26,10 @@ import com.garrietta.haven.data.LovelaceConfig
 import com.garrietta.haven.data.ProbeResult
 import com.garrietta.haven.data.ScanOutcome
 import com.garrietta.haven.data.SettingsStore
+import com.garrietta.haven.data.CardSize
+import com.garrietta.haven.data.CardSizeStore
 import com.garrietta.haven.data.TabsStore
+import com.garrietta.haven.data.cardSizeKey
 import com.garrietta.haven.data.UserTab
 import com.garrietta.haven.data.cardToYaml
 import com.garrietta.haven.data.changeCardType
@@ -123,11 +126,30 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val tokenStore = TokenStore(application)
     val settingsStore = SettingsStore(application)
     val tabsStore = TabsStore(application)
+    val cardSizeStore = CardSizeStore(application)
     val client = HaClient(viewModelScope)
 
     /** User-created tabs, in pill-bar order. Loaded synchronously so the app can open on the first tab. */
     var userTabs by mutableStateOf<List<UserTab>>(tabsStore.loadTabs())
         private set
+
+    /**
+     * Feedback round 20, item 5: card sizes, mirrored in Compose
+     * state so grids recompose on change (the store alone is not
+     * observable). The store is the source of truth across
+     * restarts; this state is its live mirror, updated only
+     * through [setCardSize]. Scope keys: "home", "room:<areaId>"
+     * ("room:unassigned" for No room), "tab:<tabId>".
+     */
+    private var cardSizesState by mutableStateOf(cardSizeStore.loadAll())
+
+    fun cardSize(scope: String, entityId: String): CardSize =
+        cardSizesState[cardSizeKey(scope, entityId)] ?: CardSize.NORMAL
+
+    fun setCardSize(scope: String, entityId: String, size: CardSize) {
+        cardSizeStore.setSize(cardSizeKey(scope, entityId), size)
+        cardSizesState = cardSizeStore.loadAll()
+    }
 
     /**
      * Feedback round 19, item 3: the Home room filter, hoisted out

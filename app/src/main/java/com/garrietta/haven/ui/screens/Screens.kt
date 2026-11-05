@@ -107,6 +107,7 @@ import com.garrietta.haven.ui.controls.ServiceSlider
 import com.garrietta.haven.ui.components.tabIconPairForKey
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailTopBar
+import com.garrietta.haven.data.CardSize
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.groupEntitiesByRoom
 import com.garrietta.haven.ui.components.shapeLabel
@@ -149,7 +150,9 @@ import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.cardTapRoute
 import com.garrietta.haven.ui.components.tileBadgePair
+import com.garrietta.haven.ui.components.CardResizeHandle
 import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.resizeSettle
 import com.garrietta.haven.ui.components.weatherConditionColorThemed
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.legibleSecondaryOn
@@ -613,7 +616,7 @@ fun TodayScreen(
                             // section into a sibling's slot — keys pin
                             // each section to its area.
                             item(key = "room:${section.areaId ?: "unassigned"}") {
-                                RoomSectionGrid(section.name, section.members, states, vm, 2, navigate, section.iconKey)
+                                RoomSectionGrid(section.name, section.members, states, vm, 2, navigate, section.iconKey, areaId = section.areaId)
                             }
                         }
                     }
@@ -697,7 +700,7 @@ fun TodayScreen(
                             "round3-media" -> if (showSection("round3-media") && !isRoomView) Round3MediaBlock(vm, states, navigate)
                             "round3-greenhouse" -> if (showSection("round3-greenhouse") && !isRoomView) Round3GreenhouseBlock(vm, states, navigate)
                             "rooms" -> for (section in visibleRooms) {
-                                RoomSectionGrid(section.name, section.members, states, vm, gridColumns, navigate, section.iconKey, spacing = 14.dp)
+                                RoomSectionGrid(section.name, section.members, states, vm, gridColumns, navigate, section.iconKey, spacing = 14.dp, areaId = section.areaId)
                                 Spacer(Modifier.height(16.dp))
                             }
                         }
@@ -848,7 +851,14 @@ private fun RoomSectionGrid(
     navigate: (Screen) -> Unit,
     iconKey: String? = null,
     spacing: Dp = 12.dp,
+    // Feedback round 20, item 5: areaId scopes the persisted
+    // size (room:<areaId>:<entityId>); null = No room.
+    areaId: String? = null,
 ) {
+    // Feedback round 20, item 5: Arrange mode shows the drag
+    // handles; exiting keeps sizes (they live in prefs).
+    var arrangeMode by remember { mutableStateOf(false) }
+    val scope = "room:${areaId ?: "unassigned"}"
     // Resolved here, per section, from the already-collected map:
     // no extra subscription, no re-sort (membership order is
     // memoized in TodayScreen). Cards below still collect their
@@ -868,6 +878,10 @@ private fun RoomSectionGrid(
                 Spacer(Modifier.width(8.dp))
             }
             Text(name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f, fill = false))
+            // Feedback round 20, item 5: per-section Arrange toggle
+            // (a room view shows that room's single grid, so this
+            // approximates a per-page toggle there).
+            TextButton(onClick = { arrangeMode = !arrangeMode }) { Text(if (arrangeMode) "Done" else "Arrange") }
             if (vm.badgeRoom && hasImportantAlert(members)) {
                 Spacer(Modifier.width(8.dp))
                 Box(
@@ -891,20 +905,68 @@ private fun RoomSectionGrid(
             HomeRoomMediaCard(vm, media.entityId, gridIndex = wideIndex, navigate = navigate)
             Spacer(Modifier.height(spacing))
         }
-        for ((rowIdx, row) in standard.chunked(columns).withIndex()) {
-            Row {
-                for ((colIdx, member) in row.withIndex()) {
-                    // gridIndex counts within the standard list
-                    // (wide media have their own sequence above).
-                    Box(Modifier.weight(1f)) { HomeRoomCard(vm, member.entityId, navigate, gridIndex = rowIdx * columns + colIdx) }
-                    if (member != row.last()) Spacer(Modifier.width(spacing))
+        // Feedback round 20, item 5: wide-aware rows, same rule
+        // as FavoritesSection — a WIDE card takes its own
+        // full-width row, consecutive non-wide cards chunk as
+        // before, gridIndex still counts flat position in the
+        // standard list. With no wide cards this reproduces the
+        // old chunked loop exactly.
+        var flatIdx = 0
+        var i = 0
+        while (i < standard.size) {
+            if (vm.cardSize(scope, standard[i].entityId) == CardSize.WIDE) {
+                val member = standard[i]
+                Box(Modifier.fillMaxWidth().resizeSettle()) {
+                    HomeRoomCard(vm, member.entityId, navigate, gridIndex = flatIdx)
+                    if (arrangeMode) {
+                        CardResizeHandle(
+                            CardSize.WIDE,
+                            { vm.setCardSize(scope, member.entityId, it) },
+                            Modifier.align(Alignment.BottomEnd),
+                        )
+                    }
                 }
-                repeat(columns - row.size) {
-                    Spacer(Modifier.width(spacing))
-                    Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(spacing))
+                i++
+                flatIdx++
+            } else {
+                val row = mutableListOf<HaEntity>()
+                val rowStart = flatIdx
+                while (i < standard.size && row.size < columns &&
+                    vm.cardSize(scope, standard[i].entityId) != CardSize.WIDE
+                ) {
+                    row.add(standard[i])
+                    i++
+                    flatIdx++
                 }
+                Row {
+                    for ((colIdx, member) in row.withIndex()) {
+                        val size = vm.cardSize(scope, member.entityId)
+                        Box(
+                            Modifier.weight(1f).resizeSettle()
+                                .then(if (size == CardSize.TALL) Modifier.heightIn(min = 272.dp) else Modifier),
+                        ) {
+                            HomeRoomCard(
+                                vm, member.entityId, navigate, gridIndex = rowStart + colIdx,
+                                modifier = if (size == CardSize.TALL) Modifier.fillMaxSize() else Modifier,
+                            )
+                            if (arrangeMode) {
+                                CardResizeHandle(
+                                    size,
+                                    { vm.setCardSize(scope, member.entityId, it) },
+                                    Modifier.align(Alignment.BottomEnd),
+                                )
+                            }
+                        }
+                        if (member != row.last()) Spacer(Modifier.width(spacing))
+                    }
+                    repeat(columns - row.size) {
+                        Spacer(Modifier.width(spacing))
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+                Spacer(Modifier.height(spacing))
             }
-            Spacer(Modifier.height(spacing))
         }
         Spacer(Modifier.height(4.dp))
     }
@@ -1198,7 +1260,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
  * which beats this alternating default.
  */
 @Composable
-fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, onOpenPanel: (() -> Unit)? = null) {
+fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Unit, gridIndex: Int = 0, modifier: Modifier = Modifier, onOpenPanel: (() -> Unit)? = null) {
     // Entity-scoped state (§6): this card recomposes only when
     // its own entity changes. An entity that vanished from state
     // renders nothing (membership rebuilds without it).
@@ -1367,7 +1429,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         // taller; its row-mate stays 136dp top-aligned, which
         // reads better than cut text. The polygon path keeps its
         // round-2 spacer/padding shift (inscribed-circle clip).
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
             .heightIn(min = 136.dp)
             .reportCardBounds(entity.entityId)
             .reportCardShape(entity.entityId, cardOutline)
