@@ -236,8 +236,7 @@ class SettingsStore(context: Context) {
     }
 
     /** Per-area icon keys (TAB_ICON_OPTIONS keys; presentation only). */
-    fun roomIconKeys(): Map<String, String> {
-        val raw = prefs.getString("room_icon_keys_json", null) ?: return emptyMap()
+    fun roomIconKeys(): Map<String, String> {        val raw = prefs.getString("room_icon_keys_json", null) ?: return emptyMap()
         return try {
             val obj = org.json.JSONObject(raw)
             val out = mutableMapOf<String, String>()
@@ -258,6 +257,36 @@ class SettingsStore(context: Context) {
         if (iconKey == null) obj.remove(areaId) else obj.put(areaId, iconKey)
         prefs.edit().putString("room_icon_keys_json", obj.toString()).apply()
     }
+
+    /**
+     * Feedback round 19, item 5: per-area placement (see
+     * RoomPlacement) — which surface a room pins to. Stored as
+     * area id -> storage key; absent means ROOM_CHIP (the
+     * historical default: every room was a chip). Presentation
+     * only: area IDs and HA data never change here.
+     */
+    fun roomPlacements(): Map<String, String> = stringMap("room_placements_json")
+    fun setRoomPlacement(areaId: String, placementKey: String?) =
+        setStringMap("room_placements_json", roomPlacements(), areaId, placementKey)
+
+    /**
+     * Feedback round 19, item 6: event notification toggles.
+     * All three default ON — the feature is the point, and the
+     * user turns a category off here (or in system settings, via
+     * its own channel). The toggles gate posting only; the
+     * Android 13+ runtime permission gates separately.
+     */
+    var notifyGarage: Boolean
+        get() = prefs.getBoolean("notify_garage", true)
+        set(value) = prefs.edit().putBoolean("notify_garage", value).apply()
+
+    var notifyMotion: Boolean
+        get() = prefs.getBoolean("notify_motion", true)
+        set(value) = prefs.edit().putBoolean("notify_motion", value).apply()
+
+    var notifyLights: Boolean
+        get() = prefs.getBoolean("notify_lights", true)
+        set(value) = prefs.edit().putBoolean("notify_lights", value).apply()
 
     /** Ordered area ids for Home room sections (presentation only). */
     fun roomOrder(): List<String> {

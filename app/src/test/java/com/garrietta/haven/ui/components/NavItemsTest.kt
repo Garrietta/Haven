@@ -93,10 +93,10 @@ class NavItemsTest {
         // item 3, OVERRIDES the round-15 Browse carve-out for
         // exactly four destinations: Dashboards, Areas, Search,
         // and UserTabs now map to Settings too (Manage home page
-        // and Rooms & areas cleared the indicator on the
+        // and Rooms & tabs cleared the indicator on the
         // 2026-11-04 runs).
         for (screen in listOf(
-            Screen.HomeEditor, Screen.RoomManager, Screen.TabManager,
+            Screen.HomeEditor, Screen.RoomsTabs,
             Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs,
             Screen.AutomationBuilder, Screen.SceneBuilder, Screen.ScriptBuilder,
             Screen.HelperBuilder, Screen.UpdatesPanel,

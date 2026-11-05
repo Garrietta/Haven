@@ -19,6 +19,7 @@ import com.garrietta.haven.data.FRONT_DOOR_LIVE_MAX_MS
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_STREAM_SWITCH_ID
 import com.garrietta.haven.data.motionSensorForCamera
 import com.garrietta.haven.data.HaClient
+import com.garrietta.haven.data.storageKey
 import com.garrietta.haven.data.HistoryPoint
 import com.garrietta.haven.data.HaDiscovery
 import com.garrietta.haven.data.LovelaceConfig
@@ -39,7 +40,15 @@ import com.garrietta.haven.data.connectionModeFromKey
 import com.garrietta.haven.data.isLocalAddress
 import com.garrietta.haven.data.resolveConnectionTarget
 import com.garrietta.haven.data.shouldAutoPinNewTab
+import com.garrietta.haven.data.HavenNotificationManager
+import com.garrietta.haven.data.Placement
+import com.garrietta.haven.data.placementFromKey
+import com.garrietta.haven.data.tabPlacementFor
+import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.ui.components.MAX_PINNED_TABS
+import com.garrietta.haven.ui.components.RoomBarItem
+import com.garrietta.haven.ui.components.canPinBarExtra
+import com.garrietta.haven.ui.screens.RoomFilter
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.navStyleFromKey
 import com.garrietta.haven.data.isNetworkAvailable
@@ -78,10 +87,11 @@ sealed class Screen {
     data object Settings : Screen()
     /** A user-created tab; Home and Settings are the built-in tabs. */
     data class UserTab(val tabId: String) : Screen()
-    data object TabManager : Screen()
+    /** Feedback round 19, item 5: the unified Rooms & tabs manager (Settings) — replaces RoomManager + TabManager. */
+    data object RoomsTabs : Screen()
+    /** Feedback round 19, item 5: a room pinned as a navigation tab — renders Today with that room's filter. */
+    data class RoomTab(val areaId: String) : Screen()
     data object HomeEditor : Screen()
-    /** Rooms & areas manager (Settings): create/rename/delete HA areas and assign entities to them. */
-    data object RoomManager : Screen()
     data class EntityDetail(val entityId: String) : Screen()
     /** Round 3 morph panels: full-screen panels on both postures, reusing the PanelOverlay morph machinery. */
     data object VacuumPanel : Screen()
@@ -118,6 +128,138 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /** User-created tabs, in pill-bar order. Loaded synchronously so the app can open on the first tab. */
     var userTabs by mutableStateOf<List<UserTab>>(tabsStore.loadTabs())
         private set
+
+    /**
+     * Feedback round 19, item 3: the Home room filter, hoisted out
+     * of TodayScreen into the ViewModel. TodayScreen used to own
+     * it in remember, so every AnimatedContent/direct swap (popup
+     * open/close, detail return) disposed TodayScreen and reset
+     * the filter to My Home — the 2026-11-04 video's "back to My
+     * Home instead of my room" bug. As ViewModel state it survives
+     * popup opens, closes, and recompositions; returning from a
+     * detail lands back in the room view. Tab taps to Home reset
+     * it to All in goTop (Home means My Home); chips set it.
+     */
+    internal var roomFilter by mutableStateOf<RoomFilter>(RoomFilter.All)
+
+    /**
+     * Feedback round 19, item 5: per-area placements, mirrored in
+     * Compose state so the bar/rail/chips recompose on change
+     * (the store alone is not observable). The store is the
+     * source of truth across restarts; this state is its live
+     * mirror, updated only through [setRoomPlacement].
+     */
+    private var roomPlacementsState by mutableStateOf(settingsStore.roomPlacements())
+
+    fun roomPlacement(areaId: String): Placement =
+        placementFromKey(roomPlacementsState[areaId])
+
+    /** Combined bar-extra count: pinned user tabs + nav-tab rooms (the 2-cap counts both). */
+    fun barPinnedExtrasCount(): Int =
+        userTabs.count { it.pinned } +
+            roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB }
+
+    /** Placement-selector gate: may THIS group pin to the bar right now? */
+    fun canPinToBar(alreadyOnBar: Boolean): Boolean {
+        val roomNavTabs = roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB }
+        return canPinBarExtra(userTabs.count { it.pinned }, roomNavTabs, alreadyOnBar)
+    }
+
+    fun setRoomPlacement(areaId: String, placement: Placement) {
+        if (placement == Placement.NAV_TAB &&
+            !canPinBarExtra(
+                userTabs.count { it.pinned },
+                roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB },
+                roomPlacement(areaId) == Placement.NAV_TAB,
+            )
+        ) return
+        settingsStore.setRoomPlacement(areaId, placement.storageKey())
+        roomPlacementsState = settingsStore.roomPlacements()
+        bumpHomePrefs()
+    }
+
+    /** Bar/rail room tabs in stored room order (snapshot read — the transition spec reads this at transition time). */
+    fun roomBarItemsSnapshot(): List<RoomBarItem> {
+        val ordered = resolveOrder(settingsStore.roomOrder(), areas.value.map { it.id })
+        val names = settingsStore.roomDisplayNames()
+        val icons = settingsStore.roomIconKeys()
+        return ordered.mapNotNull { areaId ->
+            val area = areas.value.firstOrNull { it.id == areaId } ?: return@mapNotNull null
+            if (roomPlacement(areaId) != Placement.NAV_TAB) return@mapNotNull null
+            RoomBarItem(areaId, names[areaId] ?: area.name, icons[areaId])
+        }
+    }
+
+    /**
+     * Feedback round 19, item 5: the placement selector's single
+     * write path for a tab. NAV_TAB maps to pinned (cap-checked,
+     * chip/hidden cleared — placement is exclusive); ROOM_CHIP
+     * maps to chip (pinned/hidden cleared); HIDDEN clears pinned
+     * and chip and sets hidden (browse-list-only, exactly the old
+     * unpinned tab's visibility). The old pinned+hidden
+     * combination no longer has a selector value.
+     */
+    fun setTabPlacement(tabId: String, placement: Placement) {
+        val tab = userTabs.firstOrNull { it.id == tabId } ?: return
+        when (placement) {
+            Placement.NAV_TAB -> {
+                if (!canPinBarExtra(
+                        userTabs.count { it.pinned },
+                        roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB },
+                        tab.pinned,
+                    )
+                ) return
+                mutateTab(tabId) { it.copy(pinned = true, chip = false, hidden = false) }
+            }
+            Placement.ROOM_CHIP -> mutateTab(tabId) { it.copy(pinned = false, chip = true, hidden = false) }
+            Placement.HIDDEN -> mutateTab(tabId) { it.copy(pinned = false, chip = false, hidden = true) }
+        }
+    }
+
+    /** Feedback round 19, item 6: event notification toggles, persisted like navShowScenes. */
+    private var notifyGarageState by mutableStateOf(settingsStore.notifyGarage)
+    var notifyGarage: Boolean
+        get() = notifyGarageState
+        set(value) {
+            notifyGarageState = value
+            settingsStore.notifyGarage = value
+        }
+
+    private var notifyMotionState by mutableStateOf(settingsStore.notifyMotion)
+    var notifyMotion: Boolean
+        get() = notifyMotionState
+        set(value) {
+            notifyMotionState = value
+            settingsStore.notifyMotion = value
+        }
+
+    private var notifyLightsState by mutableStateOf(settingsStore.notifyLights)
+    var notifyLights: Boolean
+        get() = notifyLightsState
+        set(value) {
+            notifyLightsState = value
+            settingsStore.notifyLights = value
+        }
+
+    /** Feedback round 19, item 6: the notification manager (created here so MainActivity can ensure channels). */
+    val notificationManager = HavenNotificationManager(getApplication(), settingsStore)
+
+    /**
+     * Feedback round 19, item 6: local actuation timestamps
+     * (entity id -> epoch ms). Every Haven tap funnels through
+     * [actuate], so a confirming on->off event within the window
+     * is the user's own action, never an automation — the
+     * light-shutoff rule suppresses exactly those. The window is
+     * generous (10s) because slow round-trips must not leak a
+     * self-tap notification; an automation firing on the same
+     * light inside the window is the accepted tradeoff, and a
+     * non-null parent id still notifies regardless.
+     */
+    private val localActuations = mutableMapOf<String, Long>()
+    fun wasLocallyActuated(id: String, windowMs: Long = 10_000L): Boolean {
+        val at = localActuations[id] ?: return false
+        return System.currentTimeMillis() - at < windowMs
+    }
 
     /**
      * Bumped whenever the Home editor saves, so the Today screen recomposes
@@ -748,6 +890,14 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             cm?.registerDefaultNetworkCallback(connectivityCallback)
         } catch (_: Exception) {
         }
+        // Feedback round 19, item 6: feed parsed state_changed
+        // events to the notification manager BEFORE connecting,
+        // so no early event is missed. The VM's own actuation
+        // timestamps suppress the user's own taps; the manager
+        // owns channels, toggles, and the deep-link intent.
+        client.stateChangedListener = { event ->
+            notificationManager.onStateChanged(event, wasLocallyActuated(event.entityId))
+        }
         autoConnect()
     }
 
@@ -768,7 +918,9 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         // not on the bar, and the empty tab screen reads as
         // nothing happening. Auto-pin puts it on the bar; the
         // Pin button still unpins it in one tap.
-        val pinned = shouldAutoPinNewTab(userTabs.count { it.pinned })
+        // Feedback round 19, item 5: the cap counts bar extras
+        // (pinned tabs + nav-tab rooms), not tabs alone.
+        val pinned = shouldAutoPinNewTab(barPinnedExtrasCount())
         userTabs = userTabs + UserTab(id, title.trim().ifEmpty { "Tab" }, emptyList(), pinned = pinned)
         tabsStore.saveTabs(userTabs)
         return id
@@ -893,7 +1045,9 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
      * a pinned tab shows on the bar even while hidden.
      */
     fun setTabPinned(tabId: String, pinned: Boolean) {
-        if (pinned && userTabs.count { it.pinned } >= MAX_PINNED_TABS &&
+        // Feedback round 19, item 5: the cap counts bar extras
+        // (pinned tabs + nav-tab rooms), not tabs alone.
+        if (pinned && barPinnedExtrasCount() >= MAX_PINNED_TABS &&
             userTabs.firstOrNull { it.id == tabId }?.pinned != true
         ) return
         mutateTab(tabId) { it.copy(pinned = pinned) }
@@ -942,7 +1096,9 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         navStyle = NavStyle.FLOATING
         navShowScenes = true
         navShowEnergy = true
-        userTabs = userTabs.map { it.copy(icon = null, hidden = false, pinned = false) }
+        // Feedback round 19, item 5: chip placements reset with
+        // pins (both are bar/chip surfaces, not tab content).
+        userTabs = userTabs.map { it.copy(icon = null, hidden = false, pinned = false, chip = false) }
         tabsStore.saveTabs(userTabs)
     }
 
@@ -1254,6 +1410,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
      * what made off feel delayed while on felt instant.
      */
     private fun actuate(id: String, optimisticState: String, call: ((Boolean) -> Unit) -> Unit) {
+        // Feedback round 19, item 6: every local tap funnels
+        // through here, so the timestamp marks exactly the
+        // user's own actuations for light-shutoff suppression.
+        localActuations[id] = System.currentTimeMillis()
         val prev = client.states.value[id]?.state
         client.setLocalState(id, optimisticState)
         client.expectOptimistic(id, optimisticState)

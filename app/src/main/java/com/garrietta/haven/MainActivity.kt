@@ -1,16 +1,28 @@
 package com.garrietta.haven
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import com.garrietta.haven.data.HavenNotificationManager
 
 class MainActivity : ComponentActivity() {
 
     private val vm: HavenViewModel by viewModels()
+
+    // Feedback round 19, item 6: the Android 13+ notification
+    // permission ask runs ONCE at launch (flag in prefs); a denial
+    // is not re-asked — the Settings permission row is the
+    // re-grant path via system settings.
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ -> /* Result is re-read from the system on next Settings visit. */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Edge-to-edge is enforced on Android 15+; opt in explicitly so the
@@ -29,6 +41,18 @@ class MainActivity : ComponentActivity() {
         // its entity id; the router jumps to that entity's surface
         // once its state has loaded (cold start included).
         vm.handleControlDeepLink(intent.getStringExtra(EXTRA_CONTROL_ENTITY_ID))
+        // Feedback round 19, item 6: notification channels exist
+        // before any state change can fire, and the Android 13+
+        // permission ask runs once (see the launcher above).
+        vm.notificationManager.ensureChannels()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED &&
+            !vm.notificationManager.permissionAsked()
+        ) {
+            vm.notificationManager.markPermissionAsked()
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
         setContent {
             HavenApp(vm)
         }

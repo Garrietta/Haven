@@ -59,29 +59,55 @@ const val MAX_PINNED_TABS = 2
  * last, so the user can never strand themselves on a screen with no
  * way back to Settings), but Scenes and Energy are now hideable
  * ([showScenes]/[showEnergy] from the Settings store, both on by
- * default), and up to two user tabs may be PINNED to the bar
- * ([pinnedTabs], already filtered to pinned and capped to two by
- * the caller — this function trusts the cap and takes the first
- * two in user-tab order, never more). Pinned tabs sit between
- * Energy and Settings. A screen that is not in the bar shows the
- * bar/rail with nothing selected (same as Boards/Areas/Search),
- * except Settings submenus, which map back to Settings via
+ * default). Pinned tabs sit between Energy and Settings. A screen
+ * that is not in the bar shows the bar/rail with nothing selected
+ * (same as Boards/Areas/Search), except Settings submenus, which
+ * map back to Settings via [navActiveScreen] (feedback round 15,
+ * item 4).
+ */
+/**
+ * Feedback round 15, item 3, EXTENDED round 19, item 5: the bar/rail
+ * model. Home first, Settings last, Scenes/Energy hideable, and
+ * up to [MAX_PINNED_TABS] pinned extras between Energy and
+ * Settings — where an "extra" is now EITHER a pinned user tab OR
+ * a room pinned as a tab. The caller passes ALL pinned tabs and
+ * ALL nav-tab rooms (already filtered to their placement); this
+ * function caps the COMBINED extras to two, user tabs first so
+ * existing bars never reorder when a room is pinned. The 6-total
+ * cap holds by construction (Home + Scenes + Energy + 2 extras +
+ * Settings). A screen that is not in the bar shows the bar/rail
+ * with nothing selected (same as Boards/Areas/Search), except
+ * Settings submenus, which map back to Settings via
  * [navActiveScreen] (feedback round 15, item 4).
  */
+data class RoomBarItem(
+    val areaId: String,
+    val title: String,
+    val iconKey: String?,
+)
+
 fun pillBarItems(
     showScenes: Boolean = true,
     showEnergy: Boolean = true,
     pinnedTabs: List<UserTab> = emptyList(),
+    roomTabs: List<RoomBarItem> = emptyList(),
 ): List<NavItem> {
     val items = mutableListOf(
         NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home),
     )
     if (showScenes) items += NavItem(Screen.Scenes, "Scenes", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
     if (showEnergy) items += NavItem(Screen.Energy, "Energy", Icons.Filled.Bolt, Icons.Outlined.Bolt)
-    for (tab in pinnedTabs.take(2)) {
+    val extras = mutableListOf<NavItem>()
+    for (tab in pinnedTabs) {
         val (icon, outlined) = tabIcons(tab)
-        items += NavItem(Screen.UserTab(tab.id), tab.title, icon, outlined)
+        extras += NavItem(Screen.UserTab(tab.id), tab.title, icon, outlined)
     }
+    for (room in roomTabs) {
+        val (icon, outlined) = room.iconKey?.let { tabIconPairForKey(it) }
+            ?: (Icons.Filled.GridView to Icons.Outlined.GridView)
+        extras += NavItem(Screen.RoomTab(room.areaId), room.title, icon, outlined)
+    }
+    items += extras.take(MAX_PINNED_TABS)
     items += NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
     return items
 }
@@ -103,8 +129,7 @@ fun pillBarItems(
  */
 fun navActiveScreen(current: Screen): Screen = when (current) {
     Screen.HomeEditor,
-    Screen.RoomManager,
-    Screen.TabManager,
+    Screen.RoomsTabs,
     Screen.Dashboards,
     Screen.Areas,
     Screen.Search,
@@ -131,15 +156,42 @@ fun navActiveScreen(current: Screen): Screen = when (current) {
 internal fun shouldNavigateOnTabTap(tapped: Screen, current: Screen): Boolean = tapped != current
 
 /**
- * Follow-up B (2026-11-03): Koda's directional tab-slide rule,
- * pure so it is unit-testable. Rank = index in bar order
- * (Home, Scenes, Energy, Settings — Koda's visualTabOrder
- * rule, Haven's bar order). Returns +1 when the incoming tab
- * sits to the RIGHT of the outgoing tab (the new page enters
- * from the right), -1 when it sits to the LEFT, and null when
- * either screen is not a bar tab (the caller keeps the fixed
- * slide) or both are the same tab (no transition runs).
+ * Feedback round 19, item 2: the non-tab slide direction, pure so
+ * it is unit tested. Pushing a sub-page (Settings -> UserTabs,
+ * Manage home page, Rooms & tabs) slides the new page in from the
+ * right and the old page out to the left — direction +1, the same
+ * offsets as [tabSlideOffsets](1). Popping (back to Settings or a
+ * parent) reverses it: the outgoing sub-page exits to the right
+ * and the parent enters from the left — direction -1. The caller
+ * (HavenApp) tracks push vs pop from backstack mutations; this
+ * function is only the direction mapping, so the transition math
+ * stays in one tested place.
  */
+fun nonTabSlideDirection(isPop: Boolean): Int = if (isPop) -1 else 1
+
+/**
+ * Feedback round 19, item 3: the folded nav clearance gate, pure
+ * so it is unit tested. Folded content ALWAYS reserves the
+ * navigation-bars inset at the bottom (matching the unfolded
+ * clearance rule) — the old isTopLevel gate dropped the reserve
+ * the moment a detail panel left the top level, so opening a
+ * panel at the bottom of the Home list changed contentPadding
+ * and jumped the scroll offset by exactly the inset.
+ */
+fun shouldApplyFoldedNavClearance(isWideLayout: Boolean): Boolean = !isWideLayout
+
+/**
+ * Feedback round 19, item 5: the combined bar-extra cap, pure so
+ * it is unit tested. A room or tab may pin to the bar only when
+ * it is already there (re-pinning is free) or when pinning it
+ * keeps the combined count of pinned user tabs plus nav-tab
+ * rooms at or below [MAX_PINNED_TABS] — the 2-cap and the
+ * 6-total survive rooms joining the bar. The UI disables the
+ * Nav-tab option at the cap; the ViewModel setters are the
+ * backstop.
+ */
+fun canPinBarExtra(pinnedTabCount: Int, roomNavTabCount: Int, alreadyOnBar: Boolean): Boolean =
+    alreadyOnBar || pinnedTabCount + roomNavTabCount + 1 <= MAX_PINNED_TABS
 fun tabSlideDirection(barScreens: List<Screen>, from: Screen, to: Screen): Int? {
     val fromRank = barScreens.indexOf(from)
     val toRank = barScreens.indexOf(to)

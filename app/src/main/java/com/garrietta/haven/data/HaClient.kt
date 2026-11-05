@@ -55,6 +55,17 @@ class HaClient(
     private val _states = MutableStateFlow<Map<String, HaEntity>>(emptyMap())
     val states: StateFlow<Map<String, HaEntity>> = _states.asStateFlow()
 
+    /**
+     * Feedback round 19, item 6: one parsed `state_changed`
+     * event per applied state update, for the notification
+     * manager. Fires ONLY when the event is applied to [_states]:
+     * entity removals (new_state null) and optimistic-guard
+     * drops (stale echoes of the user's own tap) never notify.
+     * Set by the ViewModel before connecting; null means nobody
+     * listens (the state flow itself is untouched either way).
+     */
+    var stateChangedListener: ((StateChangeEvent) -> Unit)? = null
+
     private val _areas = MutableStateFlow<List<HaArea>>(emptyList())
     val areas: StateFlow<List<HaArea>> = _areas.asStateFlow()
 
@@ -350,6 +361,7 @@ class HaClient(
                 if (event.optString("event_type") == "state_changed") {
                     val data = event.optJSONObject("data") ?: return
                     val entityId = data.optString("entity_id")
+                    val oldState = data.optJSONObject("old_state")
                     val newState = data.optJSONObject("new_state")
                     val current = _states.value.toMutableMap()
                     if (newState == null || newState == JSONObject.NULL) {
@@ -365,6 +377,25 @@ class HaClient(
                         // flip (the guard clears itself) and applies.
                         if (!optimisticGuard.shouldDrop(entityId, incoming)) {
                             current[entityId] = attachManufacturer(HaEntity.fromJson(newState))
+                            // Feedback round 19, item 6: applied
+                            // events only (see stateChangedListener).
+                            // parent_id lives on new_state.context
+                            // (null = direct change, non-null =
+                            // automation/script). device_class and
+                            // friendly_name come from attributes.
+                            val attributes = newState.optJSONObject("attributes")
+                            val context = newState.optJSONObject("context")
+                            stateChangedListener?.invoke(
+                                StateChangeEvent(
+                                    entityId = entityId,
+                                    domain = entityId.substringBefore("."),
+                                    oldState = oldState?.optString("state")?.ifEmpty { null },
+                                    newState = incoming,
+                                    deviceClass = attributes?.optString("device_class")?.ifEmpty { null },
+                                    friendlyName = attributes?.optString("friendly_name")?.ifEmpty { null },
+                                    parentId = context?.optString("parent_id")?.ifEmpty { null },
+                                )
+                            )
                         }
                     }
                     _states.value = current

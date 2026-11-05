@@ -175,6 +175,25 @@ fun frontDoorShowsLiveBadge(
 ): Boolean = webrtcFrames || (mjpegFrames && liveSwitchOn)
 
 /**
+ * Feedback round 19, item 4: the Front Door quadrant badge rule,
+ * pure so it is unit tested. The quadrant shows the green LIVE
+ * badge ONLY when the resolved front-door source is the ring-mqtt
+ * live camera (camera.front_door_69a1) and no stream error is
+ * reported; every other case — fallback live_view feed, both
+ * sources down, a stream error — shows Recording. Built
+ * literally per the round spec: a healthy fallback feed still
+ * reads Recording, because the LIVE source is what is down.
+ * The quadrant renders snapshots, not a live stream, so it has
+ * no quadrant-level stream error to report — the call site
+ * passes false, and the panel keeps its own stream-error UI.
+ * The resolver already treats "unavailable" as down, so a
+ * resolved 69a1 source is by construction present and available;
+ * [streamError] covers only a load failure on top of that.
+ */
+fun frontDoorQuadrantShowsLive(resolvedSource: String?, streamError: Boolean): Boolean =
+    resolvedSource == FRONT_DOOR_RING_MQTT_CAMERA_ID && !streamError
+
+/**
  * Pulls the HLS playlist URL out of a WS `camera/stream` result message.
  * Pure (JSONObject only) so it is unit tested on the JVM. Returns null
  * when HA reports failure, when the result has no URL, or when the URL

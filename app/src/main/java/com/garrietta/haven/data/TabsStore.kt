@@ -19,6 +19,11 @@ import org.json.JSONObject
  * and hidden are independent: a pinned tab shows on the bar even
  * while hidden from the Browse list's bar section. Older JSON
  * without it loads as pinned=false.
+ * Feedback round 19, item 5: [chip] places the tab in the Home
+ * chip row (a tap navigates to the tab). The placement selector
+ * is the single source of truth — pinned wins over chip, and a
+ * tab with neither flag is hidden from both surfaces. Older JSON
+ * without it loads as chip=false.
  */
 data class UserTab(
     val id: String,
@@ -27,6 +32,7 @@ data class UserTab(
     val icon: String? = null,
     val hidden: Boolean = false,
     val pinned: Boolean = false,
+    val chip: Boolean = false,
 )
 
 /**
@@ -71,6 +77,7 @@ class TabsStore(context: Context) {
                         icon = obj.optString("icon").ifEmpty { null },
                         hidden = obj.optBoolean("hidden"),
                         pinned = obj.optBoolean("pinned"),
+                        chip = obj.optBoolean("chip"),
                     )
                 )
             }
@@ -91,6 +98,7 @@ class TabsStore(context: Context) {
                 .put("cards", cardsArr)
                 .put("hidden", tab.hidden)
                 .put("pinned", tab.pinned)
+                .put("chip", tab.chip)
             // Icon keys are written only when set, so older readers
             // (and older JSON) keep seeing the auto-derived icon.
             if (tab.icon != null) obj.put("icon", tab.icon)

@@ -1,5 +1,16 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.filled.Garage
+import com.garrietta.haven.ui.components.NavStyle
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.foundation.layout.RowScope
+import android.provider.Settings
+import android.os.Build
+import android.content.pm.PackageManager
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -178,8 +189,11 @@ import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID
+import com.garrietta.haven.data.Placement
+import com.garrietta.haven.data.frontDoorQuadrantShowsLive
 import com.garrietta.haven.data.frontDoorResolverStates
 import com.garrietta.haven.data.resolveFrontDoorCameraSource
+import com.garrietta.haven.data.tabPlacementFor
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.isRingCamera
 import java.util.Calendar
@@ -521,7 +535,9 @@ fun TodayScreen(
     // who's-home, and the Round 3 blocks all hide. "No room" is a
     // room view (unassigned entities only), never a My Home
     // section.
-    var roomFilter by remember { mutableStateOf<RoomFilter>(RoomFilter.All) }
+    // Feedback round 19, item 3: the filter lives on the
+    // ViewModel now, not in TodayScreen's remember (see there).
+    val roomFilter = vm.roomFilter
     // Feedback round 18, item 1 (DECIDED organization rule):
     // "My Home" shows ONLY the overview sections — room sections
     // never render under it (visibleRooms = emptyList()). A room
@@ -529,24 +545,29 @@ fun TodayScreen(
     // (isRoomView gates them at every render site below).
     val isRoomView = isRoomViewFilter(roomFilter)
     val visibleRooms = visibleRoomsFor(roomFilter, allRooms)
-    // Chips actually shown: "My Home" + one per visible room.
-    val roomChips: List<Triple<RoomFilter, String, String?>> = buildList {
-        add(Triple(RoomFilter.All, "My Home", null))
+    // Chips actually shown: "My Home" + one per visible room,
+    // plus tabs placed as chips (round 19, item 5). Placement is
+    // exclusive: Hidden rooms and nav-tab rooms are NOT chips,
+    // and a tab chip navigates to the tab (it is never the
+    // selected filter — leaving Home selects nothing there).
+    // "No room" has no placement and is always a chip.
+    val roomChips: List<HomeChip> = buildList {
+        add(HomeChip("My Home", null, roomFilter == RoomFilter.All) { vm.roomFilter = RoomFilter.All })
         for (section in allRooms) {
-            add(
-                Triple(
-                    if (section.areaId == null) RoomFilter.Unassigned else RoomFilter.Area(section.areaId),
-                    section.name,
-                    section.iconKey,
-                )
-            )
+            if (section.areaId != null && vm.roomPlacement(section.areaId) != Placement.ROOM_CHIP) continue
+            val filter = if (section.areaId == null) RoomFilter.Unassigned else RoomFilter.Area(section.areaId)
+            add(HomeChip(section.name, section.iconKey, roomFilter == filter) { vm.roomFilter = filter })
+        }
+        for (tab in vm.userTabs) {
+            if (tabPlacementFor(tab.pinned, tab.chip, tab.hidden) != Placement.ROOM_CHIP) continue
+            add(HomeChip(tab.title, tab.icon, false) { navigate(Screen.UserTab(tab.id)) })
         }
     }
 
-    // Room-filter state is hoisted in TodayScreen (never inside a
-    // pane composable): TodayScreen itself is not keyed on the
-    // wide flag and the Scaffold is not keyed, so the selection
-    // survives fold/unfold posture changes.
+    // Room-filter state is hoisted in the ViewModel (round 19,
+    // item 3 — never inside a pane composable, and never in
+    // TodayScreen's remember): the selection survives popup
+    // opens, detail returns, and fold/unfold posture changes.
     val wide = LocalWideLayout.current
     val sectionOrder = resolveOrder(
         migrateRound3SectionOrder(vm.settingsStore.homeSectionOrder()),
@@ -570,7 +591,7 @@ fun TodayScreen(
                 // below render in the stored section order — the greeting
                 // is the pinned header and is not orderable.
                 greetingSection()
-                item { RoomFilterChips(roomChips, roomFilter) { roomFilter = it } }
+                item { RoomFilterChips(roomChips) }
                 item { Spacer(Modifier.height(12.dp)) }
                 for (key in sectionOrder) {
                     when (key) {
@@ -623,7 +644,7 @@ fun TodayScreen(
                 Modifier.weight(0.42f).verticalScroll(homeLeftScrollState),
             ) {
                 GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onSignInExpired)
-                RoomFilterChips(roomChips, roomFilter) { roomFilter = it }
+                RoomFilterChips(roomChips)
                 Spacer(Modifier.height(12.dp))
                 if (showSection("cameras") && !isRoomView) CameraQuadrantHero(vm, navigate, states)
                 Spacer(Modifier.height(16.dp))
@@ -738,19 +759,27 @@ internal data class RoomSection(
  * mockup does not have. Selected = primaryContainer/onPrimaryContainer
  * from the scheme (the mockup's pale green, scheme-correct in both
  * modes); unselected = surfaceContainer/onSurfaceVariant.
+ * Feedback round 19, item 5: a chip is either a room filter or a
+ * tab navigation — the row carries both, each with its own tap
+ * action, so tab chips join the room chips without a second row.
  */
+private data class HomeChip(
+    val label: String,
+    val iconKey: String?,
+    val selected: Boolean,
+    val onClick: () -> Unit,
+)
+
 @Composable
 private fun RoomFilterChips(
-    chips: List<Triple<RoomFilter, String, String?>>,
-    selected: RoomFilter,
-    onSelect: (RoomFilter) -> Unit,
+    chips: List<HomeChip>,
 ) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        for ((filter, label, iconKey) in chips) {
-            val isSelected = filter == selected
+        for (chip in chips) {
+            val isSelected = chip.selected
             val glyphColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
             else MaterialTheme.colorScheme.onSurfaceVariant
             Box(
@@ -759,19 +788,19 @@ private fun RoomFilterChips(
                         if (isSelected) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceContainer,
                     )
-                    .clickable { onSelect(filter) }
+                    .clickable { chip.onClick }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
                 // Stage G: a room's chosen icon rides in its chip
                 // (Filled variant; unknown keys render no icon).
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val icon = iconKey?.let { tabIconPairForKey(it)?.first }
+                    val icon = chip.iconKey?.let { tabIconPairForKey(it)?.first }
                     if (icon != null) {
                         Icon(icon, null, tint = glyphColor, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                     }
                     Text(
-                        label,
+                        chip.label,
                         fontSize = 14.sp,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         color = glyphColor,
@@ -1891,11 +1920,60 @@ fun SettingsScreen(
                     badgeKey = "rooms-manage",
                     badgeKind = ExpressiveKind.BUN,
                     icon = Icons.Filled.GridView,
-                    title = "Rooms & areas",
-                    subtitle = "Create, rename, and delete rooms, and assign devices to them — saved to Home Assistant itself.",
-                    onClick = { navigate(Screen.RoomManager) },
+                    title = "Rooms & tabs",
+                    subtitle = "Rooms (saved to Home Assistant itself) and custom tabs, in one place — pick whether each one pins as a room chip, a navigation tab, or stays hidden.",
+                    onClick = { navigate(Screen.RoomsTabs) },
                     flat = true,
                 )
+            }
+            Spacer(Modifier.height(16.dp))
+            KodaMenuSection("Notifications")
+            KodaMenuGroup {
+                KodaMenuRow(
+                    badgeKey = "notif-garage",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.Garage,
+                    title = "Garage & door alerts",
+                    subtitle = "Notify when a garage door or door opens",
+                    onClick = null,
+                    flat = true,
+                    trailing = {
+                        // Feedback round 16, item 3: default
+                        // switch–text buffer.
+                        Spacer(Modifier.width(12.dp))
+                        Switch(checked = vm.notifyGarage, onCheckedChange = { vm.notifyGarage = it })
+                    },
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "notif-motion",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                    title = "Motion alerts",
+                    subtitle = "Notify when a motion sensor detects motion",
+                    onClick = null,
+                    flat = true,
+                    trailing = {
+                        Spacer(Modifier.width(12.dp))
+                        Switch(checked = vm.notifyMotion, onCheckedChange = { vm.notifyMotion = it })
+                    },
+                )
+                KodaMenuDivider()
+                KodaMenuRow(
+                    badgeKey = "notif-lights",
+                    badgeKind = ExpressiveKind.BUN,
+                    icon = Icons.Filled.Lightbulb,
+                    title = "Automated light alerts",
+                    subtitle = "Notify when a light turns off by automation or externally — never for your own taps",
+                    onClick = null,
+                    flat = true,
+                    trailing = {
+                        Spacer(Modifier.width(12.dp))
+                        Switch(checked = vm.notifyLights, onCheckedChange = { vm.notifyLights = it })
+                    },
+                )
+                KodaMenuDivider()
+                NotificationPermissionRow()
             }
             Spacer(Modifier.height(16.dp))
             KodaMenuSection("Shapes")
@@ -2120,16 +2198,6 @@ fun SettingsScreen(
                     title = "User tabs",
                     subtitle = "Your custom tabs",
                     onClick = { navigate(Screen.UserTabs) },
-                    flat = true,
-                )
-                KodaMenuDivider()
-                KodaMenuRow(
-                    badgeKey = "browse-tabs-manage",
-                    badgeKind = ExpressiveKind.BURST,
-                    icon = Icons.Filled.List,
-                    title = "Manage tabs",
-                    subtitle = "Create, rename, reorder, hide, and delete your custom tabs. Home and Settings always stay on the bar; Scenes and Energy can be hidden, and up to two custom tabs can be pinned to it.",
-                    onClick = { navigate(Screen.TabManager) },
                     flat = true,
                 )
             }
@@ -2417,7 +2485,11 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // name bottom-left over a bottom scrim. The pill is
             // honest by construction: LIVE only for genuinely live
             // native feeds, Recording for Ring (never a LIVE badge
-            // on a recording — standing honesty law). The name uses
+            // on a recording — standing honesty law). Feedback
+            // round 19, item 4, refines the Front Door quadrant:
+            // its badge follows the resolved live source (69a1
+            // up = LIVE, fallback = Recording), not the brand —
+            // see showLive below. The name uses
             // the display name, so the Ring quadrant never reads
             // "Front Door Live view". Expressive-menus round,
             // item 7: a Motion pill joins the status pill ONLY
@@ -2431,7 +2503,19 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // unavailable state — a "Recording" pill over an
             // "Unavailable" quadrant would contradict it.
             if (entity != null && !frontDoorDown) {
-                val isRing = isRingCamera(entity)
+                // Feedback round 19, item 4: the Front Door
+                // quadrant's badge follows the LIVE source, not
+                // the camera brand — a recovered 69a1 earns LIVE
+                // here; the fallback feed stays Recording even
+                // while it plays (the live source is what is
+                // down). Every other quadrant keeps the existing
+                // brand rule (LIVE for native feeds, Recording
+                // for Ring).
+                val showLive = if (cameraId == FRONT_DOOR_LIVE_VIEW_ID) {
+                    frontDoorQuadrantShowsLive(resolveFrontDoorCameraSource(frontDoorStates), false)
+                } else {
+                    !isRingCamera(entity)
+                }
                 Box(Modifier.fillMaxSize()) {
                     Box(
                         Modifier.align(Alignment.BottomStart).fillMaxWidth().height(56.dp)
@@ -2448,7 +2532,7 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (!isRing) {
+                        if (showLive) {
                             Box(
                                 Modifier.size(6.dp).clip(CircleShape)
                                     .background(Color(0xFF4CAF50)),
@@ -2495,19 +2579,21 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
 }
 
 /**
- * Rooms & areas manager (2026-10-30): Apple-Home-style room
- * management that carries over to the actual HA instance. Areas
- * are read from HA's area registry on load; every mutation here
- * calls the real registry WebSocket APIs (area create/update/
- * delete, entity area assign/clear) and re-reads the registries
- * on success, so changes appear in HA itself. Errors (duplicate
- * names, a delete HA rejects) surface as a message, never a
- * crash. Device-level assignment is not exposed: Haven's model
- * is entities, and entity assignment covers every device Haven
- * shows.
+ * Feedback round 19, item 5: the unified Rooms & tabs manager.
+ * REPLACES RoomManagerScreen + TabManagerScreen (both deleted):
+ * one Settings entry, "Rooms & tabs", with the rooms section
+ * first (create/rename/delete/assign, writing through to real
+ * Home Assistant exactly as before) and the tabs section second
+ * (navigation switches, pill style, reset, tab editors, add tab,
+ * exactly as before). Every room and every tab carries a
+ * placement selector — Room chip (Home chip row), Nav tab
+ * (bar/rail), or Hidden (neither surface, still manageable
+ * here). Home and Settings stay locked by construction (they
+ * have no selector); the 2-cap on bar extras counts pinned tabs
+ * plus nav-tab rooms together, and the 6-total holds.
  */
 @Composable
-fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
+fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val areas by vm.areas.collectAsState()
     val entityAreas by vm.entityAreas.collectAsState()
     val states by vm.states.collectAsState()
@@ -2521,6 +2607,9 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
     var deleteArmed by remember { mutableStateOf<String?>(null) }
     var addFor by remember { mutableStateOf<String?>(null) }
     var assignFor by remember { mutableStateOf<String?>(null) }
+    var newTabTitle by remember { mutableStateOf("") }
+    // (tabId, cardIndex, yaml) of the card currently in the YAML editor, if any.
+    var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     fun done(err: String?, ok: String) {
         if (err != null) { message = err; messageIsError = true }
         else { message = ok; messageIsError = false }
@@ -2528,17 +2617,17 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
 
     // Status-bar inset: same missing-inset class as the clips screen
     // (this root Column was the only other DetailTopBar screen
-    // without one — every sibling pads its root). Deviation from
-    // the round brief, reported: one line, same fix as clips.
+    // without one — every sibling pads its root).
     Column(Modifier.fillMaxSize().statusBarsPadding().background(MaterialTheme.colorScheme.background)) {
-        DetailTopBar("Rooms & areas", onBack)
+        DetailTopBar("Rooms & tabs", onBack)
         LazyColumn(
             Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
             contentPadding = PaddingValues(bottom = 16.dp),
         ) {
             item {
                 Text(
-                    "Rooms live in Home Assistant — changes here appear in HA itself.",
+                    "Rooms live in Home Assistant — changes here appear in HA itself. Tabs are local to Haven. " +
+                        "Each room or tab pins to exactly one surface: the Home chip row, the navigation bar, or neither.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -2692,6 +2781,12 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    PlacementSelector(
+                        selected = vm.roomPlacement(area.id),
+                        barDisabled = !vm.canPinToBar(vm.roomPlacement(area.id) == Placement.NAV_TAB),
+                        onSelect = { vm.setRoomPlacement(area.id, it) },
+                    )
                 }
             }
             item {
@@ -2699,6 +2794,8 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 // (2026-10-30 verdict round): system entities
                 // (zone/sun/update) are not room-assignable devices
                 // and never appear, so this count agrees with Home.
+                // No room has no area id, so it has no placement:
+                // it is always a Home chip, never a bar tab.
                 val unassigned = states.values
                     .filter { entityAreas[it.entityId] == null && isHomeRoomEntity(it) }
                     .sortedBy { it.friendlyName }
@@ -2738,6 +2835,229 @@ fun RoomManagerScreen(vm: HavenViewModel, onBack: () -> Unit) {
                     }
                 }
             }
+            item {
+                Text("Tabs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Home is always first and Settings is always last — everything else here is yours. " +
+                        "Reorder tabs to change their order in User Tabs.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(16.dp))
+                // Stage C: navigation customization lives here (not a new
+                // settings section — Stage G owns the settings IA reorg).
+                // Hidden tabs stay listed below with a selector, so a
+                // hidden tab can always come back; Settings can never be
+                // hidden or removed, by construction in pillBarItems.
+                Text("Navigation", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(8.dp))
+                // Feedback round 15, item 3: Scenes and Energy are
+                // hideable from the bar/rail; Home and Settings are
+                // locked and have no switch. A hidden built-in tab
+                // stays reachable from Settings -> Browse.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Show Scenes on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    // Feedback round 16, item 3: default switch–text buffer.
+                    Spacer(Modifier.width(12.dp))
+                    Switch(checked = vm.navShowScenes, onCheckedChange = { vm.navShowScenes = it })
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Show Energy on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    // Feedback round 16, item 3: default switch–text buffer.
+                    Spacer(Modifier.width(12.dp))
+                    Switch(checked = vm.navShowEnergy, onCheckedChange = { vm.navShowEnergy = it })
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Up to two extras can sit on the bar — pinned tabs and rooms-as-tabs share the two slots. " +
+                        "Use the placement selector below each room or tab; Home and Settings always stay on the bar.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Pill style", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    var styleExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(onClick = { styleExpanded = true }) {
+                            Text(if (vm.navStyle == NavStyle.COMPACT) "Compact" else "Floating")
+                        }
+                        DropdownMenu(
+                            expanded = styleExpanded,
+                            onDismissRequest = { styleExpanded = false },
+                        ) {
+                            DropdownMenuItem(text = { Text("Floating") }, onClick = {
+                                styleExpanded = false
+                                vm.navStyle = NavStyle.FLOATING
+                            })
+                            DropdownMenuItem(text = { Text("Compact") }, onClick = {
+                                styleExpanded = false
+                                vm.navStyle = NavStyle.COMPACT
+                            })
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Reset navigation restores the floating pill, automatic icons, shows all tabs, " +
+                            "puts Scenes and Energy back on the bar, and clears all pins and chip placements. " +
+                            "Your tabs are never deleted by a reset.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { vm.resetNavigation() }) { Text("Reset") }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+            for (tab in vm.userTabs) {
+                item {
+                    TabEditorCard(vm, tab, states, onEditYaml = { index, yaml ->
+                        editingCard = Triple(tab.id, index, yaml)
+                    })
+                    Spacer(Modifier.height(8.dp))
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            PlacementSelector(
+                                selected = tabPlacementFor(tab.pinned, tab.chip, tab.hidden),
+                                barDisabled = !vm.canPinToBar(tab.pinned),
+                                onSelect = { vm.setTabPlacement(tab.id, it) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+            }
+            item {
+                Text("Add a tab", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newTabTitle,
+                        onValueChange = { newTabTitle = it },
+                        label = { Text("Tab title") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        val id = vm.addTab(newTabTitle)
+                        newTabTitle = ""
+                        navigate(Screen.UserTab(id))
+                    }) { Text("Add") }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
         }
     }
+    editingCard?.let { (tabId, index, yaml) ->
+        CardYamlEditor(
+            initialYaml = yaml,
+            onDismiss = { editingCard = null },
+            onSave = { newYaml ->
+                vm.updateCardYaml(tabId, index, newYaml)
+                editingCard = null
+            },
+        )
+    }
+}
+
+/**
+ * Feedback round 19, item 5: the placement selector — three
+ * buttons splitting the row, the selected one filled. One
+ * control for one placement, so the bar, the chips, and this
+ * screen can never disagree about where a group lives. The Nav
+ * tab option disables at the bar cap (with the reason line);
+ * a group already on the bar is never disabled out from under
+ * itself (see canPinToBar's alreadyOnBar rule).
+ */
+@Composable
+private fun PlacementSelector(
+    selected: Placement,
+    barDisabled: Boolean,
+    onSelect: (Placement) -> Unit,
+) {
+    Column {
+        Text("Pin as", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PlacementOption("Room chip", selected == Placement.ROOM_CHIP) { onSelect(Placement.ROOM_CHIP) }
+            PlacementOption("Nav tab", selected == Placement.NAV_TAB, enabled = !barDisabled) { onSelect(Placement.NAV_TAB) }
+            PlacementOption("Hidden", selected == Placement.HIDDEN) { onSelect(Placement.HIDDEN) }
+        }
+        if (barDisabled && selected != Placement.NAV_TAB) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Bar full — at most two tabs and rooms-as-tabs combined.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowScope.PlacementOption(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    if (selected) {
+        Button(onClick = onClick, enabled = enabled, modifier = Modifier.weight(1f)) {
+            Text(label, maxLines = 1)
+        }
+    } else {
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.weight(1f)) {
+            Text(label, maxLines = 1)
+        }
+    }
+}
+
+/**
+ * Feedback round 19, item 6: the notification permission row.
+ * The toggles above gate posting per category; this row reports
+ * the Android 13+ runtime permission itself, with a button to
+ * system settings when it is missing (the launch-time ask runs
+ * once in MainActivity — this is the re-grant path). The status
+ * is read on each composition; returning from system settings
+ * refreshes it on the next visit.
+ */
+@Composable
+private fun NotificationPermissionRow() {
+    val context = LocalContext.current
+    val granted = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        true
+    } else {
+        context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+    KodaMenuRow(
+        badgeKey = "notif-permission",
+        badgeKind = ExpressiveKind.BUN,
+        icon = Icons.Filled.Notifications,
+        title = "Notification permission",
+        subtitle = if (granted) "Granted — alerts can post." else "Not granted — alerts are held until you allow them.",
+        onClick = null,
+        flat = true,
+        trailing = {
+            if (!granted) {
+                Spacer(Modifier.width(12.dp))
+                OutlinedButton(onClick = {
+                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    }
+                    context.startActivity(intent)
+                }) { Text("Allow") }
+            }
+        },
+    )
 }

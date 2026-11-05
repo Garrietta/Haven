@@ -55,10 +55,10 @@ class Round18LogicTest {
     @Test
     fun shouldNavigateOnTabTap_subScreenReturnsToHighlightedTab() {
         // The round-18 bug: tapping highlighted Settings inside
-        // Manage home page / Rooms & areas was swallowed by the
+        // Manage home page / Rooms & tabs was swallowed by the
         // old index-equality guard; the screen comparison navigates.
         assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.HomeEditor))
-        assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.RoomManager))
+        assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.RoomsTabs))
         assertTrue(shouldNavigateOnTabTap(Screen.Today, Screen.Settings))
         assertFalse(shouldNavigateOnTabTap(Screen.Settings, Screen.Settings))
         assertFalse(shouldNavigateOnTabTap(Screen.Today, Screen.Today))

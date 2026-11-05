@@ -42,7 +42,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.garrietta.haven.ui.controls.DialogActionButtons
-import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
@@ -90,7 +89,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             Spacer(Modifier.height(16.dp))
             Text("This tab was deleted.", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+            Button(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -101,7 +100,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             // verdict's "hermostat" frame). Titles stay fully
             // rendered through the whole morph and at rest.
             Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = { navigate(Screen.TabManager) }) { Text("Edit") }
+            OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Edit") }
         }
         Spacer(Modifier.height(12.dp))
         if (tab.cards.isEmpty()) {
@@ -183,7 +182,7 @@ private fun TabCardView(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { navigate(Screen.TabManager) }) { Text("Fix in Manage tabs") }
+                OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Fix in Rooms & tabs") }
             }
         }
     } else {
@@ -227,7 +226,7 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             item {
                 Text("No custom tabs yet.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+                Button(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
             }
         } else {
             items(visibleTabs) { tab ->
@@ -249,145 +248,13 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
         item {
             Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = { navigate(Screen.TabManager) }) { Text("Manage tabs") }
+            OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
         }
     }
 }
 
 @Composable
-fun TabManagerScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
-    val states by vm.states.collectAsState()
-    var newTabTitle by remember { mutableStateOf("") }
-    // (tabId, cardIndex, yaml) of the card currently in the YAML editor, if any.
-    var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
-    LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
-            // Feedback round 18, item 6: opaque root so sub-screen
-            // transitions never overlap transparent text.
-            .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(bottom = 16.dp),
-    ) {
-        item {
-            DetailTopBar("Manage tabs", onBack)
-            Text(
-                "Home is always first and Settings is always last — everything else here is yours. " +
-                    "Reorder tabs to change their order in User Tabs.",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(16.dp))
-            // Stage C: navigation customization lives here (not a new
-            // settings section — Stage G owns the settings IA reorg).
-            // Hidden tabs stay listed below with a Show button, so a
-            // hidden tab can always come back; Settings can never be
-            // hidden or removed, by construction in pillBarItems.
-            Text("Navigation", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            // Feedback round 15, item 3: Scenes and Energy are
-            // hideable from the bar/rail; Home and Settings are
-            // locked and have no switch. A hidden built-in tab
-            // stays reachable from Settings -> Browse.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Show Scenes on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                // Feedback round 16, item 3: default switch–text buffer.
-                Spacer(Modifier.width(12.dp))
-                Switch(checked = vm.navShowScenes, onCheckedChange = { vm.navShowScenes = it })
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Show Energy on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                // Feedback round 16, item 3: default switch–text buffer.
-                Spacer(Modifier.width(12.dp))
-                Switch(checked = vm.navShowEnergy, onCheckedChange = { vm.navShowEnergy = it })
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Up to two custom tabs can be pinned to the bar (Pin below each tab). Pinned tabs sit " +
-                    "between Energy and Settings; Home and Settings always stay on the bar.",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Pill style", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                var styleExpanded by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(onClick = { styleExpanded = true }) {
-                        Text(if (vm.navStyle == NavStyle.COMPACT) "Compact" else "Floating")
-                    }
-                    DropdownMenu(
-                        expanded = styleExpanded,
-                        onDismissRequest = { styleExpanded = false },
-                    ) {
-                        DropdownMenuItem(text = { Text("Floating") }, onClick = {
-                            styleExpanded = false
-                            vm.navStyle = NavStyle.FLOATING
-                        })
-                        DropdownMenuItem(text = { Text("Compact") }, onClick = {
-                            styleExpanded = false
-                            vm.navStyle = NavStyle.COMPACT
-                        })
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Reset navigation restores the floating pill, automatic icons, shows all tabs, " +
-                        "puts Scenes and Energy back on the bar, and clears all pins. " +
-                        "Your tabs are never deleted by a reset.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { vm.resetNavigation() }) { Text("Reset") }
-            }
-            Spacer(Modifier.height(16.dp))
-        }
-        for (tab in vm.userTabs) {
-            item {
-                TabEditorCard(vm, tab, states, onEditYaml = { index, yaml ->
-                    editingCard = Triple(tab.id, index, yaml)
-                })
-                Spacer(Modifier.height(16.dp))
-            }
-        }
-        item {
-            Text("Add a tab", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = newTabTitle,
-                    onValueChange = { newTabTitle = it },
-                    label = { Text("Tab title") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = {
-                    val id = vm.addTab(newTabTitle)
-                    newTabTitle = ""
-                    navigate(Screen.UserTab(id))
-                }) { Text("Add") }
-            }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-    editingCard?.let { (tabId, index, yaml) ->
-        CardYamlEditor(
-            initialYaml = yaml,
-            onDismiss = { editingCard = null },
-            onSave = { newYaml ->
-                vm.updateCardYaml(tabId, index, newYaml)
-                editingCard = null
-            },
-        )
-    }
-}
-
-@Composable
-private fun TabEditorCard(
+internal fun TabEditorCard(
     vm: HavenViewModel,
     tab: UserTab,
     states: Map<String, HaEntity>,
@@ -429,7 +296,7 @@ private fun TabEditorCard(
                     Icon(Icons.Filled.Delete, contentDescription = "Delete tab")
                 }
             }
-            // Stage C: per-tab icon choice + hide/show. The icon picker
+            // Stage C: per-tab icon choice. The icon picker
             // writes the stored key (null = automatic); the pill icon
             // updates through the same bar model as everything else.
             Spacer(Modifier.height(8.dp))
@@ -454,38 +321,10 @@ private fun TabEditorCard(
                         }
                     }
                 }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { vm.setTabHidden(tab.id, !tab.hidden) }) {
-                    Text(if (tab.hidden) "Show" else "Hide")
-                }
-                // Feedback round 15, item 3: pin the tab onto the
-                // bar (at most two). The button disables at the
-                // cap for unpinned tabs; the ViewModel setter is
-                // the backstop for the same cap.
-                Spacer(Modifier.width(8.dp))
-                val pinnedCount = vm.userTabs.count { it.pinned }
-                OutlinedButton(
-                    enabled = tab.pinned || pinnedCount < MAX_PINNED_TABS,
-                    onClick = { vm.setTabPinned(tab.id, !tab.pinned) },
-                ) {
-                    Text(if (tab.pinned) "Unpin" else "Pin")
-                }
-                if (tab.pinned) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Pinned to bar",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (tab.hidden) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Hidden from User Tabs",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                // Feedback round 19, item 5: placement (chip /
+                // bar tab / hidden) lives in the selector below
+                // the card, not in buttons here — one control for
+                // one placement, so the two can never disagree.
             }
             Spacer(Modifier.height(12.dp))
             for ((index, yaml) in tab.cards.withIndex()) {
@@ -641,7 +480,7 @@ private fun EntityPickerField(
  * its error inline and never overwrites the stored card.
  */
 @Composable
-private fun CardYamlEditor(initialYaml: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+internal fun CardYamlEditor(initialYaml: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var text by remember { mutableStateOf(initialYaml) }
     var error by remember { mutableStateOf<String?>(null) }
     Dialog(onDismissRequest = onDismiss) {

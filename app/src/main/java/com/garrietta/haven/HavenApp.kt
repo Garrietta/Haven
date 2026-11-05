@@ -1,5 +1,7 @@
 package com.garrietta.haven
 import com.garrietta.haven.ui.components.LocalShapePrefs
+import com.garrietta.haven.ui.components.nonTabSlideDirection
+import com.garrietta.haven.ui.components.shouldApplyFoldedNavClearance
 import com.garrietta.haven.ui.components.LocalSuppressTraveler
 import com.garrietta.haven.ui.components.PopupDragHandle
 import com.garrietta.haven.ui.components.PopupDragState
@@ -49,6 +51,8 @@ import com.garrietta.haven.ui.theme.FloatingCorner
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.SizeTransform
@@ -273,14 +277,14 @@ import com.garrietta.haven.ui.screens.LoginScreen
 import com.garrietta.haven.ui.screens.SceneBuilderScreen
 import com.garrietta.haven.ui.screens.ScriptBuilderScreen
 import com.garrietta.haven.ui.screens.SearchScreen
-import com.garrietta.haven.ui.screens.RoomManagerScreen
+import com.garrietta.haven.ui.screens.RoomFilter
+import com.garrietta.haven.ui.screens.RoomsTabsScreen
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.DomainDefaultsDialog
 import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.CardSettingsSheet
 import com.garrietta.haven.ui.screens.CardSettingsPencil
 import com.garrietta.haven.ui.screens.rememberCardCustom
-import com.garrietta.haven.ui.screens.TabManagerScreen
 import com.garrietta.haven.ui.screens.UserTabsScreen
 import com.garrietta.haven.ui.screens.ThermostatPopout
 import com.garrietta.haven.ui.screens.TodayScreen
@@ -301,6 +305,7 @@ import com.garrietta.haven.ui.theme.resolveHavenIsDark
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
     Screen.Today, Screen.Scenes, Screen.Energy, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs, Screen.Settings -> true
     is Screen.UserTab -> true
+    is Screen.RoomTab -> true
     else -> false
 }
 
@@ -401,6 +406,22 @@ fun HavenApp(vm: HavenViewModel) {
         val homeListState = rememberLazyListState()
         val homeLeftScrollState = rememberScrollState()
         val homeRightScrollState = rememberScrollState()
+        // Feedback round 19, item 2: the non-tab slide direction.
+        // AnimatedContent's transitionSpec cannot tell a push from
+        // a pop on its own (both are just initialState ->
+        // targetState), so the direction is tracked here from the
+        // backstack mutations themselves: navigate() pushes (+1),
+        // goBack() pops (-1), goTop() jumps to a tab (+1, the old
+        // forward behavior for tab jumps). The transitionSpec
+        // reads this at transition time; a change without a
+        // targetState change starts no transition.
+        // Feedback round 19, item 3: the Round 9 branch swap itself
+        // is GONE — AnimatedContent(targetState = base) stays
+        // mounted at all times now (see the transition block), so
+        // TodayScreen never disposes under a morphing popup. The
+        // hoisted scroll states above stay: they are still what
+        // keeps Home's offset across detail returns.
+        var navDirection by remember { mutableStateOf(1) }
         val current = backstack.last()
         // Panel state machine (2026-11-01 morphing-panels round,
         // superseding the 2026-10-30 centered-dialog round): the
@@ -498,7 +519,10 @@ fun HavenApp(vm: HavenViewModel) {
         val scrollVisibility = remember(scrollDensity) {
             ScrollVisibilityState(with(scrollDensity) { 8.dp.toPx() })
         }
-        val navigate: (Screen) -> Unit = { screen -> backstack.add(screen) }
+        val navigate: (Screen) -> Unit = { screen ->
+            navDirection = 1
+            backstack.add(screen)
+        }
         // Feedback round 3, item 6: Device Controls deep links.
         // The provider's app intent carries the tapped entity id
         // (see appIntentFor); MainActivity stores it on the VM.
@@ -507,6 +531,18 @@ fun HavenApp(vm: HavenViewModel) {
         // nothing, so its states collection cannot recompose UI.
         ControlDeepLinkRouter(vm, current, navigate)
         val goTop: (Screen) -> Unit = {
+            navDirection = 1
+            // Feedback round 19, item 3: a tab jump to Home means
+            // My Home (the old behavior fell out of TodayScreen
+            // disposal; the ViewModel-hoisted filter needs the
+            // explicit reset). A room tab jump sets that room's
+            // filter. Other tabs leave the filter alone — it only
+            // renders on Today anyway.
+            when (it) {
+                Screen.Today -> vm.roomFilter = RoomFilter.All
+                is Screen.RoomTab -> vm.roomFilter = RoomFilter.Area(it.areaId)
+                else -> {}
+            }
             morphGeneration++
             vm.pageOrigin = null
             vm.closePopup()
@@ -883,7 +919,10 @@ fun HavenApp(vm: HavenViewModel) {
             if (panelDetailAnim != null) dismissPanelDetail()
             else if (detailAnim != null) dismissDetail()
             else if (popoutAnim != null) dismissPopout()
-            else if (backstack.size > 1) backstack.removeAt(backstack.lastIndex)
+            else if (backstack.size > 1) {
+                navDirection = -1
+                backstack.removeAt(backstack.lastIndex)
+            }
         }
         val signOut: () -> Unit = {
             morphGeneration++
@@ -1367,7 +1406,7 @@ fun HavenApp(vm: HavenViewModel) {
                     // the user's bar (hideable Scenes/Energy, up to
                     // two pinned tabs); Settings submenus resolve
                     // to Settings for the active highlight below.
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }.take(2))
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot())
                     // Stage E §9: the Home dot lights only for a real
                     // important alert (unlocked lock, open door/window,
                     // triggered alarm) — never a count, never for
@@ -1492,16 +1531,29 @@ fun HavenApp(vm: HavenViewModel) {
             // the system bar.
             val unfoldedBottomClearance =
                 if (LocalWideLayout.current) navBottom else 0.dp
+            // Feedback round 19, item 3: folded content ALWAYS
+            // reserves the navigation-bars inset (matching the
+            // unfolded clearance rule) — the old isTopLevel gate
+            // dropped it the moment a detail panel left the top
+            // level, so opening a panel at the bottom of the Home
+            // list changed contentPadding and jumped the scroll
+            // offset by exactly the inset.
             val foldedNavClearance =
-                if (!LocalWideLayout.current && isTopLevel(current)) navBottom else 0.dp
+                if (shouldApplyFoldedNavClearance(LocalWideLayout.current)) navBottom else 0.dp
             val contentPadding = PaddingValues(
-                // Feedback round 4, item 1: on unfolded, the
-                // full-width Scaffold reserves the 84dp rail zone
-                // as start padding — resting content still sits
-                // right of the rail, exactly as before; only the
-                // transition container now spans the bezel.
-                start = padding.calculateStartPadding(layoutDirection) +
-                    if (LocalWideLayout.current) 84.dp else 0.dp,
+                // Feedback round 19, item 1: the outer Box no
+                // longer reserves the 84dp rail zone — the
+                // transition container spans the full window
+                // width, so sliding pages travel all the way to
+                // the physical left bezel underneath the rail.
+                // The 84dp inset now lives INSIDE AnimatedContent
+                // (see the wrapper below): resting content still
+                // sits right of the rail, exactly as before, and
+                // every screen's scheme background still paints
+                // full-bleed (this Box paints it across the full
+                // width behind the inset content, and every screen
+                // root background is the same scheme color).
+                start = padding.calculateStartPadding(layoutDirection),
                 top = padding.calculateTopPadding(),
                 end = padding.calculateEndPadding(layoutDirection),
                 bottom = padding.calculateBottomPadding() + unfoldedBottomClearance + foldedNavClearance,
@@ -1551,19 +1603,9 @@ fun HavenApp(vm: HavenViewModel) {
                 // one-third), and on unfolded the leftward travel
                 // adds the 84dp rail width so the page clears the
                 // left edge too. The rail draws on top (zIndex,
-                // see the VerticalSidePill call site). Round 17,
-                // item 6, SUPERSEDES the old no-clip rule for the
-                // ghosting symptom: the transition below is now
-                // clipped to the content area (see there), so
-                // sliding pages can no longer spill into the rail
-                // zone and ghost behind the pill.
+                // see the VerticalSidePill call site).
                 // Resting page positioning is unchanged (content
-                // still starts right of the rail). Any switch
-                // involving a non-tab screen keeps Round 4's fixed
-                // slide (enter one-third from the right, exit
-                // one-third to the left). Koda passes no explicit
-                // animationSpec in either branch (AnimatedContent
-                // defaults), so this port does neither. Tab tap
+                // still starts right of the rail). Tab tap
                 // while a panel is open: goTop clears the panel
                 // INSTANTLY first (pre-existing), then the
                 // directional slide runs — no panel/tab animation
@@ -1580,58 +1622,84 @@ fun HavenApp(vm: HavenViewModel) {
                 val railTransitionPx = with(LocalDensity.current) {
                     if (LocalWideLayout.current) 84.dp.roundToPx() else 0
                 }
-                // Feedback round 4, item 4: while a detail/panel
-                // overlay is open, the underlying page renders
-                // instantly with no AnimatedContent slide/fade —
-                // the intermediate panel stays opaque and
-                // stationary underneath the top-most morph instead
-                // of sliding/fading in over Home (the bleed/flash
-                // mechanism: the base change Home<->panel used to
-                // animate beneath the morph). Tab switches always
-                // run with detailAnim null (goTop clears overlays
-                // atomically first), so they keep the slide.
-                if (reduceMotionTop || detailAnim != null) {
-                    content(base)
-                } else {
-                    AnimatedContent(
-                        modifier = Modifier.fillMaxSize(),
-                        targetState = base,
-                        transitionSpec = {
-                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }.take(2)).map { it.screen }
-                            // Feedback round 17, item 6: NO fades,
-                            // CLIPPED. The old slide + fade let the
-                            // outgoing and incoming pages show
-                            // through each other mid-transition
-                            // (readable ghost text — Settings over
-                            // Manage home page on the 2026-11-04
-                            // runs), and SizeTransform(clip =
-                            // false) let sliding pages spill past
-                            // the content boundary into the rail
-                            // zone, visible above and below the
-                            // floating pill. Opaque slides keep the
-                            // directional character (full travel
-                            // for tabs and sub-screens alike,
+                // Feedback round 19, items 1 + 3: AnimatedContent
+                // is ALWAYS mounted now (targetState = base).
+                // Round 4, item 4's direct branch — content(base)
+                // while a detail overlay was open — is DELETED:
+                // swapping parents disposed TodayScreen, which
+                // reset the room filter and flashed the page
+                // underneath the morph. With base stable across
+                // a morph (detail screens substitute their
+                // backstack predecessor), no transition runs
+                // under the overlay; the page simply stays.
+                // Reduce-motion keeps an instant switch, but
+                // through the same AnimatedContent (None
+                // transitions), so composition identity never
+                // changes with the motion setting either.
+                AnimatedContent(
+                    modifier = Modifier.fillMaxSize(),
+                    targetState = base,
+                    transitionSpec = {
+                        if (reduceMotionTop) {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        } else {
+                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot()).map { it.screen }
+                            // Feedback round 17, item 6: NO fades.
+                            // The old slide + fade let the outgoing
+                            // and incoming pages show through each
+                            // other mid-transition (readable ghost
+                            // text — Settings over Manage home page
+                            // on the 2026-11-04 runs). Opaque slides
+                            // keep the directional character (full
+                            // travel for tabs and sub-screens alike,
                             // round 18, item 6) with no see-through
-                            // overlap, and clip = true bounds the
-                            // travel to the content area — the same
-                            // fade removal also ends the
-                            // back-navigation page fade that
-                            // flashed cards semi-transparent on
-                            // return to Home.
-                            // This SUPERSEDES round 3's no-clip
-                            // choice for exactly this symptom; the
-                            // slide directions are untouched (only
-                            // the sub-screen distance grows from
-                            // one-third to full travel).
+                            // overlap, and the same fade removal
+                            // ends the back-navigation page fade
+                            // that flashed cards semi-transparent
+                            // on return to Home. The fade removal
+                            // is the ghosting fix, and it STAYS.
+                            // Feedback round 19, item 1, SUPERSEDES
+                            // round 17's clip = true for exactly
+                            // the clipping symptom: with the
+                            // container spanning the full window
+                            // width and clip = false, sliding pages
+                            // travel all the way to the physical
+                            // left bezel underneath the rail
+                            // instead of stopping at the old
+                            // content boundary — the 2026-11-04
+                            // video's "clipped by that imaginary
+                            // bar" defect. The rail still draws on
+                            // top (zIndex), so pages slide UNDER
+                            // it, never over it.
+                            // Feedback round 19, item 2: switches
+                            // involving a non-tab screen use the
+                            // tracked push/pop direction instead
+                            // of the old fixed forward slide — a
+                            // pop slides the sub-page out to the
+                            // right and the parent in from the
+                            // left, the mirror of a push.
                             when (val direction = tabSlideDirection(barScreens, initialState, targetState)) {
                                 1, -1 -> (slideInHorizontally(initialOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).first }) togetherWith
                                     slideOutHorizontally(targetOffsetX = { tabSlideOffsets(direction, it, railTransitionPx).second }))
-                                else -> (slideInHorizontally(initialOffsetX = { it }) togetherWith
-                                    slideOutHorizontally(targetOffsetX = { -it }))
-                            }.using(SizeTransform(clip = true))
-                        },
-                        label = "topLevelScreen",
-                    ) { screen -> content(screen) }
+                                else -> {
+                                    val dir = nonTabSlideDirection(navDirection < 0)
+                                    (slideInHorizontally(initialOffsetX = { tabSlideOffsets(dir, it, railTransitionPx).first }) togetherWith
+                                        slideOutHorizontally(targetOffsetX = { tabSlideOffsets(dir, it, railTransitionPx).second }))
+                                }
+                            }
+                        }.using(SizeTransform(clip = false))
+                    },
+                    label = "topLevelScreen",
+                ) { screen ->
+                    // Feedback round 19, item 1: the 84dp rail
+                    // inset, applied INSIDE the transition
+                    // container so resting content sits right of
+                    // the rail while the sliding page surface
+                    // travels bezel to bezel. Screens keep their
+                    // own horizontal padding on top of this.
+                    Box(Modifier.fillMaxSize().padding(start = if (LocalWideLayout.current) 84.dp else 0.dp)) {
+                        content(screen)
+                    }
                 }
                 // A failed tap used to vanish silently; now it banners here on
                 // every screen until dismissed.
@@ -1663,7 +1731,7 @@ fun HavenApp(vm: HavenViewModel) {
             // unmount it cleanly.
             key(LocalWideLayout.current) {
                 if (!LocalWideLayout.current && isTopLevel(current)) {
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }.take(2))
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot())
                     val selectedIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     // Stage E §9: same Home dot as the rail.
                     // Collected here so only the bar recomposes on
@@ -2146,9 +2214,9 @@ private fun ScreenContent(
         // Stage F destinations (first-class bar items, brief §4).
         Screen.Scenes -> ScenesScreen(vm)
         Screen.Energy -> EnergyScreen(vm)
-        Screen.TabManager -> TabManagerScreen(vm, goBack, navigate)
+        Screen.RoomsTabs -> RoomsTabsScreen(vm, goBack, navigate)
         Screen.HomeEditor -> HomeEditorScreen(vm, goBack)
-        Screen.RoomManager -> RoomManagerScreen(vm, goBack)
+        is Screen.RoomTab -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onSignInExpired = onSignOut)
         // Detail pages replaced the old generic detail screen: per-domain
         // pages (climate still routes to its thermostat page inside).
         is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack)
