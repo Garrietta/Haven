@@ -168,7 +168,7 @@ import com.garrietta.haven.ui.components.choiceChipColors
 // ---- Shared small pieces ----
 
 @Composable
-private fun Round3SectionTitle(title: String) {
+private fun BlockTitle(title: String) {
     SectionTitle(title)
     Spacer(Modifier.height(8.dp))
 }
@@ -368,11 +368,11 @@ private fun SelectChips(entity: HaEntity, vm: HavenViewModel, label: String) {
  * toggle is unbundled. Each block renders only when its domain
  * exists in live state and keeps the original 16dp trailing
  * spacing, so folded and unfolded spacing is unchanged. The
- * stored preference migrates via migrateRound3Hidden /
- * migrateRound3SectionOrder (combined-on maps to all four on).
+ * stored preference migrates via migrateLegacyHiddenSections /
+ * migrateLegacySectionOrder (combined-on maps to all four on).
  */
 @Composable
-fun Round3SecurityBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
+fun SecurityBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val alarm = states[ALARM_ID]
     if (alarm != null) {
         SecurityBannerSection(alarm, vm) { navigate(Screen.SecurityPanel) }
@@ -381,7 +381,7 @@ fun Round3SecurityBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navig
 }
 
 @Composable
-fun Round3VacuumBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
+fun VacuumBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val vacuum = states[VACUUM_ID]
     if (vacuum != null) {
         VacuumTileSection(vacuum, states, vm) { navigate(Screen.VacuumPanel) }
@@ -390,7 +390,7 @@ fun Round3VacuumBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigat
 }
 
 @Composable
-fun Round3MediaBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
+fun MediaBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val media = MEDIA_PLAYER_IDS.mapNotNull { states[it] }
     if (media.isNotEmpty()) {
         MediaRowSection(media, vm) { entity -> navigate(Screen.MediaPanel(entity.entityId)) }
@@ -399,7 +399,7 @@ fun Round3MediaBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate
 }
 
 @Composable
-fun Round3GreenhouseBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
+fun GreenhouseBlock(vm: HavenViewModel, states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
     val greenhousePresent = (GREENHOUSE_AUTOMATION_IDS + GREENHOUSE_TIMER_IDS +
         listOf(GREENHOUSE_WATER_DUE_ID, SPRINKLER_SWITCH_ID)).any { states.containsKey(it) }
     if (greenhousePresent) {
@@ -410,7 +410,7 @@ fun Round3GreenhouseBlock(vm: HavenViewModel, states: Map<String, HaEntity>, nav
 
 @Composable
 private fun SecurityBannerSection(alarm: HaEntity, vm: HavenViewModel, onOpen: () -> Unit) {
-    Round3SectionTitle("Security")
+    BlockTitle("Security")
     Box(
         Modifier.fillMaxWidth()
             .reportCardBounds(ALARM_ID).reportCardShape(ALARM_ID, generalCardShape(0))
@@ -459,7 +459,7 @@ private fun VacuumTileSection(
     vm: HavenViewModel,
     onOpen: () -> Unit,
 ) {
-    Round3SectionTitle("Robot vacuum")
+    BlockTitle("Robot vacuum")
     val battery = states[VACUUM_BATTERY_ID]?.state?.toIntOrNull()?.toString()
     Box(
         Modifier.fillMaxWidth()
@@ -506,7 +506,7 @@ private fun MediaRowSection(
     vm: HavenViewModel,
     onOpen: (HaEntity) -> Unit,
 ) {
-    Round3SectionTitle("TV & media")
+    BlockTitle("TV & media")
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -590,7 +590,7 @@ private fun MediaTile(entity: HaEntity, vm: HavenViewModel, onOpen: () -> Unit) 
 
 @Composable
 private fun GreenhouseSummaryCard(states: Map<String, HaEntity>, onOpen: () -> Unit) {
-    Round3SectionTitle("Greenhouse & irrigation")
+    BlockTitle("Greenhouse & irrigation")
     val automationsOn = GREENHOUSE_AUTOMATION_IDS.count { states[it]?.state == "on" }
     val automationsTotal = GREENHOUSE_AUTOMATION_IDS.count { states.containsKey(it) }
     val waterDue = states[GREENHOUSE_WATER_DUE_ID]?.state

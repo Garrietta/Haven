@@ -89,8 +89,8 @@ import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.ui.components.PillSwitch
 import com.garrietta.haven.data.domainSwitchColors
 import com.garrietta.haven.data.hasImportantAlert
-import com.garrietta.haven.data.migrateRound3Hidden
-import com.garrietta.haven.data.migrateRound3SectionOrder
+import com.garrietta.haven.data.migrateLegacyHiddenSections
+import com.garrietta.haven.data.migrateLegacySectionOrder
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.customIconKeyFor
@@ -520,7 +520,7 @@ fun TodayScreen(
     // the automatic time-based greeting exactly as before.
     val customWelcome = vm.settingsStore.homeWelcomeMessage
     val greeting = if (customWelcome.isBlank()) autoGreeting else customWelcome
-    val hiddenSections = migrateRound3Hidden(vm.settingsStore.homeHiddenSections)
+    val hiddenSections = migrateLegacyHiddenSections(vm.settingsStore.homeHiddenSections)
     val showSection: (String) -> Boolean = { it !in hiddenSections }
     val entities = states.values
     val weather = entities.firstOrNull { it.domain == "weather" }
@@ -600,16 +600,16 @@ fun TodayScreen(
     // Visual-fidelity round §4: the combined block is split into
     // four independently gated blocks (see Round3Panels).
     val round3SecuritySection: LazyListScope.() -> Unit = {
-        if (showSection("round3-security")) item { Round3SecurityBlock(vm, states, navigate) }
+        if (showSection("round3-security")) item { SecurityBlock(vm, states, navigate) }
     }
     val round3VacuumSection: LazyListScope.() -> Unit = {
-        if (showSection("round3-vacuum")) item { Round3VacuumBlock(vm, states, navigate) }
+        if (showSection("round3-vacuum")) item { VacuumBlock(vm, states, navigate) }
     }
     val round3MediaSection: LazyListScope.() -> Unit = {
-        if (showSection("round3-media")) item { Round3MediaBlock(vm, states, navigate) }
+        if (showSection("round3-media")) item { MediaBlock(vm, states, navigate) }
     }
     val round3GreenhouseSection: LazyListScope.() -> Unit = {
-        if (showSection("round3-greenhouse")) item { Round3GreenhouseBlock(vm, states, navigate) }
+        if (showSection("round3-greenhouse")) item { GreenhouseBlock(vm, states, navigate) }
     }
     // Visible room sections, in HA order, after the hidden-section
     // filter: one (areaId, heading, member ids) triple per room,
@@ -684,7 +684,7 @@ fun TodayScreen(
     // opens, detail returns, and fold/unfold posture changes.
     val wide = LocalWideLayout.current
     val sectionOrder = resolveOrder(
-        migrateRound3SectionOrder(vm.settingsStore.homeSectionOrder()),
+        migrateLegacySectionOrder(vm.settingsStore.homeSectionOrder()),
         HOME_SECTION_ORDER_DEFAULT,
     )
     if (!wide) {
@@ -816,10 +816,10 @@ fun TodayScreen(
                             // "status" is placed by the left pane
                             // (item 9) — never here, never twice.
                             "status" -> { }
-                            "round3-security" -> if (showSection("round3-security") && !isRoomView) Round3SecurityBlock(vm, states, navigate)
-                            "round3-vacuum" -> if (showSection("round3-vacuum") && !isRoomView) Round3VacuumBlock(vm, states, navigate)
-                            "round3-media" -> if (showSection("round3-media") && !isRoomView) Round3MediaBlock(vm, states, navigate)
-                            "round3-greenhouse" -> if (showSection("round3-greenhouse") && !isRoomView) Round3GreenhouseBlock(vm, states, navigate)
+                            "round3-security" -> if (showSection("round3-security") && !isRoomView) SecurityBlock(vm, states, navigate)
+                            "round3-vacuum" -> if (showSection("round3-vacuum") && !isRoomView) VacuumBlock(vm, states, navigate)
+                            "round3-media" -> if (showSection("round3-media") && !isRoomView) MediaBlock(vm, states, navigate)
+                            "round3-greenhouse" -> if (showSection("round3-greenhouse") && !isRoomView) GreenhouseBlock(vm, states, navigate)
                             "rooms" -> for (section in visibleRooms) {
                                 RoomSectionGrid(section.name, section.members, states, vm, gridColumns, navigate, section.iconKey, spacing = 14.dp, areaId = section.areaId)
                                 Spacer(Modifier.height(16.dp))

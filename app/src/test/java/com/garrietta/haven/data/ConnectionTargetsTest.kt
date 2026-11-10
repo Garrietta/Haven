@@ -12,7 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Feedback round 16: the round's new pure logic, pinned by tests. */
-class Round16LogicTest {
+class ConnectionTargetsTest {
 
     // Item 1 — aspect-ratio gate.
 

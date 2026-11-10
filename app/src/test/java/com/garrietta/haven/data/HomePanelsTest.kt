@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Round 3 logic tests (2026-11-02): pure functions only, no Compose. */
-class Round3LogicTest {
+class HomePanelsTest {
 
     private fun entity(id: String, state: String, attrs: Map<String, Any?> = emptyMap()): HaEntity {
         val o = JSONObject()

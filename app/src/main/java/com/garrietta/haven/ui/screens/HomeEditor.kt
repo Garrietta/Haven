@@ -43,8 +43,8 @@ import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HOME_SECTIONS
-import com.garrietta.haven.data.migrateRound3Hidden
-import com.garrietta.haven.data.migrateRound3SectionOrder
+import com.garrietta.haven.data.migrateLegacyHiddenSections
+import com.garrietta.haven.data.migrateLegacySectionOrder
 import com.garrietta.haven.data.HOME_SECTION_ORDER_DEFAULT
 import com.garrietta.haven.data.HomeStatusCategory
 import com.garrietta.haven.data.isIndicatorLight
@@ -70,7 +70,7 @@ import com.garrietta.haven.ui.components.SectionTitle
 fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     var welcome by remember { mutableStateOf(vm.settingsStore.homeWelcomeMessage) }
-    var hidden by remember { mutableStateOf(migrateRound3Hidden(vm.settingsStore.homeHiddenSections)) }
+    var hidden by remember { mutableStateOf(migrateLegacyHiddenSections(vm.settingsStore.homeHiddenSections)) }
     var overrides by remember { mutableStateOf(vm.settingsStore.homeLightOverrides()) }
     // Stage G: arrangement state. Rendered orders resolve
     // against the canonical lists at render time, so sections
@@ -78,7 +78,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
     // correctly. (Round 24, item 5: room display names, icons,
     // and order moved to Rooms & tabs — the duplicate Rooms
     // block here is gone.)
-    var sectionOrder by remember { mutableStateOf(migrateRound3SectionOrder(vm.settingsStore.homeSectionOrder())) }
+    var sectionOrder by remember { mutableStateOf(migrateLegacySectionOrder(vm.settingsStore.homeSectionOrder())) }
     var showFavoritesSheet by remember { mutableStateOf(false) }
     val lights = states.values.filter { it.domain == "light" }.sortedBy { it.friendlyName }
     val resolvedSectionOrder = resolveOrder(sectionOrder, HOME_SECTION_ORDER_DEFAULT)
