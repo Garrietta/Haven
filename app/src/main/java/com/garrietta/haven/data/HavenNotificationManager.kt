@@ -122,7 +122,7 @@ class HavenNotificationManager(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = android.app.Notification.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(com.garrietta.haven.R.drawable.ic_stat_haven)
             .setContentTitle(title)
             .setContentText(body)
             .setContentIntent(pending)

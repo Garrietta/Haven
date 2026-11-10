@@ -149,6 +149,8 @@ import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.data.humanizeOptionLabel
 import org.json.JSONArray
 import org.json.JSONObject
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.choiceChipColors
 
 /**
  * Round 3 surfaces (2026-11-02): vacuum, media, security, greenhouse,
@@ -167,7 +169,7 @@ import org.json.JSONObject
 
 @Composable
 private fun Round3SectionTitle(title: String) {
-    Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    SectionTitle(title)
     Spacer(Modifier.height(8.dp))
 }
 
@@ -439,6 +441,7 @@ private fun SecurityBannerSection(alarm: HaEntity, vm: HavenViewModel, onOpen: (
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (mode in ALARM_ARM_MODES) {
                     FilterChip(
+                        colors = choiceChipColors(),
                         selected = alarm.state == "armed_$mode",
                         onClick = { vm.callService("alarm_control_panel", alarmArmService(mode), ALARM_ID) },
                         label = { Text(alarmModeLabel(mode)) },
@@ -655,7 +658,7 @@ private fun GreenhouseSummaryCard(states: Map<String, HaEntity>, onOpen: () -> U
 fun PresenceBlock(homeTrackers: List<HaEntity>, states: Map<String, HaEntity>) {
     val groups = groupPresence(homeTrackers)
     var selected by remember { mutableStateOf<PresenceGroup?>(null) }
-    Text("Who's home", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    SectionTitle("Who's home")
     Spacer(Modifier.height(8.dp))
     if (groups.isEmpty()) {
         Text("Nobody home", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)

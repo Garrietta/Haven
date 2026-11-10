@@ -220,7 +220,7 @@ import com.garrietta.haven.ui.components.windowSizeClassFor
 import com.garrietta.haven.ui.components.SheetPageContent
 import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.shapeForDomain
-import com.garrietta.haven.ui.components.KodaMenuRow
+import com.garrietta.haven.ui.components.MenuRow
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.PillBarActiveCapsule
 import com.garrietta.haven.ui.components.PillBarActiveGlyph
@@ -260,7 +260,7 @@ import com.garrietta.haven.ui.components.showPillOnSwipeDown
 import com.garrietta.haven.ui.components.heroHeaderAlpha
 import com.garrietta.haven.ui.theme.popupMorphSpring
 import com.garrietta.haven.ui.theme.springBounds
-import com.garrietta.haven.ui.theme.kodaBarSpec
+import com.garrietta.haven.ui.theme.barSpring
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.dialogHeaderState
@@ -301,6 +301,9 @@ import com.garrietta.haven.ui.screens.VacuumPanelScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
 import com.garrietta.haven.ui.theme.resolveHavenIsDark
+import com.garrietta.haven.ui.theme.Palette
+import com.garrietta.haven.ui.theme.HavenChrome
+import com.garrietta.haven.ui.components.SectionTitle
 
 // Stage C: the navigation model (NavItem, pillBarItems, tabIcons,
 // selectedNavIndex) moved to ui/components/NavItems.kt as pure,
@@ -3508,7 +3511,7 @@ private fun FrontDoorCameraPanel(
                     Spacer(Modifier.width(8.dp))
                     Row(
                         Modifier.clip(RoundedCornerShape(50))
-                            .background(Color(0xFFD32F2F))
+                            .background(Palette.Alarm.t50)
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -4150,7 +4153,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, currentS
     // Haven's indicator and takes Koda's spec. Reduce-motion
     // keeps the stiff snap.
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
-        else kodaBarSpec()
+        else barSpring()
     // Feedback round 17, item 3: the indicator offset comes from
     // the item INDEX ([railIndicatorTop]), never from measured
     // window rects. The old boundsInWindow measurements went
@@ -4218,7 +4221,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, currentS
             // slightly to #263026 (~1.35:1). A small bump, not
             // a rework; the folded pill bar keeps
             // PillBarContainer in both themes.
-            color = if (isDark) Color(0xFF263026) else PillBarContainer,
+            color = if (isDark) HavenChrome.barOnBlack else PillBarContainer,
             tonalElevation = 0.dp,
             shadowElevation = 6.dp,
         ) {
@@ -4420,7 +4423,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, currentScreen: Sc
                         // 12dp) and 4dp item gap are kept likewise.
                         val itemPadding by animateDpAsState(
                             if (highlighted) 20.dp else 12.dp,
-                            animationSpec = kodaBarSpec(),
+                            animationSpec = barSpring(),
                             label = "pillItemPadding",
                         )
                         val capsuleColor by animateColorAsState(
@@ -4442,7 +4445,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, currentScreen: Sc
                                 ) { onTap() }
                                 .background(capsuleColor, CircleShape)
                                 .padding(horizontal = itemPadding)
-                                .animateContentSize(kodaBarSpec()),
+                                .animateContentSize(barSpring()),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
@@ -4465,10 +4468,10 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, currentScreen: Sc
                             AnimatedVisibility(
                                 visible = highlighted,
                                 enter = fadeIn() + expandHorizontally(
-                                    animationSpec = kodaBarSpec()
+                                    animationSpec = barSpring()
                                 ),
                                 exit = fadeOut() + shrinkHorizontally(
-                                    animationSpec = kodaBarSpec()
+                                    animationSpec = barSpring()
                                 ),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -4642,6 +4645,6 @@ fun DetailPopupHeader(
 @Composable
 fun SectionHeader(title: String) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        SectionTitle(title)
     }
 }

@@ -16,6 +16,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.garrietta.haven.ui.theme.StateFamily
+import com.garrietta.haven.ui.theme.colors
 
 /**
  * Feedback round 21: the room-chip tap mapping (item 1), the
@@ -197,11 +199,11 @@ class Round21LogicTest {
             detailPageAccent(presets, HaEntity(garage, "closed", emptyMap()), true),
         )
         assertEquals(
-            Color(0xFF1A304E),
+            StateFamily.Cool.colors(isDark = true).container,
             detailPageAccent(presets, HaEntity(garage, "open", emptyMap()), true),
         )
         assertEquals(
-            Color(0xFFBDDEFF),
+            StateFamily.Cool.colors(isDark = false).container,
             detailPageAccent(presets, HaEntity(garage, "open", emptyMap()), false),
         )
         assertNull(
@@ -213,7 +215,7 @@ class Round21LogicTest {
     fun detailAccentGatedForLights() {
         val presets = mapOf("light.lamp_socket_1" to "lime")
         assertEquals(
-            Color(0xFF2B4E14),
+            StateFamily.On.colors(isDark = true).container,
             detailPageAccent(presets, HaEntity("light.lamp_socket_1", "on", emptyMap()), true),
         )
         assertNull(

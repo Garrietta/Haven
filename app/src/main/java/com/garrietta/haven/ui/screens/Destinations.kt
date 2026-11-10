@@ -35,6 +35,8 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.energySlotForWatts
 import com.garrietta.haven.data.semanticVisual
 import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.ScreenTitle
 
 /**
  * Stage F (redesign): the two first-class destinations from brief §4 —
@@ -68,7 +70,7 @@ fun ScenesScreen(vm: HavenViewModel) {
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
-            Text("Scenes", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            ScreenTitle("Scenes")
             Spacer(Modifier.height(8.dp))
             Text(
                 "Scenes from your Home Assistant instance. Activating a scene sets your devices to its saved states.",
@@ -161,7 +163,7 @@ fun EnergyScreen(vm: HavenViewModel) {
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
-            Text("Energy", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            ScreenTitle("Energy")
             Spacer(Modifier.height(8.dp))
             Text(
                 "Live readings from your Home Assistant sensors — current draw, per-device breakdown, and cumulative totals.",
@@ -216,7 +218,7 @@ fun EnergyScreen(vm: HavenViewModel) {
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Text("Devices drawing power", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                SectionTitle("Devices drawing power")
                 Spacer(Modifier.height(8.dp))
             }
             for (sensor in power) {
@@ -233,7 +235,7 @@ fun EnergyScreen(vm: HavenViewModel) {
         }
         if (energy.isNotEmpty()) {
             item {
-                Text("Cumulative energy", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                SectionTitle("Cumulative energy")
                 Spacer(Modifier.height(8.dp))
             }
             for (sensor in energy) {

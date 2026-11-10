@@ -82,7 +82,7 @@ import com.garrietta.haven.data.displayCameraName
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.garrietta.haven.ui.components.DomainBadge
-import com.garrietta.haven.ui.components.KodaMenuRow
+import com.garrietta.haven.ui.components.MenuRow
 import com.garrietta.haven.ui.components.VerticalPillToggle
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.shapeLabel
@@ -125,6 +125,7 @@ import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
 import java.util.Locale
 import org.json.JSONObject
+import com.garrietta.haven.ui.components.SectionTitle
 
 /**
  * Pop-ups, one per entity (2026-10-29 pop-up round — every detail
@@ -214,7 +215,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, n
             // (the Front Door keeps its in-panel Event History
             // tab). Dismiss first, then navigate — the sheet's
             // Details handoff pattern.
-            KodaMenuRow(
+            MenuRow(
                 badgeKey = "clips-${entity.entityId}",
                 badgeKind = shapeForDomain(entity.domain),
                 icon = domainIcon(entity),
@@ -273,7 +274,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         // Dial survives only in sheets/cards via WeatherControl.
         WeatherHeroCard(entity, vm)
         Spacer(Modifier.height(16.dp))
-        Text("Hourly forecast", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        SectionTitle("Hourly forecast")
         Spacer(Modifier.height(8.dp))
         // Timeline, not a list (2026-10-29 verdict: the 24-row plain
         // list "just doesn't look very good — a forecast could be a
@@ -399,7 +400,7 @@ private fun DetailPageContent(
     val history: @Composable () -> Unit = {
         if (entity.state.toDoubleOrNull() != null) {
             Spacer(Modifier.height(24.dp))
-            Text("Last 24 hours", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            SectionTitle("Last 24 hours")
             Spacer(Modifier.height(8.dp))
             DetailHistoryStrip(vm, entity)
             Spacer(Modifier.height(16.dp))
@@ -676,7 +677,7 @@ internal fun EntityPopupMenuRows(
 ) {
     Column(modifier) {
         if (onDetails != null) {
-            KodaMenuRow(
+            MenuRow(
                 badgeKey = entity.entityId,
                 badgeKind = shapeForDomain(entity.domain),
                 icon = domainIcon(entity),
@@ -687,7 +688,7 @@ internal fun EntityPopupMenuRows(
             )
             Spacer(Modifier.height(8.dp))
         }
-        KodaMenuRow(
+        MenuRow(
             badgeKey = "shape-badge-${entity.entityId}",
             badgeKind = shapeForDomain(entity.domain),
             icon = domainIcon(entity),
@@ -697,7 +698,7 @@ internal fun EntityPopupMenuRows(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
-        KodaMenuRow(
+        MenuRow(
             badgeKey = "shape-card-${entity.entityId}",
             badgeKind = shapeForDomain(entity.domain),
             icon = domainIcon(entity),
@@ -707,7 +708,7 @@ internal fun EntityPopupMenuRows(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
-        KodaMenuRow(
+        MenuRow(
             badgeKey = "card-settings-${entity.entityId}",
             badgeKind = shapeForDomain(entity.domain),
             icon = domainIcon(entity),

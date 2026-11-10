@@ -141,6 +141,7 @@ import com.garrietta.haven.ui.screens.clampHeatSetpoint
 import com.garrietta.haven.ui.screens.defaultSelector
 import com.garrietta.haven.ui.screens.snapToDegree
 import com.garrietta.haven.ui.screens.toggleSelector
+import com.garrietta.haven.ui.components.choiceChipColors
 
 fun Double.formatTemp(): String =
     if (this % 1.0 == 0.0) "${this.toInt()}°" else "%.1f°".format(this)
@@ -901,6 +902,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = nu
             ) {
                 for (mode in modes) {
                     FilterChip(
+                        colors = choiceChipColors(),
                         selected = entity.state == mode,
                         onClick = { vm.setClimateHvacMode(entity.entityId, mode) },
                         label = { Text(mode.replace('_', ' ').replaceFirstChar { it.uppercase() }) },
@@ -916,6 +918,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = nu
             ) {
                 for (preset in presets) {
                     FilterChip(
+                        colors = choiceChipColors(),
                         selected = entity.attrString("preset_mode") == preset,
                         onClick = {
                             vm.callService("climate", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", preset))
@@ -1028,7 +1031,7 @@ fun VacuumControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = nul
                     label = { Text(humanizeOptionLabel(speed)) },
                     // Feedback round 5, item 4: the selected speed chip carries the tile
                     // color; unselected chips stay scheme (their signal is selected-vs-not).
-                    colors = if (pageAccent != null) FilterChipDefaults.filterChipColors(selectedContainerColor = pageAccent) else FilterChipDefaults.filterChipColors(),
+                    colors = if (pageAccent != null) FilterChipDefaults.filterChipColors(selectedContainerColor = pageAccent) else choiceChipColors(),
                 )
             }
         }
@@ -1153,6 +1156,7 @@ fun FanControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) 
         ) {
             for (preset in presets) {
                 FilterChip(
+                    colors = choiceChipColors(),
                     selected = entity.attrString("preset_mode") == preset,
                     onClick = {
                         vm.callService("fan", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", preset))

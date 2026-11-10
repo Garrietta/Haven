@@ -85,6 +85,7 @@ import com.garrietta.haven.data.semanticVisual
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailPopupTitleHeader
+import com.garrietta.haven.ui.components.SectionTitle
 
 /**
  * Stage D (redesign): the Home dashboard's two new sections, kept out of
@@ -128,7 +129,7 @@ fun HomeStatusSection(
     ).filter { "status:${it.category.key}" !in hiddenSections }
     val anyCategoryVisible = HomeStatusCategory.entries.any { "status:${it.key}" !in hiddenSections }
 
-    Text("Home Status", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    SectionTitle("Home Status")
     Spacer(Modifier.height(8.dp))
     if (items.isEmpty()) {
         Card(
@@ -339,7 +340,7 @@ fun FavoritesSection(
     val resolved = vm.favorites.mapNotNull { states[it] }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Favorites", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+        SectionTitle("Favorites", Modifier.weight(1f))
         // Round 21, item 7: the Arrange button is gone — a
         // long-press on any favorite enters Arrange mode.
         // The pencil stays always-composed (round 18).

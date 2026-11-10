@@ -1,7 +1,8 @@
 package com.garrietta.haven.data
 
-import androidx.compose.ui.graphics.Color
 import com.garrietta.haven.ui.components.contrastRatio
+import com.garrietta.haven.ui.theme.StateFamily
+import com.garrietta.haven.ui.theme.colors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -9,13 +10,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * UI rewrite round §2: the user's complete state-based color matrix
- * for Home cards. Every badge glyph must clear 4.5:1 against its
- * badge background in both themes — including the inactive row,
- * whose glyph follows the container rule since round 24, item 1
- * (sage container light, vibrant container-hue tint dark).
- * Temperature/humidity sensors keep their semantic path; binary
- * sensors and generic sensors keep the existing pipeline.
+ * Which color family a tile is drawn in, and that every family's pairs
+ * are readable. The colors themselves are tones of the generated palette
+ * (ui/theme), so nothing here pins a hex: the tests pin the decisions
+ * (this state means that family) and the guarantees (this pair clears
+ * that contrast), which is what must not drift.
  */
 class DomainCardColorsTest {
 
@@ -25,226 +24,212 @@ class DomainCardColorsTest {
         attrs: Map<String, Any?> = emptyMap(),
     ): HaEntity = HaEntity(id, state, attrs)
 
+    private val everyTile = listOf(
+        entity("light.a", "on"),
+        entity("light.a", "off"),
+        entity("switch.a", "on"),
+        entity("switch.a", "off"),
+        entity("switch.plug", "on", mapOf("current_power_w" to 320.0)),
+        entity("climate.a", "heat"),
+        entity("climate.a", "cool", mapOf("hvac_action" to "cooling")),
+        entity("climate.a", "heat_cool", mapOf("hvac_action" to "idle")),
+        entity("lock.a", "locked"),
+        entity("lock.a", "unlocked"),
+        entity("cover.a", "open"),
+        entity("cover.a", "closed"),
+        entity("alarm_control_panel.a", "disarmed"),
+        entity("alarm_control_panel.a", "armed_away"),
+        entity("media_player.a", "playing"),
+        entity("vacuum.a", "cleaning"),
+        entity("vacuum.a", "docked"),
+        entity("vacuum.a", "error"),
+        entity("weather.a", "sunny"),
+        entity("automation.greenhouse_brain", "on"),
+        entity("sensor.power", "320", mapOf("device_class" to "power")),
+        entity("sensor.temp", "21.5", mapOf("device_class" to "temperature")),
+        entity("sensor.humidity", "44", mapOf("device_class" to "humidity")),
+        entity("sensor.count", "3"),
+        entity("binary_sensor.motion", "on", mapOf("device_class" to "motion")),
+        entity("binary_sensor.door", "on", mapOf("device_class" to "door")),
+        entity("binary_sensor.door", "off", mapOf("device_class" to "door")),
+        entity("light.a", "unavailable"),
+        entity("sensor.a", "unknown"),
+    )
+
     @Test
-    fun everyBadgeGlyphClearsFourPointFiveInBothThemes() {
-        val cases = listOf(
-            entity("light.a", "on"),
-            entity("light.a", "off"),
-            entity("switch.a", "on"),
-            entity("switch.a", "off"),
-            entity("switch.plug", "on", mapOf("current_power_w" to 320.0)),
-            entity("climate.a", "heat"),
-            entity("climate.a", "cool", mapOf("hvac_action" to "cooling")),
-            entity("climate.a", "heat_cool", mapOf("hvac_action" to "idle")),
-            entity("lock.a", "locked"),
-            entity("lock.a", "unlocked"),
-            entity("cover.a", "open"),
-            entity("cover.a", "closed"),
-            entity("alarm_control_panel.a", "disarmed"),
-            entity("alarm_control_panel.a", "armed_away"),
-            entity("media_player.a", "playing"),
-            entity("vacuum.a", "cleaning"),
-            entity("vacuum.a", "docked"),
-            entity("weather.a", "sunny"),
-            entity("automation.greenhouse_brain", "on"),
-            entity("sensor.power", "320", mapOf("device_class" to "power")),
-            entity("light.a", "unavailable"),
-            entity("sensor.a", "unknown"),
-        )
-        for (e in cases) {
+    fun everyTileResolvesAndItsBadgeIconIsReadableInBothThemes() {
+        for (e in everyTile) {
             for (isDark in listOf(false, true)) {
                 val colors = domainCardColors(e, isDark)
                 assertNotNull("${e.entityId} ${e.state} dark=$isDark must resolve", colors)
                 val ratio = contrastRatio(colors!!.badgeGlyph, colors.badgeBg)
                 assertTrue(
-                    "${e.entityId} ${e.state} dark=$isDark glyph contrast $ratio below 4.5:1",
+                    "${e.entityId} ${e.state} dark=$isDark icon contrast $ratio below 4.5:1",
                     ratio >= 4.5f,
                 )
-                assertNotNull(colors.container)
             }
         }
     }
 
     @Test
-    fun inactiveGlyphMatchesContainer() {
-        // Round 24, item 1: the inactive row follows the same
-        // glyph rule as the active rows — the glyph IS the
-        // card's container color in light mode, and a vibrant
-        // tint of the container's hue in dark mode. A closed
-        // garage door (preset-inactive) and a docked vacuum
-        // never render a plain white/gray icon on their sage
-        // cards again. (Cover closed without a preset resolves
-        // to the LOCKED row, not INACTIVE, so the inactive
-        // assertions use a light that is off and a docked
-        // vacuum, which both resolve to INACTIVE.)
-        val offLight = domainCardColors(entity("light.a", "off"), false)!!
-        assertEquals(Color(0xFFE6EBD3), offLight.container)
-        assertEquals(Color(0xFFE6EBD3), offLight.badgeGlyph)
-        val dockedLight = domainCardColors(entity("vacuum.a", "docked"), false)!!
-        assertEquals(Color(0xFFE6EBD3), dockedLight.badgeGlyph)
-        val dockedDark = domainCardColors(entity("vacuum.a", "docked"), true)!!
-        val (h, _, _) = rgbToHsl(dockedDark.container.red, dockedDark.container.green, dockedDark.container.blue)
-        val (gh, _, gl) = rgbToHsl(dockedDark.badgeGlyph.red, dockedDark.badgeGlyph.green, dockedDark.badgeGlyph.blue)
-        val hueDistance = run {
-            val d = kotlin.math.abs(gh - h) % 360f
-            minOf(d, 360f - d)
-        }
-        assertTrue("dark inactive glyph hue $gh must match container hue $h", hueDistance <= 1f)
-        assertTrue("dark inactive glyph lightness $gl must be the 0.72 bright tint", gl > 0.70f && gl < 0.74f)
-        assertTrue(
-            "dark inactive glyph must clear 4.5:1",
-            contrastRatio(dockedDark.badgeGlyph, dockedDark.badgeBg) >= 4.5f,
-        )
-    }
-
-    @Test
-    fun lightFamilyMatchesDirectiveTable() {
-        val on = domainCardColors(entity("light.island", "on"), false)!!
-        assertEquals(Color(0xFFC8F5A6), on.container)
-        assertEquals(Color(0xFF1B3708), on.badgeBg)
-        val onDark = domainCardColors(entity("light.island", "on"), true)!!
-        assertEquals(Color(0xFF2B4E14), onDark.container)
-        assertEquals(Color(0xFFB8F397), onDark.badgeBg)
-        // Off is the inactive row, not the light row.
-        val off = domainCardColors(entity("light.living_room", "off"), false)!!
-        assertEquals(Color(0xFFE6EBD3), off.container)
-        assertEquals(Color(0xFF52564E), off.badgeBg)
-        // Round 24, item 1: the inactive light glyph IS the
-        // container now (was plain White — the garage-door /
-        // eufy mismatch on sage cards).
-        assertEquals(Color(0xFFE6EBD3), off.badgeGlyph)
-        val offDark = domainCardColors(entity("light.living_room", "off"), true)!!
-        assertEquals(Color(0xFF1C201B), offDark.container)
-        // Reconciliation: dark badge polygon #2A2F28 (visible
-        // against the #1C201B card). Round 24, item 1: the glyph
-        // is no longer the flat #8C9188 gray — it is the
-        // container's hue at full saturation and 0.72 lightness
-        // (a vibrant sage tint; its hue/lightness/contrast are
-        // pinned independently by inactiveGlyphMatchesContainer).
-        assertEquals(Color(0xFF2A2F28), offDark.badgeBg)
-        val (oh, _, _) = rgbToHsl(offDark.container.red, offDark.container.green, offDark.container.blue)
-        assertEquals(hslToColor(oh, 1.0f, 0.72f), offDark.badgeGlyph)
-    }
-
-    @Test
-    fun climateLockMediaPowerFamiliesMatchDirectiveTable() {
-        assertEquals(Color(0xFFFFD1B9), domainCardColors(entity("climate.greenhouse", "heat"), false)!!.container)
-        assertEquals(Color(0xFF532215), domainCardColors(entity("climate.greenhouse", "heat"), true)!!.container)
-        assertEquals(Color(0xFFCCD7FF), domainCardColors(entity("lock.front_door", "locked"), false)!!.container)
-        assertEquals(Color(0xFFEFCEFF), domainCardColors(entity("media_player.sonos", "playing"), false)!!.container)
-        assertEquals(Color(0xFFFFE082), domainCardColors(entity("switch.workbench", "on", mapOf("current_power_w" to 320.0)), false)!!.container)
-    }
-
-    @Test
-    fun plugSwitchUsesPowerFamilyButPlainSwitchUsesLightFamily() {
-        val plug = domainCardColors(entity("switch.workbench", "on", mapOf("current_power_w" to 320.0)), false)!!
-        val plain = domainCardColors(entity("switch.porch", "on"), false)!!
-        assertEquals(Color(0xFFFFE082), plug.container)
-        assertEquals(Color(0xFFC8F5A6), plain.container)
-    }
-
-    @Test
-    fun unavailableIsInactiveGreyInBothThemes() {
-        val light = domainCardColors(entity("light.a", "unavailable"), false)!!
-        assertEquals(Color(0xFFE6EBD3), light.container)
-        val dark = domainCardColors(entity("climate.a", "unavailable"), true)!!
-        assertEquals(Color(0xFF1C201B), dark.container)
-    }
-
-    @Test
-    fun temperatureSensorBypassesTableKeepsSemanticPath() {
-        // device_class temperature (and humidity) must NOT resolve
-        // here: the caller keeps the coral/sky semantic path.
-        assertNull(domainCardColors(entity("sensor.temp", "72", mapOf("device_class" to "temperature")), false))
-        assertNull(domainCardColors(entity("sensor.hum", "45", mapOf("device_class" to "humidity")), false))
-        // A power sensor DOES resolve to the power family.
-        assertNotNull(domainCardColors(entity("sensor.watts", "320", mapOf("device_class" to "power")), false))
-    }
-
-    @Test
-    fun stateRowsFollowTheMatrix() {
-        // Cooling and heat_cool differ from heating; unlocked/open
-        // differ from locked/closed; armed differs from disarmed.
-        assertEquals(Color(0xFFBDDEFF), domainCardColors(entity("climate.a", "cool", mapOf("hvac_action" to "cooling")), false)!!.container)
-        assertEquals(Color(0xFF1A304E), domainCardColors(entity("climate.a", "cool", mapOf("hvac_action" to "cooling")), true)!!.container)
-        assertEquals(Color(0xFF3E2723), domainCardColors(entity("climate.a", "heat_cool", mapOf("hvac_action" to "idle")), true)!!.container)
-        assertEquals(Color(0xFFFFCDC4), domainCardColors(entity("lock.a", "unlocked"), false)!!.container)
-        assertEquals(Color(0xFF5C1916), domainCardColors(entity("lock.a", "unlocked"), true)!!.container)
-        assertEquals(Color(0xFF222C61), domainCardColors(entity("cover.a", "closed"), true)!!.container)
-        assertEquals(Color(0xFF532215), domainCardColors(entity("alarm_control_panel.a", "armed_away"), true)!!.container)
-        assertEquals(Color(0xFF2B4E14), domainCardColors(entity("vacuum.a", "cleaning"), true)!!.container)
-        assertEquals(Color(0xFF1F3D0C), domainCardColors(entity("automation.greenhouse_brain", "on"), true)!!.container)
-        assertEquals(Color(0xFFBDDEFF), domainCardColors(entity("weather.a", "sunny"), false)!!.container)
-        // Active dark glyphs are tonal ink, not white.
-        assertEquals(Color(0xFF111D52), domainCardColors(entity("lock.a", "unlocked"), true)!!.badgeGlyph)
-        assertEquals(Color(0xFF0A2005), domainCardColors(entity("vacuum.a", "cleaning"), true)!!.badgeGlyph)
-        // Feedback round 4, item 3 (SUPERSEDES the rewrite's white
-        // rule): active light glyphs are the pastel container.
-        assertEquals(Color(0xFFFFCDC4), domainCardColors(entity("lock.a", "unlocked"), false)!!.badgeGlyph)
-        assertEquals(Color(0xFFC8F5A6), domainCardColors(entity("light.a", "on"), false)!!.badgeGlyph)
-        // Climate keeps its climate rows even for greenhouse names.
-        assertEquals(Color(0xFFFFD1B9), domainCardColors(entity("climate.greenhouse", "heat"), false)!!.container)
-        // Idle climate keeps the Heating row (previous CLIMATE family).
-        assertEquals(Color(0xFFFFD1B9), domainCardColors(entity("climate.a", "heat", mapOf("hvac_action" to "idle")), false)!!.container)
-    }
-
-    // Feedback round 4, item 3: in the light theme, every ACTIVE
-    // row's badge glyph is exactly its pastel container (the
-    // switch thumb color), while the badge polygon stays deep
-    // tonal ink. Inactive rows keep their white/gray glyphs.
-    @Test
-    fun lightThemeActiveGlyphEqualsContainer() {
-        val active = listOf(
-            entity("light.a", "on"),
-            entity("switch.a", "on"),
-            entity("switch.plug", "on", mapOf("current_power_w" to 320.0)),
-            entity("climate.a", "heat"),
-            entity("climate.a", "cool", mapOf("hvac_action" to "cooling")),
-            entity("climate.a", "heat_cool", mapOf("hvac_action" to "idle")),
-            entity("lock.a", "locked"),
-            entity("lock.a", "unlocked"),
-            entity("cover.a", "open"),
-            entity("cover.a", "closed"),
-            entity("alarm_control_panel.a", "disarmed"),
-            entity("alarm_control_panel.a", "armed_away"),
-            entity("media_player.a", "playing"),
-            entity("vacuum.a", "cleaning"),
-            entity("weather.a", "sunny"),
-            entity("automation.greenhouse_brain", "on"),
-            entity("sensor.power", "320", mapOf("device_class" to "power")),
-        )
-        for (e in active) {
-            val colors = domainCardColors(e, false)!!
-            assertEquals("${e.entityId} ${e.state} light glyph", colors.container, colors.badgeGlyph)
+    fun everyFamilyKeepsItsTextReadableInBothThemes() {
+        for (family in StateFamily.entries) {
+            for (isDark in listOf(false, true)) {
+                val c = family.colors(isDark)
+                val text = contrastRatio(c.onContainer, c.container)
+                val icon = contrastRatio(c.onAccent, c.accent)
+                assertTrue("$family dark=$isDark text on container $text below 4.5:1", text >= 4.5f)
+                assertTrue("$family dark=$isDark icon on badge $icon below 4.5:1", icon >= 4.5f)
+            }
         }
     }
 
     @Test
-    fun switchColorsFollowStateRows() {
-        val light = domainSwitchColors(entity("light.a", "on"), false)!!
-        assertEquals(Color(0xFF1B3708), light.trackChecked)
-        assertEquals(Color(0xFFC8F5A6), light.thumbChecked)
-        assertEquals(Color(0xFF52564E), light.trackUnchecked)
-        val lightDark = domainSwitchColors(entity("light.a", "on"), true)!!
-        assertEquals(Color(0xFFB8F397), lightDark.trackChecked)
-        assertEquals(Color(0xFF2B4E14), lightDark.thumbChecked)
-        // Dark unchecked track is the matrix switch hex, NOT the badge polygon.
-        assertEquals(Color(0xFF8C9188), lightDark.trackUnchecked)
-        val lock = domainSwitchColors(entity("lock.a", "locked"), false)!!
-        assertEquals(Color(0xFF111D52), lock.trackChecked)
-        assertEquals(Color(0xFF410002), lock.trackUnchecked)
-        val cover = domainSwitchColors(entity("cover.a", "open"), true)!!
-        assertEquals(Color(0xFFFFB4AB), cover.trackChecked)
-        assertEquals(Color(0xFFB9C3FF), cover.trackUnchecked)
-        assertNull(domainSwitchColors(entity("sensor.a", "72"), false))
-        assertNull(domainSwitchColors(entity("media_player.a", "playing"), false))
+    fun aTileIsItsFamilysContainerBadgeAndIcon() {
+        for (isDark in listOf(false, true)) {
+            val on = StateFamily.On.colors(isDark)
+            val lamp = domainCardColors(entity("light.a", "on"), isDark)!!
+            assertEquals(on.container, lamp.container)
+            assertEquals(on.accent, lamp.badgeBg)
+            assertEquals(on.onAccent, lamp.badgeGlyph)
+        }
     }
 
     @Test
-    fun unmappedDomainsFallThroughToExistingPipeline() {
-        // Docked vacuum is Inactive (off) per the matrix; binary
-        // sensors have no matrix row and keep the old pipeline.
-        assertEquals(Color(0xFFE6EBD3), domainCardColors(entity("vacuum.t2292", "docked"), false)!!.container)
-        assertNull(domainCardColors(entity("binary_sensor.door", "off", mapOf("device_class" to "door")), false))
+    fun byDayTheBadgeIconIsTheCardsOwnColor() {
+        // The icon is cut from the tile: on a light theme it is exactly
+        // the container color, so badge and card read as one piece.
+        for (e in everyTile) {
+            val colors = domainCardColors(e, isDark = false)!!
+            assertEquals("${e.entityId} ${e.state}", colors.container, colors.badgeGlyph)
+        }
+    }
+
+    @Test
+    fun statesMapToFamilies() {
+        fun family(id: String, state: String, attrs: Map<String, Any?> = emptyMap()) =
+            domainFamily(entity(id, state, attrs))
+
+        assertEquals(StateFamily.On, family("light.a", "on"))
+        assertEquals(StateFamily.Quiet, family("light.a", "off"))
+        assertEquals(StateFamily.On, family("switch.a", "on"))
+        assertEquals(StateFamily.Quiet, family("fan.a", "off"))
+
+        assertEquals(StateFamily.Heat, family("climate.a", "heat", mapOf("hvac_action" to "heating")))
+        assertEquals(StateFamily.Cool, family("climate.a", "cool", mapOf("hvac_action" to "cooling")))
+        // On but idle stays warm: a grey thermostat reads as broken.
+        assertEquals(StateFamily.Heat, family("climate.a", "heat", mapOf("hvac_action" to "idle")))
+        assertEquals(StateFamily.Heat, family("climate.a", "heat_cool"))
+
+        assertEquals(StateFamily.Secure, family("lock.a", "locked"))
+        assertEquals(StateFamily.Secure, family("lock.a", "locking"))
+        assertEquals(StateFamily.Alert, family("lock.a", "unlocked"))
+        assertEquals(StateFamily.Alert, family("lock.a", "jammed"))
+        assertEquals(StateFamily.Alert, family("cover.a", "open"))
+        assertEquals(StateFamily.Alert, family("cover.a", "opening"))
+        assertEquals(StateFamily.Secure, family("cover.a", "closed"))
+
+        assertEquals(StateFamily.Secure, family("alarm_control_panel.a", "disarmed"))
+        assertEquals(StateFamily.Heat, family("alarm_control_panel.a", "armed_home"))
+        assertEquals(StateFamily.Heat, family("alarm_control_panel.a", "triggered"))
+
+        // Paused media keeps its color: a favourite that is not playing is not dead.
+        assertEquals(StateFamily.Media, family("media_player.a", "playing"))
+        assertEquals(StateFamily.Media, family("media_player.a", "paused"))
+
+        assertEquals(StateFamily.On, family("vacuum.a", "cleaning"))
+        assertEquals(StateFamily.Quiet, family("vacuum.a", "docked"))
+        assertEquals(StateFamily.Alert, family("vacuum.a", "error"))
+        assertEquals(StateFamily.Cool, family("weather.a", "rainy"))
+    }
+
+    @Test
+    fun aPlugWithAPowerReadingIsPowerAndAPlainSwitchIsOn() {
+        assertEquals(StateFamily.Power, domainFamily(entity("switch.plug", "on", mapOf("current_power_w" to 320.0))))
+        assertEquals(StateFamily.On, domainFamily(entity("switch.plain", "on")))
+        // Off is off, whatever it could measure.
+        assertEquals(StateFamily.Quiet, domainFamily(entity("switch.plug", "off", mapOf("current_power_w" to 0.0))))
+    }
+
+    @Test
+    fun sensorsTakeTheFamilyOfWhatTheyMeasure() {
+        fun family(id: String, deviceClass: String?) =
+            domainFamily(entity(id, "1", deviceClass?.let { mapOf("device_class" to it) } ?: emptyMap()))
+
+        assertEquals(StateFamily.Heat, family("sensor.a", "temperature"))
+        assertEquals(StateFamily.Water, family("sensor.a", "humidity"))
+        assertEquals(StateFamily.Power, family("sensor.a", "power"))
+        assertEquals(StateFamily.On, family("sensor.a", "battery"))
+        // A reading with no meaning of its own stays neutral.
+        assertEquals(StateFamily.Quiet, family("sensor.people_count", null))
+    }
+
+    @Test
+    fun binarySensorsSpeakOnlyWhenTriggered() {
+        fun family(state: String, deviceClass: String) =
+            domainFamily(entity("binary_sensor.a", state, mapOf("device_class" to deviceClass)))
+
+        assertEquals(StateFamily.Caution, family("on", "motion"))
+        assertEquals(StateFamily.Alert, family("on", "door"))
+        assertEquals(StateFamily.Alert, family("on", "smoke"))
+        assertEquals(StateFamily.Quiet, family("off", "motion"))
+        assertEquals(StateFamily.Quiet, family("off", "door"))
+    }
+
+    @Test
+    fun greenhouseAndIrrigationReadAsOnExceptAThermostat() {
+        assertEquals(StateFamily.On, domainFamily(entity("automation.greenhouse_brain", "on")))
+        assertEquals(StateFamily.On, domainFamily(entity("switch.irrigation_zone_1", "off")))
+        assertEquals(StateFamily.Heat, domainFamily(entity("climate.greenhouse", "heat")))
+    }
+
+    @Test
+    fun unavailableAndUnknownAreQuietInBothThemes() {
+        for (isDark in listOf(false, true)) {
+            val quiet = inactiveCardColors(isDark)
+            assertEquals(quiet, domainCardColors(entity("light.a", "unavailable"), isDark))
+            assertEquals(quiet, domainCardColors(entity("lock.a", "unknown"), isDark))
+            assertEquals(quiet, domainCardColors(entity("media_player.a", ""), isDark))
+        }
+    }
+
+    @Test
+    fun domainsWithNoTileMeaningResolveToNothing() {
+        assertNull(domainCardColors(entity("scene.movie_night", "2026-01-01T00:00:00"), false))
+        assertNull(domainCardColors(entity("person.alex", "home"), false))
+    }
+
+    @Test
+    fun switchColorsFollowTheTileFamilies() {
+        for (isDark in listOf(false, true)) {
+            val on = StateFamily.On.colors(isDark)
+            val light = domainSwitchColors(entity("light.a", "on"), isDark)!!
+            assertEquals(on.accent, light.trackChecked)
+            assertEquals(on.container, light.thumbChecked)
+            assertEquals(restingSwitchTrack(isDark), light.trackUnchecked)
+
+            val plug = domainSwitchColors(entity("switch.plug", "on", mapOf("current_power_w" to 5.0)), isDark)!!
+            assertEquals(StateFamily.Power.colors(isDark).accent, plug.trackChecked)
+
+            // A lock or a cover has no "off": its other position is its other state.
+            val lock = domainSwitchColors(entity("lock.a", "locked"), isDark)!!
+            assertEquals(StateFamily.Secure.colors(isDark).accent, lock.trackChecked)
+            assertEquals(StateFamily.Alert.colors(isDark).accent, lock.trackUnchecked)
+            val cover = domainSwitchColors(entity("cover.a", "open"), isDark)!!
+            assertEquals(StateFamily.Alert.colors(isDark).accent, cover.trackChecked)
+            assertEquals(StateFamily.Secure.colors(isDark).accent, cover.trackUnchecked)
+        }
+        assertNull(domainSwitchColors(entity("sensor.a", "1"), false))
+    }
+
+    @Test
+    fun aSwitchThumbIsVisibleOnItsTrackEitherWay() {
+        for (isDark in listOf(false, true)) {
+            for (e in listOf(entity("light.a", "on"), entity("lock.a", "locked"), entity("cover.a", "open"))) {
+                val s = domainSwitchColors(e, isDark)!!
+                assertTrue(contrastRatio(s.thumbChecked, s.trackChecked) >= 3f)
+                assertTrue(contrastRatio(s.thumbUnchecked, s.trackUnchecked) >= 3f)
+            }
+        }
     }
 }

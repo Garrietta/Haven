@@ -143,10 +143,10 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
 import com.garrietta.haven.data.UpdateSummary
 import com.garrietta.haven.data.updatesSummary
-import com.garrietta.haven.ui.components.KodaMenuDivider
-import com.garrietta.haven.ui.components.KodaMenuGroup
-import com.garrietta.haven.ui.components.KodaMenuRow
-import com.garrietta.haven.ui.components.KodaMenuSection
+import com.garrietta.haven.ui.components.MenuDivider
+import com.garrietta.haven.ui.components.MenuGroup
+import com.garrietta.haven.ui.components.MenuRow
+import com.garrietta.haven.ui.components.MenuSection
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.springSpatial
@@ -217,13 +217,44 @@ import com.garrietta.haven.data.tabPlacementFor
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.isRingCamera
 import java.util.Calendar
+import com.garrietta.haven.ui.theme.Palette
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.HavenLockup
+import com.garrietta.haven.ui.theme.HavenChrome
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import com.garrietta.haven.ui.components.HavenMark
+import com.garrietta.haven.ui.components.HavenWordmark
+import com.garrietta.haven.ui.theme.leafCard
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import com.garrietta.haven.ui.components.ScreenTitle
+import com.garrietta.haven.ui.components.choiceChipColors
 
+/**
+ * Sign-in. One job, so one clear path: the address of the user's Home
+ * Assistant (typed, or picked from the instances found on the network),
+ * then "Sign in". The long-lived token route does the same job for
+ * setups the browser flow cannot reach; it is one tap away behind a
+ * disclosure instead of sharing the screen with the main path.
+ *
+ * The screen paints the scheme background itself, in both themes, so the
+ * text on it is always the scheme's text on the scheme's ground.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LoginScreen(vm: HavenViewModel) {
     var url by remember { mutableStateOf(vm.tokenStore.instanceUrl ?: "") }
     var token by remember { mutableStateOf("") }
-    // The authorize page renders in-app (see OAuthWebViewScreen): Chrome's stack
-    // cannot load this phone's instance, so no browser-based flow is used.
+    var showToken by rememberSaveable { mutableStateOf(false) }
+    // The authorize page renders in-app (see OAuthWebViewScreen): the
+    // phone's browser cannot always reach a LAN instance.
     var oauthUrl by remember { mutableStateOf<String?>(null) }
     if (oauthUrl != null) {
         BackHandler { oauthUrl = null }
@@ -231,166 +262,233 @@ fun LoginScreen(vm: HavenViewModel) {
         return
     }
     val discovered by vm.discoveredInstances.collectAsState()
-    val connecting = vm.connection.collectAsState().value is ConnectionState.Connecting ||
-        vm.connection.collectAsState().value is ConnectionState.Authenticating
+    val conn = vm.connection.collectAsState().value
+    val connecting = conn is ConnectionState.Connecting || conn is ConnectionState.Authenticating
+    val busy = connecting || vm.probing
     // mDNS discovery runs only while the login screen is visible.
     DisposableEffect(Unit) {
         vm.discovery.startMdns()
         onDispose { vm.discovery.stopMdns() }
     }
-    Column(
-        // The login screen paints the scheme background itself: without
-        // this, the window background showed through — white under the
-        // Light activity theme — so dark-mode text was light-on-white and
-        // unreadable, and the screen "bounced" to dark after sign-in when
-        // the Scaffold painted. The DayNight activity theme covers the
-        // window; this covers the content, in both modes, with no
-        // hardcoded color.
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp),
-        verticalArrangement = Arrangement.Center,
+    val scheme = MaterialTheme.colorScheme
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(scheme.background).statusBarsPadding().navigationBarsPadding().imePadding(),
+        contentAlignment = Alignment.TopCenter,
     ) {
-        Text("Haven", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Text(
-            "Your home, designed — not a web page in a frame.",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(24.dp))
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it },
-            label = { Text("Home Assistant URL") },
-            placeholder = { Text("https://home.example.com") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "Find on my network",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(4.dp))
-        if (discovered.isEmpty()) {
+        Column(
+            // At least as tall as the window, so a short form sits in
+            // the middle of a tall screen instead of hanging from the top.
+            Modifier.widthIn(max = 480.dp).fillMaxWidth().verticalScroll(rememberScrollState())
+                .heightIn(min = maxHeight)
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            // Brand
+            HavenMark(Modifier.size(88.dp), turning = true)
+            Spacer(Modifier.height(20.dp))
+            HavenWordmark(fontSize = 44.sp)
+            Spacer(Modifier.height(4.dp))
             Text(
-                "Looking for Home Assistant on your Wi-Fi…",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                "Home Assistant, designed.",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurfaceVariant,
             )
-        } else {
-            for (instance in discovered) {
-                Row(
-                    Modifier.fillMaxWidth().clickable {
-                        url = instance.url
-                        vm.preflight(instance.url) {}
-                    }.padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(instance.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                        Text(instance.url, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(28.dp))
+
+            // Where is your home?
+            Surface(color = scheme.surfaceContainerLow, shape = leafCard(0)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = { url = it },
+                        label = { Text("Home Assistant address") },
+                        placeholder = { Text("https://home.example.com") },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SectionTitle("On your network", Modifier.weight(1f))
+                        TextButton(onClick = { vm.scanNetwork() }, enabled = !vm.scanning) {
+                            Text(if (vm.scanning) "Scanning…" else "Scan")
+                        }
                     }
+                    if (discovered.isEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LoadingIndicator(Modifier.size(20.dp), color = scheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Looking for Home Assistant on your Wi-Fi…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        for (instance in discovered) {
+                            val picked = instance.url == url
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .background(if (picked) scheme.primaryContainer else scheme.surfaceContainerHigh)
+                                    .clickable {
+                                        url = instance.url
+                                        vm.preflight(instance.url) {}
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        instance.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (picked) scheme.onPrimaryContainer else scheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        instance.url,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (picked) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Text(
+                                    if (instance.source == DiscoverySource.MDNS) "Nearby" else "Scan",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (picked) scheme.onPrimaryContainer else scheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    vm.scanMessage?.let { message ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(message, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+
+            // The main path
+            Button(
+                onClick = {
+                    if (url.isNotBlank()) {
+                        // Pre-flight first: a dead address gets an explanation
+                        // here instead of a dead page. On success the authorize
+                        // page opens in-app (OAuthWebViewScreen).
+                        vm.preflight(url) { clean ->
+                            oauthUrl = vm.startOAuth(clean).toString()
+                        }
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) { Text("Sign in with Home Assistant", style = MaterialTheme.typography.titleSmall) }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Opens your instance's sign-in page inside Haven.",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+
+            // Status: what is happening, or what went wrong, right under the action.
+            if (busy) {
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LoadingIndicator(Modifier.size(24.dp), color = scheme.primary)
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        if (instance.source == DiscoverySource.MDNS) "Nearby" else "Scan",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
+                        if (vm.probing) "Checking that address…" else "Connecting…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
                     )
                 }
             }
-        }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = { vm.scanNetwork() },
-            enabled = !vm.scanning,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (vm.scanning) "Scanning…" else "Scan network") }
-        vm.scanMessage?.let { message ->
-            Spacer(Modifier.height(8.dp))
-            Text(message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = {
-                if (url.isNotBlank()) {
-                    // Pre-flight first: a dead address shows an in-app explanation
-                    // instead of a dead page. On success the authorize page opens
-                    // in-app (OAuthWebViewScreen), never in Chrome.
-                    vm.preflight(url) { clean ->
-                        oauthUrl = vm.startOAuth(clean).toString()
+            vm.probeOk?.let { ok ->
+                Spacer(Modifier.height(12.dp))
+                Text(ok, style = MaterialTheme.typography.bodyMedium, color = scheme.primary)
+            }
+            val problem = vm.authError ?: (conn as? ConnectionState.Error)?.message
+            if (problem != null) {
+                Spacer(Modifier.height(12.dp))
+                Surface(color = scheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+                    Text(
+                        problem,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onErrorContainer,
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // The other path
+            Surface(color = scheme.surfaceContainerLow, shape = leafCard(1)) {
+                Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { showToken = !showToken }.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Use an access token instead",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = scheme.onSurface,
+                            )
+                            Text(
+                                "Works when the sign-in page can't be reached.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            if (showToken) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            contentDescription = if (showToken) "Hide" else "Show",
+                            tint = scheme.onSurfaceVariant,
+                        )
+                    }
+                    AnimatedVisibility(visible = showToken) {
+                        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                            OutlinedTextField(
+                                value = token,
+                                onValueChange = { token = it },
+                                label = { Text("Long-lived access token") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            FilledTonalButton(
+                                onClick = {
+                                    if (url.isNotBlank() && token.isNotBlank()) {
+                                        vm.preflight(url) { clean -> vm.loginWithToken(clean, token.trim()) }
+                                    }
+                                },
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                            ) { Text("Connect with token") }
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "Create one in Home Assistant under Profile → Security → Long-lived access tokens.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Sign in with Home Assistant") }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Opens the sign-in page inside Haven.",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(20.dp))
-        Text(
-            "Long-lived access token — no browser needed",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            "Signs in directly from the app, so it works even when the phone's browser can't reach your instance.",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = token,
-            onValueChange = { token = it },
-            label = { Text("Long-lived access token") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(
-            onClick = {
-                if (url.isNotBlank() && token.isNotBlank()) {
-                    vm.preflight(url) { clean -> vm.loginWithToken(clean, token.trim()) }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Connect with token") }
-        if (connecting || vm.probing) {
-            Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(20.dp))
-                Text(
-                    if (vm.probing) "Checking that address…" else "Connecting…",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp),
-                )
             }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Haven talks only to your own instance. Tokens are encrypted on this device and never sent anywhere else.",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
-        vm.probeOk?.let { ok ->
-            Spacer(Modifier.height(16.dp))
-            Text(ok, color = MaterialTheme.colorScheme.primary)
-        }
-        vm.authError?.let { error ->
-            Spacer(Modifier.height(16.dp))
-            Text(error, color = MaterialTheme.colorScheme.error)
-        }
-        val conn = vm.connection.collectAsState().value
-        if (conn is ConnectionState.Error) {
-            Spacer(Modifier.height(8.dp))
-            Text(conn.message, color = MaterialTheme.colorScheme.error)
-        }
-        Spacer(Modifier.height(24.dp))
-        Text(
-            "Long-lived tokens live in your Home Assistant profile: Profile → Long-Lived Access Tokens → Create Token. Haven encrypts tokens on-device and never sends them anywhere except your instance.",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -825,6 +923,11 @@ internal fun buildHomeChips(
     }
 }
 
+/**
+ * The row of rooms under the greeting. A selected chip is the lime
+ * capsule, the same signal as the selected tab in the navigation bar:
+ * in Haven, lime means "this one", by day and by night.
+ */
 @Composable
 private fun RoomFilterChips(
     chips: List<HomeChip>,
@@ -835,19 +938,17 @@ private fun RoomFilterChips(
     ) {
         for (chip in chips) {
             val isSelected = chip.selected
-            val glyphColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+            val glyphColor = if (isSelected) HavenChrome.onCapsule
             else MaterialTheme.colorScheme.onSurfaceVariant
             Box(
-                Modifier.clip(RoundedCornerShape(50))
+                Modifier.clip(CircleShape)
                     .background(
-                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainer,
+                        if (isSelected) HavenChrome.capsule
+                        else MaterialTheme.colorScheme.surfaceContainerHigh,
                     )
                     .clickable { chip.onClick() }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
-                // Stage G: a room's chosen icon rides in its chip
-                // (Filled variant; unknown keys render no icon).
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val icon = chip.iconKey?.let { tabIconPairForKey(it)?.first }
                     if (icon != null) {
@@ -856,8 +957,8 @@ private fun RoomFilterChips(
                     }
                     Text(
                         chip.label,
-                        fontSize = 14.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         color = glyphColor,
                         maxLines = 1,
                     )
@@ -877,7 +978,7 @@ private fun RoomFilterChips(
  */
 @Composable
 private fun WeatherBlock(weather: HaEntity, vm: HavenViewModel, navigate: (Screen) -> Unit) {
-    Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    SectionTitle("Weather")
     Spacer(Modifier.height(8.dp))
     HomeWeatherCard(weather, vm, navigate)
     Spacer(Modifier.height(16.dp))
@@ -1007,7 +1108,7 @@ private fun RoomSectionGrid(
                 Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
             }
-            Text(name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f, fill = false))
+            SectionTitle(name, Modifier.weight(1f, fill = false))
             // Round 21, item 7: the Arrange button is gone — a
             // long-press on any card in this section enters
             // Arrange/resize mode instead (onArrangeToggle below).
@@ -1588,13 +1689,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     } else {
         null
     }
-    val cardColors = if (sensorKindForCard == SensorKind.TEMPERATURE ||
-        sensorKindForCard == SensorKind.HUMIDITY
-    ) {
-        null
-    } else {
-        domainCardColors(display, isDark)
-    }
+    val cardColors = domainCardColors(display, isDark)
     // Customization round, item 2: same-store overrides read here
     // as on every other surface (see CardSettings.kt for the list).
     val roomCustom = rememberCardCustom(vm)
@@ -1991,22 +2086,17 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
  * hidden, exactly as the old section did.
  */
 /**
- * Greeting + connection line (2026-11-01 polish round): a transient
- * connection loss is NEVER a red banner and never a modal — it is a
- * small inline spinner row in this exact slot, in-flow (it pushes
- * content down, it overlays nothing), which clears on its own the
- * moment the connection recovers. The row distinguishes three cases:
- * a retry already in flight (spinner + "Reconnecting…" when cached
- * content is on screen, "Connecting…" on a cold first load, so the
- * subtitle stays stable across Error <-> Connecting cycles during
- * an outage), a hard auth failure (no spinner — the token was
- * rejected and no retry is scheduled — inline variant-colored text
- * that taps through to sign in again), and plain Disconnected
- * (variant-colored "Not connected", no spinner). Retries are
- * indefinite, so there is no "retries exhausted" state to present:
- * the spinner simply stays until the connection recovers or the
- * failure turns into an auth rejection.
+ * The top of Home: the Haven lockup as a small signature, then the
+ * greeting as the one big line on the screen, then the connection state
+ * when there is something to say about it.
+ *
+ * The greeting is the hero rather than the app's name: it is the line
+ * that changes (time of day, or the user's own welcome message), and the
+ * brand does its work at signature size. [showGreeting] hides both, for
+ * users who turned the section off; the connection line always shows,
+ * because "not connected" must never be hidden by a layout preference.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun GreetingBlock(
     greeting: String,
@@ -2017,65 +2107,51 @@ private fun GreetingBlock(
 ) {
     if (showGreeting) {
         Spacer(Modifier.height(16.dp))
-        // Mockup masthead (Gemini mockup round, 2026-11-01): the very
-        // large bold "Haven" masthead, with the greeting as the smaller
-        // gray subheading under it — the mockup's header, not a second
-        // greeting. The connection line below is untouched (#83).
-        Text("Haven", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
-        Spacer(Modifier.height(2.dp))
-        Text(greeting, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HavenLockup(markSize = 26.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(14.dp))
+        Text(
+            greeting,
+            style = MaterialTheme.typography.headlineLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
     }
     if (!connection.isLive()) {
-        Spacer(Modifier.height(4.dp))
-        when (connection) {
-            is ConnectionState.Connecting, ConnectionState.Authenticating -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (hasCachedContent) "Reconnecting…" else "Connecting to your home…",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                    )
-                }
-            }
-            is ConnectionState.Error -> if (connection.retrying) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (hasCachedContent) "Reconnecting…" else "Connecting…",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                    )
-                }
-            } else {
-                // Round 25, item 1: the tap reconnects in place
-                // (vm.reconnectNow — refresh + reconnect, tokens
-                // untouched). It NEVER signs out; signOut lives only
-                // on the Settings screen's explicit button.
+        Spacer(Modifier.height(6.dp))
+        val waiting = connection is ConnectionState.Connecting ||
+            connection is ConnectionState.Authenticating ||
+            (connection is ConnectionState.Error && connection.retrying)
+        if (waiting) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LoadingIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(6.dp))
                 Text(
-                    "Sign-in expired — tap to reconnect",
+                    when {
+                        hasCachedContent -> "Reconnecting…"
+                        connection is ConnectionState.Error -> "Connecting…"
+                        else -> "Connecting to your home…"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 13.sp,
-                    modifier = if (onReconnectTap != null) Modifier.clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                    ) { onReconnectTap() } else Modifier,
                 )
             }
-            else -> Text(
-                "Not connected",
+        } else if (connection is ConnectionState.Error) {
+            Text(
+                "Sign-in expired — tap to reconnect",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp,
+                modifier = if (onReconnectTap != null) Modifier.clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) { onReconnectTap() } else Modifier,
+            )
+        } else {
+            Text(
+                "Not connected",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -2162,10 +2238,11 @@ private fun SettingsAppearanceSection(
     dynamicColor: Boolean,
     onDynamicColor: (Boolean) -> Unit,
 ) {
-    KodaMenuSection("Appearance")
+    MenuSection("Appearance")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for ((value, label) in listOf("system" to "System", "light" to "Light", "dark" to "Dark")) {
             FilterChip(
+                colors = choiceChipColors(),
                 selected = themeMode == value,
                 onClick = { onThemeMode(value) },
                 label = { Text(label) },
@@ -2173,8 +2250,8 @@ private fun SettingsAppearanceSection(
         }
     }
     Spacer(Modifier.height(8.dp))
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuGroup {
+        MenuRow(
             badgeKey = "appearance-motion",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.Autorenew,
@@ -2184,8 +2261,8 @@ private fun SettingsAppearanceSection(
             trailing = { Switch(checked = reduceMotion, onCheckedChange = onReduceMotion) },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "appearance-dynamic-color",
             badgeKind = ExpressiveKind.SUNNY,
             icon = Icons.Filled.Palette,
@@ -2203,9 +2280,9 @@ private fun SettingsBadgesSection(vm: HavenViewModel) {
     // Stage E §9: condition badges — a dot, never a count.
     // Device badges are the tiles' own state badges (always on:
     // they carry tap actions, so they are not a preference).
-    KodaMenuSection("Badges")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Badges")
+    MenuGroup {
+        MenuRow(
             badgeKey = "badges-nav",
             badgeKind = ExpressiveKind.FLOWER,
             icon = Icons.Filled.Visibility,
@@ -2215,8 +2292,8 @@ private fun SettingsBadgesSection(vm: HavenViewModel) {
             trailing = { Switch(checked = vm.badgeNav, onCheckedChange = { vm.badgeNav = it }) },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "badges-room",
             badgeKind = ExpressiveKind.WAVE,
             icon = Icons.Filled.Home,
@@ -2235,8 +2312,8 @@ private fun SettingsConnectionSection(
     connection: ConnectionState,
     onOpenDialog: () -> Unit,
 ) {
-    KodaMenuSection("Connection")
-    KodaMenuGroup {
+    MenuSection("Connection")
+    MenuGroup {
         // Feedback round 16, item 7: the Instance row is
         // tappable and shows Local vs Cloud for the
         // EFFECTIVE target (anything not a local address
@@ -2246,7 +2323,7 @@ private fun SettingsConnectionSection(
         // stored URL.
         val connTick = vm.connectionPrefsVersion
         val (connLabel, connTarget) = remember(connTick) { vm.connectionDisplay() }
-        KodaMenuRow(
+        MenuRow(
             badgeKey = "connection-instance",
             badgeKind = ExpressiveKind.CLOUD,
             icon = Icons.Filled.Wifi,
@@ -2255,8 +2332,8 @@ private fun SettingsConnectionSection(
             onClick = onOpenDialog,
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "connection-status",
             badgeKind = ExpressiveKind.CLOUD,
             icon = Icons.Filled.Wifi,
@@ -2276,9 +2353,9 @@ private fun SettingsConnectionSection(
 
 @Composable
 private fun SettingsHomePageSection(navigate: (Screen) -> Unit) {
-    KodaMenuSection("Home page")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Home page")
+    MenuGroup {
+        MenuRow(
             badgeKey = "home-manage",
             badgeKind = ExpressiveKind.SUNNY,
             icon = Icons.Filled.Home,
@@ -2292,9 +2369,9 @@ private fun SettingsHomePageSection(navigate: (Screen) -> Unit) {
 
 @Composable
 private fun SettingsRoomsSection(navigate: (Screen) -> Unit) {
-    KodaMenuSection("Rooms")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Rooms")
+    MenuGroup {
+        MenuRow(
             badgeKey = "rooms-manage",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.GridView,
@@ -2308,9 +2385,9 @@ private fun SettingsRoomsSection(navigate: (Screen) -> Unit) {
 
 @Composable
 private fun SettingsNotificationsSection(vm: HavenViewModel) {
-    KodaMenuSection("Notifications")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Notifications")
+    MenuGroup {
+        MenuRow(
             badgeKey = "notif-garage",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.Garage,
@@ -2325,8 +2402,8 @@ private fun SettingsNotificationsSection(vm: HavenViewModel) {
                 Switch(checked = vm.notifyGarage, onCheckedChange = { vm.notifyGarage = it })
             },
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "notif-motion",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.AutoMirrored.Filled.DirectionsRun,
@@ -2339,8 +2416,8 @@ private fun SettingsNotificationsSection(vm: HavenViewModel) {
                 Switch(checked = vm.notifyMotion, onCheckedChange = { vm.notifyMotion = it })
             },
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "notif-lights",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.Lightbulb,
@@ -2353,16 +2430,16 @@ private fun SettingsNotificationsSection(vm: HavenViewModel) {
                 Switch(checked = vm.notifyLights, onCheckedChange = { vm.notifyLights = it })
             },
         )
-        KodaMenuDivider()
+        MenuDivider()
         NotificationPermissionRow()
     }
 }
 
 @Composable
 private fun SettingsShapesSection(vm: HavenViewModel) {
-    KodaMenuSection("Shapes")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Shapes")
+    MenuGroup {
+        MenuRow(
             badgeKey = "shapes-badge",
             badgeKind = ExpressiveKind.SUNNY,
             icon = Icons.Filled.Palette,
@@ -2371,8 +2448,8 @@ private fun SettingsShapesSection(vm: HavenViewModel) {
             onClick = { vm.openShapePicker(null, false) },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "shapes-card",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.GridView,
@@ -2381,13 +2458,13 @@ private fun SettingsShapesSection(vm: HavenViewModel) {
             onClick = { vm.openShapePicker(null, true) },
             flat = true,
         )
-        KodaMenuDivider()
+        MenuDivider()
         // Feedback round 15, item 5: per-domain defaults —
         // badge shape, card shape, and tile color for one
         // entity type (e.g. light), applying to every
         // entity of that domain unless it has its own
         // Card settings. Per-entity settings still win.
-        KodaMenuRow(
+        MenuRow(
             badgeKey = "shapes-domain",
             badgeKind = ExpressiveKind.SUNNY,
             icon = Icons.Filled.Tune,
@@ -2401,9 +2478,9 @@ private fun SettingsShapesSection(vm: HavenViewModel) {
 
 @Composable
 private fun SettingsBrowseSection(navigate: (Screen) -> Unit) {
-    KodaMenuSection("Browse")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Browse")
+    MenuGroup {
+        MenuRow(
             badgeKey = "browse-boards",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.Dashboard,
@@ -2412,8 +2489,8 @@ private fun SettingsBrowseSection(navigate: (Screen) -> Unit) {
             onClick = { navigate(Screen.Dashboards) },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "browse-areas",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.GridView,
@@ -2422,8 +2499,8 @@ private fun SettingsBrowseSection(navigate: (Screen) -> Unit) {
             onClick = { navigate(Screen.Areas) },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "browse-search",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.Search,
@@ -2432,8 +2509,8 @@ private fun SettingsBrowseSection(navigate: (Screen) -> Unit) {
             onClick = { navigate(Screen.Search) },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "browse-usertabs",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.GridView,
@@ -2450,9 +2527,9 @@ private fun SettingsCreateHubSection(navigate: (Screen) -> Unit) {
     // Round 24, item 5: the four Create rows collapsed into
     // one hub row — the builders themselves are unchanged,
     // they just open from the hub screen now.
-    KodaMenuSection("Create")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Create")
+    MenuGroup {
+        MenuRow(
             badgeKey = "create-hub",
             badgeKind = ExpressiveKind.WAVE,
             icon = Icons.Filled.Autorenew,
@@ -2470,9 +2547,9 @@ private fun SettingsSystemSection(
     updateSummary: UpdateSummary,
     navigate: (Screen) -> Unit,
 ) {
-    KodaMenuSection("System")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("System")
+    MenuGroup {
+        MenuRow(
             badgeKey = "system-updates",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.SystemUpdate,
@@ -2521,7 +2598,7 @@ fun SettingsScreen(
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
         item {
-            Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            ScreenTitle("Settings")
             Spacer(Modifier.height(8.dp))
             // Round 24, item 5: two columns on wide screens
             // (left: Appearance through Notifications, right:
@@ -2621,8 +2698,8 @@ fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(12.dp))
-                KodaMenuGroup {
-                    KodaMenuRow(
+                MenuGroup {
+                    MenuRow(
                         badgeKey = "create-automation",
                         badgeKind = ExpressiveKind.WAVE,
                         icon = Icons.Filled.Autorenew,
@@ -2631,8 +2708,8 @@ fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                         onClick = { navigate(Screen.AutomationBuilder) },
                         flat = true,
                     )
-                    KodaMenuDivider()
-                    KodaMenuRow(
+                    MenuDivider()
+                    MenuRow(
                         badgeKey = "create-scene",
                         badgeKind = ExpressiveKind.WAVE,
                         icon = Icons.Filled.Palette,
@@ -2641,8 +2718,8 @@ fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                         onClick = { navigate(Screen.SceneBuilder) },
                         flat = true,
                     )
-                    KodaMenuDivider()
-                    KodaMenuRow(
+                    MenuDivider()
+                    MenuRow(
                         badgeKey = "create-script",
                         badgeKind = ExpressiveKind.WAVE,
                         icon = Icons.Filled.Code,
@@ -2651,8 +2728,8 @@ fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                         onClick = { navigate(Screen.ScriptBuilder) },
                         flat = true,
                     )
-                    KodaMenuDivider()
-                    KodaMenuRow(
+                    MenuDivider()
+                    MenuRow(
                         badgeKey = "create-helper",
                         badgeKind = ExpressiveKind.WAVE,
                         icon = Icons.Filled.Build,
@@ -2754,7 +2831,7 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
     val camerasTab = vm.userTabs.firstOrNull { it.title == "Cameras" }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Cameras", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+            SectionTitle("Cameras", Modifier.weight(1f))
             if (camerasTab != null) {
                 TextButton(onClick = { navigate(Screen.UserTab(camerasTab.id)) }) { Text("See all") }
             }
@@ -2930,7 +3007,7 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                         if (showLive) {
                             Box(
                                 Modifier.size(6.dp).clip(CircleShape)
-                                    .background(Color(0xFF4CAF50)),
+                                    .background(Palette.Lime),
                             )
                             Spacer(Modifier.width(4.dp))
                             Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -2952,7 +3029,7 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                         ) {
                             Box(
                                 Modifier.size(6.dp).clip(CircleShape)
-                                    .background(Color(0xFFFFC107)),
+                                    .background(Palette.Sun),
                             )
                             Spacer(Modifier.width(4.dp))
                             Text("Motion", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -3331,7 +3408,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                 }
             }
             item {
-                Text("Tabs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                SectionTitle("Tabs")
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Home is always first and Settings is always last — everything else here is yours. " +
@@ -3345,7 +3422,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                 // Hidden tabs stay listed below with a selector, so a
                 // hidden tab can always come back; Settings can never be
                 // hidden or removed, by construction in pillBarItems.
-                Text("Navigation", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                SectionTitle("Navigation")
                 Spacer(Modifier.height(8.dp))
                 // Feedback round 15, item 3: Scenes and Energy are
                 // hideable from the bar/rail; Home and Settings are
@@ -3432,7 +3509,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                 }
             }
             item {
-                Text("Add a tab", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                SectionTitle("Add a tab")
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
@@ -3535,7 +3612,7 @@ private fun NotificationPermissionRow() {
         context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
     }
-    KodaMenuRow(
+    MenuRow(
         badgeKey = "notif-permission",
         badgeKind = ExpressiveKind.BUN,
         icon = Icons.Filled.Notifications,

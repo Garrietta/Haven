@@ -199,11 +199,9 @@ fun MorphShape(
 }
 
 /**
- * Pure clamp for morph progress (spring-value clamping rule): every
- * value derived from animated progress is clamped to [0, 1] BEFORE
- * computing geometry. An underdamped spring overshoots its target
- * (the observed 1.00493 peak crashed production in #53), so the
- * morph path must never see out-of-range progress.
+ * Clamps morph progress to 0..1 before any geometry is computed from it.
+ * A bouncy spring overshoots its target (1.005 has been seen on a
+ * phone), and a polygon morph handed progress outside its range throws.
  */
 fun clampMorphProgress(progress: Float): Float = progress.coerceIn(0f, 1f)
 

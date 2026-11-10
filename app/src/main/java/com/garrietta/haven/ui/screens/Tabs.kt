@@ -76,6 +76,8 @@ import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import org.json.JSONObject
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.ScreenTitle
 
 /**
  * User tabs: a title plus cards, each card stored as YAML text. Tab pages
@@ -109,7 +111,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             // vanishing into the background — the 2026-10-29
             // verdict's "hermostat" frame). Titles stay fully
             // rendered through the whole morph and at rest.
-            Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            ScreenTitle(tab.title, Modifier.weight(1f))
             // Round 21, item 7: the Arrange button is gone — a
             // long-press on any tile enters Arrange mode.
             OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Edit") }
@@ -237,7 +239,7 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         contentPadding = PaddingValues(bottom = 96.dp),
     ) {
         item {
-            Text("User tabs", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ScreenTitle("User tabs")
             Spacer(Modifier.height(8.dp))
             Text("Your custom tabs. Hidden tabs live in Manage tabs.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(16.dp))
@@ -406,7 +408,7 @@ internal fun TabEditorCard(
                 Spacer(Modifier.height(4.dp))
             }
             Spacer(Modifier.height(8.dp))
-            Text("Add a card", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            SectionTitle("Add a card")
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {

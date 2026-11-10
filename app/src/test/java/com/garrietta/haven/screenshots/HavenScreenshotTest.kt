@@ -3,7 +3,11 @@ package com.garrietta.haven.screenshots
 import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.garrietta.haven.HavenApp
@@ -49,14 +53,36 @@ class HavenScreenshotTest {
         return vm
     }
 
-    private fun shoot(name: String, qualifiers: String, vm: HavenViewModel, settle: Long = 1_500L) {
+    /**
+     * Renders the app and captures it. [then] drives the UI first (a tap
+     * on a tab or a tile); the clock is advanced by hand around it,
+     * because the app always has something animating (a loading
+     * indicator, the mark's sun) and would never report itself idle.
+     */
+    private fun shoot(
+        name: String,
+        qualifiers: String,
+        vm: HavenViewModel,
+        then: (() -> Unit)? = null,
+    ) {
         RuntimeEnvironment.setQualifiers(qualifiers)
         compose.mainClock.autoAdvance = false
         compose.activityRule.scenario.recreate()
         compose.setContent { HavenApp(vm) }
-        compose.mainClock.advanceTimeBy(settle)
-        compose.onRoot().captureRoboImage("build/outputs/roborazzi/$name.png")
+        compose.mainClock.advanceTimeBy(SETTLE_MS)
+        if (then != null) {
+            then()
+            compose.mainClock.advanceTimeBy(SETTLE_MS)
+        }
+        // onRoot() would be ambiguous while a popup's own window is up.
+        compose.onAllNodes(isRoot()).onLast().captureRoboImage("build/outputs/roborazzi/$name.png")
     }
+
+    // The navigation bar is drawn last, so its item is the last node
+    // carrying the label (a Home card can share it, like "Energy").
+    private fun tapTab(label: String) = compose.onAllNodesWithContentDescription(label).onLast().performClick()
+
+    private fun tapText(text: String) = compose.onNodeWithText(text).performClick()
 
     @Test fun login_folded_light() = shoot("login_folded_light", FOLDED, viewModel(signedIn = false, dark = false))
 
@@ -82,7 +108,37 @@ class HavenScreenshotTest {
         shoot("room_folded_dark", FOLDED, vm)
     }
 
+    @Test fun settings_folded_light() =
+        shoot("settings_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapTab("Settings") }
+
+    @Test fun settings_folded_dark() =
+        shoot("settings_folded_dark", FOLDED, viewModel(signedIn = true, dark = true)) { tapTab("Settings") }
+
+    @Test fun settings_unfolded_light() =
+        shoot("settings_unfolded_light", UNFOLDED, viewModel(signedIn = true, dark = false)) { tapTab("Settings") }
+
+    @Test fun scenes_folded_light() =
+        shoot("scenes_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapTab("Scenes") }
+
+    @Test fun energy_folded_dark() =
+        shoot("energy_folded_dark", FOLDED, viewModel(signedIn = true, dark = true)) { tapTab("Energy") }
+
+    @Test fun light_popup_folded_light() {
+        val vm = viewModel(signedIn = true, dark = false)
+        vm.roomFilter = RoomFilter.Area("living_room")
+        shoot("light_popup_folded_light", FOLDED, vm) { tapText("Floor Lamp") }
+    }
+
+    @Test fun thermostat_popup_folded_dark() {
+        val vm = viewModel(signedIn = true, dark = true)
+        vm.roomFilter = RoomFilter.Area("living_room")
+        shoot("thermostat_popup_folded_dark", FOLDED, vm) { tapText("Thermostat") }
+    }
+
     private companion object {
+        /** Long enough for every spring in the app to come to rest. */
+        const val SETTLE_MS = 1_500L
+
         /** The Fold's cover screen, in dp. */
         const val FOLDED = "w384dp-h880dp-xhdpi"
 

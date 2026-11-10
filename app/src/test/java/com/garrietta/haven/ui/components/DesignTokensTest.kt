@@ -9,25 +9,18 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.garrietta.haven.ui.theme.Palette
 
 class DesignTokensTest {
 
     private val scheme = lightColorScheme()
 
     @Test
-    fun pillTokensMatchRewriteDirective() {
-        // UI rewrite round: theme-independent chrome — the same
-        // container, lime capsule, ink glyph, and pale-sage
-        // unselected icons in BOTH themes (never blue on dark).
-        // Feedback round 2, item 5, briefly made the unselected
-        // glyph theme-aware (no container behind the pill); round
-        // 3, item 1, REVERTS that (video ba: the user wants the
-        // pill AND its background kept) — the #108 law below is
-        // the standing law again.
-        assertEquals(Color(0xFF161D17), PillBarContainer)
-        assertEquals(Color(0xFF9BF67C), PillBarActiveCapsule)
-        assertEquals(Color(0xFF0A2005), PillBarActiveGlyph)
-        assertEquals(Color(0xFFD7E2D4), PillBarUnselectedGlyph)
+    fun navigationChromeIsTheSameInBothThemes() {
+        // The bar is the brand in miniature: near-black green with a
+        // lime capsule, by day and by night. No theme changes it.
+        assertEquals(Palette.Ink, PillBarContainer)
+        assertEquals(Palette.Lime, PillBarActiveCapsule)
         val dark = darkColorScheme()
         assertEquals(PillBarActiveCapsule, selectedPillFill(scheme, false))
         assertEquals(PillBarActiveCapsule, selectedPillFill(dark, true))
@@ -35,8 +28,8 @@ class DesignTokensTest {
         assertEquals(PillBarActiveGlyph, selectedPillGlyph(dark, true))
         assertEquals(PillBarUnselectedGlyph, pillUnselectedGlyph(scheme, false))
         assertEquals(PillBarUnselectedGlyph, pillUnselectedGlyph(dark, true))
-        // Active glyph on capsule, and unselected sage on the
-        // near-black container, both clear 4.5:1.
+        // The selected glyph on the capsule and the resting glyphs on
+        // the bar both clear 4.5:1.
         assertTrue(contrastRatio(PillBarActiveGlyph, PillBarActiveCapsule) >= 4.5f)
         assertTrue(contrastRatio(PillBarUnselectedGlyph, PillBarContainer) >= 4.5f)
     }
@@ -52,14 +45,18 @@ class DesignTokensTest {
 
     @Test
     fun lightTempTintEndpointsAreWarmAndCool() {
-        assertEquals(Color(0xFFFFB300), lightColorTempTint(2000))
+        val warm = lightColorTempTint(2000)
+        val cool = lightColorTempTint(6500)
+        assertEquals(Palette.Honey.t80, warm)
         // Lerp at fraction 1 can differ by 1 ULP from the endpoint, so
         // compare components with tolerance instead of exact equality.
-        val cool = lightColorTempTint(6500)
-        val expected = Color(0xFFCCE4FF)
+        val expected = Palette.Frost.t90
         assertEquals(expected.red, cool.red, 0.002f)
         assertEquals(expected.green, cool.green, 0.002f)
         assertEquals(expected.blue, cool.blue, 0.002f)
+        // Candlelight is redder than daylight, daylight bluer than candlelight.
+        assertTrue(warm.red > warm.blue)
+        assertTrue(cool.blue > warm.blue)
     }
 
     @Test
@@ -162,21 +159,22 @@ class DesignTokensTest {
 
     @Test
     fun climateModeColorFollowsHeatingCooling() {
-        assertEquals(Color(0xFFD84315), climateModeColor("heat", null))
-        assertEquals(Color(0xFF1565C0), climateModeColor("cool", null))
+        assertEquals(HeatOrange, climateModeColor("heat", null))
+        assertEquals(CoolBlue, climateModeColor("cool", null))
         // heat_cool / auto default to the heating color (heating
         // selector is the default selector).
-        assertEquals(Color(0xFFD84315), climateModeColor("heat_cool", null))
-        assertEquals(Color(0xFFD84315), climateModeColor("auto", null))
+        assertEquals(HeatOrange, climateModeColor("heat_cool", null))
+        assertEquals(HeatOrange, climateModeColor("auto", null))
         // hvac_action is the live truth and wins over the mode.
-        assertEquals(Color(0xFF1565C0), climateModeColor("heat_cool", "cooling"))
-        assertEquals(Color(0xFFD84315), climateModeColor("heat_cool", "heating"))
+        assertEquals(CoolBlue, climateModeColor("heat_cool", "cooling"))
+        assertEquals(HeatOrange, climateModeColor("heat_cool", "heating"))
         // Off / idle / dry / fan_only are neither: neutral, never a
         // heating or cooling color.
-        assertEquals(Color(0xFF78909C), climateModeColor("off", null))
-        assertEquals(Color(0xFF78909C), climateModeColor("heat", "idle"))
-        assertEquals(Color(0xFF78909C), climateModeColor("dry", null))
-        assertEquals(Color(0xFF78909C), climateModeColor("fan_only", null))
+        assertEquals(ClimateNeutral, climateModeColor("off", null))
+        assertEquals(ClimateNeutral, climateModeColor("heat", "idle"))
+        assertEquals(ClimateNeutral, climateModeColor("dry", null))
+        assertEquals(ClimateNeutral, climateModeColor("fan_only", null))
+        assertTrue(HeatOrange != CoolBlue && HeatOrange != ClimateNeutral && CoolBlue != ClimateNeutral)
     }
 
     @Test
@@ -210,14 +208,19 @@ class DesignTokensTest {
 
     @Test
     fun weatherConditionColorCoversConditions() {
-        assertEquals(Color(0xFFFFB300), weatherConditionColor("sunny"))
-        assertEquals(Color(0xFF5C6BC0), weatherConditionColor("clear-night"))
-        assertEquals(Color(0xFF1E88E5), weatherConditionColor("rainy"))
-        assertEquals(Color(0xFF81D4FA), weatherConditionColor("snowy"))
-        assertEquals(Color(0xFF7E57C2), weatherConditionColor("lightning"))
-        assertEquals(Color(0xFF90A4AE), weatherConditionColor("partlycloudy"))
-        assertEquals(Color(0xFF90A4AE), weatherConditionColor(null))
-        assertEquals(Color(0xFF90A4AE), weatherConditionColor("exceptional"))
+        // Each kind of sky has its own color, and anything unrecognised
+        // reads as plain cloud rather than as fair weather.
+        val sunny = weatherConditionColor("sunny")
+        assertEquals(sunny, weatherConditionColor("clear"))
+        assertEquals(weatherConditionColor("rainy"), weatherConditionColor("pouring"))
+        val distinct = listOf("sunny", "clear-night", "rainy", "snowy", "lightning", "partlycloudy", "fog", "windy")
+            .map { weatherConditionColor(it) }
+        assertEquals(distinct.size, distinct.toSet().size)
+        assertEquals(weatherConditionColor("partlycloudy"), weatherConditionColor(null))
+        assertEquals(weatherConditionColor("partlycloudy"), weatherConditionColor("exceptional"))
+        // Sun is warm, rain is cool.
+        assertTrue(sunny.red > sunny.blue)
+        assertTrue(weatherConditionColor("rainy").blue > weatherConditionColor("rainy").red)
     }
 
     @Test
@@ -312,15 +315,21 @@ class DesignTokensTest {
 
     @Test
     fun sensorBadgeColors_semanticPairs() {
-        assertEquals(Color(0xFFEF5350) to Color.White, sensorBadgeColors(SensorKind.TEMPERATURE))
-        assertEquals(Color(0xFF29B6F6) to Color(0xFF01579B), sensorBadgeColors(SensorKind.HUMIDITY))
+        // Temperature is warm, humidity is cool, and each icon reads on
+        // its fill. A reading with no meaning of its own gets no pair.
+        val (heatFill, heatGlyph) = sensorBadgeColors(SensorKind.TEMPERATURE)!!
+        val (waterFill, waterGlyph) = sensorBadgeColors(SensorKind.HUMIDITY)!!
+        assertTrue(heatFill.red > heatFill.blue)
+        assertTrue(waterFill.blue > waterFill.red)
+        assertTrue(contrastRatio(heatGlyph, heatFill) >= 4.5f)
+        assertTrue(contrastRatio(waterGlyph, waterFill) >= 4.5f)
         assertEquals(null, sensorBadgeColors(SensorKind.OTHER))
     }
 
     @Test
     fun sensorCardTint_semanticOrNull() {
-        assertEquals(Color(0xFFEF5350), sensorCardTint(SensorKind.TEMPERATURE))
-        assertEquals(Color(0xFF29B6F6), sensorCardTint(SensorKind.HUMIDITY))
+        assertEquals(sensorBadgeColors(SensorKind.TEMPERATURE)!!.first, sensorCardTint(SensorKind.TEMPERATURE))
+        assertEquals(sensorBadgeColors(SensorKind.HUMIDITY)!!.first, sensorCardTint(SensorKind.HUMIDITY))
         assertEquals(null, sensorCardTint(SensorKind.OTHER))
     }
 
@@ -332,16 +341,15 @@ class DesignTokensTest {
     fun darkConditionColorsBrightenOnlyGreyFamily() {
         // Saturated hues are identical in both themes (same semantic
         // colors, not a second palette); only the grey family lifts.
-        assertEquals(Color(0xFFB0BEC5), weatherConditionColorThemed("partlycloudy", true))
-        assertEquals(Color(0xFFA7BAC2), weatherConditionColorThemed("cloudy", true))
-        assertEquals(Color(0xFFBDBDBD), weatherConditionColorThemed("fog", true))
-        assertEquals(Color(0xFFFFB300), weatherConditionColorThemed("sunny", true))
-        assertEquals(Color(0xFF1E88E5), weatherConditionColorThemed("rainy", true))
-        assertEquals(Color(0xFF7E57C2), weatherConditionColorThemed("lightning", true))
-        // Light theme is exactly the historical values.
-        assertEquals(weatherConditionColor("partlycloudy"), weatherConditionColorThemed("partlycloudy", false))
-        assertEquals(weatherConditionColor("cloudy"), weatherConditionColorThemed("cloudy", false))
-        assertEquals(weatherConditionColor("fog"), weatherConditionColorThemed("fog", false))
+        for (grey in listOf("partlycloudy", "cloudy", "fog")) {
+            val day = weatherConditionColorThemed(grey, false)
+            val night = weatherConditionColorThemed(grey, true)
+            assertEquals(weatherConditionColor(grey), day)
+            assertTrue("$grey lifts on black", relativeLuminance(night) > relativeLuminance(day))
+        }
+        for (vivid in listOf("sunny", "rainy", "lightning", "snowy", "clear-night")) {
+            assertEquals(weatherConditionColor(vivid), weatherConditionColorThemed(vivid, true))
+        }
         // Dark fills separate from true-black background.
         for (condition in listOf("partlycloudy", "cloudy", "fog", "sunny", "rainy", "snowy", "lightning", "clear-night")) {
             assertTrue(contrastRatio(weatherConditionColorThemed(condition, true), Color.Black) >= 3.0f)
@@ -349,21 +357,19 @@ class DesignTokensTest {
     }
 
     @Test
-    fun chipGlyphIsDarkOnLightFillsInDarkThemeOnly() {
-        // Light theme keeps the historical white glyph everywhere.
-        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFFFFB300), false))
-        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFFB0BEC5), false))
-        // Dark theme: light fills take a near-black glyph so the icon
-        // reads instead of dissolving into the chip; dark fills keep white.
-        assertEquals(Color(0xFF102027), weatherChipGlyphColor(Color(0xFFFFB300), true))
-        assertEquals(Color(0xFF102027), weatherChipGlyphColor(Color(0xFFB0BEC5), true))
-        assertEquals(Color(0xFF102027), weatherChipGlyphColor(Color(0xFF1E88E5), true))
-        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFF5C6BC0), true))
-        assertEquals(Color.White, weatherChipGlyphColor(Color(0xFF7E57C2), true))
-        // Every dark-theme glyph clears the 3:1 large-glyph floor.
-        for (condition in listOf("sunny", "partlycloudy", "cloudy", "fog", "rainy", "snowy", "lightning", "clear-night", "windy", "hail")) {
-            val fill = weatherConditionColorThemed(condition, true)
-            assertTrue(contrastRatio(weatherChipGlyphColor(fill, true), fill) >= 3.0f)
+    fun chipGlyphFollowsTheFillInBothThemes() {
+        // Dark ink on a light fill, white on a dark one, whatever the
+        // theme: the fill decides, so no chip's icon dissolves into it.
+        for (isDark in listOf(false, true)) {
+            assertTrue(relativeLuminance(weatherChipGlyphColor(weatherConditionColor("sunny"), isDark)) < 0.2f)
+            assertEquals(Color.White, weatherChipGlyphColor(weatherConditionColor("lightning"), isDark))
+            for (condition in listOf("sunny", "partlycloudy", "cloudy", "fog", "rainy", "snowy", "lightning", "clear-night", "windy", "hail")) {
+                val fill = weatherConditionColorThemed(condition, isDark)
+                assertTrue(
+                    "$condition dark=$isDark",
+                    contrastRatio(weatherChipGlyphColor(fill, isDark), fill) >= 3.0f,
+                )
+            }
         }
     }
 

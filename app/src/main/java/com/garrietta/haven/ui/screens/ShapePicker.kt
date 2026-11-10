@@ -294,7 +294,7 @@ fun DomainDefaultsDialog(vm: HavenViewModel, onClose: () -> Unit) {
                         onClick = { domainExpanded = true },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = Color(0xFFF6F5EC),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                             contentColor = MaterialTheme.colorScheme.onSurface,
                         ),
                     ) { Text("Entity type: $domainLabel") }
