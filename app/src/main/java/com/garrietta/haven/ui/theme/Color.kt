@@ -173,10 +173,11 @@ enum class StateFamily {
  * text on it. [accent] is the strong tone for the badge behind the
  * device's icon and for a switch track, [onAccent] the icon on it.
  *
- * The tone recipe is the same for every family: by day a pastel
- * container (t90) under a deep badge (t25) whose icon is the container
- * color again; by night a deep container (t25) under a bright badge
- * (t85) with dark ink (t12). Every pair is at least 8:1.
+ * The tone recipe is the same for every colored family: by day a
+ * pastel container (t90) under a deep badge (t25) whose icon is the
+ * container color again; by night a deep container (t25) under a bright
+ * badge (t85) with dark ink (t12). Because the recipe is in tones, the
+ * contrast is the same in every hue: 8.5:1 or better for every pair.
  */
 data class FamilyColors(
     val container: Color,

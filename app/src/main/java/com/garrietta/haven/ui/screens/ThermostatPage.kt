@@ -96,6 +96,7 @@ import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.ui.components.SectionTitle
 import com.garrietta.haven.ui.theme.HavenChrome
+import androidx.compose.foundation.text.TextAutoSize
 
 
 /**
@@ -524,14 +525,18 @@ private fun FilledOptionRow(
                     ?: if (isSelected) HavenChrome.capsule else scheme.surfaceContainerHigh,
                 contentColor = active?.second
                     ?: if (isSelected) HavenChrome.onCapsule else scheme.onSurfaceVariant,
-                contentPadding = PaddingValues(horizontal = 12.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp),
             ) {
+                // Four modes share a cover-screen row, and the longest
+                // label ("Heat • Cool") does not fit at full size: step
+                // it down before cutting it off.
                 Text(
                     label,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    fontSize = 14.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = 14.sp, stepSize = 0.5.sp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                 )
             }
         }

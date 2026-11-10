@@ -1,5 +1,30 @@
 # Haven Changelog
 
+## 2.0: a new identity (2026-11-10)
+
+A redesign of the whole visual system, not a feedback round. `DESIGN.md` is now the source of truth for how the app looks and moves.
+
+**What you will see**
+
+- A new logo: a house with the light on in its doorway and the sun rising behind the roof. New launcher icon (with a themed-icon version), a splash screen that matches the app's background, and a Haven icon on notifications in place of the stock info glyph.
+- A new typeface, Google Sans Flex, rounded, across the whole app. Text that used to look double-spaced or letter-spaced now sits properly.
+- A rebuilt sign-in screen: the address and the instances found on your network in one card, one "Sign in" button, and the access-token route one tap away.
+- Home opens on the Haven signature and the greeting as the big line.
+- Lime now means "this one" everywhere: the selected tab, room, mode and choice.
+- Tiles for temperature, humidity and motion follow the same color recipe as every other tile. Every default card is a leaf card; the sharp and pillow outlines are still in the shape picker.
+- Settings rows have calmer badges, and a wide control (the thermostat range steppers) now drops under its text instead of squeezing the title.
+
+**Under it**
+
+- Every color is a tone of a generated palette (`tools/palette.py`) read through ten state families; no hex values in screens. Hues are the ones the app already used.
+- The theme is `MaterialExpressiveTheme` on material3 1.5. Toolchain: AGP 9.3, Kotlin 2.4, Gradle 9.6, compileSdk 37 (targetSdk still 35).
+- Haven's own springs are unchanged in value and now live in `Motion.kt`.
+- A screenshot harness renders the real app on the JVM with a demo home: `./gradlew :app:recordRoborazziDebug`.
+- CI tests and renders every pull request and builds the signed release on `main`.
+- 538 unit tests pass. Tests that pinned hex values now pin the decisions and the contrast floors.
+
+**Not yet seen on a phone:** motion, haptics, camera streams and real insets cannot be judged on the JVM. Worth a look on the Fold: the splash on a cold start, the sign-in screen with the keyboard up, popup morphs with the new type sizes, and the themed icon.
+
 ## Feedback round 25 (2026-11-05, seven items from his written spec on #135 — no video attached)
 
 PASSES from #135 (do not regress): badge glyphs match their cards; vacuum/garage split heroes; swipe-down settles at tap-outside calm speed; no tile flash on ×3 cycles; default card shapes stable on Climate/Lights tabs; Settings compact on unfolded; Tall visibly doubles.
