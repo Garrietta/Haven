@@ -20,7 +20,7 @@ A redesign of the whole visual system, not a feedback round. `DESIGN.md` is now 
 - The theme is `MaterialExpressiveTheme` on material3 1.5. Toolchain: AGP 9.3, Kotlin 2.4, Gradle 9.6, compileSdk 37 (targetSdk still 35).
 - Haven's own springs are unchanged in value and now live in `Motion.kt`.
 - A screenshot harness renders the real app on the JVM with a demo home: `./gradlew :app:recordRoborazziDebug`.
-- CI tests and renders every pull request and builds the signed release on `main`.
+- CI tests, renders and builds the signed release for every pull request and for `main`.
 - 538 unit tests pass. Tests that pinned hex values now pin the decisions and the contrast floors.
 
 **Not yet seen on a phone:** motion, haptics, camera streams and real insets cannot be judged on the JVM. Worth a look on the Fold: the splash on a cold start, the sign-in screen with the keyboard up, popup morphs with the new type sizes, and the themed icon.

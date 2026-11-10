@@ -50,7 +50,7 @@ Requirements: JDK 17 or newer and the Android SDK (platform 37, build-tools 36).
 
 The screenshot run renders the real app on the JVM with a seeded demo home, folded and unfolded, light and dark. It is how a visual change is checked without a phone.
 
-CI (`.github/workflows/build.yml`) runs the tests and uploads the screenshots and a debug APK for every pull request, and builds the signed release APK on `main`.
+CI (`.github/workflows/build.yml`) runs the tests and uploads the screenshots and a debug APK for every pull request and every push to `main`, and builds the signed release APK for both (not for pull requests from forks).
 
 ## Layout of the code
 

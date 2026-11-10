@@ -1,7 +1,9 @@
 name: Build
 
-# Every pull request and every push to main is tested and rendered.
-# Only main, which has the signing secrets, builds the release APK.
+# Every pull request and every push to main is tested and rendered, and
+# gets the signed release APK: the build that upgrades the installed app,
+# so a change can be tried on the phone before it is merged. Pull requests
+# from forks are tested but not signed; they never see the secrets.
 on:
   push:
     branches: [main]
@@ -66,9 +68,13 @@ jobs:
 
   release:
     name: Signed release APK
-    # Secrets are not available to pull requests from forks, and a
-    # release is only cut from main.
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Signing needs the repository's secrets, so: main, a manual run, or
+    # a pull request whose branch lives in this repository.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 30
