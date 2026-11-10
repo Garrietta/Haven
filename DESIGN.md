@@ -66,16 +66,15 @@ data/, ui/   decisions   which role an entity in a given state gets
 
 ### The palette
 
-Every color is a tone of one of fifteen ramps. A ramp is one hue and chroma in HCT, the color space Material 3 is built on, where tone is perceptual lightness. Two colors the same tone apart have the same contrast whatever their hue, which is what lets one rule serve every family.
+Every color is a tone of one of fourteen ramps. A ramp is one hue and chroma in HCT, the color space Material 3 is built on, where tone is perceptual lightness. Two colors the same tone apart have the same contrast whatever their hue, which is what lets one rule serve every family.
 
 | Ramp | Hue | Chroma | Role |
 |---|---|---|---|
-| Leaf | 140 | 48 | Brand green. Primary. |
+| Leaf | 140 | 48 | Brand green. Primary, and anything that is on. |
 | Sage | 140 | 14 | Secondary. |
 | Dew | 192 | 24 | Tertiary, the cool counterpoint. |
 | Cream | 118 | 5 | Paper: backgrounds and text. |
 | Moss | 136 | 11 | Sage-tinted neutral: containers, outlines, secondary text. |
-| Glow | 138 | 46 | On, live, running. |
 | Ember | 40 | 52 | Heating, temperature. |
 | Frost | 255 | 42 | Cooling, weather. |
 | Guard | 277 | 42 | Locked, armed, secure. |
@@ -99,7 +98,7 @@ To change a color, change its hue or chroma in `tools/palette.py` and run it. Th
 | Secondary text | Moss 30 | Moss 80 |
 | Containers, low to highest | Moss 95 / 94 / 90 / 87 | Moss 6 / 10 / 15 / 20 |
 | Primary | Leaf 40 | Lime |
-| Primary container | Glow 90 | Leaf 30 |
+| Primary container | Leaf 90 | Leaf 30 |
 
 The light containers run a little steeper than stock Material 3: chips and resting tiles sit straight on the page with no outline, so they need the separation. Dark is true black because the phone this is built for is OLED and a home app gets opened in dark rooms; its primary is the lime itself, so the things you can press glow.
 
@@ -109,7 +108,7 @@ Both schemes are fixed, so Haven looks like Haven on every phone. Wallpaper colo
 
 | Family | Means | Ramp |
 |---|---|---|
-| On | on, running, live | Glow |
+| On | on, running, live | Leaf |
 | Heat | heating; temperature readings | Ember |
 | Cool | cooling; the weather | Frost |
 | Secure | locked, closed, disarmed | Guard |

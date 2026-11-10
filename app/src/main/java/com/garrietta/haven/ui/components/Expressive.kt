@@ -117,8 +117,8 @@ val LocalModalActive = compositionLocalOf { false }
 /** Stable per-entity accent color, hashed from the entity id (same idea as Relay's palettes).
  * Not a scheme role: an identity palette — each entity keeps its accent across launches. */
 private val ACCENTS = listOf(
-    Palette.Honey.t70, Palette.Leaf.t60, Palette.Dew.t60, Palette.Tune.t60,
-    Palette.Alarm.t70, Palette.Ember.t60, Palette.Glow.t70, Palette.Frost.t60,
+    Palette.Honey.t70, Palette.Sage.t60, Palette.Dew.t60, Palette.Tune.t60,
+    Palette.Alarm.t70, Palette.Ember.t60, Palette.Leaf.t70, Palette.Frost.t60,
     Palette.Volt.t70, Palette.Rain.t60, Palette.Ember.t70, Palette.Guard.t60,
 )
 

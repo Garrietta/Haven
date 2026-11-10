@@ -23,13 +23,12 @@ from materialyoucolor.hct import Hct
 # name: (hue, chroma, what it is for)
 RAMPS = {
     # The scheme
-    "Leaf": (140, 48, "Brand green. Primary."),
+    "Leaf": (140, 48, "Brand green. Primary, and the color of anything on."),
     "Sage": (140, 14, "Quiet green. Secondary."),
     "Dew": (192, 24, "Cool counterpoint. Tertiary."),
     "Cream": (118, 5, "Warm paper. Backgrounds and text."),
     "Moss": (136, 11, "Sage-tinted neutral. Containers, outlines, secondary text."),
     # State families: what the home is doing
-    "Glow": (138, 46, "Soft lime. On, live, running."),
     "Ember": (40, 52, "Heating, temperature."),
     "Frost": (255, 42, "Cooling, weather."),
     "Guard": (277, 42, "Locked, armed, secure."),

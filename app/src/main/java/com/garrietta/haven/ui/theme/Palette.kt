@@ -50,7 +50,7 @@ class TonalRamp(
  * home is doing.
  */
 object Palette {
-    /** Brand green. Primary. HCT hue 140, chroma 48. */
+    /** Brand green. Primary, and the color of anything on. HCT hue 140, chroma 48. */
     val Leaf = TonalRamp(
         t0 = Color(0xFF000000),
         t4 = Color(0xFF021200),
@@ -207,38 +207,6 @@ object Palette {
         t96 = Color(0xFFEFF6E2),
         t98 = Color(0xFFF5FCE8),
         t99 = Color(0xFFF8FFEB),
-        t100 = Color(0xFFFFFFFF),
-    )
-
-    /** Soft lime. On, live, running. HCT hue 138, chroma 46. */
-    val Glow = TonalRamp(
-        t0 = Color(0xFF000000),
-        t4 = Color(0xFF031200),
-        t6 = Color(0xFF041800),
-        t8 = Color(0xFF061C00),
-        t10 = Color(0xFF082100),
-        t12 = Color(0xFF092500),
-        t15 = Color(0xFF0D2C00),
-        t17 = Color(0xFF0F3100),
-        t20 = Color(0xFF123800),
-        t22 = Color(0xFF143D00),
-        t25 = Color(0xFF184500),
-        t30 = Color(0xFF23510A),
-        t35 = Color(0xFF2F5D17),
-        t40 = Color(0xFF3B6A22),
-        t50 = Color(0xFF538339),
-        t60 = Color(0xFF6B9E50),
-        t70 = Color(0xFF85B968),
-        t80 = Color(0xFF9FD580),
-        t85 = Color(0xFFADE48D),
-        t87 = Color(0xFFB2E992),
-        t90 = Color(0xFFBBF29A),
-        t92 = Color(0xFFC0F89F),
-        t94 = Color(0xFFC6FEA4),
-        t95 = Color(0xFFCDFFAE),
-        t96 = Color(0xFFD9FFBF),
-        t98 = Color(0xFFEEFFDE),
-        t99 = Color(0xFFF7FFEC),
         t100 = Color(0xFFFFFFFF),
     )
 

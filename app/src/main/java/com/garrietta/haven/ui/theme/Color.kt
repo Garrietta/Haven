@@ -29,7 +29,7 @@ import androidx.compose.ui.graphics.Color
 fun havenLightColorScheme(): ColorScheme = lightColorScheme(
     primary = Palette.Leaf.t40,
     onPrimary = Color.White,
-    primaryContainer = Palette.Glow.t90,
+    primaryContainer = Palette.Leaf.t90,
     onPrimaryContainer = Palette.Leaf.t10,
     inversePrimary = Palette.Leaf.t80,
     secondary = Palette.Sage.t40,
@@ -78,7 +78,7 @@ fun havenDarkColorScheme(): ColorScheme = darkColorScheme(
     primary = Palette.Lime,
     onPrimary = Palette.Leaf.t10,
     primaryContainer = Palette.Leaf.t30,
-    onPrimaryContainer = Palette.Glow.t92,
+    onPrimaryContainer = Palette.Leaf.t92,
     inversePrimary = Palette.Leaf.t40,
     secondary = Palette.Sage.t80,
     onSecondary = Palette.Sage.t20,
@@ -191,7 +191,7 @@ private fun TonalRamp.family(isDark: Boolean): FamilyColors =
     else FamilyColors(container = t90, onContainer = t10, accent = t25, onAccent = t90)
 
 fun StateFamily.ramp(): TonalRamp = when (this) {
-    StateFamily.On -> Palette.Glow
+    StateFamily.On -> Palette.Leaf
     StateFamily.Heat -> Palette.Ember
     StateFamily.Cool -> Palette.Frost
     StateFamily.Secure -> Palette.Guard

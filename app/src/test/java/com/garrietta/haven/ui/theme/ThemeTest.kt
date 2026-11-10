@@ -86,7 +86,7 @@ class ThemeTest {
         assertEquals(light.background, light.surface)
         assertEquals(Palette.Cream.t10, light.onSurface)
         assertEquals(Palette.Leaf.t40, light.primary)
-        assertEquals(Palette.Glow.t90, light.primaryContainer)
+        assertEquals(Palette.Leaf.t90, light.primaryContainer)
         // Containers step away from the page in order.
         val steps = listOf(
             light.surfaceContainerLowest, light.background, light.surfaceContainerLow,
