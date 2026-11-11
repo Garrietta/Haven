@@ -310,6 +310,9 @@ import com.garrietta.haven.ui.components.drawMorphGhost
 import com.garrietta.haven.ui.components.ghostMatchesSource
 import com.garrietta.haven.ui.components.morphGhostAlpha
 import androidx.compose.ui.draw.drawWithContent
+import com.garrietta.haven.data.FRONT_DOOR_INFO_SENSOR_ID
+import com.garrietta.haven.data.ringMqttLivePath
+import com.garrietta.haven.data.frontDoorNotLiveLine
 
 // Stage C: the navigation model (NavItem, pillBarItems, tabIcons,
 // selectedNavIndex) moved to ui/components/NavItems.kt as pure,
@@ -3019,7 +3022,10 @@ private fun FrontDoorCameraPanel(
     val frontDoorSource = resolveFrontDoorCameraSource(states)
     // Round 21, item 3: the ring-mqtt RTSP URL for the fallback
     // live attempt (null off-LAN — RTSP exists only on the Pi).
-    val rtspUrl = vm.frontDoorRtspUrl
+    // The live stream leads whenever the phone is on the home network,
+    // whichever entity the fallback picture would come from: it is the
+    // only source here that is the door right now.
+    val rtspUrl = vm.frontDoorRtspUrlFor(ringMqttLivePath(states[FRONT_DOOR_INFO_SENSOR_ID]?.attributes))
     val engaged = vm.frontDoorLiveEngaged
     val stopReason = vm.frontDoorLiveStopReason
 
@@ -3282,13 +3288,13 @@ private fun FrontDoorCameraPanel(
         // unavailable" — the live_view proxy serves the last
         // motion recording by construction.
         phase == FrontDoorLivePhase.MJPEG && rtspFrames -> "Live"
-        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && !rtspFailed && rtspUrl != null -> "Connecting to live view…"
+        phase == FrontDoorLivePhase.MJPEG && frontDoorSource != null && !rtspFailed && rtspUrl != null -> "Connecting to live view…"
         phase == FrontDoorLivePhase.MJPEG && mjpegError != null && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> "Recording unavailable"
         // Camera fallback round: the fallback source gets a neutral
         // status line — no liveness claim (no LIVE badge either),
         // and no recording claim. On a fallback-body error the
         // later mjpegError branch reports "Live view unavailable".
-        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && mjpegError == null -> "Front door camera"
+        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && mjpegError == null -> frontDoorNotLiveLine(rtspUrl)
         phase == FrontDoorLivePhase.MJPEG && live69a1Failed -> "Live view unavailable — showing latest recording"
         phase == FrontDoorLivePhase.MJPEG && liveRestarts > 0 && !mjpegFrames -> "Reconnecting to live view…"
         phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn -> "Live view"
@@ -3393,44 +3399,32 @@ private fun FrontDoorCameraPanel(
                             )
                         }
                     }
+                    rtspUrl != null && !rtspFailed -> {
+                        CameraRtspPlayerBody(
+                            vm, rtspUrl, enterProgress,
+                            onFirstFrame = {
+                                Log.d("Haven", "FrontDoorLive: RTSP first frame")
+                                rtspFrames = true
+                                vm.markFrontDoorRtspProven()
+                            },
+                            onPlayerError = { message ->
+                                Log.w("Haven", "FrontDoorLive: RTSP error: $message — falling back")
+                                rtspFrames = false
+                                vm.clearFrontDoorRtspProven()
+                                rtspFailed = true
+                            },
+                        )
+                    
+                    }
                     frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> {
-                        // Round 21, item 3: the live_view MJPEG
-                        // proxy serves the last motion recording by
-                        // construction — it can never be the live
-                        // path. The RTSP attempt goes FIRST (LAN
-                        // only, rtspUrl null off-LAN): a first frame
-                        // proves liveness in-session (badge LIVE +
-                        // quadrant proof); an error or the 8s
-                        // first-frame timeout latches rtspFailed and
-                        // the panel falls through to the LABELED
-                        // recording below (recording = true, so the
-                        // body reads "Loading recording…" /
-                        // "Recording unavailable" instead of
-                        // pretending to be live).
-                        if (rtspUrl != null && !rtspFailed) {
-                            CameraRtspPlayerBody(
-                                vm, rtspUrl, enterProgress,
-                                onFirstFrame = {
-                                    Log.d("Haven", "FrontDoorLive: RTSP fallback first frame")
-                                    rtspFrames = true
-                                    vm.markFrontDoorRtspProven()
-                                },
-                                onPlayerError = { message ->
-                                    Log.w("Haven", "FrontDoorLive: RTSP fallback error: $message — showing recording")
-                                    rtspFrames = false
-                                    vm.clearFrontDoorRtspProven()
-                                    rtspFailed = true
-                                },
-                            )
-                        } else {
-                            CameraMjpegBody(
-                                vm, FRONT_DOOR_LIVE_VIEW_ID, enterProgress, recording = true, onClose = onClose,
-                                onError = { message ->
-                                    Log.w("Haven", "FrontDoorLive: fallback live_view error: $message")
-                                    mjpegError = message
-                                },
-                            )
-                        }
+                        CameraMjpegBody(
+                            vm, FRONT_DOOR_LIVE_VIEW_ID, enterProgress, recording = true, onClose = onClose,
+                            onError = { message ->
+                                Log.w("Haven", "FrontDoorLive: fallback live_view error: $message")
+                                mjpegError = message
+                            },
+                        )
+                    
                     }
                     !live69a1Failed && switchOn && live69a1Ready -> {
                         // Visual-fidelity round §3: keyed on the

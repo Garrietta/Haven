@@ -607,6 +607,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val frontDoorRtspUrl: String?
         get() = frontDoorRtspUrl(connectionLocalUrl)
 
+    /** The live stream's address using the path ring-mqtt reports, or the default path when it reports none. */
+    fun frontDoorRtspUrlFor(path: String?): String? =
+        frontDoorRtspUrl(connectionLocalUrl, path ?: com.garrietta.haven.data.FRONT_DOOR_RTSP_PATH)
+
     /** Why the live session last stopped, for the panel's paused UI. Null while never stopped. */
     var frontDoorLiveStopReason by mutableStateOf<String?>(null)
         private set

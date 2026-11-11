@@ -177,8 +177,14 @@ class Round21LogicTest {
         assertFalse(
             frontDoorQuadrantShowsLive(FRONT_DOOR_LIVE_VIEW_ID, true, rtspProven = true),
         )
-        assertTrue(
+        // The badge is earned by live frames whichever entity the
+        // picture comes from: an available camera with no live frame
+        // yet reads Recording.
+        assertFalse(
             frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, false),
+        )
+        assertTrue(
+            frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, false, rtspProven = true),
         )
         assertFalse(
             frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, true),
