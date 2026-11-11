@@ -304,6 +304,12 @@ import com.garrietta.haven.ui.theme.resolveHavenIsDark
 import com.garrietta.haven.ui.theme.Palette
 import com.garrietta.haven.ui.theme.HavenChrome
 import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.LocalMorphGhosts
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import com.garrietta.haven.ui.components.drawMorphGhost
+import com.garrietta.haven.ui.components.ghostMatchesSource
+import com.garrietta.haven.ui.components.morphGhostAlpha
+import androidx.compose.ui.draw.drawWithContent
 
 // Stage C: the navigation model (NavItem, pillBarItems, tabIcons,
 // selectedNavIndex) moved to ui/components/NavItems.kt as pure,
@@ -436,6 +442,9 @@ fun HavenApp(vm: HavenViewModel) {
         // shapes, reported alongside cardBounds (see reportCardShape).
         val cardShapes = remember { mutableStateMapOf<String, androidx.compose.ui.graphics.Shape>() }
         val cardColors = remember { mutableStateMapOf<String, Color>() }
+        // The open morph's source tile, recorded as a layer (see
+        // LocalMorphGhosts). Plain map: written and read while drawing.
+        val morphGhosts = remember { mutableMapOf<String, GraphicsLayer>() }
         // Traveling-header state (2026-10-29 pop-up round): cards
         // report header rects here, measurement frames report their
         // pop-up header target here (id + rect, so a stale target from
@@ -1177,11 +1186,18 @@ fun HavenApp(vm: HavenViewModel) {
             // cost. PanelDetailAnim was missing from the old
             // when-branch; that gap is closed here (its progress
             // was unreadable at the root before this round).
+            // The progress each surface is DRAWN at: the finger's while a
+            // pull is in flight, the animation's otherwise. The source
+            // tile decides when to reappear from this, so it must be
+            // the same number the surface uses. Reading the animation
+            // alone left the tile hidden for as long as a finger held
+            // the popup at the bottom of a pull, after the surface had
+            // already landed and gone: an empty slot.
             val rootMorphProgress: () -> Float = {
                 topMorphProgress(
-                    panelDetailAnim?.let { panelDetailProgress.value },
-                    detailAnim?.let { detailProgress.value },
-                    popoutAnim?.let { popoutProgress.value },
+                    panelDetailAnim?.let { dragProgressFor(panelDetailProgress, panelDetailDrag)() },
+                    detailAnim?.let { dragProgressFor(detailProgress, detailDrag)() },
+                    popoutAnim?.let { dragProgressFor(popoutProgress, popoutDrag)() },
                 )
             }
             // Round 21, item 8: the id of the card currently hidden
@@ -1208,6 +1224,7 @@ fun HavenApp(vm: HavenViewModel) {
                 LocalCardBounds provides cardBounds,
                 LocalCardShapes provides cardShapes,
                 LocalCardColors provides cardColors,
+                LocalMorphGhosts provides morphGhosts,
                 // The camera panel's quadrant is a morph source too
                 // (see CameraQuadrant): its rect anchors the panel
                 // morph, and the opaque panel covers it while open,
@@ -1839,6 +1856,7 @@ fun HavenApp(vm: HavenViewModel) {
                         dragHandle = detailHandle,
                         isClosing = detailExiting && !detailDrag.settling,
                         landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        ghost = { morphGhosts[anim.entityId] },
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                             content(anim.screen)
@@ -1864,6 +1882,7 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
                     landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    ghost = { morphGhosts[anim.entityId] },
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                         content(anim.screen)
@@ -1908,6 +1927,7 @@ fun HavenApp(vm: HavenViewModel) {
                         dragHandle = panelDetailHandle,
                         isClosing = panelDetailExiting && !panelDetailDrag.settling,
                         landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        ghost = { morphGhosts[anim.entityId] },
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
                             DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() }, navigate = navigate)
@@ -1923,6 +1943,7 @@ fun HavenApp(vm: HavenViewModel) {
                     isClosing = panelDetailExiting && !panelDetailDrag.settling,
                     dragHandle = panelDetailHandle,
                     landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    ghost = { morphGhosts[anim.entityId] },
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides true) {
                         DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() }, navigate = navigate)
@@ -1955,6 +1976,7 @@ fun HavenApp(vm: HavenViewModel) {
                         dragHandle = popoutHandle,
                         isClosing = popoutExiting && !popoutDrag.settling,
                         landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                        ghost = { morphGhosts[anim.id] },
                     ) {
                         ThermostatPopoutContent(
                             vm, anim.id,
@@ -1975,6 +1997,7 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                     landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                    ghost = { morphGhosts[anim.id] },
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
@@ -2307,6 +2330,8 @@ private fun PanelOverlay(
     // Feedback round 11, item 2: the source tile's outline, passed
     // through to MorphSurface so the exit lands on its corners.
     landingShape: androidx.compose.ui.graphics.Shape? = null,
+    // The source tile's recording, passed through to MorphSurface.
+    ghost: (() -> GraphicsLayer?)? = null,
     content: @Composable () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -2345,6 +2370,7 @@ private fun PanelOverlay(
                 isClosing = isClosing,
                 onPlaced = onPanelPlaced,
                 landingShape = landingShape,
+                ghost = ghost,
             ) {
                 CompositionLocalProvider(
                     LocalHeroTarget provides heroTargetReporter,
@@ -2490,6 +2516,8 @@ private fun CenteredPopup(
     // cream over the hidden tile on exit. Declared before the
     // content lambda (round 5 lesson).
     fromBackground: Color? = null,
+    // The source tile's recording (see LocalMorphGhosts).
+    ghost: (() -> GraphicsLayer?)? = null,
     content: @Composable () -> Unit,
 ) {
     // Feedback round 7: the surface's placed rect in root
@@ -2686,6 +2714,22 @@ private fun CenteredPopup(
                     Modifier.fillMaxSize().drawBehind {
                         val p = progress().coerceIn(0f, 1f)
                         drawRect(lerp(fromBackground ?: containerColor, containerColor, morphPanelBackgroundBlend(p)))
+                    }
+                    // The tile's own content over the popup's, fading in as
+                    // the surface nears the tile (same as MorphSurface).
+                    .drawWithContent {
+                        drawContent()
+                        val p = progress().coerceIn(0f, 1f)
+                        val layer = ghost?.invoke()
+                        if (layer != null && source != null && morphSwapContainerAlpha(p) > 0f &&
+                            ghostMatchesSource(layer.size, source)
+                        ) {
+                            val targetLeft = overlayOrigin.x + (overlayWidthPx - size.width) / 2f
+                            val targetTop = overlayOrigin.y + (overlayHeightPx - size.height) / 2f
+                            val target = Rect(targetLeft, targetTop, targetLeft + size.width, targetTop + size.height)
+                            val morph = tileMorphTransform(source, target, p)
+                            drawMorphGhost(layer, morphGhostAlpha(p), lerpRect(source, target, p).width, morph.scaleX, morph.scaleY)
+                        }
                     },
                 ) {
                 // Feedback round 7: drag range is the vertical
@@ -2742,8 +2786,7 @@ private fun CenteredPopup(
                             // full-size content ever appears
                             // inside a still-small rect.
                             .graphicsLayer {
-                                alpha = if (isClosing) morphCloseContentAlpha(progress())
-                                else morphEnterContentAlpha(progress())
+                                alpha = morphEnterContentAlpha(progress())
                             },
                     ) {
                         content()
