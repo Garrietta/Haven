@@ -16,6 +16,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -209,7 +210,10 @@ import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID
+import com.garrietta.haven.data.HomeHeadline
 import com.garrietta.haven.data.Placement
+import com.garrietta.haven.data.homeHeadline
+import com.garrietta.haven.data.homeSubline
 import com.garrietta.haven.data.frontDoorQuadrantShowsLive
 import com.garrietta.haven.data.frontDoorResolverStates
 import com.garrietta.haven.data.resolveFrontDoorCameraSource
@@ -579,9 +583,15 @@ fun TodayScreen(
     // then who's-home, then rooms. Weather and who's-home are plain
     // composables too (WeatherBlock, PresenceBlock), shared by the folded
     // LazyColumn and the unfolded scrolling Column.
+    // The sentence that opens Home, unless the owner wrote a welcome of
+    // their own. It speaks for the devices that live in rooms: a light
+    // group or a helper outside every room would be counted twice.
+    val roomDevices = membership.values.flatten().distinct().mapNotNull(states::get)
+    val headline = if (customWelcome.isBlank() && states.isNotEmpty()) homeHeadline(roomDevices) else null
+    val subline = homeSubline(roomDevices, weather)
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap)
+            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline)
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
@@ -682,6 +692,19 @@ fun TodayScreen(
     // item 3 — never inside a pane composable, and never in
     // TodayScreen's remember): the selection survives popup
     // opens, detail returns, and fold/unfold posture changes.
+    // My Home lists the rooms as cards; a card opens that room's view,
+    // where the chips are the way to hop to another room or back. The
+    // cards follow the same placement rule the chips do, and tabs the
+    // owner placed among the chips keep a row of their own.
+    val roomCards = allRooms.filter { it.areaId == null || vm.roomPlacement(it.areaId) == Placement.ROOM_CHIP }
+    val tabChips = buildHomeChips(
+        emptyList(), roomFilter, vm::roomPlacement, vm.userTabs,
+        onRoomFilter = {}, onNavigateTab = { navigate(it) },
+    ).drop(1)
+    val openRoom: (RoomSection) -> Unit = { room ->
+        vm.roomFilter = if (room.areaId == null) RoomFilter.Unassigned else RoomFilter.Area(room.areaId)
+    }
+    BackHandler(enabled = isRoomView) { vm.roomFilter = RoomFilter.All }
     val wide = LocalWideLayout.current
     val sectionOrder = resolveOrder(
         migrateLegacySectionOrder(vm.settingsStore.homeSectionOrder()),
@@ -705,8 +728,24 @@ fun TodayScreen(
                 // below render in the stored section order — the greeting
                 // is the pinned header and is not orderable.
                 greetingSection()
-                item { RoomFilterChips(roomChips) }
-                item { Spacer(Modifier.height(12.dp)) }
+                if (isRoomView) {
+                    item { RoomFilterChips(roomChips) }
+                    item { Spacer(Modifier.height(12.dp)) }
+                } else {
+                    if (tabChips.isNotEmpty()) {
+                        item { RoomFilterChips(tabChips) }
+                        item { Spacer(Modifier.height(12.dp)) }
+                    }
+                    itemsIndexed(roomCards, key = { _, room -> "roomcard:${room.areaId ?: "unassigned"}" }) { index, room ->
+                        RoomCard(
+                            vm, room, states, index, navigate,
+                            onOpen = { openRoom(room) },
+                            modifier = Modifier.padding(bottom = 10.dp),
+                            resting = room.areaId == null,
+                        )
+                    }
+                    item { Spacer(Modifier.height(6.dp)) }
+                }
                 for (key in sectionOrder) {
                     when (key) {
                         "cameras" -> if (showSection("cameras") && !isRoomView) item { CameraQuadrantHero(vm, navigate, states) }
@@ -759,9 +798,14 @@ fun TodayScreen(
             Column(
                 Modifier.weight(0.42f).verticalScroll(homeLeftScrollState),
             ) {
-                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap)
-                RoomFilterChips(roomChips)
-                Spacer(Modifier.height(12.dp))
+                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline)
+                if (isRoomView) {
+                    RoomFilterChips(roomChips)
+                    Spacer(Modifier.height(12.dp))
+                } else if (tabChips.isNotEmpty()) {
+                    RoomFilterChips(tabChips)
+                    Spacer(Modifier.height(12.dp))
+                }
                 // Round 25, item 5 (scoped exception to round 18,
                 // item 1): on unfolded, Cameras + Home Status stay
                 // in the left pane on room views too — the left side
@@ -794,6 +838,18 @@ fun TodayScreen(
                 Column(
                     Modifier.fillMaxSize().verticalScroll(homeRightScrollState),
                 ) {
+                    if (!isRoomView) {
+                        Spacer(Modifier.height(16.dp))
+                        roomCards.forEachIndexed { index, room ->
+                            RoomCard(
+                                vm, room, states, index, navigate,
+                                onOpen = { openRoom(room) },
+                                resting = room.areaId == null,
+                            )
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
                     if (showSection("favorites") && !isRoomView) {
                         FavoritesSection(vm, states, navigate, columnsOverride = gridColumns, spacing = 14.dp)
                     }
@@ -2104,16 +2160,23 @@ private fun GreetingBlock(
     showGreeting: Boolean,
     hasCachedContent: Boolean,
     onReconnectTap: (() -> Unit)?,
+    /** The house in a sentence; null shows [greeting] instead. */
+    headline: HomeHeadline? = null,
+    subline: String? = null,
 ) {
     if (showGreeting) {
         Spacer(Modifier.height(16.dp))
         HavenLockup(markSize = 26.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(14.dp))
-        Text(
-            greeting,
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+        if (headline != null) {
+            HomeHeadlineText(headline, subline)
+        } else {
+            Text(
+                greeting,
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+        }
     }
     if (!connection.isLive()) {
         Spacer(Modifier.height(6.dp))

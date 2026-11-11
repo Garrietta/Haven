@@ -1,5 +1,22 @@
 # Haven Changelog
 
+## 2.1: Home as rooms (2026-11-11)
+
+The first screen is laid out around the rooms of the house rather than a grid of equal tiles.
+
+**What you will see**
+
+- Home opens with a sentence about the house: how many lights are on, and whether the doors are locked. The last word is a pill in that state's color, so "locked" reads calm and "unlocked" reads as a warning. A welcome message you set yourself still replaces it.
+- Under it, one card per room. A room with something happening wears that state's color and says what in a line ("Floor Lamp is on, Heating to 70°"); a room with nothing happening is a single quiet line.
+- Each card carries the room's devices as round switches. Tap a light, plug or fan to flip it; tap anything else, or hold any of them, to open its controls, which grow out of the switch.
+- Tap a card to open that room. The room chips now appear inside a room, as the way to hop to another or back to My Home; Back also returns to My Home.
+- Cameras, Home Status, Favorites and the other Home sections follow the rooms, in the order you set.
+
+**Under it**
+
+- `data/RoomDigest.kt` decides each room's color, sentence, temperature and switches, and the headline; `ui/screens/RoomsHome.kt` draws them. 13 tests cover the rules.
+- Rooms shown as cards follow the same placement setting the chips did. "No room" is always the quiet line.
+
 ## 2.0: a new identity (2026-11-10)
 
 A redesign of the whole visual system, not a feedback round. `DESIGN.md` is now the source of truth for how the app looks and moves.

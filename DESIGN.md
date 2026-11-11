@@ -227,6 +227,16 @@ These numbers were tuned on the phone, a round at a time. Do not change one with
 
 Haven is designed for a foldable. The two-pane layout with the side rail engages when the window is at least 600dp wide **and** at least as wide as it is tall (`isWideLayout`), so unfolded landscape gets it and unfolded portrait keeps the folded layout. The folded bar floats at the bottom; the unfolded rail floats at the left.
 
+### Home is the rooms
+
+Home answers "what is the house doing" before it offers anything to press. It opens with a sentence (lights, then doors) and then lists the rooms, each as a card:
+
+- **A room with something happening** wears that state's family color and says what in one line. Its devices sit on it as round switches: lit ones in their own family color, resting ones as a tint of the card.
+- **A room with nothing happening** is a single quiet line. The screen is as tall as the house is busy.
+- **Which color** follows a fixed order, because a room can only be one: something open or unlocked, then anything switched on, then active heating or cooling, then media, then a locked door. Open blinds and an idle thermostat color nothing.
+
+A tap on a switch does what a tap can safely do (lights, plugs, fans flip; everything else opens its control); a tap on the card opens the room. Unfolded, the sentence, cameras and status take the left pane and the rooms lead the right. The rules live in `data/RoomDigest.kt` as pure functions and are tested there.
+
 ## Verifying a change
 
 A visual change is judged on rendered pixels:
