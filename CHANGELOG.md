@@ -10,11 +10,14 @@ The first screen is laid out around the rooms of the house rather than a grid of
 - Under it, one card per room. A room with something happening wears that state's color and says what in a line ("Floor Lamp is on, Heating to 70°"); a room with nothing happening is a single quiet line.
 - Each card carries the room's devices as round switches. Tap a light, plug or fan to flip it; tap anything else, or hold any of them, to open its controls, which grow out of the switch.
 - Tap a card to open that room. The room chips now appear inside a room, as the way to hop to another or back to My Home; Back also returns to My Home.
-- Cameras, Home Status, Favorites and the other Home sections follow the rooms, in the order you set.
+- The sentence is also the controls. Each line ends in a state word you can tap to undo it: "on" turns those lights off, "open" closes the garage door, "running" sends the vacuum home, "playing" pauses. "locked" opens the lock's control instead of unlocking. Tap the inside temperature to open the thermostat.
+- A lit lamp is yellow everywhere: its tile, its switch on a room card and the "on" in the sentence. The room card itself stays green.
+- Home Status is gone from Home while the sentence is showing, since the sentence does its job. Cameras, Favorites and the other Home sections follow the rooms, in the order you set.
 
 **Under it**
 
-- `data/RoomDigest.kt` decides each room's color, sentence, temperature and switches, and the headline; `ui/screens/RoomsHome.kt` draws them. 13 tests cover the rules.
+- `data/RoomDigest.kt` decides each room's color, sentence, temperature and switches, and the headline with its actions; `ui/screens/RoomsHome.kt` draws them. 17 tests cover the rules.
+- A new state family, Light, on the Volt ramp. By day its badge is the bright tone, the one exception to the tone recipe besides Quiet.
 - Rooms shown as cards follow the same placement setting the chips did. "No room" is always the quiet line.
 
 ## 2.0: a new identity (2026-11-10)

@@ -38,13 +38,17 @@ import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.HeadlineAction
+import com.garrietta.haven.data.HeadlineClause
 import com.garrietta.haven.data.HomeHeadline
+import com.garrietta.haven.data.HomeSubline
 import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.data.roomDigest
 import com.garrietta.haven.data.switchIsActive
@@ -72,58 +76,94 @@ import com.garrietta.haven.ui.theme.leafCard
 private const val STATE_PILL = "state"
 
 /**
- * The sentence at the top of Home. Its last word is the state of the
- * doors, drawn as a pill in that state's color so "locked" reads as
- * calm and "unlocked" as a warning before either is read.
+ * The sentence at the top of Home, a line for each thing the house is
+ * doing. The last word of a line is its state, drawn as a pill in that
+ * state's color, and the pill is a button: it puts that thing back to
+ * rest. "on" turns those lights off, "open" closes the door. The line
+ * under it gives the temperatures, and the inside one opens the
+ * thermostat.
  */
 @Composable
-internal fun HomeHeadlineText(headline: HomeHeadline, subline: String?) {
+internal fun HomeHeadlineText(
+    headline: HomeHeadline,
+    subline: HomeSubline?,
+    onAction: (HeadlineAction) -> Unit,
+    onThermostat: (String) -> Unit,
+) {
     val style = MaterialTheme.typography.headlineLarge
     val scheme = MaterialTheme.colorScheme
-    val pill = headline.family?.colors(isDarkBackdrop(scheme.background))
-    val state = headline.state
-    val text = buildAnnotatedString {
-        append(headline.lead)
-        if (headline.subject != null && state != null) {
-            append("\n")
-            append(headline.subject)
-            append(" ")
-            appendInlineContent(STATE_PILL, state)
-            append(".")
-        }
-    }
-    val inline = if (state != null && pill != null) {
-        // The pill is as wide as its word plus a little air on each side.
-        val measurer = rememberTextMeasurer()
-        val wordWidth = remember(state, style) { measurer.measure(state, style, maxLines = 1).size.width }
-        val width = with(LocalDensity.current) { (wordWidth.toDp() + 24.dp).toSp() }
-        mapOf(
-            STATE_PILL to InlineTextContent(
-                Placeholder(width, 1.2.em, PlaceholderVerticalAlign.TextCenter),
-            ) {
-                Box(
-                    Modifier.fillMaxSize().clip(CircleShape).background(pill.container),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        state,
-                        style = style,
-                        color = pill.onContainer,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.wrapContentHeight(unbounded = true),
-                    )
-                }
-            },
-        )
-    } else {
-        emptyMap()
-    }
-    Text(text, style = style, color = scheme.onBackground, inlineContent = inline)
+    headline.resting?.let { Text(it, style = style, color = scheme.onBackground) }
+    for (clause in headline.clauses) HeadlineLine(clause, onAction)
     if (subline != null) {
         Spacer(Modifier.height(8.dp))
-        Text(subline, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            subline.inside?.let { inside ->
+                val id = subline.thermostatId
+                Text(
+                    inside,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                    textDecoration = if (id != null) TextDecoration.Underline else null,
+                    modifier = if (id != null) {
+                        Modifier.clickable(onClickLabel = "Open the thermostat", role = Role.Button) { onThermostat(id) }
+                    } else {
+                        Modifier
+                    },
+                )
+            }
+            subline.outside?.let { outside ->
+                Text(
+                    if (subline.inside != null) " · $outside" else outside,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun HeadlineLine(clause: HeadlineClause, onAction: (HeadlineAction) -> Unit) {
+    val style = MaterialTheme.typography.headlineLarge
+    val scheme = MaterialTheme.colorScheme
+    val colors = clause.family.colors(isDarkBackdrop(scheme.background))
+    // A calm state is a quiet pill; anything that is on, open or running
+    // is drawn in the strong tone, so it reads as something to act on.
+    val calm = clause.family == StateFamily.Secure
+    val fill = if (calm) colors.container else colors.accent
+    val ink = if (calm) colors.onContainer else colors.onAccent
+    // The pill is as wide as its word plus a little air on each side.
+    val measurer = rememberTextMeasurer()
+    val wordWidth = remember(clause.state, style) { measurer.measure(clause.state, style, maxLines = 1).size.width }
+    val width = with(LocalDensity.current) { (wordWidth.toDp() + 24.dp).toSp() }
+    val text = buildAnnotatedString {
+        append(clause.text)
+        append(" ")
+        appendInlineContent(STATE_PILL, clause.state)
+        append(".")
+    }
+    val inline = mapOf(
+        STATE_PILL to InlineTextContent(Placeholder(width, 1.2.em, PlaceholderVerticalAlign.TextCenter)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(fill)
+                    .clickable(role = Role.Button) { onAction(clause.action) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    clause.state,
+                    style = style,
+                    color = ink,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.wrapContentHeight(unbounded = true),
+                )
+            }
+        },
+    )
+    Text(text, style = style, color = scheme.onBackground, inlineContent = inline)
 }
 
 /**

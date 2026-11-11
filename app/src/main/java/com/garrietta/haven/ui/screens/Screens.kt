@@ -210,7 +210,9 @@ import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID
+import com.garrietta.haven.data.HeadlineAction
 import com.garrietta.haven.data.HomeHeadline
+import com.garrietta.haven.data.HomeSubline
 import com.garrietta.haven.data.Placement
 import com.garrietta.haven.data.homeHeadline
 import com.garrietta.haven.data.homeSubline
@@ -589,9 +591,23 @@ fun TodayScreen(
     val roomDevices = membership.values.flatten().distinct().mapNotNull(states::get)
     val headline = if (customWelcome.isBlank() && states.isNotEmpty()) homeHeadline(roomDevices) else null
     val subline = homeSubline(roomDevices, weather)
+    // A tap on a state word puts that thing back to rest. Unlocking is
+    // the one change the sentence never makes by itself: "locked" opens
+    // the lock's own control instead.
+    val headlineAction: (HeadlineAction) -> Unit = { action ->
+        when (action) {
+            is HeadlineAction.TurnOff -> action.ids.forEach(vm::turnOff)
+            is HeadlineAction.Close -> action.ids.forEach(vm::toggleCover)
+            is HeadlineAction.Lock -> action.ids.forEach(vm::toggleLock)
+            is HeadlineAction.Dock -> action.ids.forEach { vm.callService("vacuum", "return_to_base", it) }
+            is HeadlineAction.Pause -> action.ids.forEach { vm.callService("media_player", "media_pause", it) }
+            is HeadlineAction.Show -> navigate(Screen.EntityDetail(action.id))
+        }
+    }
+    val openThermostat: (String) -> Unit = { vm.openClimatePopout(it) }
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline)
+            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline, headlineAction, openThermostat)
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
@@ -754,7 +770,7 @@ fun TodayScreen(
                         // Stage D: Home Status (real entities only,
                         // inline reveal) then Favorites, both hideable
                         // like every other section.
-                        "status" -> if (showSection("status") && !isRoomView) item { HomeStatusSection(vm, states, navigate) }
+                        "status" -> if (showSection("status") && !isRoomView && headline == null) item { HomeStatusSection(vm, states, navigate) }
                         "favorites" -> if (showSection("favorites") && !isRoomView) item { FavoritesSection(vm, states, navigate) }
                         "round3-security" -> if (!isRoomView) round3SecuritySection()
                         "round3-vacuum" -> if (!isRoomView) round3VacuumSection()
@@ -798,7 +814,7 @@ fun TodayScreen(
             Column(
                 Modifier.weight(0.42f).verticalScroll(homeLeftScrollState),
             ) {
-                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline)
+                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline, headlineAction, openThermostat)
                 if (isRoomView) {
                     RoomFilterChips(roomChips)
                     Spacer(Modifier.height(12.dp))
@@ -825,7 +841,7 @@ fun TodayScreen(
                 // status -> favorites already holds in
                 // HOME_SECTION_ORDER_DEFAULT and is unchanged.
                 // Round 25, item 5: stays visible on room views.
-                if (showSection("status")) HomeStatusSection(vm, states, navigate)
+                if (showSection("status") && headline == null) HomeStatusSection(vm, states, navigate)
             }
             Spacer(Modifier.width(16.dp))
             BoxWithConstraints(Modifier.weight(0.58f)) {
@@ -2162,14 +2178,16 @@ private fun GreetingBlock(
     onReconnectTap: (() -> Unit)?,
     /** The house in a sentence; null shows [greeting] instead. */
     headline: HomeHeadline? = null,
-    subline: String? = null,
+    subline: HomeSubline? = null,
+    onHeadlineAction: (HeadlineAction) -> Unit = {},
+    onThermostat: (String) -> Unit = {},
 ) {
     if (showGreeting) {
         Spacer(Modifier.height(16.dp))
         HavenLockup(markSize = 26.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(14.dp))
         if (headline != null) {
-            HomeHeadlineText(headline, subline)
+            HomeHeadlineText(headline, subline, onHeadlineAction, onThermostat)
         } else {
             Text(
                 greeting,

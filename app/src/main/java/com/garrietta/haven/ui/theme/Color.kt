@@ -144,8 +144,10 @@ fun ColorScheme.withHavenDarkSurfaces(): ColorScheme {
  * The same state is the same color everywhere in the app.
  */
 enum class StateFamily {
-    /** On, running, live. Lights, switches, a vacuum at work. */
+    /** On, running, live. Switches, fans, a vacuum at work. */
     On,
+    /** A lamp that is lit. */
+    Light,
     /** Heating, and temperature readings. */
     Heat,
     /** Cooling, and the weather. */
@@ -192,6 +194,7 @@ private fun TonalRamp.family(isDark: Boolean): FamilyColors =
 
 fun StateFamily.ramp(): TonalRamp = when (this) {
     StateFamily.On -> Palette.Leaf
+    StateFamily.Light -> Palette.Volt
     StateFamily.Heat -> Palette.Ember
     StateFamily.Cool -> Palette.Frost
     StateFamily.Secure -> Palette.Guard
@@ -220,6 +223,14 @@ fun StateFamily.colors(isDark: Boolean): FamilyColors = when (this) {
             accent = Palette.Moss.t35,
             onAccent = Palette.Moss.t92,
         )
+    // A lit lamp is a light source, so by day its badge is the bright
+    // tone, not the deep one: it is the one thing drawn glowing. By
+    // night every badge is already bright.
+    StateFamily.Light ->
+        if (isDark) ramp().family(true)
+        else Palette.Volt.let {
+            FamilyColors(container = it.t90, onContainer = it.t10, accent = it.t80, onAccent = it.t10)
+        }
     else -> ramp().family(isDark)
 }
 

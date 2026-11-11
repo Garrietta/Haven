@@ -109,38 +109,80 @@ class RoomDigestTest {
     }
 
     @Test
-    fun theHeadlineCountsLightsInWords() {
-        assertEquals("All quiet.", homeHeadline(emptyList()).lead)
-        assertEquals("All lights off.", homeHeadline(listOf(entity("light.a", "off"))).lead)
-        assertEquals("One light on.", homeHeadline(listOf(sofa)).lead)
-        assertEquals("Two lights on.", homeHeadline(listOf(sofa, shelf)).lead)
+    fun theHeadlineCountsLightsInWordsAndTheWordTurnsThemOff() {
+        assertEquals("All quiet.", homeHeadline(emptyList()).resting)
+        assertEquals("All lights off.", homeHeadline(listOf(entity("light.a", "off"))).resting)
+
+        val one = homeHeadline(listOf(sofa))
+        assertNull(one.resting)
+        assertEquals("One light", one.clauses.single().text)
+        assertEquals("on", one.clauses.single().state)
+        assertEquals(StateFamily.Light, one.clauses.single().family)
+
+        val two = homeHeadline(listOf(sofa, shelf, entity("light.off", "off"))).clauses.single()
+        assertEquals("Two lights", two.text)
+        assertEquals(HeadlineAction.TurnOff(listOf("light.sofa", "light.shelf")), two.action)
+
         val many = (1..14).map { entity("light.l$it", "on") }
-        assertEquals("14 lights on.", homeHeadline(many).lead)
+        assertEquals("14 lights", homeHeadline(many).clauses.single().text)
     }
 
     @Test
-    fun theHeadlineSpeaksForTheDoors() {
-        val calm = homeHeadline(listOf(sofa, frontDoor))
-        assertEquals("Front Door is", calm.subject)
+    fun anOpenDoorIsALineAndItsWordClosesIt() {
+        val garage = entity("cover.garage", "open", "Garage Door", mapOf("device_class" to "garage"))
+        val headline = homeHeadline(listOf(sofa, garage, frontDoor))
+        assertEquals(listOf("on", "open"), headline.clauses.map { it.state })
+        val open = headline.clauses[1]
+        assertEquals("Garage Door is", open.text)
+        assertEquals(StateFamily.Alert, open.family)
+        assertEquals(HeadlineAction.Close(listOf("cover.garage")), open.action)
+    }
+
+    @Test
+    fun anUnlockedDoorLocksOnATapButALockedOneOnlyOpensItsControl() {
+        val back = entity("lock.back_door", "unlocked", "Back Door Lock")
+        val unlocked = homeHeadline(listOf(frontDoor, back)).clauses.single()
+        assertEquals("Back Door is", unlocked.text)
+        assertEquals("unlocked", unlocked.state)
+        assertEquals(HeadlineAction.Lock(listOf("lock.back_door")), unlocked.action)
+
+        val calm = homeHeadline(listOf(frontDoor)).clauses.single()
+        assertEquals("Front Door is", calm.text)
         assertEquals("locked", calm.state)
         assertEquals(StateFamily.Secure, calm.family)
+        assertEquals(HeadlineAction.Show("lock.front_door"), calm.action)
 
-        val back = entity("lock.back_door", "locked", "Back Door Lock")
-        assertEquals("Doors are", homeHeadline(listOf(frontDoor, back)).subject)
-
-        val open = homeHeadline(listOf(frontDoor, back.copy(state = "unlocked")))
-        assertEquals("Back Door is", open.subject)
-        assertEquals("unlocked", open.state)
-        assertEquals(StateFamily.Alert, open.family)
-
-        assertNull(homeHeadline(listOf(sofa)).subject)
+        val both = homeHeadline(listOf(frontDoor, back.copy(state = "locked"))).clauses.single()
+        assertEquals("Doors are", both.text)
     }
 
     @Test
-    fun theSublineUsesWhateverIsKnown() {
+    fun aRunningVacuumAndAPlayingTvEachGetALineThatStopsThem() {
+        val vacuum = entity("vacuum.robot", "cleaning", "Robot Vacuum")
+        val headline = homeHeadline(listOf(vacuum, tv))
+        assertNull(headline.resting)
+        assertEquals(listOf("Robot Vacuum is", "TV is"), headline.clauses.map { it.text })
+        assertEquals(HeadlineAction.Dock(listOf("vacuum.robot")), headline.clauses[0].action)
+        assertEquals(HeadlineAction.Pause(listOf("media_player.tv")), headline.clauses[1].action)
+    }
+
+    @Test
+    fun theHeadlineStopsAtThreeLinesAndKeepsWhatMattersMost() {
+        val garage = entity("cover.garage", "open", "Garage Door", mapOf("device_class" to "garage"))
+        val back = entity("lock.back_door", "unlocked", "Back Door Lock")
+        val vacuum = entity("vacuum.robot", "cleaning", "Robot Vacuum")
+        val headline = homeHeadline(listOf(sofa, garage, back, vacuum, tv))
+        assertEquals(listOf("on", "open", "unlocked"), headline.clauses.map { it.state })
+    }
+
+    @Test
+    fun theSublineUsesWhateverIsKnownAndNamesTheThermostat() {
         val weather = entity("weather.home", "cloudy", attrs = mapOf("temperature" to 9.0))
-        assertEquals("18.5° inside · 9° outside", homeSubline(listOf(heating), weather))
-        assertEquals("9° outside", homeSubline(emptyList(), weather))
+        val both = homeSubline(listOf(heating), weather)!!
+        assertEquals("18.5° inside", both.inside)
+        assertEquals("climate.bedroom", both.thermostatId)
+        assertEquals("9° outside", both.outside)
+        assertNull(homeSubline(emptyList(), weather)!!.inside)
         assertNull(homeSubline(emptyList(), null))
     }
 }

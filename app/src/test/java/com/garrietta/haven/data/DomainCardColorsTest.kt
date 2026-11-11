@@ -88,10 +88,10 @@ class DomainCardColorsTest {
     fun aTileIsItsFamilysContainerBadgeAndIcon() {
         for (isDark in listOf(false, true)) {
             val on = StateFamily.On.colors(isDark)
-            val lamp = domainCardColors(entity("light.a", "on"), isDark)!!
-            assertEquals(on.container, lamp.container)
-            assertEquals(on.accent, lamp.badgeBg)
-            assertEquals(on.onAccent, lamp.badgeGlyph)
+            val plug = domainCardColors(entity("switch.a", "on"), isDark)!!
+            assertEquals(on.container, plug.container)
+            assertEquals(on.accent, plug.badgeBg)
+            assertEquals(on.onAccent, plug.badgeGlyph)
         }
     }
 
@@ -100,9 +100,23 @@ class DomainCardColorsTest {
         // The icon is cut from the tile: on a light theme it is exactly
         // the container color, so badge and card read as one piece.
         for (e in everyTile) {
+            // A lit lamp is the exception: its badge glows (see the next test).
+            if (domainFamily(e) == StateFamily.Light) continue
             val colors = domainCardColors(e, isDark = false)!!
             assertEquals("${e.entityId} ${e.state}", colors.container, colors.badgeGlyph)
         }
+    }
+
+    @Test
+    fun aLitLampIsYellowAndItsBadgeIsTheBrightToneByDay() {
+        val lamp = StateFamily.Light.colors(isDark = false)
+        val tile = domainCardColors(entity("light.a", "on"), isDark = false)!!
+        assertEquals(lamp.accent, tile.badgeBg)
+        // Bright, not deep: lighter than the card it sits on is dark.
+        assertTrue(contrastRatio(tile.badgeBg, tile.container) < 2f)
+        assertTrue(contrastRatio(tile.badgeGlyph, tile.badgeBg) >= 7f)
+        // And it is not the green of a switch that is merely on.
+        assertTrue(tile.container != StateFamily.On.colors(isDark = false).container)
     }
 
     @Test
@@ -110,7 +124,7 @@ class DomainCardColorsTest {
         fun family(id: String, state: String, attrs: Map<String, Any?> = emptyMap()) =
             domainFamily(entity(id, state, attrs))
 
-        assertEquals(StateFamily.On, family("light.a", "on"))
+        assertEquals(StateFamily.Light, family("light.a", "on"))
         assertEquals(StateFamily.Quiet, family("light.a", "off"))
         assertEquals(StateFamily.On, family("switch.a", "on"))
         assertEquals(StateFamily.Quiet, family("fan.a", "off"))
@@ -203,10 +217,16 @@ class DomainCardColorsTest {
     fun switchColorsFollowTheTileFamilies() {
         for (isDark in listOf(false, true)) {
             val on = StateFamily.On.colors(isDark)
+            val plain = domainSwitchColors(entity("switch.a", "on"), isDark)!!
+            assertEquals(on.accent, plain.trackChecked)
+            assertEquals(on.container, plain.thumbChecked)
+            assertEquals(restingSwitchTrack(isDark), plain.trackUnchecked)
+
+            // A lamp's track is its yellow, with the dark ink as the thumb.
+            val lamp = StateFamily.Light.colors(isDark)
             val light = domainSwitchColors(entity("light.a", "on"), isDark)!!
-            assertEquals(on.accent, light.trackChecked)
-            assertEquals(on.container, light.thumbChecked)
-            assertEquals(restingSwitchTrack(isDark), light.trackUnchecked)
+            assertEquals(lamp.accent, light.trackChecked)
+            assertEquals(lamp.onAccent, light.thumbChecked)
 
             val plug = domainSwitchColors(entity("switch.plug", "on", mapOf("current_power_w" to 5.0)), isDark)!!
             assertEquals(StateFamily.Power.colors(isDark).accent, plug.trackChecked)

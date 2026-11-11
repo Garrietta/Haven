@@ -109,6 +109,7 @@ Both schemes are fixed, so Haven looks like Haven on every phone. Wallpaper colo
 | Family | Means | Ramp |
 |---|---|---|
 | On | on, running, live | Leaf |
+| Light | a lamp that is lit | Volt |
 | Heat | heating; temperature readings | Ember |
 | Cool | cooling; the weather | Frost |
 | Secure | locked, closed, disarmed | Guard |
@@ -125,6 +126,8 @@ Every family resolves to the same four colors by the same recipe (`FamilyColors`
 |---|---|---|---|---|
 | Day | tone 90, a pastel | tone 10 | tone 25, deep | tone 90, the container again |
 | Night | tone 25 | tone 92 | tone 85, bright | tone 12 |
+
+Two families bend the recipe, each for a reason. **Quiet** is the absence of a color, so it stays close to the page. **Light** is a light source, so by day its badge is the bright tone (80) with dark ink instead of the deep one: a lit lamp is the one thing on a card that is drawn glowing. It shares its ramp with Power, which keeps the standard recipe, so a lamp is bright yellow and a metered plug is deep yellow.
 
 So a tile, the polygon badge behind its icon and its switch are always cut from one color, and by day the icon is literally the tile's own color showing through the badge. Quiet is the exception on purpose: it is the absence of a color, so it stays close to the page.
 
@@ -229,7 +232,11 @@ Haven is designed for a foldable. The two-pane layout with the side rail engages
 
 ### Home is the rooms
 
-Home answers "what is the house doing" before it offers anything to press. It opens with a sentence (lights, then doors) and then lists the rooms, each as a card:
+Home answers "what is the house doing" before it offers anything to press. It opens with a sentence and then lists the rooms, each as a card.
+
+The sentence has a line for each kind of thing that is happening (lights, a door open or unlocked, a vacuum running, something playing) and nothing for what is at rest, three lines at most. The last word of a line is its state, drawn as a pill in that state's family color, and the pill is a button that puts the thing back to rest: "on" turns those lights off, "open" closes the door, "running" sends the vacuum home. The one change it never makes is unlocking: "locked" opens the lock's own control. Under the sentence, the inside temperature opens the thermostat. Because the sentence both reports and acts, Home has no separate status section while it is showing.
+
+The rooms:
 
 - **A room with something happening** wears that state's family color and says what in one line. Its devices sit on it as round switches: lit ones in their own family color, resting ones as a tint of the card.
 - **A room with nothing happening** is a single quiet line. The screen is as tall as the house is busy.

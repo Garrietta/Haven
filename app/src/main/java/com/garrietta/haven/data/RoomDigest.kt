@@ -168,52 +168,112 @@ fun roomDigest(room: String, members: List<HaEntity>): RoomDigest {
     )
 }
 
-/**
- * The sentence at the top of Home.
- *
- * [lead] is the lights, because they are what people leave on. The
- * second half is the doors: "[subject] [state]", where [state] is drawn
- * as a pill in [family]'s color. It is absent in a home with no locks
- * and nothing open.
- */
-data class HomeHeadline(
-    val lead: String,
-    val subject: String? = null,
-    val state: String? = null,
-    val family: StateFamily? = null,
-)
-
-fun homeHeadline(entities: Collection<HaEntity>): HomeHeadline {
-    val lights = entities.filter { it.domain == "light" && it.known() }
-    val on = lights.count { it.state == "on" }
-    val lead = when {
-        lights.isEmpty() -> "All quiet."
-        on == 0 -> "All lights off."
-        on == 1 -> "One light on."
-        else -> "${NUMBER_WORDS.getOrElse(on) { on.toString() }} lights on."
-    }
-    fun doorName(entity: HaEntity) = entity.friendlyName.trim().removeSuffix(" Lock").removeSuffix(" lock")
-
-    val alert = entities.firstOrNull { it.needsALook() }
-    if (alert != null) {
-        return HomeHeadline(lead, "${doorName(alert)} is", alert.alertWord(), StateFamily.Alert)
-    }
-    val locks = entities.filter { it.domain == "lock" && it.known() }
-    return when (locks.size) {
-        0 -> HomeHeadline(lead)
-        1 -> HomeHeadline(lead, "${doorName(locks[0])} is", "locked", StateFamily.Secure)
-        else -> HomeHeadline(lead, "Doors are", "locked", StateFamily.Secure)
-    }
+/** What a tap on a headline's state word does. */
+sealed interface HeadlineAction {
+    data class TurnOff(val ids: List<String>) : HeadlineAction
+    data class Close(val ids: List<String>) : HeadlineAction
+    data class Lock(val ids: List<String>) : HeadlineAction
+    /** Sends vacuums back to their docks. */
+    data class Dock(val ids: List<String>) : HeadlineAction
+    data class Pause(val ids: List<String>) : HeadlineAction
+    /** Opens the device's control, for a change one tap should not make: unlocking a door. */
+    data class Show(val id: String) : HeadlineAction
 }
 
-/** "21.5° inside · 9° outside", from whatever of the two is known. */
-fun homeSubline(entities: Collection<HaEntity>, weather: HaEntity?): String? {
-    val inside = entities.filter { it.domain == "climate" }
-        .mapNotNull { it.attrDouble("current_temperature") }
+/**
+ * One line of the headline: "[text] [state]." The state word is drawn
+ * as a pill in [family]'s color, and tapping it does [action], which is
+ * always the way back to rest: what is on goes off, what is open closes.
+ */
+data class HeadlineClause(
+    val text: String,
+    val state: String,
+    val family: StateFamily,
+    val action: HeadlineAction,
+)
+
+/**
+ * The sentence at the top of Home: what the house is doing, a line for
+ * each kind of thing, and nothing for what is at rest. [resting] is the
+ * plain line that stands in when no light is on.
+ */
+data class HomeHeadline(val clauses: List<HeadlineClause>, val resting: String? = null)
+
+/** More lines than this and the sentence pushes the rooms off the screen. */
+const val HEADLINE_LINES = 3
+
+private fun count(n: Int): String = NUMBER_WORDS.getOrElse(n) { n.toString() }
+
+private fun doorName(entity: HaEntity): String =
+    entity.friendlyName.trim().removeSuffix(" Lock").removeSuffix(" lock")
+
+/**
+ * Lights lead, because they are what people leave on; then whatever
+ * wants a look (a door open or unlocked); then what is running or
+ * playing. A locked door is only worth a line when nothing is open.
+ */
+fun homeHeadline(entities: Collection<HaEntity>): HomeHeadline {
+    val lights = entities.filter { it.domain == "light" && it.known() }
+    val lit = lights.filter { it.state == "on" }
+    val open = entities.filter { it.isEntrance() && it.needsALook() }
+    val unlocked = entities.filter { it.domain == "lock" && it.needsALook() }
+    val cleaning = entities.filter { it.domain == "vacuum" && it.known() && it.state == "cleaning" }
+    val playing = entities.filter { it.domain == "media_player" && it.state == "playing" }
+    val locks = entities.filter { it.domain == "lock" && it.known() }
+
+    val clauses = buildList {
+        if (lit.isNotEmpty()) {
+            val subject = if (lit.size == 1) "One light" else "${count(lit.size)} lights"
+            add(HeadlineClause(subject, "on", StateFamily.Light, HeadlineAction.TurnOff(lit.map { it.entityId })))
+        }
+        if (open.isNotEmpty()) {
+            val subject = if (open.size == 1) "${doorName(open[0])} is" else "${count(open.size)} doors are"
+            add(HeadlineClause(subject, "open", StateFamily.Alert, HeadlineAction.Close(open.map { it.entityId })))
+        }
+        if (unlocked.isNotEmpty()) {
+            val subject = if (unlocked.size == 1) "${doorName(unlocked[0])} is" else "${count(unlocked.size)} doors are"
+            val word = if (unlocked.size == 1) unlocked[0].alertWord() else "unlocked"
+            add(HeadlineClause(subject, word, StateFamily.Alert, HeadlineAction.Lock(unlocked.map { it.entityId })))
+        }
+        if (cleaning.isNotEmpty()) {
+            val subject = if (cleaning.size == 1) "${cleaning[0].friendlyName.trim()} is" else "${count(cleaning.size)} vacuums are"
+            add(HeadlineClause(subject, "running", StateFamily.On, HeadlineAction.Dock(cleaning.map { it.entityId })))
+        }
+        if (playing.isNotEmpty()) {
+            val subject = if (playing.size == 1) "${playing[0].friendlyName.trim()} is" else "${count(playing.size)} players are"
+            add(HeadlineClause(subject, "playing", StateFamily.Media, HeadlineAction.Pause(playing.map { it.entityId })))
+        }
+        if (locks.isNotEmpty() && unlocked.isEmpty() && open.isEmpty()) {
+            val subject = if (locks.size == 1) "${doorName(locks[0])} is" else "Doors are"
+            add(HeadlineClause(subject, "locked", StateFamily.Secure, HeadlineAction.Show(locks[0].entityId)))
+        }
+    }.take(HEADLINE_LINES)
+
+    val resting = when {
+        lit.isNotEmpty() -> null
+        lights.isNotEmpty() -> "All lights off."
+        clauses.isEmpty() -> "All quiet."
+        else -> null
+    }
+    return HomeHeadline(clauses, resting)
+}
+
+/**
+ * The line under the headline. [inside] opens [thermostatId], the
+ * thermostat it was read from, when tapped.
+ */
+data class HomeSubline(val inside: String?, val thermostatId: String?, val outside: String?)
+
+/** Inside is the average of the thermostats; outside is the weather. Null when neither is known. */
+fun homeSubline(entities: Collection<HaEntity>, weather: HaEntity?): HomeSubline? {
+    val thermostats = entities.filter { it.domain == "climate" && it.attrDouble("current_temperature") != null }
+    val inside = thermostats.mapNotNull { it.attrDouble("current_temperature") }
         .takeIf { it.isNotEmpty() }?.average()
     val outside = weather?.attrDouble("temperature")
-    return listOfNotNull(
-        inside?.let { "${degrees(it)} inside" },
-        outside?.let { "${degrees(it)} outside" },
-    ).joinToString(" · ").ifEmpty { null }
+    if (inside == null && outside == null) return null
+    return HomeSubline(
+        inside = inside?.let { "${degrees(it)} inside" },
+        thermostatId = thermostats.firstOrNull()?.entityId,
+        outside = outside?.let { "${degrees(it)} outside" },
+    )
 }

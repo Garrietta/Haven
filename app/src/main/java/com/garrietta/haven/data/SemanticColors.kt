@@ -210,7 +210,7 @@ fun domainFamily(entity: HaEntity): StateFamily? {
         return StateFamily.On
     }
     return when (entity.domain) {
-        "light" -> if (entity.state == "on") StateFamily.On else StateFamily.Quiet
+        "light" -> if (entity.state == "on") StateFamily.Light else StateFamily.Quiet
         "switch", "input_boolean", "fan" -> when {
             entity.state != "on" -> StateFamily.Quiet
             hasPowerReading(entity) -> StateFamily.Power
@@ -278,9 +278,13 @@ fun restingSwitchThumb(isDark: Boolean): Color = if (isDark) Palette.Moss.t20 el
 fun domainSwitchColors(entity: HaEntity, isDark: Boolean): CardSwitchColors? {
     val thumb = restingSwitchThumb(isDark)
     return when (entity.domain) {
-        "light", "switch", "input_boolean", "fan" -> {
-            val on = (if (entity.domain != "light" && hasPowerReading(entity)) StateFamily.Power else StateFamily.On)
-                .card(isDark)
+        "light" -> {
+            // A lit lamp's track is its bright yellow, so the thumb is the dark ink on it.
+            val lit = StateFamily.Light.card(isDark)
+            CardSwitchColors(lit.badgeBg, lit.badgeGlyph, restingSwitchTrack(isDark), thumb)
+        }
+        "switch", "input_boolean", "fan" -> {
+            val on = (if (hasPowerReading(entity)) StateFamily.Power else StateFamily.On).card(isDark)
             CardSwitchColors(on.badgeBg, on.container, restingSwitchTrack(isDark), thumb)
         }
         "lock" -> {
