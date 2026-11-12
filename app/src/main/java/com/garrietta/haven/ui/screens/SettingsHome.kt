@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SpaceDashboard
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.MaterialTheme
@@ -78,6 +79,7 @@ object SettingsRoute {
     const val TABS = "tabs"
     const val NOTIFICATIONS = "notifications"
     const val CONNECTION = "connection"
+    const val UPDATES = "updates"
 
     fun devices(tab: String) = "$DEVICES/$tab"
     fun automations(tab: String) = "$AUTOMATIONS/$tab"
@@ -117,6 +119,13 @@ fun SettingsScreen(
     val repairs = rememberLoad(connection is ConnectionState.Connected) { vm.admin.repairs() }
     val openRepairs = (repairs.state as? Loaded.Ready)?.value?.count { !it.ignored } ?: 0
     fun go(route: String) = navigate(Screen.SettingsPage(route))
+    // One quiet check when Settings opens, so the row can say a build is waiting.
+    val updateCheck = remember { mutableStateOf<com.garrietta.haven.update.UpdateCheck?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        updateCheck.value = com.garrietta.haven.update.checkForUpdate(
+            com.garrietta.haven.BuildConfig.GITHUB_REPO, com.garrietta.haven.BuildConfig.BUILD_NUMBER,
+        )
+    }
 
     val homeAssistant: @Composable () -> Unit = {
         MenuSection("Home Assistant")
@@ -162,6 +171,15 @@ fun SettingsScreen(
                 else -> "Disconnected"
             }
             HubRow("app-connection", Icons.Filled.Wifi, "Connection", target?.let { "$status · $label" } ?: status) { go(SettingsRoute.CONNECTION) }
+            MenuDivider()
+            HubRow(
+                "app-updates", Icons.Filled.SystemUpdate, "App updates",
+                when (val c = updateCheck.value) {
+                    is com.garrietta.haven.update.UpdateCheck.Available -> "Build ${c.update.build} is ready to install"
+                    else -> "Haven " + com.garrietta.haven.BuildConfig.VERSION_NAME +
+                        if (com.garrietta.haven.BuildConfig.BUILD_NUMBER > 0) ", build ${com.garrietta.haven.BuildConfig.BUILD_NUMBER}" else ""
+                },
+            ) { go(SettingsRoute.UPDATES) }
         }
     }
 
@@ -232,6 +250,7 @@ fun SettingsPageHost(
         route == SettingsRoute.TABS -> CustomTabsPage(vm, onBack, navigate)
         route == SettingsRoute.NOTIFICATIONS -> NotificationsPage(vm, onBack)
         route == SettingsRoute.CONNECTION -> ConnectionPage(vm, appearance.onSignOut, onBack)
+        route == SettingsRoute.UPDATES -> AppUpdatesPage(onBack)
         else -> SettingsPage("Settings", onBack) { item { SettingsNote("This page has moved.") } }
     }
 }

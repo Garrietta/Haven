@@ -238,6 +238,9 @@ class HavenScreenshotTest {
     @Test fun home_navigation_folded_light() =
         shootSettingsPage("home_navigation_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "home")
 
+    @Test fun app_updates_folded_light() =
+        shootSettingsPage("app_updates_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "updates")
+
     @Test fun system_folded_dark() =
         shootSettingsPage("system_folded_dark", viewModel(signedIn = true, dark = true), dark = true, route = "system")
 

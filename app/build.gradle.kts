@@ -19,6 +19,10 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "2.0"
+        // Where updates come from, and which CI run built this APK (0 for a
+        // local build): a test build is newer when its number is higher.
+        buildConfigField("String", "GITHUB_REPO", "\"Garrietta/Haven\"")
+        buildConfigField("int", "BUILD_NUMBER", (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0).toString())
     }
 
     signingConfigs {
@@ -60,6 +64,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {

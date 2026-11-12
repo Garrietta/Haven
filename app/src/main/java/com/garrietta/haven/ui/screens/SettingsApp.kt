@@ -434,3 +434,93 @@ fun ConnectionPage(vm: HavenViewModel, onSignOut: () -> Unit, onBack: () -> Unit
         ConfirmDialog("Sign out?", "Haven forgets this instance and its sign-in on this phone. Your settings stay.", "Sign out", onConfirm = onSignOut, onDismiss = { confirmSignOut = false })
     }
 }
+
+/**
+ * App updates: which build is installed, the newest test build, and a
+ * button that downloads it and hands it to Android's installer, which
+ * asks to confirm. Installing needs the person's leave under Install
+ * unknown apps; without it the button opens that page and says so.
+ */
+@Composable
+fun AppUpdatesPage(onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var request by remember { mutableStateOf(0) }
+    var check by remember { mutableStateOf<com.garrietta.haven.update.UpdateCheck?>(null) }
+    androidx.compose.runtime.LaunchedEffect(request) {
+        check = null
+        check = com.garrietta.haven.update.checkForUpdate(com.garrietta.haven.BuildConfig.GITHUB_REPO, com.garrietta.haven.BuildConfig.BUILD_NUMBER)
+    }
+    val install by com.garrietta.haven.update.ApkInstaller.state.collectAsState()
+    var askedForPermission by remember { mutableStateOf(false) }
+    val installed = com.garrietta.haven.BuildConfig.BUILD_NUMBER
+    SettingsPage("App updates", onBack, intro = "Haven updates itself from its newest test build, made after every change.") {
+        item(key = "installed") {
+            MenuGroup {
+                MenuRow(
+                    "update-installed", ExpressiveKind.SUNNY, Icons.Filled.Autorenew, "Installed",
+                    "Haven ${com.garrietta.haven.BuildConfig.VERSION_NAME} · " + if (installed > 0) "build $installed" else "a local build",
+                    onClick = null, flat = true,
+                )
+                MenuDivider()
+                MenuRow(
+                    "update-check", ExpressiveKind.SUNNY, Icons.Filled.Autorenew, "Check again",
+                    when (val c = check) {
+                        null -> "Checking…"
+                        is com.garrietta.haven.update.UpdateCheck.Available -> "Build ${c.update.build} is ready"
+                        is com.garrietta.haven.update.UpdateCheck.Current -> "Up to date with build ${c.update.build}"
+                        com.garrietta.haven.update.UpdateCheck.NoBuilds -> "No test builds yet"
+                        is com.garrietta.haven.update.UpdateCheck.Failed -> c.message
+                    },
+                    onClick = { request++ }, flat = true,
+                )
+            }
+        }
+        val available = (check as? com.garrietta.haven.update.UpdateCheck.Available)?.update
+        if (available != null) {
+            item(key = "available") {
+                MenuSection(available.title)
+                if (available.notes.isNotBlank()) SettingsNote(available.notes)
+                val busy = install is com.garrietta.haven.update.ApkInstaller.State.Downloading ||
+                    install is com.garrietta.haven.update.ApkInstaller.State.Installing
+                androidx.compose.material3.Button(
+                    enabled = !busy,
+                    onClick = {
+                        if (!com.garrietta.haven.update.ApkInstaller.canInstall(context)) {
+                            askedForPermission = true
+                            com.garrietta.haven.update.ApkInstaller.openInstallPermission(context)
+                        } else {
+                            askedForPermission = false
+                            com.garrietta.haven.update.ApkInstaller.start(context, available.apkUrl)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                ) {
+                    Text(
+                        when (val s = install) {
+                            is com.garrietta.haven.update.ApkInstaller.State.Downloading ->
+                                s.fraction?.let { "Downloading ${(it * 100).toInt()}%" } ?: "Downloading…"
+                            com.garrietta.haven.update.ApkInstaller.State.Installing -> "Waiting for Android to install it…"
+                            else -> "Download and install" +
+                                if (available.apkSize > 0) " (${com.garrietta.haven.data.formatBytes(available.apkSize)})" else ""
+                        },
+                    )
+                }
+                (install as? com.garrietta.haven.update.ApkInstaller.State.Downloading)?.fraction?.let { fraction ->
+                    Spacer(Modifier.height(12.dp))
+                    androidx.compose.material3.LinearWavyProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                }
+                if (askedForPermission && !busy) {
+                    SettingsNote("Let Haven install updates on the page that just opened, then tap Download and install again.")
+                }
+                (install as? com.garrietta.haven.update.ApkInstaller.State.Failed)?.let { failed ->
+                    Text(failed.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        }
+        if (com.garrietta.haven.BuildConfig.DEBUG) {
+            item(key = "debug-note") {
+                SettingsNote("This is a debug build. Test builds are the release app, so one installs beside this one rather than over it.")
+            }
+        }
+    }
+}

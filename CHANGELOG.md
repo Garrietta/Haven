@@ -1,5 +1,18 @@
 # Haven Changelog
 
+## 2.7: Haven updates itself (2026-11-12)
+
+**What you will see**
+
+- Settings, App updates shows the build installed and the newest test build. Download and install fetches it and hands it to Android, which asks you to confirm. The first time, Android asks you to let Haven install apps.
+- The App updates row in Settings says when a newer build is waiting.
+
+**Under it**
+
+- CI's new `publish-test-build` job replaces one pre-release, `test-build`, after every signed build, with the APK and a `Build: <run number>` line. The app knows its own run number (`BuildConfig.BUILD_NUMBER`, 0 locally), so a higher one is newer. The repository is public, so no sign-in is needed.
+- `update/ApkInstaller.kt` downloads into the cache and commits a `PackageInstaller` session; `UpdateInstallReceiver` shows Android's confirmation and words a refusal (an APK signed with another key cannot update this one). `REQUEST_INSTALL_PACKAGES` is new.
+- A debug build says that test builds install beside it, since they are the release app.
+
 ## 2.6: Settings laid out like Home Assistant's (2026-11-12)
 
 **What you will see**

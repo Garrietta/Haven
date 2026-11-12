@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Feedback round 19, item 6: real-time HA event alerts (Android 13+ runtime grant, asked once at launch). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Installs an update downloaded from Settings, App updates. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -19,6 +21,10 @@
              both the OkHttp client and the in-app WebView from reaching them at
              all ("CLEARTEXT communication not permitted"). Tokens still only ever
              go to the user's own instance. -->
+        <!-- Hears back from the package installer during an in-app update. -->
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
