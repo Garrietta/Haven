@@ -174,11 +174,14 @@ private fun StateFamily.card(isDark: Boolean): DomainCardColors =
 /** The resting tile: off, idle, unavailable. Also what a preset tile wears while its entity is off. */
 fun inactiveCardColors(isDark: Boolean): DomainCardColors = StateFamily.Quiet.card(isDark)
 
+/** The watts a plug-style switch reports on itself, or null when it has no meter. */
+fun powerWatts(entity: HaEntity): Double? =
+    entity.attrDouble("current_power_w")
+        ?: entity.attrDouble("power")
+        ?: entity.attrDouble("current_power")
+
 /** A power reading on the entity itself (plug-style switches/sensors). */
-private fun hasPowerReading(entity: HaEntity): Boolean =
-    entity.attrDouble("current_power_w") != null ||
-        entity.attrDouble("power") != null ||
-        entity.attrDouble("current_power") != null
+private fun hasPowerReading(entity: HaEntity): Boolean = powerWatts(entity) != null
 
 /**
  * The family a tile is drawn in, from the entity's live state. Null for

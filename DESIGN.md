@@ -226,6 +226,8 @@ These numbers were tuned on the phone, a round at a time. Do not change one with
 | `MenuSection`, `MenuGroup`, `MenuRow`, `MenuDivider` | Settings, and the option rows at the foot of a popup. A row's control drops under its text when the two cannot share a line. |
 | `choiceChipColors()` | Colors for any chip that is one of a set of choices: the chosen one is the lime capsule. |
 | `DomainBadge` | The polygon badge that blooms with state. |
+| `ControlSlab` | A device popup's main control: a large slab that fills from the bottom in its family's accent. Tap switches the device; where it has a level (brightness, fan speed) a vertical drag sets it, committed on release. Lamps, switches, fans and locks lead with one (`BrightnessSlab`, `PowerSlab`, `FanSlab`, `LockSlab`). |
+| `ColorTempTrack` | Warm to cool, painted in the light it gives, with a handle where the lamp sits. |
 | Tiles (`HomeRoomCard`, `TabTileGrid`) | A leaf card in its family's container, badge top-left, switch top-right, name and state below. |
 
 ## Layout

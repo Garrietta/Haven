@@ -1,5 +1,21 @@
 # Haven Changelog
 
+## 2.3: device popups lead with one control (2026-11-12)
+
+**What you will see**
+
+- A lamp's popup opens on one large slab in the lamp's yellow. The fill is the brightness: drag up or down anywhere on it to set the level, tap it to switch the lamp on or off. It replaces the small on/off pill and the thin brightness slider.
+- Warm to cool is a track painted from amber to cool white, with a handle where the lamp sits. Tap a point on it or drag the handle.
+- Switches, fans and locks lead with the same slab. A fan's fill is its speed and can be dragged; a plug with a meter says how many watts it is drawing; a lock is full and blue while locked and asks before unlocking, as before. The Turn on / Turn off / Toggle buttons are gone from these popups.
+- The card options at the foot of every popup (Card settings, Badge shape, Card shape) sit together in one group under "Customize".
+- The lamp's details card no longer repeats on and brightness; it keeps the room, when it last changed and its smart plug.
+
+**Under it**
+
+- `ui/controls/ControlSlab.kt`: `ControlSlab` and the four device slabs, plus `ColorTempTrack`. The level, kelvin and watt rules are pure functions with 7 tests.
+- `powerWatts` (data/SemanticColors.kt) is the one reading of a plug's meter, used by the tile's family and the slab's caption.
+- Screenshot tests for the switch, fan and lock popups and the lamp popup at night.
+
 ## 2.2: popups that grow, not stretch (2026-11-12)
 
 **What you will see**

@@ -692,16 +692,29 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel, showBulb: Boolean = true)
     }
     if (modes.any { it == "hs" || it == "rgb" || it == "xy" }) {
         Spacer(Modifier.height(4.dp))
-        val hues = listOf(0f, 30f, 60f, 120f, 180f, 220f, 280f, 320f)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for (hue in hues) {
-                val dot = Color.hsv(hue, 0.85f, 0.95f)
-                Box(
-                    Modifier.size(30.dp)
-                        .background(dot, polygonShape(ExpressiveKind.FLOWER))
-                        .clickable { vm.setLightHsColor(entity.entityId, hue, 100f) },
-                )
-            }
+        LightColorDots(entity, vm)
+    }
+}
+
+/**
+ * Eight hues a color lamp can be sent to in one tap. The dots are the
+ * colors themselves, so they are computed here rather than taken from
+ * the palette, which holds the app's own colors.
+ */
+@Composable
+fun LightColorDots(entity: HaEntity, vm: HavenViewModel, modifier: Modifier = Modifier, dotSize: Dp = 30.dp, spread: Boolean = false) {
+    val hues = listOf(0f, 30f, 60f, 120f, 180f, 220f, 280f, 320f)
+    Row(
+        modifier.then(if (spread) Modifier.fillMaxWidth() else Modifier),
+        horizontalArrangement = if (spread) Arrangement.SpaceBetween else Arrangement.spacedBy(10.dp),
+    ) {
+        for (hue in hues) {
+            val dot = Color.hsv(hue, 0.85f, 0.95f)
+            Box(
+                Modifier.size(dotSize)
+                    .background(dot, polygonShape(ExpressiveKind.FLOWER))
+                    .clickable { vm.setLightHsColor(entity.entityId, hue, 100f) },
+            )
         }
     }
 }
@@ -1129,17 +1142,20 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null
 }
 
 @Composable
-fun FanControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
+fun FanControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null, showSpeed: Boolean = true) {
     val pct = entity.attrInt("percentage") ?: 0
     val presets = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
     val oscillating = entity.attrBool("oscillating") ?: false
-    Text("Speed $pct%", fontWeight = FontWeight.SemiBold)
-    // Feedback round 5, item 4: speed slider + oscillate toggle follow the tile color.
-    ServiceSlider(
-        pct.toFloat(), 0f..100f,
-        { vm.callService("fan", "set_percentage", entity.entityId, JSONObject().put("percentage", it.toInt())) },
-        pageAccent ?: accentFor(entity.entityId),
-    )
+    // The pop-up's slab carries the speed there, so it passes showSpeed = false.
+    if (showSpeed) {
+        Text("Speed $pct%", fontWeight = FontWeight.SemiBold)
+        // Feedback round 5, item 4: speed slider + oscillate toggle follow the tile color.
+        ServiceSlider(
+            pct.toFloat(), 0f..100f,
+            { vm.callService("fan", "set_percentage", entity.entityId, JSONObject().put("percentage", it.toInt())) },
+            pageAccent ?: accentFor(entity.entityId),
+        )
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         PillToggle(
             oscillating,

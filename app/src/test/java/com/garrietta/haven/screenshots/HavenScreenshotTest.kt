@@ -136,6 +136,33 @@ class HavenScreenshotTest {
         shoot("light_popup_folded_light", FOLDED, vm) { tapText("Floor Lamp") }
     }
 
+    @Test fun light_popup_folded_dark() {
+        val vm = viewModel(signedIn = true, dark = true)
+        vm.roomFilter = RoomFilter.Area("living_room")
+        shoot("light_popup_folded_dark", FOLDED, vm) { tapText("Floor Lamp") }
+    }
+
+    /** A switch's pop-up: the power slab, empty while it is off. */
+    @Test fun switch_popup_folded_dark() {
+        val vm = viewModel(signedIn = true, dark = true)
+        vm.roomFilter = RoomFilter.Area("kitchen")
+        shoot("switch_popup_folded_dark", FOLDED, vm) { tapText("Coffee Maker") }
+    }
+
+    /** A fan's pop-up: the slab filled to its speed. */
+    @Test fun fan_popup_folded_light() {
+        val vm = viewModel(signedIn = true, dark = false)
+        vm.roomFilter = RoomFilter.Area("bedroom")
+        shoot("fan_popup_folded_light", FOLDED, vm) { tapText("Ceiling Fan") }
+    }
+
+    /** A lock's pop-up: full and secure while locked. */
+    @Test fun lock_popup_folded_light() {
+        val vm = viewModel(signedIn = true, dark = false)
+        vm.roomFilter = RoomFilter.Area("garage")
+        shoot("lock_popup_folded_light", FOLDED, vm) { tapText("Side Door") }
+    }
+
     @Test fun thermostat_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
         vm.roomFilter = RoomFilter.Area("living_room")
