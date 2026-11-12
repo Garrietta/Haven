@@ -1,5 +1,19 @@
 # Haven Changelog
 
+## 2.2: popups that grow, not stretch (2026-11-12)
+
+**What you will see**
+
+- A device, room or status popup now grows out of its tile as itself: it is laid out at full size from the first frame and revealed through a window that opens from the tile's rectangle to the popup's. It used to be the finished popup scaled down to the tile and back up, which stretched its text and icons on the way.
+- Opening and closing settle the way Rondo's music player does: no bounce against the popup's edges, and a calmer arrival.
+- Pull-to-dismiss runs the same motion backwards under your finger.
+
+**Under it**
+
+- `RevealWindowShape` (ui/components/MorphOverlay.kt) clips a full-size layer to the in-between rectangle; the folded surface and the unfolded centered popup both use it, moved but never scaled.
+- `popupMorphSpring` is 350 / 0.95, Rondo's player transform, up from 500 / 0.85, on the owner's word that the popups felt underworked beside that player.
+- The centered popup measures itself for the drag range only when fully open.
+
 ## 2.1: Home as rooms (2026-11-11)
 
 The first screen is laid out around the rooms of the house rather than a grid of equal tiles.

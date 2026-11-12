@@ -17,6 +17,7 @@ import com.garrietta.haven.ui.components.morphEnterContentAlpha
 import com.garrietta.haven.ui.components.morphPanelBackgroundBlend
 import com.garrietta.haven.ui.components.morphPopupShape
 import com.garrietta.haven.ui.components.tileMorphTransform
+import com.garrietta.haven.ui.components.RevealWindowShape
 import com.garrietta.haven.ui.components.dragProgressAfterDelta
 import com.garrietta.haven.ui.components.dragRangeForCenteredPopup
 import com.garrietta.haven.ui.components.dragRangeForPanelOverlay
@@ -2624,8 +2625,8 @@ private fun CenteredPopup(
                         // captured from the sourced branch; the
                         // sourceless branch keeps 1f.
                         val p = progress()
-                        var popupScaleX = 1f
-                        var popupScaleY = 1f
+                        var windowWidth = size.width
+                        var windowHeight = size.height
                         if (source != null) {
                             val targetLeft = overlayOrigin.x + (overlayWidthPx - size.width) / 2f
                             val targetTop = overlayOrigin.y + (overlayHeightPx - size.height) / 2f
@@ -2635,12 +2636,14 @@ private fun CenteredPopup(
                             )
                             val morph = tileMorphTransform(source, target, p)
                             transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                            // Moved, never scaled: the popup is revealed
+                            // through a window that grows from the tile
+                            // (see RevealWindowShape).
                             translationX = morph.translationX
                             translationY = morph.translationY
-                            scaleX = morph.scaleX
-                            scaleY = morph.scaleY
-                            popupScaleX = morph.scaleX
-                            popupScaleY = morph.scaleY
+                            val window = lerpRect(source, target, p)
+                            windowWidth = window.width
+                            windowHeight = window.height
                             // Feedback round 17, item 1: the
                             // container alpha, mirroring
                             // MorphSurface — the old opaque-from-
@@ -2683,11 +2686,13 @@ private fun CenteredPopup(
                             scaleY = enter.scale
                             alpha = enter.alpha
                         }
-                        shape = morphPopupShape(p, landingShape, popupScaleX, popupScaleY)
+                        shape = RevealWindowShape(morphPopupShape(p, landingShape, 1f, 1f), windowWidth, windowHeight)
                         clip = true
                     }
                     .onGloballyPositioned { coords ->
-                        placedRect = coords.boundsInRoot()
+                        // Measured open: the drag range is worked out from
+                        // the popup at rest, not from where it is mid-flight.
+                        if (progress() >= 0.999f) placedRect = coords.boundsInRoot()
                         onPanelPlaced?.invoke(coords.boundsInRoot())
                     }
                     // Consume taps on the surface so they never
@@ -2733,8 +2738,7 @@ private fun CenteredPopup(
                             val targetLeft = overlayOrigin.x + (overlayWidthPx - size.width) / 2f
                             val targetTop = overlayOrigin.y + (overlayHeightPx - size.height) / 2f
                             val target = Rect(targetLeft, targetTop, targetLeft + size.width, targetTop + size.height)
-                            val morph = tileMorphTransform(source, target, p)
-                            drawMorphGhost(layer, morphGhostAlpha(p), lerpRect(source, target, p).width, morph.scaleX, morph.scaleY)
+                            drawMorphGhost(layer, morphGhostAlpha(p), lerpRect(source, target, p).width, 1f, 1f)
                         }
                     },
                 ) {

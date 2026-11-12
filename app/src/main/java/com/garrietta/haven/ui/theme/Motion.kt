@@ -68,10 +68,15 @@ fun <T> springBounds(): FiniteAnimationSpec<T> =
 fun <T> springMorph(): FiniteAnimationSpec<T> = spring(dampingRatio = 0.72f, stiffness = 320f)
 
 /**
- * A tile becoming its popup. Same numbers as [sheetSpring] and its own
- * name, so the popup's opening speed can be tuned without moving sheets.
+ * A tile becoming its popup, and the popup closing into its tile. The
+ * numbers of Rondo's music player as it grows from its mini bar:
+ * near-critically damped, so the popup never bounces against its own
+ * edges, and stiff enough to arrive rather than drift. Chosen on the
+ * owner's word that the popups felt underworked beside that player
+ * (November 2026); the earlier 500 / 0.85 was quicker with a slight
+ * overshoot. Its own name, so it can be tuned without moving sheets.
  */
-fun <T> popupMorphSpring(): FiniteAnimationSpec<T> = spring(stiffness = 500f, dampingRatio = 0.85f)
+fun <T> popupMorphSpring(): FiniteAnimationSpec<T> = spring(stiffness = 350f, dampingRatio = 0.95f)
 
 /** A sheet rising: quick, with a soft landing and almost no overshoot. */
 fun <T> sheetSpring(): FiniteAnimationSpec<T> = spring(stiffness = 500f, dampingRatio = 0.85f)

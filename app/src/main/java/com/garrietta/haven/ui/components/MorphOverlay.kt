@@ -1236,6 +1236,23 @@ data class TileMorph(
     val scaleY: Float,
 )
 
+/**
+ * [inner], drawn [width] by [height] from the layer's top-left corner,
+ * whatever the layer's own size.
+ *
+ * This is how a popup grows out of a tile. The popup is laid out once at
+ * its full size and shown through a window that grows from the tile's
+ * rectangle to the popup's, its top-left corner riding the window's. The
+ * older way scaled the finished popup down to the tile and back up, which
+ * stretched its text and icons unevenly on the way (a wide tile becomes a
+ * tall popup) and read as a picture of a popup, not the popup itself.
+ * The music player in Rondo grows the same way.
+ */
+class RevealWindowShape(private val inner: Shape, private val width: Float, private val height: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        inner.createOutline(Size(width.coerceAtLeast(0f), height.coerceAtLeast(0f)), layoutDirection, density)
+}
+
 fun tileMorphTransform(source: Rect, target: Rect, progress: Float): TileMorph {
     val p = progress.coerceIn(0f, 1f)
     val rect = lerpRect(source, target, p)
@@ -1747,13 +1764,12 @@ fun MorphSurface(
                 val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
                 val rect = lerpRect(source, target, p)
                 transformOrigin = TransformOrigin(0f, 0f)
+                // Moved, never scaled: the surface is revealed through a
+                // window the size of the in-between rectangle (see
+                // RevealWindowShape).
                 translationX = rect.left - target.left
                 translationY = rect.top - target.top
-                scaleX = if (target.width > 0f) rect.width / target.width else 1f
-                scaleY = if (target.height > 0f) rect.height / target.height else 1f
-                // Round 17: the clip divides out the layer scale,
-                // so visible corners follow the landing ramp.
-                shape = morphSurfaceShape(p, landingShape, scaleX, scaleY)
+                shape = RevealWindowShape(morphSurfaceShape(p, landingShape), rect.width, rect.height)
                 clip = true
             }
             .drawBehind {
@@ -1793,13 +1809,7 @@ fun MorphSurface(
                 val layer = ghost?.invoke()
                 if (layer != null && morphSwapContainerAlpha(p) > 0f && ghostMatchesSource(layer.size, source)) {
                     val rect = lerpRect(source, target, p)
-                    drawMorphGhost(
-                        layer,
-                        morphGhostAlpha(p),
-                        rect.width,
-                        if (target.width > 0f) rect.width / target.width else 1f,
-                        if (target.height > 0f) rect.height / target.height else 1f,
-                    )
+                    drawMorphGhost(layer, morphGhostAlpha(p), rect.width, 1f, 1f)
                 }
             }
             .then(

@@ -197,6 +197,8 @@ Two layers. A container is never a polygon, and a badge is never a rectangle.
 
 ## Motion
 
+A popup grows out of its tile as itself. It is laid out once at its full size and revealed through a rounded window that grows from the tile's rectangle to its own, its top-left corner riding the window's; it is moved, never scaled, so its text and icons are never stretched (`RevealWindowShape`). The tile's picture fades out over the first stretch while the popup's content fades in, and the spring is near-critically damped (`popupMorphSpring`, 350 / 0.95, the same as Rondo's music player), so nothing bounces against an edge.
+
 Stock components take `MotionScheme.expressive()` from the theme. Everything Haven draws itself uses one of the named springs in `Motion.kt`, and a call site never writes `spring(...)` with its own numbers.
 
 | Moving | Spring | Damping / stiffness |
