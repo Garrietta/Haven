@@ -227,6 +227,7 @@ These numbers were tuned on the phone, a round at a time. Do not change one with
 | `choiceChipColors()` | Colors for any chip that is one of a set of choices: the chosen one is the lime capsule. |
 | `DomainBadge` | The polygon badge that blooms with state. |
 | `ControlSlab` | A device popup's main control: a large slab that fills from the bottom in its family's accent. Tap switches the device; where it has a level (brightness, fan speed) a vertical drag sets it, committed on release. Lamps, switches, fans and locks lead with one (`BrightnessSlab`, `PowerSlab`, `FanSlab`, `LockSlab`). |
+| `ReorderHandle`, `ColumnReorderHandle` | The grip a row is dragged by to reorder a list (`ReorderList.kt`). The row lifts, the rows it passes step aside, and the order is written once, on release. TalkBack gets Move up and Move down. Never arrow buttons. |
 | `ColorTempTrack` | Warm to cool, painted in the light it gives, with a handle where the lamp sits. |
 | Tiles (`HomeRoomCard`, `TabTileGrid`) | A leaf card in its family's container, badge top-left, switch top-right, name and state below. |
 

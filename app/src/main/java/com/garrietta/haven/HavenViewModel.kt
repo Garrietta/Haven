@@ -1065,6 +1065,15 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         tabsStore.saveTabs(userTabs)
     }
 
+    /** Puts the tabs in the order of [ids]; a tab missing from [ids] keeps its place at the end. */
+    fun setTabOrder(ids: List<String>) {
+        val byId = userTabs.associateBy { it.id }
+        val ordered = ids.mapNotNull { byId[it] } + userTabs.filter { it.id !in ids }
+        if (ordered.map { it.id } == userTabs.map { it.id }) return
+        userTabs = ordered
+        tabsStore.saveTabs(userTabs)
+    }
+
     fun moveTab(tabId: String, delta: Int) {
         val list = userTabs.toMutableList()
         val i = list.indexOfFirst { it.id == tabId }

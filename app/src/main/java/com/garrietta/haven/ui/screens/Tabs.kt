@@ -1,5 +1,8 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.ui.components.ColumnReorderHandle
+import com.garrietta.haven.ui.components.columnReorderRow
+import com.garrietta.haven.ui.components.rememberColumnReorder
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.ChevronRight
@@ -312,12 +315,7 @@ internal fun TabEditorCard(
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = { vm.moveTab(tab.id, -1) }) {
-                    Icon(Icons.Filled.ArrowUpward, contentDescription = "Move tab left")
-                }
-                IconButton(onClick = { vm.moveTab(tab.id, 1) }) {
-                    Icon(Icons.Filled.ArrowDownward, contentDescription = "Move tab right")
-                }
+                // The tab's place in the order is its row's grip in Rooms & tabs.
                 IconButton(onClick = { vm.deleteTab(tab.id) }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Delete tab")
                 }
@@ -353,13 +351,29 @@ internal fun TabEditorCard(
                 // one placement, so the two can never disagree.
             }
             Spacer(Modifier.height(12.dp))
+            // A card is moved by its grip; the new order is written once,
+            // when the finger lifts.
+            val cardReorder = rememberColumnReorder(tab.cards.size) { from, to -> vm.moveCardInTab(tab.id, from, to) }
             for ((index, yaml) in tab.cards.withIndex()) {
                 val type = try {
                     cardType(parseCardYaml(yaml))
                 } catch (e: Exception) {
                     "?"
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .columnReorderRow(cardReorder, index)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(vertical = 2.dp),
+                ) {
+                    ColumnReorderHandle(
+                        cardReorder,
+                        index,
+                        label = "card ${index + 1}",
+                        onStep = { delta -> vm.moveCardInTab(tab.id, index, (index + delta).coerceIn(tab.cards.indices)) },
+                        modifier = Modifier.size(40.dp).padding(8.dp),
+                    )
                     Box {
                         OutlinedButton(onClick = { typeMenuFor = index }) { Text(type) }
                         DropdownMenu(
@@ -395,17 +409,10 @@ internal fun TabEditorCard(
                     IconButton(onClick = { onEditYaml(index, yaml) }) {
                         Icon(Icons.Filled.Edit, contentDescription = "Edit card YAML")
                     }
-                    IconButton(onClick = { vm.moveCardInTab(tab.id, index, index - 1) }) {
-                        Icon(Icons.Filled.ArrowUpward, contentDescription = "Move card up")
-                    }
-                    IconButton(onClick = { vm.moveCardInTab(tab.id, index, index + 1) }) {
-                        Icon(Icons.Filled.ArrowDownward, contentDescription = "Move card down")
-                    }
                     IconButton(onClick = { vm.removeCardFromTab(tab.id, index) }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Remove card")
                     }
                 }
-                Spacer(Modifier.height(4.dp))
             }
             Spacer(Modifier.height(8.dp))
             SectionTitle("Add a card")

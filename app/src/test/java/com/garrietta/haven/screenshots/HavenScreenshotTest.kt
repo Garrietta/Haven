@@ -1,12 +1,17 @@
 package com.garrietta.haven.screenshots
 
 import android.app.Application
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
+import org.junit.Assert.assertEquals
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -14,6 +19,8 @@ import com.garrietta.haven.HavenApp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.ui.screens.RoomFilter
+import com.garrietta.haven.ui.screens.RoomsTabsScreen
+import com.garrietta.haven.ui.theme.HavenTheme
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -161,6 +168,74 @@ class HavenScreenshotTest {
         val vm = viewModel(signedIn = true, dark = false)
         vm.roomFilter = RoomFilter.Area("garage")
         shoot("lock_popup_folded_light", FOLDED, vm) { tapText("Side Door") }
+    }
+
+    /**
+     * Rooms & tabs on its own, as Settings opens it. Drawn directly rather
+     * than reached through Settings, whose row sits below the fold: a
+     * scroll there waits on an animation the hand-driven clock never runs.
+     */
+    private fun shootRoomsTabs(name: String, vm: HavenViewModel, dark: Boolean, then: (() -> Unit)? = null) {
+        RuntimeEnvironment.setQualifiers(FOLDED)
+        compose.mainClock.autoAdvance = false
+        compose.activityRule.scenario.recreate()
+        compose.setContent { HavenTheme(darkTheme = dark) { RoomsTabsScreen(vm, onBack = {}, navigate = {}) } }
+        compose.mainClock.advanceTimeBy(SETTLE_MS)
+        if (then != null) {
+            then()
+            settle()
+        }
+        compose.onAllNodes(isRoot()).onLast().captureRoboImage("build/outputs/roborazzi/$name.png")
+    }
+
+    /**
+     * Hands state written by input to composition, then runs the clock.
+     * Nothing on this screen animates at rest, so no frame would otherwise
+     * come to carry a tap's write to the screen.
+     */
+    private fun frame() {
+        Snapshot.sendApplyNotifications()
+        compose.mainClock.advanceTimeByFrame()
+    }
+
+    private fun settle() {
+        Snapshot.sendApplyNotifications()
+        compose.mainClock.advanceTimeBy(SETTLE_MS)
+    }
+
+    private fun withMediaTab(vm: HavenViewModel): HavenViewModel {
+        val id = vm.addTab("Media")
+        vm.addCardToTab(id, "type: tile\nentity: media_player.living_room_tv")
+        vm.addCardToTab(id, "type: tile\nentity: light.living_room_lamp")
+        vm.addCardToTab(id, "type: tile\nentity: climate.thermostat")
+        return vm
+    }
+
+    /** Rooms and tabs as rows with grips, one open. */
+    @Test fun rooms_tabs_folded_light() =
+        shootRoomsTabs("rooms_tabs_folded_light", withMediaTab(viewModel(signedIn = true, dark = false)), dark = false) {
+            tapText("Kitchen")
+        }
+
+    /**
+     * A room dragged by its grip: captured mid-drag, lifted over the rows
+     * that have stepped aside, then dropped, and the new order is stored.
+     */
+    @Test fun rooms_tabs_drag_folded_dark() {
+        val vm = viewModel(signedIn = true, dark = true)
+        shootRoomsTabs("rooms_tabs_drag_folded_dark", vm, dark = true) {
+            val grip = compose.onNodeWithContentDescription("Reorder Living Room", useUnmergedTree = true)
+            grip.performTouchInput { down(center) }
+            frame()
+            // Down past Kitchen and Bedroom, a frame at a time, as a finger would.
+            repeat(40) {
+                grip.performTouchInput { moveBy(Offset(0f, 9f)) }
+                frame()
+            }
+        }
+        compose.onNodeWithContentDescription("Reorder Living Room", useUnmergedTree = true).performTouchInput { up() }
+        settle()
+        assertEquals(listOf("kitchen", "bedroom", "living_room", "garage"), vm.settingsStore.roomOrder())
     }
 
     @Test fun thermostat_popup_folded_dark() {

@@ -1,5 +1,21 @@
 # Haven Changelog
 
+## 2.4: drag to reorder in Rooms & tabs (2026-11-12)
+
+**What you will see**
+
+- Rooms & tabs lists each room and each tab as one row: a grip, its icon, its name, and a line saying how many devices or cards it holds and where it is pinned.
+- Hold a row's grip and drag it to move it. The row lifts and the others step out of its way; the order is saved when you let go. The order of rooms is the order Home shows them in, and the order of tabs is the order of User Tabs.
+- Tap a row to open its settings under it: names, icon, devices and where it is pinned for a room; title, icon, cards and where it is pinned for a tab. One row is open at a time, so the list stays short enough to reorder.
+- A tab's cards reorder the same way, by their grips. The up and down arrows are gone everywhere on this screen.
+- With TalkBack, each grip offers Move up and Move down.
+
+**Under it**
+
+- `ui/components/ReorderList.kt`: `LazyListReorder` for rows of a LazyColumn (reads where rows really are, so rows of different heights reorder correctly, and scrolls the list while a row is held near an edge) and `ColumnReorder` for equal rows inside one item. The rules (which row is under the dragged row's middle, edge scroll speed, equal-row steps) are pure functions with 5 tests.
+- Rooms & tabs moved out of `Screens.kt` into `ui/screens/RoomsTabs.kt`; `HavenViewModel.setTabOrder` writes a whole tab order at once.
+- Screenshot tests open a room and drag one, and check the stored order. The screen is drawn on its own in them: nothing on it animates at rest, so the test pushes state changes through by hand.
+
 ## 2.3: device popups lead with one control (2026-11-12)
 
 **What you will see**
