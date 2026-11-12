@@ -1,5 +1,18 @@
 # Haven Changelog
 
+## 2.8: Devices land in their area (2026-11-12)
+
+**What you will see**
+
+- A device you put in an area in Home Assistant now shows up there in Haven, on Home and in Settings. Before, a heater or fan set to Greenhouse left Greenhouse at "0 devices" and empty on Home.
+- A device's page in Settings leads with its on/off. Its entities follow in Home Assistant's groups (Controls, Sensors, Configuration, Diagnostic), named without the device's name in front, with a switch on anything that turns on and off and a Press button on buttons. Tap one for its controls; the tune button opens its settings.
+- An area in Areas, labels & zones lists its devices, the way Home Assistant does: one row for a smart plug rather than one for each of its sensors and timers. Add a device and Remove move the whole device; something that belongs to no device still moves on its own.
+
+**Under it**
+
+- Android's `JSONObject.optString` returns the text "null" for a JSON null, so every `"area_id": null` on an entity read as an area called "null" and hid the device's area behind it. `JSONObject.text()` (`data/HaJson.kt`) reads null as empty, and the registry, event and media parsers use it. The JVM's org.json returns "" there, which is why no test caught it.
+- `entityGroup`, `mainControl`, `nameUnderDevice` and `areaMembers` in `HaAdmin.kt` are pure and tested in `DeviceGroupingTest`.
+
 ## 2.7: Haven updates itself (2026-11-12)
 
 **What you will see**

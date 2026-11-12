@@ -486,3 +486,82 @@ private fun selectOptions(arr: JSONArray?): List<Pair<String, String>> {
         }
     }
 }
+
+/** How a device's entities are grouped on its page, in Home Assistant's order. */
+enum class EntityGroup(val title: String) {
+    CONTROLS("Controls"),
+    SENSORS("Sensors"),
+    CONFIGURATION("Configuration"),
+    DIAGNOSTIC("Diagnostic"),
+}
+
+/** Domains a person operates rather than reads. */
+private val CONTROL_DOMAINS = setOf(
+    "switch", "light", "fan", "cover", "lock", "climate", "media_player", "input_boolean", "button",
+    "vacuum", "siren", "humidifier", "valve", "water_heater", "select", "number", "scene", "script",
+    "alarm_control_panel", "camera", "lawn_mower", "remote", "text", "input_button", "input_number",
+    "input_select", "input_text",
+)
+
+/** Domains whose main state is on or off. */
+private val ON_OFF_DOMAINS = setOf("switch", "light", "fan", "input_boolean", "humidifier", "siren")
+
+/**
+ * Home Assistant's grouping: anything it marks as configuration or
+ * diagnostic goes there; of the rest, what can be operated is a control
+ * and what can only be read is a sensor.
+ */
+fun entityGroup(entity: RegistryEntity): EntityGroup = when (entity.entityCategory) {
+    "config" -> EntityGroup.CONFIGURATION
+    "diagnostic" -> EntityGroup.DIAGNOSTIC
+    else -> if (entity.domain in CONTROL_DOMAINS) EntityGroup.CONTROLS else EntityGroup.SENSORS
+}
+
+/**
+ * The device's own on/off, shown first on its page: an enabled control
+ * that switches on and off, preferring the one that is the device itself
+ * (Home Assistant gives that one no name of its own beyond the device's).
+ * A smart plug's outlet, a lamp, a fan. Null when the device has none.
+ */
+fun mainControl(entities: List<RegistryEntity>): RegistryEntity? =
+    entities.filter { entityGroup(it) == EntityGroup.CONTROLS && it.domain in ON_OFF_DOMAINS && it.disabledBy == null }
+        .minWithOrNull(compareBy({ if (it.originalName == null) 0 else 1 }, { it.entityId }))
+
+/** True for a domain whose state a switch can flip. */
+fun isOnOffDomain(domain: String): Boolean = domain in ON_OFF_DOMAINS
+
+/** An entity's name under its device's: "Heater Auto-off at" on "Heater" reads "Auto-off at". */
+fun nameUnderDevice(name: String, deviceName: String): String {
+    if (deviceName.isBlank() || !name.startsWith(deviceName, ignoreCase = true)) return name
+    val rest = name.substring(deviceName.length).trim(' ', '-', ':', '·')
+    return if (rest.isEmpty()) name else rest.replaceFirstChar { it.uppercase() }
+}
+
+/** What an area holds, as its page lists it: whole devices, and entities that belong to no device. */
+sealed class AreaMember {
+    abstract val name: String
+
+    data class Device(val deviceId: String, override val name: String, val entityCount: Int) : AreaMember()
+
+    data class Lone(val entity: HaEntity) : AreaMember() {
+        override val name: String get() = entity.friendlyName
+    }
+}
+
+/**
+ * An area's entities gathered into their devices, the way Home Assistant
+ * lists an area: one row for a smart plug, not one for each of its eight
+ * timers and sensors. A device with no name in [deviceNames] takes its
+ * shortest entity name.
+ */
+fun areaMembers(
+    entities: List<HaEntity>,
+    entityDevices: Map<String, String>,
+    deviceNames: Map<String, String>,
+): List<AreaMember> {
+    val (withDevice, lone) = entities.partition { entityDevices[it.entityId] != null }
+    val devices = withDevice.groupBy { entityDevices.getValue(it.entityId) }.map { (id, list) ->
+        AreaMember.Device(id, deviceNames[id] ?: list.minBy { it.friendlyName.length }.friendlyName, list.size)
+    }
+    return (devices + lone.map { AreaMember.Lone(it) }).sortedBy { it.name.lowercase() }
+}

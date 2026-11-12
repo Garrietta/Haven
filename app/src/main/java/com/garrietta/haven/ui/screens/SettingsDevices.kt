@@ -44,6 +44,12 @@ import com.garrietta.haven.data.RegistryDevice
 import com.garrietta.haven.data.RegistryEntity
 import com.garrietta.haven.data.configEntryNeedsAttention
 import com.garrietta.haven.data.configEntryStatus
+import com.garrietta.haven.data.EntityGroup
+import com.garrietta.haven.data.entityGroup
+import com.garrietta.haven.data.isOnOffDomain
+import com.garrietta.haven.data.mainControl
+import com.garrietta.haven.data.nameUnderDevice
+import com.garrietta.haven.ui.controls.stateText
 import com.garrietta.haven.data.humanizeOptionLabel
 import com.garrietta.haven.ui.components.MenuDivider
 import com.garrietta.haven.ui.components.MenuGroup
@@ -285,6 +291,15 @@ fun DeviceSettingsPage(vm: HavenViewModel, deviceId: String, onBack: () -> Unit,
                 item { SettingsNote("This device is no longer in Home Assistant.") }
                 return@loadedItems
             }
+            // The device's own on/off, first and large, as its maker's app
+            // shows it: a smart plug's outlet, a lamp, a fan.
+            val main = mainControl((registry.state as? Loaded.Ready)?.value?.filter { it.deviceId == deviceId } ?: emptyList())
+            val mainEntity = main?.let { states[it.entityId] }
+            if (mainEntity != null) {
+                item(key = "main-control") {
+                    com.garrietta.haven.ui.controls.PowerSlab(mainEntity, vm, Modifier.padding(bottom = 8.dp))
+                }
+            }
             item(key = "ha") {
                 MenuSection("In Home Assistant")
                 MenuGroup {
@@ -321,19 +336,17 @@ fun DeviceSettingsPage(vm: HavenViewModel, deviceId: String, onBack: () -> Unit,
                 }
             }
             val own = (registry.state as? Loaded.Ready)?.value?.filter { it.deviceId == deviceId } ?: emptyList()
-            item(key = "entities-title") { MenuSection("Entities") }
             if (own.isEmpty()) item(key = "no-entities") { SettingsNote("No entities on this device.") }
-            groupedRows(own, key = { "dev-entity-" + it.entityId }) { reg ->
-                val entity = states[reg.entityId]
-                MenuRow(
-                    badgeKey = reg.entityId,
-                    badgeKind = shapeForDomain(reg.domain),
-                    icon = entity?.let { domainIcon(it) } ?: Icons.Filled.Tune,
-                    title = entity?.friendlyName ?: reg.name ?: reg.originalName ?: reg.entityId,
-                    subtitle = listOfNotNull(reg.entityId, entity?.state, if (reg.disabledBy != null) "Disabled" else null).joinToString(" · "),
-                    onClick = { navigate(Screen.SettingsPage(SettingsRoute.entity(reg.entityId))) },
-                    flat = true,
-                )
+            // Grouped the way Home Assistant groups them, controls first. A
+            // tap opens the entity's controls; the gear opens its settings.
+            for (group in EntityGroup.entries) {
+                val members = own.filter { entityGroup(it) == group }
+                    .sortedWith(compareBy({ it.disabledBy != null }, { states[it.entityId]?.friendlyName ?: it.entityId }))
+                if (members.isEmpty()) continue
+                item(key = "group-${group.name}") { MenuSection(group.title) }
+                groupedRows(members, key = { "dev-entity-" + it.entityId }) { reg ->
+                    DeviceEntityRow(vm, reg, states[reg.entityId], device.displayName, navigate)
+                }
             }
         }
     }
@@ -367,6 +380,50 @@ fun DeviceSettingsPage(vm: HavenViewModel, deviceId: String, onBack: () -> Unit,
             }
         }
     }
+}
+
+/**
+ * One of a device's entities: named under the device, with what it reads
+ * now. A switch flips in place and a button presses in place; a tap opens
+ * the entity's controls, and the gear its settings.
+ */
+@Composable
+private fun DeviceEntityRow(
+    vm: HavenViewModel,
+    reg: RegistryEntity,
+    entity: com.garrietta.haven.data.HaEntity?,
+    deviceName: String,
+    navigate: (Screen) -> Unit,
+) {
+    val name = entity?.friendlyName ?: reg.name ?: reg.originalName ?: reg.entityId
+    MenuRow(
+        badgeKey = reg.entityId,
+        badgeKind = shapeForDomain(reg.domain),
+        icon = entity?.let { domainIcon(it) } ?: Icons.Filled.Tune,
+        title = nameUnderDevice(name, deviceName),
+        subtitle = listOfNotNull(
+            if (reg.disabledBy != null) "Disabled" else entity?.stateText(),
+            reg.entityId,
+        ).joinToString(" · "),
+        onClick = if (entity != null) {
+            { navigate(Screen.EntityDetail(reg.entityId)) }
+        } else {
+            { navigate(Screen.SettingsPage(SettingsRoute.entity(reg.entityId))) }
+        },
+        trailing = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (entity != null && isOnOffDomain(reg.domain) && (entity.state == "on" || entity.state == "off")) {
+                    Switch(checked = entity.state == "on", onCheckedChange = { vm.toggle(reg.entityId) })
+                } else if (entity != null && reg.domain in setOf("button", "input_button")) {
+                    androidx.compose.material3.TextButton(onClick = { vm.callService(reg.domain, "press", reg.entityId) }) { Text("Press") }
+                }
+                IconButton(onClick = { navigate(Screen.SettingsPage(SettingsRoute.entity(reg.entityId))) }) {
+                    Icon(Icons.Filled.Tune, contentDescription = "Settings for $name")
+                }
+            }
+        },
+        flat = true,
+    )
 }
 
 /**

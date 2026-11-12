@@ -458,9 +458,9 @@ class HaClient(
                                     domain = entityId.substringBefore("."),
                                     oldState = oldState?.optString("state")?.ifEmpty { null },
                                     newState = incoming,
-                                    deviceClass = attributes?.optString("device_class")?.ifEmpty { null },
-                                    friendlyName = attributes?.optString("friendly_name")?.ifEmpty { null },
-                                    parentId = context?.optString("parent_id")?.ifEmpty { null },
+                                    deviceClass = attributes?.text("device_class")?.ifEmpty { null },
+                                    friendlyName = attributes?.text("friendly_name")?.ifEmpty { null },
+                                    parentId = context?.text("parent_id")?.ifEmpty { null },
                                 )
                             )
                         }
@@ -515,12 +515,12 @@ class HaClient(
             val items = registryItems(msg)
             val list = mutableListOf<HaArea>()
             for (o in items) {
-                val id = o.optString("area_id").ifEmpty { o.optString("id") }
+                val id = o.text("area_id").ifEmpty { o.text("id") }
                 if (id.isEmpty()) continue
                 list.add(
                     HaArea(
-                        id, o.optString("name"), o.optString("icon").ifEmpty { null },
-                        o.optString("floor_id").takeIf { it.isNotEmpty() && it != "null" },
+                        id, o.text("name"), o.text("icon").ifEmpty { null },
+                        o.text("floor_id").ifEmpty { null },
                     ),
                 )
             }
@@ -533,18 +533,13 @@ class HaClient(
             for (o in items) {
                 val entityId = o.optString("entity_id")
                 if (entityId.isEmpty()) continue
-                val areaId = o.optString("area_id")
+                val areaId = o.text("area_id")
                 if (areaId.isNotEmpty()) entityToArea[entityId] = areaId
-                val deviceId = o.optString("device_id")
-                // Feedback round, item 8: HA carries the literal
-                // string "null" as device_id for a set of entities
-                // (proven, not guessed: org.json optString returns
-                // "" for JSON null and for a missing key, so a
-                // "null" reaching here is a real string) — treating
-                // it as a device id renders a "Device null" row
-                // with 18 entities on Garrett's phone. Treat it as
-                // absent; those entities surface under the
-                // Favorites sheet's Ungrouped row instead.
+                val deviceId = o.text("device_id")
+                // An entity with no device has "device_id": null, which
+                // [text] reads as "" (Android's optString would have made it
+                // the text "null" and a "Device null" row). The literal check
+                // stays as a guard for a registry that really sends the text.
                 if (deviceId.isNotEmpty() && !deviceId.equals("null", ignoreCase = true)) entityToDevice[entityId] = deviceId
             }
             if (entityToArea.isNotEmpty() || entityToDevice.isNotEmpty()) {
@@ -560,14 +555,14 @@ class HaClient(
             for (d in items) {
                 val id = d.optString("id")
                 if (id.isEmpty()) continue
-                val areaId = d.optString("area_id")
+                val areaId = d.text("area_id")
                 if (areaId.isNotEmpty()) deviceToArea[id] = areaId
                 // Manufacturer per device: the second Ring signal.
                 // Camera state attributes on this instance do not
                 // carry `brand`, which is why run #38's label never
                 // fired — the device registry is the ground truth
                 // for who made the device.
-                val maker = d.optString("manufacturer")
+                val maker = d.text("manufacturer")
                 if (maker.isNotEmpty()) deviceToMaker[id] = maker
                 // Device info for device-aware search (item 3).
                 // Feedback round 17, item 4: the literal string
@@ -575,11 +570,11 @@ class HaClient(
                 // registry name fields, and the picker rendered
                 // it verbatim. Mirrors the device_id "null" guard
                 // below: a "null" name is treated as absent.
-                val displayName = d.optString("name_by_user").ifEmpty { d.optString("name") }
+                val displayName = d.text("name_by_user").ifEmpty { d.text("name") }
                 if (displayName.isNotEmpty() && !displayName.equals("null", ignoreCase = true)) {
                     deviceInfoById[id] = HaDeviceInfo(
                         displayName,
-                        d.optString("model").ifEmpty { null },
+                        d.text("model").ifEmpty { null },
                         maker.ifEmpty { null },
                     )
                 }
@@ -999,7 +994,7 @@ class HaClient(
                         mediaContentId = c.optString("media_content_id"),
                         mediaContentType = c.optString("media_content_type"),
                         title = c.optString("title"),
-                        thumbnail = c.optString("thumbnail").ifEmpty { null },
+                        thumbnail = c.text("thumbnail").ifEmpty { null },
                         canPlay = c.optBoolean("can_play", false),
                         canExpand = c.optBoolean("can_expand", false),
                     ),

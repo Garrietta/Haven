@@ -1,5 +1,7 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.data.AreaMember
+import com.garrietta.haven.data.areaMembers
 import androidx.compose.runtime.rememberCoroutineScope
 import com.garrietta.haven.data.HaArea
 import com.garrietta.haven.data.HaFloor
@@ -137,6 +139,7 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
     var newRoomName by remember { mutableStateOf("") }
     var renameText by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var confirmDelete by remember { mutableStateOf<HaArea?>(null) }
+    val scope = rememberCoroutineScope()
     var addFor by remember { mutableStateOf<String?>(null) }
     var assignFor by remember { mutableStateOf<String?>(null) }
     // The row whose settings are open: one at a time, so the list stays short.
@@ -216,11 +219,12 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
                 .mapNotNull { states[it] }
                 .sortedBy { it.friendlyName }
             val placement = vm.roomPlacement(area.id)
+            val holds = areaMembers(members, entityDevices, deviceInfo.mapValues { it.value.name })
             ManagerRow(
                 reorder = reorder,
                 key = key,
                 title = displayNames[area.id]?.takeIf { it.isNotBlank() } ?: area.name,
-                subtitle = "${deviceCountLabel(members.size)} · ${placementLabel(placement)}",
+                subtitle = "${deviceCountLabel(holds.size)} · ${placementLabel(placement)}",
                 icon = roomIcons[area.id]?.let { tabIconPairForKey(it)?.first } ?: Icons.Filled.Home,
                 expanded = open == key && reorder.draggingKey == null,
                 onToggle = { open = if (open == key) null else key },
@@ -232,7 +236,7 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
                 RoomSettings(
                     vm = vm,
                     area = area,
-                    members = members,
+                    holds = holds,
                     renameText = renameText[area.id] ?: area.name,
                     onRenameText = { renameText = renameText + (area.id to it) },
                     deleteArmed = false,
@@ -264,15 +268,33 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
                         }
                         Triple(matches, all.size, { id: String -> cleanDeviceName(deviceInfo[entityDevices[id]]?.name) })
                     },
+                    // A device moves as a whole, as in Home Assistant; an entity
+                    // with no device moves on its own.
                     onAdd = { candidate ->
                         addFor = null
-                        vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
-                            done(err, "${candidate.friendlyName} moved to ${area.name}")
+                        val deviceId = entityDevices[candidate.entityId]
+                        if (deviceId != null) {
+                            val deviceName = deviceInfo[deviceId]?.name ?: candidate.friendlyName
+                            scope.launch {
+                                done(vm.admin.updateDevice(deviceId) { it.put("area_id", area.id) }, "$deviceName moved to ${area.name}")
+                            }
+                        } else {
+                            vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
+                                done(err, "${candidate.friendlyName} moved to ${area.name}")
+                            }
                         }
                     },
                     onRemove = { member ->
-                        vm.assignEntityToRoom(member.entityId, null) { err ->
-                            done(err, "${member.friendlyName} moved to No room")
+                        when (member) {
+                            is AreaMember.Device -> scope.launch {
+                                done(
+                                    vm.admin.updateDevice(member.deviceId) { it.put("area_id", org.json.JSONObject.NULL) },
+                                    "${member.name} moved to No area",
+                                )
+                            }
+                            is AreaMember.Lone -> vm.assignEntityToRoom(member.entity.entityId, null) { err ->
+                                done(err, "${member.name} moved to No area")
+                            }
                         }
                     },
                     placement = placement,
@@ -502,7 +524,7 @@ private fun ManagerRow(
 private fun RoomSettings(
     vm: HavenViewModel,
     area: HaArea,
-    members: List<com.garrietta.haven.data.HaEntity>,
+    holds: List<AreaMember>,
     renameText: String,
     onRenameText: (String) -> Unit,
     deleteArmed: Boolean,
@@ -517,7 +539,7 @@ private fun RoomSettings(
     onAddQuery: (String) -> Unit,
     candidatesFor: (String) -> Triple<List<com.garrietta.haven.data.HaEntity>, Int, (String) -> String?>,
     onAdd: (com.garrietta.haven.data.HaEntity) -> Unit,
-    onRemove: (com.garrietta.haven.data.HaEntity) -> Unit,
+    onRemove: (AreaMember) -> Unit,
     placement: Placement,
     done: (String?, String) -> Unit,
     floors: List<HaFloor> = emptyList(),
@@ -605,9 +627,15 @@ private fun RoomSettings(
     }
     Spacer(Modifier.height(12.dp))
     Text("Devices", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    members.forEach { member ->
+    if (holds.isEmpty()) SettingsNote("Nothing here yet.")
+    holds.forEach { member ->
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-            Text(member.friendlyName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f)) {
+                Text(member.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (member is AreaMember.Device && member.entityCount > 1) {
+                    Text("${member.entityCount} entities", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             TextButton(onClick = { onRemove(member) }) { Text("Remove") }
         }
     }
