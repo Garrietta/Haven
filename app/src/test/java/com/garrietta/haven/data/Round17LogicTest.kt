@@ -119,7 +119,7 @@ class Round17LogicTest {
 
     @Test fun navActiveScreen_subScreensHighlightSettings() {
         assertEquals(Screen.Settings, navActiveScreen(Screen.HomeEditor))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.RoomsTabs))
+        assertEquals(Screen.Settings, navActiveScreen(Screen.SettingsPage("areas/areas")))
         assertEquals(Screen.Settings, navActiveScreen(Screen.Dashboards))
         assertEquals(Screen.Settings, navActiveScreen(Screen.Areas))
         assertEquals(Screen.Settings, navActiveScreen(Screen.Search))

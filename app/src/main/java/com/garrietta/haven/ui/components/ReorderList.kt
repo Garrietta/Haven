@@ -60,6 +60,23 @@ fun reorderTarget(draggedKey: Any, dragTop: Float, dragSize: Int, candidates: Li
     return candidates.firstOrNull { it.key != draggedKey && middle >= it.top && middle < it.top + it.size }?.key
 }
 
+/**
+ * [full] after moving the [from]th element of [shown] to [shown]'s
+ * [to]th place, where [shown] is the part of [full] a list draws (the
+ * Home sections that have a row, the favorites a search matches). The
+ * elements not drawn keep their slots; the drawn ones are rewritten in
+ * their new order into the slots they held.
+ */
+fun <T> reorderSubset(full: List<T>, shown: List<T>, from: Int, to: Int): List<T> {
+    if (from !in shown.indices || to !in shown.indices || from == to) return full
+    val moved = shown.toMutableList().apply { add(to, removeAt(from)) }
+    val slots = full.indices.filter { full[it] in shown }
+    if (slots.size != moved.size) return full
+    val out = full.toMutableList()
+    slots.forEachIndexed { i, slot -> out[slot] = moved[i] }
+    return out
+}
+
 /** [list] with the element keyed [from] moved to where [to] is. Unchanged when either is missing. */
 fun <T> moveKeyed(list: List<T>, from: T, to: T): List<T> {
     val i = list.indexOf(from)

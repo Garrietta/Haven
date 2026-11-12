@@ -19,7 +19,8 @@ import com.garrietta.haven.HavenApp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.ui.screens.RoomFilter
-import com.garrietta.haven.ui.screens.RoomsTabsScreen
+import com.garrietta.haven.ui.screens.SettingsPageHost
+import com.garrietta.haven.ui.screens.AppearanceControls
 import com.garrietta.haven.ui.theme.HavenTheme
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
@@ -171,15 +172,17 @@ class HavenScreenshotTest {
     }
 
     /**
-     * Rooms & tabs on its own, as Settings opens it. Drawn directly rather
-     * than reached through Settings, whose row sits below the fold: a
-     * scroll there waits on an animation the hand-driven clock never runs.
+     * A settings page on its own, as Settings opens it. Drawn directly
+     * rather than reached through Settings, whose rows sit below the
+     * fold: a scroll there waits on an animation the hand-driven clock
+     * never runs.
      */
-    private fun shootRoomsTabs(name: String, vm: HavenViewModel, dark: Boolean, then: (() -> Unit)? = null) {
+    private fun shootSettingsPage(name: String, vm: HavenViewModel, dark: Boolean, route: String, then: (() -> Unit)? = null) {
         RuntimeEnvironment.setQualifiers(FOLDED)
         compose.mainClock.autoAdvance = false
         compose.activityRule.scenario.recreate()
-        compose.setContent { HavenTheme(darkTheme = dark) { RoomsTabsScreen(vm, onBack = {}, navigate = {}) } }
+        val controls = AppearanceControls(if (dark) "dark" else "light", false, {}, {}, false, {}, {})
+        compose.setContent { HavenTheme(darkTheme = dark) { SettingsPageHost(vm, route, onBack = {}, navigate = {}, appearance = controls) } }
         compose.mainClock.advanceTimeBy(SETTLE_MS)
         if (then != null) {
             then()
@@ -212,18 +215,46 @@ class HavenScreenshotTest {
     }
 
     /** Rooms and tabs as rows with grips, one open. */
-    @Test fun rooms_tabs_folded_light() =
-        shootRoomsTabs("rooms_tabs_folded_light", withMediaTab(viewModel(signedIn = true, dark = false)), dark = false) {
+    @Test fun areas_folded_light() =
+        shootSettingsPage("areas_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "areas/areas") {
             tapText("Kitchen")
         }
+
+    @Test fun tabs_folded_light() =
+        shootSettingsPage("tabs_folded_light", withMediaTab(viewModel(signedIn = true, dark = false)), dark = false, route = "tabs") {
+            tapText("Media")
+        }
+
+    /** Settings' hub: Home Assistant's sections, then Haven's. */
+    @Test fun settings_hub_folded_dark() =
+        shoot("settings_hub_folded_dark", FOLDED, viewModel(signedIn = true, dark = true)) { tapTab("Settings") }
+
+    @Test fun device_styles_folded_light() =
+        shootSettingsPage("device_styles_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "styles")
+
+    @Test fun device_style_light_folded_dark() =
+        shootSettingsPage("device_style_light_folded_dark", viewModel(signedIn = true, dark = true), dark = true, route = "style/light")
+
+    @Test fun home_navigation_folded_light() =
+        shootSettingsPage("home_navigation_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "home")
+
+    @Test fun system_folded_dark() =
+        shootSettingsPage("system_folded_dark", viewModel(signedIn = true, dark = true), dark = true, route = "system")
+
+    @Test fun automations_folded_light() =
+        shootSettingsPage("automations_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "automations/scenes")
+
+    /** An entity's page: Home Assistant's settings (unreachable here) and its look in Haven. */
+    @Test fun entity_settings_folded_light() =
+        shootSettingsPage("entity_settings_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "entity/light.living_room_lamp")
 
     /**
      * A room dragged by its grip: captured mid-drag, lifted over the rows
      * that have stepped aside, then dropped, and the new order is stored.
      */
-    @Test fun rooms_tabs_drag_folded_dark() {
+    @Test fun areas_drag_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
-        shootRoomsTabs("rooms_tabs_drag_folded_dark", vm, dark = true) {
+        shootSettingsPage("areas_drag_folded_dark", vm, dark = true, route = "areas/areas") {
             val grip = compose.onNodeWithContentDescription("Reorder Living Room", useUnmergedTree = true)
             grip.performTouchInput { down(center) }
             frame()

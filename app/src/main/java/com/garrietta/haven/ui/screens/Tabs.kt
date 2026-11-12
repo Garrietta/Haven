@@ -104,7 +104,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             Spacer(Modifier.height(16.dp))
             Text("This tab was deleted.", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
+            Button(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Your tabs") }
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -117,7 +117,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             ScreenTitle(tab.title, Modifier.weight(1f))
             // Round 21, item 7: the Arrange button is gone — a
             // long-press on any tile enters Arrange mode.
-            OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Edit") }
+            OutlinedButton(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Edit") }
         }
         Spacer(Modifier.height(12.dp))
         if (tab.cards.isEmpty()) {
@@ -207,7 +207,7 @@ private fun TabCardView(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Fix in Rooms & tabs") }
+                OutlinedButton(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Fix in Your tabs") }
             }
         }
     } else {
@@ -251,7 +251,7 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             item {
                 Text("No custom tabs yet.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
+                Button(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Your tabs") }
             }
         } else {
             items(visibleTabs) { tab ->
@@ -273,7 +273,7 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
         item {
             Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
+            OutlinedButton(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Your tabs") }
         }
     }
 }

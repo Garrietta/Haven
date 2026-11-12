@@ -249,6 +249,12 @@ The rooms:
 
 A tap on a switch does what a tap can safely do (lights, plugs, fans flip; everything else opens its control); a tap on the card opens the room as a popup that grows out of the card, with every device in it as a tile. Nothing on Home leads to another page: a room, a device and a camera are all popups over it. Unfolded, the sentence, cameras and status take the left pane and the rooms lead the right. The rules live in `data/RoomDigest.kt` as pure functions and are tested there.
 
+### Settings is laid out like Home Assistant's
+
+Settings opens on Home Assistant's own sections, in its order: Devices & services (integrations, devices, entities, helpers), Automations & scenes, Areas, labels & zones, Dashboards, People, System and About. Each reads and writes Home Assistant through the same calls its frontend makes, so a change here is a change there. Under them, Haven's own: Appearance, Device styles, Home & navigation, Notifications and Connection.
+
+Each thing has one place. Rooms are areas, so a room's Haven choices (its name and icon in Haven, where it shows, its order on Home) sit beside Home Assistant's settings for it under Areas. Tabs are Haven's and live under Home & navigation. How a device looks is set for its whole type under Device styles; one device can differ from its type on its own page under Devices & services, Entities, never from its popup. Lists are reordered by dragging their grips, never with arrows. A list Home Assistant could not send says so rather than showing empty.
+
 ### Security is where the cameras live
 
 Home keeps to what the house is doing; the Security tab, beside Home on the bar, holds what keeps it safe. It opens with one line in the Secure family when everything is shut and locked, and in the Alert family naming what is not ("Back Door is open"). Under it: the alarm as one choice of four (lime capsule), every camera as a picture that opens it, the switches that turn each camera's detection on and off, and the doors, locks and sensors, each opening its own popup.

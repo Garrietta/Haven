@@ -1,5 +1,24 @@
 # Haven Changelog
 
+## 2.6: Settings laid out like Home Assistant's (2026-11-12)
+
+**What you will see**
+
+- Settings opens on Home Assistant's own sections, in its order: Devices & services, Automations & scenes, Areas, labels & zones, Dashboards, People, System and About. Haven's own settings follow under Haven: Appearance, Device styles, Home & navigation, Notifications and Connection.
+- Devices & services has Home Assistant's four tabs. Integrations: reload, disable or delete one, and add a new one by answering Home Assistant's own questions (a step that needs a browser sign-in opens the browser). Devices: rename, move to an area, disable, and see their entities. Entities: search every entity and open its page, with Home Assistant's settings (name, icon, area, entity ID, visible, enabled) and how its card looks in Haven. Helpers: create and delete.
+- Automations & scenes lists every automation with its switch and when it last ran, every scene and every script: run, switch, delete, or start a new one.
+- Areas, labels & zones holds your rooms (each with Home Assistant's settings and Haven's, and a grip to set their order on Home), and adds floors, labels and zones.
+- People lists people with their trackers, to add, rename or remove, and the users. System has updates, repairs, logs, backups, the general settings (name, units, time zone, location), checking the configuration, reloading YAML and restarting, which asks first. About shows the versions.
+- Device styles sets the color, badge shape and card shape for each type of device (every lamp, every lock) with a preview. The Card settings, Badge shape and Card shape rows are gone from popups; one device can still differ from its type on its own page.
+- Rooms and tabs each have one place: rooms under Areas, your tabs under Home & navigation. Browse, Shapes, Rooms & tabs, User tabs and the Create hub are gone from Settings.
+- Every list in Settings reorders by dragging its grip: Home sections, favorites, dashboard cards, rooms, tabs and a tab's cards. The arrows are gone.
+
+**Under it**
+
+- `data/HaAdminApi.kt` makes the calls (the WebSocket admin commands and the REST config API, through new awaited `HaClient.command` and `HaClient.rest`); `data/HaAdmin.kt` parses the replies, with 11 tests. `ui/screens/Settings*.kt` are the pages, routed by `Screen.SettingsPage(route)`.
+- `RoomsTabs.kt` now draws Areas and Your tabs as two pages. `Screen.RoomsTabs`, `Screen.BuilderHub` and the type-defaults dialog are gone; `reorderSubset` moves the shown part of a list among the rest.
+- An area carries its floor.
+
 ## 2.5: a Security tab (2026-11-12)
 
 **What you will see**

@@ -97,7 +97,7 @@ class NavItemsTest {
         // and Rooms & tabs cleared the indicator on the
         // 2026-11-04 runs).
         for (screen in listOf(
-            Screen.HomeEditor, Screen.RoomsTabs,
+            Screen.HomeEditor, Screen.SettingsPage("areas/areas"),
             Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs,
             Screen.AutomationBuilder, Screen.SceneBuilder, Screen.ScriptBuilder,
             Screen.HelperBuilder, Screen.UpdatesPanel,

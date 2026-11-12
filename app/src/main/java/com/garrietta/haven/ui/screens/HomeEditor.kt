@@ -1,4 +1,8 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.components.ColumnReorderHandle
+import com.garrietta.haven.ui.components.columnReorderRow
+import com.garrietta.haven.ui.components.rememberColumnReorder
+import com.garrietta.haven.ui.components.reorderSubset
 import androidx.compose.foundation.layout.PaddingValues
 
 import androidx.compose.foundation.background
@@ -82,18 +86,16 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
     var showFavoritesSheet by remember { mutableStateOf(false) }
     val lights = states.values.filter { it.domain == "light" }.sortedBy { it.friendlyName }
     val resolvedSectionOrder = resolveOrder(sectionOrder, HOME_SECTION_ORDER_DEFAULT)
-    // Swap helper: moves [key] one slot toward the start/end of the
-    // stored order (rooms included as swappable neighbours even
-    // though rooms have no toggle row of their own).
-    fun moveSection(key: String, up: Boolean) {
-        val order = resolvedSectionOrder.toMutableList()
-        val i = order.indexOf(key)
-        val j = if (up) i - 1 else i + 1
-        if (i < 0 || j < 0 || j >= order.size) return
-        order[i] = order[j].also { order[j] = order[i] }
+    // The sections that have a row here, in Home's order. Rooms have
+    // no row of their own and keep their slot when the rest move.
+    val sectionRows = resolvedSectionOrder.filter { it in HOME_SECTIONS.toMap() && it != "greeting" }
+    fun storeOrder(order: List<String>) {
         sectionOrder = order
         vm.settingsStore.setHomeSectionOrder(order)
         vm.bumpHomePrefs()
+    }
+    val sectionReorder = rememberColumnReorder(sectionRows.size) { from, to ->
+        storeOrder(reorderSubset(resolvedSectionOrder, sectionRows, from, to))
     }
 
     LazyColumn(
@@ -104,7 +106,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item {
-            DetailTopBar("Manage home page", onBack)
+            DetailTopBar("Home page", onBack)
             Text(
                 "Home shows your welcome message, then the camera hero and room sections below. Changes apply as soon as you make them.",
                 fontSize = 13.sp,
@@ -147,13 +149,9 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 Column {
-                    // Stage G: the greeting is the pinned header —
-                    // toggleable, never orderable — so it gets its own
-                    // row with no move buttons. Every other block
-                    // renders in stored order with up/down buttons
-                    // that swap it with its neighbour (rooms included
-                    // as a swappable neighbour, so rooms can move up
-                    // when the block above them moves down).
+                    // The greeting is the pinned header: it can be
+                    // hidden but never moved, so it has no grip. Every
+                    // other section is dragged by its grip.
                     val toggleable = HOME_SECTIONS.toMap()
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp),
@@ -171,22 +169,24 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                             },
                         )
                     }
-                    for (key in resolvedSectionOrder) {
+                    for ((index, key) in sectionRows.withIndex()) {
                         val label = toggleable[key] ?: continue
-                        if (key == "greeting") continue
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp),
+                            Modifier.fillMaxWidth()
+                                .columnReorderRow(sectionReorder, index)
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            ColumnReorderHandle(
+                                sectionReorder, index, label,
+                                onStep = { delta ->
+                                    storeOrder(reorderSubset(resolvedSectionOrder, sectionRows, index, (index + delta).coerceIn(sectionRows.indices)))
+                                },
+                                modifier = Modifier.size(40.dp).padding(8.dp),
+                            )
                             Text(label, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                            // Feedback round 16, item 3: default switch–text buffer.
                             Spacer(Modifier.width(12.dp))
-                            IconButton(onClick = { moveSection(key, true) }) {
-                                Icon(Icons.Filled.ArrowUpward, "Move up", modifier = Modifier.size(20.dp))
-                            }
-                            IconButton(onClick = { moveSection(key, false) }) {
-                                Icon(Icons.Filled.ArrowDownward, "Move down", modifier = Modifier.size(20.dp))
-                            }
                             Switch(
                                 checked = key !in hidden,
                                 onCheckedChange = { shown ->

@@ -517,7 +517,12 @@ class HaClient(
             for (o in items) {
                 val id = o.optString("area_id").ifEmpty { o.optString("id") }
                 if (id.isEmpty()) continue
-                list.add(HaArea(id, o.optString("name"), o.optString("icon").ifEmpty { null }))
+                list.add(
+                    HaArea(
+                        id, o.optString("name"), o.optString("icon").ifEmpty { null },
+                        o.optString("floor_id").takeIf { it.isNotEmpty() && it != "null" },
+                    ),
+                )
             }
             if (list.isNotEmpty()) _areas.value = list.sortedBy { it.name }
         })
@@ -1055,6 +1060,42 @@ class HaClient(
         }, onResult = { msg ->
             onDone(msg.optBoolean("success", false))
         })
+    }
+
+    /**
+     * One command, awaited: the result message, or null when Home
+     * Assistant does not answer within [timeoutMs] (not connected, or
+     * a command this version does not know). Settings uses it for the
+     * registries and admin lists it reads on demand.
+     */
+    suspend fun command(type: String, timeoutMs: Long = 10_000, build: (JSONObject) -> Unit = {}): JSONObject? =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                val id = sendCommand(type, build) { msg -> if (cont.isActive) cont.resumeWith(Result.success(msg)) }
+                cont.invokeOnCancellation { pending.remove(id) }
+            }
+        }
+
+    /**
+     * One REST call to the instance's API, as (HTTP status, body). Status
+     * is 0 when the request could not be made at all. [path] starts with
+     * "/api/".
+     */
+    suspend fun rest(method: String, path: String, body: JSONObject? = null): Pair<Int, String?> = withContext(Dispatchers.IO) {
+        try {
+            val requestBody = body?.toString()?.toRequestBody("application/json".toMediaTypeOrNull())
+                ?: if (method == "POST") "".toRequestBody(null) else null
+            val req = Request.Builder()
+                .url("$instanceUrl$path")
+                .header("Authorization", "Bearer $token")
+                .method(method, requestBody)
+                .build()
+            http.newCall(req).execute().use { resp -> resp.code to resp.body?.string() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            0 to e.message
+        }
     }
 
     /** Saves an automation/script/scene config through the REST config API. */

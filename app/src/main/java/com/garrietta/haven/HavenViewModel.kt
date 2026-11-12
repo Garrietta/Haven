@@ -102,8 +102,8 @@ sealed class Screen {
     data object Settings : Screen()
     /** A user-created tab; Home and Settings are the built-in tabs. */
     data class UserTab(val tabId: String) : Screen()
-    /** Feedback round 19, item 5: the unified Rooms & tabs manager (Settings) — replaces RoomManager + TabManager. */
-    data object RoomsTabs : Screen()
+    /** A page under Settings, named by its route (see SettingsRoute). */
+    data class SettingsPage(val route: String) : Screen()
     /** Feedback round 19, item 5: a room pinned as a navigation tab — renders Today with that room's filter. */
     data class RoomTab(val areaId: String) : Screen()
     data object HomeEditor : Screen()
@@ -126,12 +126,6 @@ sealed class Screen {
     data object SceneBuilder : Screen()
     data object ScriptBuilder : Screen()
     data object HelperBuilder : Screen()
-    /** Round 24, item 5: the builder hub — one entry point to
-     * the four existing builders, reached from Settings' single
-     * "Automations, scenes & helpers" row. Not a destination tab
-     * and not the settings epic; just the old Create section as
-     * its own screen. */
-    data object BuilderHub : Screen()
 }
 
 /**
@@ -148,6 +142,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val tabsStore = TabsStore(application)
     val cardSizeStore = CardSizeStore(application)
     val client = HaClient(viewModelScope)
+
+    /** Home Assistant's own settings, for Settings' Home Assistant pages. */
+    val admin = com.garrietta.haven.data.HaAdminApi(client)
+
+    /** Where home is, from the home zone, as a starting point for a new zone. */
+    fun homeLocationGuess(): Pair<Double, Double>? {
+        val home = client.states.value["zone.home"] ?: return null
+        val lat = home.attrDouble("latitude") ?: return null
+        val lon = home.attrDouble("longitude") ?: return null
+        return lat to lon
+    }
 
     /** User-created tabs, in pill-bar order. Loaded synchronously so the app can open on the first tab. */
     var userTabs by mutableStateOf<List<UserTab>>(tabsStore.loadTabs())
@@ -351,18 +356,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openShapePicker(entityId: String?, forCard: Boolean) { shapePickerTarget = ShapePickerTarget(entityId, forCard) }
     fun closeShapePicker() { shapePickerTarget = null }
-
-    /**
-     * Feedback round 15, item 5: the Domain defaults dialog
-     * (Settings -> Shapes) — one dialog for all three per-domain
-     * defaults, so a domain's badge shape, card shape, and tile
-     * color are set in one place instead of three pickers.
-     */
-    var domainDefaultsOpen by mutableStateOf(false)
-        private set
-
-    fun openDomainDefaults() { domainDefaultsOpen = true }
-    fun closeDomainDefaults() { domainDefaultsOpen = false }
 
     /**
      * Customization round, item 2: bumped whenever Card settings
@@ -1140,6 +1133,13 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeFavorite(entityId: String) {
         favorites = favorites - entityId
+        settingsStore.setFavoriteEntityIds(favorites)
+    }
+
+    /** Puts the favorites in the order of [ids], as a drag leaves them. */
+    fun setFavoriteOrder(ids: List<String>) {
+        if (ids.toSet() != favorites.toSet() || ids == favorites) return
+        favorites = ids
         settingsStore.setFavoriteEntityIds(favorites)
     }
 

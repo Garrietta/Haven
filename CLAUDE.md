@@ -20,6 +20,7 @@ MVVM without a DI framework: one `HavenViewModel` owns the `HaClient` and the st
 | A device's control | `ui/controls/` |
 | Screens | `ui/screens/` |
 | Stored settings | `data/SettingsStore.kt`, `TabsStore`, `CardSizeStore`, `TokenStore` |
+| Settings pages, and Home Assistant's own settings | `ui/screens/Settings*.kt` (routes in `SettingsHome.kt`), calls in `data/HaAdminApi.kt`, parsers in `data/HaAdmin.kt` |
 | Device Controls, notifications | `HavenControlsService.kt`, `data/HavenNotificationManager.kt` |
 
 ## Build, test, look

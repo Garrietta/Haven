@@ -635,21 +635,10 @@ internal fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Pair<Stri
 }
 
 /**
- * Round 21, item 5: the settings rows that used to live in the
- * long-press sheet, now at the bottom of the single-press popup
- * for EVERY tile. The sheet is gone (HavenApp's
- * EntityPopupSheetContent is deleted); these rows are the only
- * settings surface, shared verbatim by the generic detail page,
- * the thermostat popout, the weather page, the camera column,
- * and the vacuum panel. [onDetails] is the "open the full page"
- * destination — null when this surface IS the full page (generic
- * detail, thermostat popout, weather page: the row would navigate
- * to itself, and pushing a duplicate detail screen is a real
- * defect, not a no-op), non-null where a deeper surface exists
- * (vacuum panel: the generic detail page). Cameras carry their
- * own Details action (the Open live view button) plus an Event
- * history row, so they pass null here too. Badge shape / Card
- * shape / Card settings are always present.
+ * The row at the foot of a popup that leads to a fuller page, where
+ * one exists ([onDetails], the vacuum panel's generic page). How a
+ * device looks is not set here: that is Settings, Device styles, for
+ * its whole type, or the device's own page under Devices & services.
  */
 @Composable
 internal fun EntityPopupMenuRows(
@@ -670,40 +659,6 @@ internal fun EntityPopupMenuRows(
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
-        }
-        // How the device's card looks: one group, so the three rows
-        // read as one set of choices rather than three more controls.
-        MenuSection("Customize")
-        MenuGroup(Modifier.fillMaxWidth()) {
-            MenuRow(
-                badgeKey = "card-settings-${entity.entityId}",
-                badgeKind = shapeForDomain(entity.domain),
-                icon = domainIcon(entity),
-                title = "Card settings",
-                subtitle = "Title, icon, tile color",
-                onClick = { vm.openCardSettings(entity.entityId) },
-                flat = true,
-            )
-            MenuDivider()
-            MenuRow(
-                badgeKey = "shape-badge-${entity.entityId}",
-                badgeKind = shapeForDomain(entity.domain),
-                icon = domainIcon(entity),
-                title = "Badge shape",
-                subtitle = shapeLabel(vm.settingsStore.badgeShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalBadgeShape) ?: "Domain default",
-                onClick = { vm.openShapePicker(entity.entityId, false) },
-                flat = true,
-            )
-            MenuDivider()
-            MenuRow(
-                badgeKey = "shape-card-${entity.entityId}",
-                badgeKind = shapeForDomain(entity.domain),
-                icon = domainIcon(entity),
-                title = "Card shape",
-                subtitle = shapeLabel(vm.settingsStore.cardShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalCardShape) ?: "Default corners",
-                onClick = { vm.openShapePicker(entity.entityId, true) },
-                flat = true,
-            )
         }
     }
 }

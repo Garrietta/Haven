@@ -48,4 +48,14 @@ class ReorderListTest {
         assertEquals(0, columnTarget(start = 1, draggedPx = -900f, rowHeight = 100, count = 4))
         assertEquals(2, columnTarget(start = 2, draggedPx = 300f, rowHeight = 0, count = 4))
     }
+
+    @Test
+    fun movingAmongTheShownLeavesTheRestInTheirSlots() {
+        // "rooms" has no row; the shown sections move around it.
+        val full = listOf("cameras", "weather", "rooms", "status", "favorites")
+        val shown = listOf("cameras", "weather", "status", "favorites")
+        assertEquals(listOf("weather", "status", "rooms", "cameras", "favorites"), reorderSubset(full, shown, 0, 2))
+        assertEquals(full, reorderSubset(full, shown, 1, 1))
+        assertEquals(full, reorderSubset(full, shown, 0, 9))
+    }
 }

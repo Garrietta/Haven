@@ -1,5 +1,9 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.runtime.rememberCoroutineScope
+import com.garrietta.haven.data.HaArea
+import com.garrietta.haven.data.HaFloor
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -51,7 +55,6 @@ import androidx.compose.ui.unit.dp
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
-import com.garrietta.haven.data.HaArea
 import com.garrietta.haven.data.Placement
 import com.garrietta.haven.data.cleanDeviceName
 import com.garrietta.haven.data.deviceCountLabel
@@ -70,15 +73,12 @@ import com.garrietta.haven.ui.components.tabIconPairForKey
 import com.garrietta.haven.ui.theme.settleSpring
 
 /*
- * Rooms & tabs: where rooms and tabs are made, named, ordered and
- * placed. Rooms write through to Home Assistant; tabs are local.
- *
- * Each room and tab is one row: a grip to drag it by, its icon, its
- * name and a line saying what is in it and where it is pinned. Tap the
- * row to open its settings under it. Drag the grip to reorder: the order
- * of rooms is the order Home shows them in, and the order of tabs is the
- * order of User Tabs. The new order is written once, when the finger
- * lifts. A tab's own cards reorder the same way inside the open tab.
+ * Rooms and tabs as lists of rows: a grip to drag each by, its icon,
+ * its name and a line saying what is in it and where it is pinned. Tap
+ * a row to open its settings under it. The order is written once, when
+ * the finger lifts. Rooms are Home Assistant's areas and live under
+ * Areas, labels & zones; tabs are Haven's own and live under Home &
+ * navigation. A tab's own cards reorder the same way inside it.
  */
 
 private const val ROOM_KEY = "room:"
@@ -107,30 +107,41 @@ internal fun stepped(ids: List<String>, id: String, delta: Int): List<String> {
     return ids.toMutableList().apply { add(j, removeAt(i)) }
 }
 
+
+private val AREA_TABS = listOf(
+    "areas" to "Areas",
+    "floors" to "Floors",
+    "labels" to "Labels",
+    "zones" to "Zones",
+)
+
+/**
+ * Areas, labels & zones, as in Home Assistant. Areas are Haven's rooms:
+ * each one opens to Home Assistant's settings for it (name, floor,
+ * devices) beside Haven's (its name and icon in Haven, where it shows),
+ * and the grip sets the order Home shows them in.
+ */
 @Composable
-fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
+fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, navigate: (Screen) -> Unit) {
+    var selected by remember { mutableStateOf(tab) }
     val areas by vm.areas.collectAsState()
     val entityAreas by vm.entityAreas.collectAsState()
     val states by vm.states.collectAsState()
     val deviceInfo by vm.deviceInfo.collectAsState()
     val entityDevices by vm.entityDevices.collectAsState()
+    val floors = rememberLoad("floors") { vm.admin.floors() }
+    val labels = rememberLoad("labels") { vm.admin.labels() }
+    val zones = rememberLoad("zones") { vm.admin.zones() }
     var addQuery by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf<String?>(null) }
-    var messageIsError by remember { mutableStateOf(false) }
+    val status = rememberSettingsStatus()
     var newRoomName by remember { mutableStateOf("") }
     var renameText by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var deleteArmed by remember { mutableStateOf<String?>(null) }
+    var confirmDelete by remember { mutableStateOf<HaArea?>(null) }
     var addFor by remember { mutableStateOf<String?>(null) }
     var assignFor by remember { mutableStateOf<String?>(null) }
-    var newTabTitle by remember { mutableStateOf("") }
-    // (tabId, cardIndex, yaml) of the card currently in the YAML editor, if any.
-    var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
     // The row whose settings are open: one at a time, so the list stays short.
     var open by remember { mutableStateOf<String?>(null) }
-    fun done(err: String?, ok: String) {
-        if (err != null) { message = err; messageIsError = true }
-        else { message = ok; messageIsError = false }
-    }
+    fun done(err: String?, ok: String) = status.report(err, ok)
 
     // Display names and icons are Haven's own overrides of a room, not
     // Home Assistant's; renaming in HA is the Rename field.
@@ -140,9 +151,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
     // The order being dragged, while a drag is in flight; the stored
     // order otherwise. New rooms join at the end (resolveOrder).
     var roomDrag by remember { mutableStateOf<List<String>?>(null) }
-    var tabDrag by remember { mutableStateOf<List<String>?>(null) }
     val roomIds = roomDrag ?: resolveOrder(vm.settingsStore.roomOrder(), areas.map { it.id })
-    val tabIds = tabDrag ?: vm.userTabs.map { it.id }
     fun commitRooms(order: List<String>) {
         vm.settingsStore.setRoomOrder(order)
         vm.bumpHomePrefs()
@@ -151,275 +160,266 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
     val listState = rememberLazyListState()
     val reorder = rememberLazyListReorder(
         listState,
-        canSwap = { a, b ->
-            val x = a.toString()
-            val y = b.toString()
-            (x.startsWith(ROOM_KEY) && y.startsWith(ROOM_KEY)) || (x.startsWith(TAB_KEY) && y.startsWith(TAB_KEY))
-        },
+        canSwap = { a, b -> a.toString().startsWith(ROOM_KEY) && b.toString().startsWith(ROOM_KEY) },
         onMove = { from, to ->
-            val a = from.toString()
-            val b = to.toString()
-            if (a.startsWith(ROOM_KEY)) {
-                roomDrag = moveKeyed(roomIds, a.removePrefix(ROOM_KEY), b.removePrefix(ROOM_KEY))
-            } else {
-                tabDrag = moveKeyed(tabIds, a.removePrefix(TAB_KEY), b.removePrefix(TAB_KEY))
-            }
+            roomDrag = moveKeyed(roomIds, from.toString().removePrefix(ROOM_KEY), to.toString().removePrefix(ROOM_KEY))
         },
         onDrop = {
             roomDrag?.let { commitRooms(it) }
-            tabDrag?.let { vm.setTabOrder(it) }
             roomDrag = null
-            tabDrag = null
         },
     )
 
-    Column(Modifier.fillMaxSize().statusBarsPadding().background(MaterialTheme.colorScheme.background)) {
-        DetailTopBar("Rooms & tabs", onBack)
-        LazyColumn(
-            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
-            state = listState,
-            contentPadding = PaddingValues(bottom = 16.dp),
-        ) {
-            item(key = "intro") {
-                Text(
-                    "Rooms live in Home Assistant — changes here appear in HA itself. Tabs are local to Haven. " +
-                        "Each room or tab pins to exactly one surface: the Home chip row, the navigation bar, or neither.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = {
-                    vm.refreshAreas()
-                    message = "Refreshing rooms from Home Assistant…"
-                    messageIsError = false
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Refresh from Home Assistant")
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newRoomName,
-                        onValueChange = { newRoomName = it },
-                        label = { Text("New room name") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        val name = newRoomName.trim()
-                        if (name.isEmpty()) return@Button
-                        vm.createRoom(name) { err ->
-                            done(err, "Room \"$name\" created")
-                            if (err == null) newRoomName = ""
-                        }
-                    }) { Text("Add room") }
-                }
-                Spacer(Modifier.height(12.dp))
-                if (message != null) {
-                    Text(
-                        message!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-                SectionTitle("Rooms")
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Drag a room by its grip to change where it sits on Home. Tap it for its settings.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
+    SettingsPage("Areas, labels & zones", onBack, listState = listState) {
+        item(key = "tabs") { SettingsTabs(AREA_TABS, selected) { selected = it } }
+        statusItem(status)
+        if (selected != "areas") {
+            when (selected) {
+                "floors" -> floorItems(vm, floors, status)
+                "labels" -> labelItems(vm, labels, status)
+                "zones" -> zoneItems(vm, zones, status)
             }
-            items(roomIds, key = { ROOM_KEY + it }) { areaId ->
-                val area = areas.firstOrNull { it.id == areaId } ?: return@items
-                val key = ROOM_KEY + areaId
-                val members = entityAreas.filter { it.value == area.id }.keys
-                    .mapNotNull { states[it] }
-                    .sortedBy { it.friendlyName }
-                val placement = vm.roomPlacement(area.id)
-                ManagerRow(
-                    reorder = reorder,
-                    key = key,
-                    title = displayNames[area.id]?.takeIf { it.isNotBlank() } ?: area.name,
-                    subtitle = "${deviceCountLabel(members.size)} · ${placementLabel(placement)}",
-                    icon = roomIcons[area.id]?.let { tabIconPairForKey(it)?.first } ?: Icons.Filled.Home,
-                    expanded = open == key && reorder.draggingKey == null,
-                    onToggle = { open = if (open == key) null else key },
-                    onStep = { delta -> commitRooms(stepped(roomIds, areaId, delta)) },
-                    modifier = Modifier
-                        .then(if (reorder.draggingKey == key) Modifier else Modifier.animateItem())
-                        .reorderRow(reorder, key),
-                ) {
-                    RoomSettings(
-                        vm = vm,
-                        area = area,
-                        members = members,
-                        renameText = renameText[area.id] ?: area.name,
-                        onRenameText = { renameText = renameText + (area.id to it) },
-                        deleteArmed = deleteArmed == area.id,
-                        onDelete = {
-                            if (deleteArmed == area.id) {
-                                deleteArmed = null
-                                vm.deleteRoom(area.id) { err -> done(err, "Room \"${area.name}\" deleted") }
-                            } else {
-                                deleteArmed = area.id
-                                message = "Tap Delete again to confirm"
-                                messageIsError = false
-                            }
-                        },
-                        displayName = displayNames[area.id] ?: "",
-                        onDisplayName = { value ->
-                            vm.settingsStore.setRoomDisplayName(area.id, value.ifBlank { null })
-                            displayNames = vm.settingsStore.roomDisplayNames()
-                            vm.bumpHomePrefs()
-                        },
-                        iconKey = roomIcons[area.id],
-                        onIconKey = { key ->
-                            vm.settingsStore.setRoomIconKey(area.id, key)
-                            roomIcons = vm.settingsStore.roomIconKeys()
-                            vm.bumpHomePrefs()
-                        },
-                        adding = addFor == area.id,
-                        onAdding = { if (addFor == area.id) addFor = null else { addFor = area.id; addQuery = "" } },
-                        addQuery = addQuery,
-                        onAddQuery = { addQuery = it },
-                        candidatesFor = { q ->
-                            val all = states.values
-                                .filter { entityAreas[it.entityId] != area.id }
-                                .sortedBy { it.friendlyName }
-                            val matches = if (q.isEmpty()) all.take(25) else all.filter { candidate ->
-                                candidate.friendlyName.lowercase().contains(q) ||
-                                    candidate.entityId.lowercase().contains(q) ||
-                                    (deviceInfo[entityDevices[candidate.entityId]]?.name?.lowercase()?.contains(q) == true)
-                            }
-                            Triple(matches, all.size, { id: String -> cleanDeviceName(deviceInfo[entityDevices[id]]?.name) })
-                        },
-                        onAdd = { candidate ->
-                            addFor = null
-                            vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
-                                done(err, "${candidate.friendlyName} moved to ${area.name}")
-                            }
-                        },
-                        onRemove = { member ->
-                            vm.assignEntityToRoom(member.entityId, null) { err ->
-                                done(err, "${member.friendlyName} moved to No room")
-                            }
-                        },
-                        placement = placement,
-                        done = ::done,
-                    )
-                }
+            return@SettingsPage
+        }
+        item(key = "intro") {
+            Text(
+                "Areas are your rooms. They live in Home Assistant, so changes here appear there too. " +
+                    "Drag a room by its grip to change where it sits on Home; tap it for its settings.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = newRoomName,
+                    onValueChange = { newRoomName = it },
+                    label = { Text("New area name") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    val name = newRoomName.trim()
+                    if (name.isEmpty()) return@Button
+                    vm.createRoom(name) { err ->
+                        done(err, "Area \"$name\" created")
+                        if (err == null) newRoomName = ""
+                    }
+                }) { Text("Add") }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        items(roomIds, key = { ROOM_KEY + it }) { areaId ->
+            val area = areas.firstOrNull { it.id == areaId } ?: return@items
+            val key = ROOM_KEY + areaId
+            val members = entityAreas.filter { it.value == area.id }.keys
+                .mapNotNull { states[it] }
+                .sortedBy { it.friendlyName }
+            val placement = vm.roomPlacement(area.id)
+            ManagerRow(
+                reorder = reorder,
+                key = key,
+                title = displayNames[area.id]?.takeIf { it.isNotBlank() } ?: area.name,
+                subtitle = "${deviceCountLabel(members.size)} · ${placementLabel(placement)}",
+                icon = roomIcons[area.id]?.let { tabIconPairForKey(it)?.first } ?: Icons.Filled.Home,
+                expanded = open == key && reorder.draggingKey == null,
+                onToggle = { open = if (open == key) null else key },
+                onStep = { delta -> commitRooms(stepped(roomIds, areaId, delta)) },
+                modifier = Modifier
+                    .then(if (reorder.draggingKey == key) Modifier else Modifier.animateItem())
+                    .reorderRow(reorder, key),
+            ) {
+                RoomSettings(
+                    vm = vm,
+                    area = area,
+                    members = members,
+                    renameText = renameText[area.id] ?: area.name,
+                    onRenameText = { renameText = renameText + (area.id to it) },
+                    deleteArmed = false,
+                    onDelete = { confirmDelete = area },
+                    displayName = displayNames[area.id] ?: "",
+                    onDisplayName = { value ->
+                        vm.settingsStore.setRoomDisplayName(area.id, value.ifBlank { null })
+                        displayNames = vm.settingsStore.roomDisplayNames()
+                        vm.bumpHomePrefs()
+                    },
+                    iconKey = roomIcons[area.id],
+                    onIconKey = { key ->
+                        vm.settingsStore.setRoomIconKey(area.id, key)
+                        roomIcons = vm.settingsStore.roomIconKeys()
+                        vm.bumpHomePrefs()
+                    },
+                    adding = addFor == area.id,
+                    onAdding = { if (addFor == area.id) addFor = null else { addFor = area.id; addQuery = "" } },
+                    addQuery = addQuery,
+                    onAddQuery = { addQuery = it },
+                    candidatesFor = { q ->
+                        val all = states.values
+                            .filter { entityAreas[it.entityId] != area.id }
+                            .sortedBy { it.friendlyName }
+                        val matches = if (q.isEmpty()) all.take(25) else all.filter { candidate ->
+                            candidate.friendlyName.lowercase().contains(q) ||
+                                candidate.entityId.lowercase().contains(q) ||
+                                (deviceInfo[entityDevices[candidate.entityId]]?.name?.lowercase()?.contains(q) == true)
+                        }
+                        Triple(matches, all.size, { id: String -> cleanDeviceName(deviceInfo[entityDevices[id]]?.name) })
+                    },
+                    onAdd = { candidate ->
+                        addFor = null
+                        vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
+                            done(err, "${candidate.friendlyName} moved to ${area.name}")
+                        }
+                    },
+                    onRemove = { member ->
+                        vm.assignEntityToRoom(member.entityId, null) { err ->
+                            done(err, "${member.friendlyName} moved to No room")
+                        }
+                    },
+                    placement = placement,
+                    done = ::done,
+                    floors = (floors.state as? Loaded.Ready)?.value ?: emptyList(),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        item(key = "no-room") {
+            // No room mirrors Home: system entities (zone, sun, update)
+            // are not devices a room can hold, so they never appear and
+            // this count agrees with Home's. It has no area id, so no
+            // placement and no place in the order: it is always last.
+            val unassigned = states.values
+                .filter { entityAreas[it.entityId] == null && isHomeRoomEntity(it) }
+                .sortedBy { it.friendlyName }
+            Spacer(Modifier.height(4.dp))
+            Column(
+                Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.extraLarge)
+                    .padding(16.dp),
+            ) {
+                Text("No area", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text(deviceCountLabel(unassigned.size), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
-            }
-            item(key = "no-room") {
-                // No room mirrors Home: system entities (zone, sun, update)
-                // are not devices a room can hold, so they never appear and
-                // this count agrees with Home's. It has no area id, so no
-                // placement and no place in the order: it is always last.
-                val unassigned = states.values
-                    .filter { entityAreas[it.entityId] == null && isHomeRoomEntity(it) }
-                    .sortedBy { it.friendlyName }
-                Spacer(Modifier.height(4.dp))
-                Column(
-                    Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.extraLarge)
-                        .padding(16.dp),
-                ) {
-                    Text("No room", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                    Text(deviceCountLabel(unassigned.size), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    unassigned.forEach { member ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                            Text(member.friendlyName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            TextButton(onClick = { assignFor = if (assignFor == member.entityId) null else member.entityId }) {
-                                Text("Assign…")
-                            }
+                unassigned.forEach { member ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text(member.friendlyName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        TextButton(onClick = { assignFor = if (assignFor == member.entityId) null else member.entityId }) {
+                            Text("Assign…")
                         }
-                        if (assignFor == member.entityId) {
-                            DropdownMenu(
-                                expanded = true,
-                                onDismissRequest = { assignFor = null },
-                            ) {
-                                areas.forEach { area ->
-                                    DropdownMenuItem(
-                                        text = { Text(area.name) },
-                                        onClick = {
-                                            assignFor = null
-                                            vm.assignEntityToRoom(member.entityId, area.id) { err ->
-                                                done(err, "${member.friendlyName} moved to ${area.name}")
-                                            }
-                                        },
-                                    )
-                                }
+                    }
+                    if (assignFor == member.entityId) {
+                        DropdownMenu(
+                            expanded = true,
+                            onDismissRequest = { assignFor = null },
+                        ) {
+                            areas.forEach { area ->
+                                DropdownMenuItem(
+                                    text = { Text(area.name) },
+                                    onClick = {
+                                        assignFor = null
+                                        vm.assignEntityToRoom(member.entityId, area.id) { err ->
+                                            done(err, "${member.friendlyName} moved to ${area.name}")
+                                        }
+                                    },
+                                )
                             }
                         }
                     }
                 }
             }
-            item(key = "tabs-head") {
-                SectionTitle("Tabs")
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Home is always first and Settings is always last — everything else here is yours. " +
-                        "Drag a tab by its grip to change its order in User Tabs.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+    }
+    confirmDelete?.let { area ->
+        ConfirmDialog(
+            title = "Delete ${area.name}?",
+            text = "The area is removed from Home Assistant. Its devices stay, with no area.",
+            confirmLabel = "Delete",
+            onConfirm = { vm.deleteRoom(area.id) { err -> done(err, "Area \"${area.name}\" deleted") } },
+            onDismiss = { confirmDelete = null },
+        )
+    }
+}
+
+/**
+ * Your own tabs, in the order the bar and User Tabs show them: drag a
+ * tab by its grip to move it, tap it to edit its cards and where it is
+ * pinned.
+ */
+@Composable
+fun CustomTabsPage(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
+    val states by vm.states.collectAsState()
+    var newTabTitle by remember { mutableStateOf("") }
+    // (tabId, cardIndex, yaml) of the card currently in the YAML editor, if any.
+    var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
+    var open by remember { mutableStateOf<String?>(null) }
+    var tabDrag by remember { mutableStateOf<List<String>?>(null) }
+    val tabIds = tabDrag ?: vm.userTabs.map { it.id }
+    val listState = rememberLazyListState()
+    val reorder = rememberLazyListReorder(
+        listState,
+        canSwap = { a, b -> a.toString().startsWith(TAB_KEY) && b.toString().startsWith(TAB_KEY) },
+        onMove = { from, to ->
+            tabDrag = moveKeyed(tabIds, from.toString().removePrefix(TAB_KEY), to.toString().removePrefix(TAB_KEY))
+        },
+        onDrop = {
+            tabDrag?.let { vm.setTabOrder(it) }
+            tabDrag = null
+        },
+    )
+
+    SettingsPage(
+        "Your tabs",
+        onBack,
+        intro = "Tabs are Haven's own pages of cards. Pin one to the bar, show it as a chip on Home, or keep it in User Tabs.",
+        listState = listState,
+    ) {
+        if (tabIds.isEmpty()) item(key = "none") { SettingsNote("No tabs yet. Add one below.") }
+        items(tabIds, key = { TAB_KEY + it }) { tabId ->
+            val tab = vm.userTabs.firstOrNull { it.id == tabId } ?: return@items
+            val key = TAB_KEY + tabId
+            val placement = tabPlacementFor(tab.pinned, tab.chip, tab.hidden)
+            ManagerRow(
+                reorder = reorder,
+                key = key,
+                title = tab.title,
+                subtitle = "${cardCountLabel(tab.cards.size)} · ${placementLabel(placement)}",
+                icon = tab.icon?.let { tabIconPairForKey(it)?.first } ?: Icons.Filled.ViewQuilt,
+                expanded = open == key && reorder.draggingKey == null,
+                onToggle = { open = if (open == key) null else key },
+                onStep = { delta -> vm.setTabOrder(stepped(tabIds, tabId, delta)) },
+                modifier = Modifier
+                    .then(if (reorder.draggingKey == key) Modifier else Modifier.animateItem())
+                    .reorderRow(reorder, key),
+            ) {
+                TabEditorCard(vm, tab, states, onEditYaml = { index, yaml ->
+                    editingCard = Triple(tab.id, index, yaml)
+                })
+                Spacer(Modifier.height(12.dp))
+                PlacementSelector(
+                    selected = placement,
+                    barDisabled = !vm.canPinToBar(tab.pinned),
+                    onSelect = { vm.setTabPlacement(tab.id, it) },
                 )
-                Spacer(Modifier.height(16.dp))
-                NavigationSettings(vm)
-                Spacer(Modifier.height(16.dp))
             }
-            items(tabIds, key = { TAB_KEY + it }) { tabId ->
-                val tab = vm.userTabs.firstOrNull { it.id == tabId } ?: return@items
-                val key = TAB_KEY + tabId
-                val placement = tabPlacementFor(tab.pinned, tab.chip, tab.hidden)
-                ManagerRow(
-                    reorder = reorder,
-                    key = key,
-                    title = tab.title,
-                    subtitle = "${cardCountLabel(tab.cards.size)} · ${placementLabel(placement)}",
-                    icon = tab.icon?.let { tabIconPairForKey(it)?.first } ?: Icons.Filled.ViewQuilt,
-                    expanded = open == key && reorder.draggingKey == null,
-                    onToggle = { open = if (open == key) null else key },
-                    onStep = { delta -> vm.setTabOrder(stepped(tabIds, tabId, delta)) },
-                    modifier = Modifier
-                        .then(if (reorder.draggingKey == key) Modifier else Modifier.animateItem())
-                        .reorderRow(reorder, key),
-                ) {
-                    TabEditorCard(vm, tab, states, onEditYaml = { index, yaml ->
-                        editingCard = Triple(tab.id, index, yaml)
-                    })
-                    Spacer(Modifier.height(12.dp))
-                    PlacementSelector(
-                        selected = placement,
-                        barDisabled = !vm.canPinToBar(tab.pinned),
-                        onSelect = { vm.setTabPlacement(tab.id, it) },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-            item(key = "add-tab") {
-                Spacer(Modifier.height(8.dp))
-                SectionTitle("Add a tab")
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newTabTitle,
-                        onValueChange = { newTabTitle = it },
-                        label = { Text("Tab title") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        val id = vm.addTab(newTabTitle)
-                        newTabTitle = ""
-                        navigate(Screen.UserTab(id))
-                    }) { Text("Add") }
-                }
-                Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(8.dp))
+        }
+        item(key = "add-tab") {
+            Spacer(Modifier.height(8.dp))
+            SectionTitle("Add a tab")
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = newTabTitle,
+                    onValueChange = { newTabTitle = it },
+                    label = { Text("Tab title") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    val id = vm.addTab(newTabTitle)
+                    newTabTitle = ""
+                    navigate(Screen.UserTab(id))
+                }) { Text("Add") }
             }
         }
     }
@@ -520,7 +520,10 @@ private fun RoomSettings(
     onRemove: (com.garrietta.haven.data.HaEntity) -> Unit,
     placement: Placement,
     done: (String?, String) -> Unit,
+    floors: List<HaFloor> = emptyList(),
 ) {
+    val scope = rememberCoroutineScope()
+    var pickFloor by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = renameText,
@@ -584,7 +587,21 @@ private fun RoomSettings(
             }
         }
         Spacer(Modifier.weight(1f))
-        OutlinedButton(onClick = onDelete) { Text(if (deleteArmed) "Confirm delete" else "Delete room") }
+        OutlinedButton(onClick = onDelete) { Text(if (deleteArmed) "Confirm delete" else "Delete area") }
+    }
+    if (floors.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = { pickFloor = true }) {
+            Text("Floor: " + (floors.firstOrNull { it.id == area.floorId }?.name ?: "None"))
+        }
+        if (pickFloor) {
+            ChoiceDialog(
+                title = "Floor",
+                options = listOf<Pair<String?, String>>(null to "No floor") + floors.map { it.id to it.name },
+                selected = area.floorId,
+                onDismiss = { pickFloor = false },
+            ) { floorId -> scope.launch { done(vm.admin.setAreaFloor(area.id, floorId), "Floor changed") } }
+        }
     }
     Spacer(Modifier.height(12.dp))
     Text("Devices", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -641,13 +658,11 @@ private fun RoomSettings(
 
 /** The bar's own switches: which built-in tabs show, the pill's style, and reset. */
 @Composable
-private fun NavigationSettings(vm: HavenViewModel) {
+internal fun NavigationSettings(vm: HavenViewModel) {
     // Hidden tabs stay listed with a selector, so a hidden tab can
     // always come back; Settings can never be hidden or removed, by
     // construction in pillBarItems. A hidden Scenes or Energy stays
     // reachable from Settings -> Browse.
-    SectionTitle("Navigation")
-    Spacer(Modifier.height(8.dp))
     // A built-in tab can always be switched off; it can be switched on
     // only while the tabs and rooms pinned to the bar still fit beside it.
     val security = vm.navShowSecurity
@@ -661,7 +676,7 @@ private fun NavigationSettings(vm: HavenViewModel) {
     Spacer(Modifier.height(8.dp))
     Text(
         "Up to two extras can sit on the bar — pinned tabs and rooms-as-tabs share the two slots. " +
-            "Use the placement selector in each room or tab; Home and Settings always stay on the bar.",
+            "Pin a room under Areas, or a tab under Your tabs; Home and Settings always stay on the bar.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

@@ -270,7 +270,6 @@ import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
 import com.garrietta.haven.ui.screens.AutomationBuilderScreen
-import com.garrietta.haven.ui.screens.BuilderHubScreen
 import com.garrietta.haven.ui.screens.CameraClipsScreen
 import com.garrietta.haven.ui.screens.DashboardEditScreen
 import com.garrietta.haven.ui.screens.DashboardsScreen
@@ -286,9 +285,9 @@ import com.garrietta.haven.ui.screens.SceneBuilderScreen
 import com.garrietta.haven.ui.screens.ScriptBuilderScreen
 import com.garrietta.haven.ui.screens.SearchScreen
 import com.garrietta.haven.ui.screens.RoomFilter
-import com.garrietta.haven.ui.screens.RoomsTabsScreen
+import com.garrietta.haven.ui.screens.AppearanceControls
+import com.garrietta.haven.ui.screens.SettingsPageHost
 import com.garrietta.haven.ui.screens.SettingsScreen
-import com.garrietta.haven.ui.screens.DomainDefaultsDialog
 import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.CardSettingsSheet
 import com.garrietta.haven.ui.screens.rememberCardCustom
@@ -2126,11 +2125,6 @@ fun HavenApp(vm: HavenViewModel) {
             if (vm.shapePickerTarget != null) {
                 ShapePickerDialog(vm, vm.shapePickerTarget!!, onClose = { vm.closeShapePicker() })
             }
-            // Feedback round 15, item 5: Domain defaults dialog,
-            // same overlay layer as the shape picker.
-            if (vm.domainDefaultsOpen) {
-                DomainDefaultsDialog(vm, onClose = { vm.closeDomainDefaults() })
-            }
             // Customization round, item 2: Card settings sheet,
             // above every other overlay like the shape picker.
             if (vm.cardSettingsTarget != null) {
@@ -2190,7 +2184,10 @@ private fun ScreenContent(
         Screen.Security -> SecurityScreen(vm, navigate)
         Screen.Scenes -> ScenesScreen(vm)
         Screen.Energy -> EnergyScreen(vm)
-        Screen.RoomsTabs -> RoomsTabsScreen(vm, goBack, navigate)
+        is Screen.SettingsPage -> SettingsPageHost(
+            vm, screen.route, goBack, navigate,
+            AppearanceControls(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor, onSignOut),
+        )
         Screen.HomeEditor -> HomeEditorScreen(vm, goBack, navigate)
         is Screen.RoomTab -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() })
         // Detail pages replaced the old generic detail screen: per-domain
@@ -2213,7 +2210,6 @@ private fun ScreenContent(
         Screen.HelperBuilder -> HelperBuilderScreen(vm, goBack)
         // Round 24, item 5: the builder hub (Settings' single
         // "Automations, scenes & helpers" row opens it).
-        Screen.BuilderHub -> BuilderHubScreen(vm, goBack, navigate)
     }
 }
 

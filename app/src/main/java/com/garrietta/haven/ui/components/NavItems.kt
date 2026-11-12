@@ -147,7 +147,6 @@ fun pillBarItems(
  */
 fun navActiveScreen(current: Screen): Screen = when (current) {
     Screen.HomeEditor,
-    Screen.RoomsTabs,
     Screen.Dashboards,
     Screen.Areas,
     Screen.Search,
@@ -156,9 +155,9 @@ fun navActiveScreen(current: Screen): Screen = when (current) {
     Screen.SceneBuilder,
     Screen.ScriptBuilder,
     Screen.HelperBuilder,
-    Screen.BuilderHub,
     Screen.UpdatesPanel,
     -> Screen.Settings
+    is Screen.SettingsPage -> Screen.Settings
     else -> current
 }
 

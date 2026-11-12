@@ -58,7 +58,7 @@ class Round18LogicTest {
         // Manage home page / Rooms & tabs was swallowed by the
         // old index-equality guard; the screen comparison navigates.
         assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.HomeEditor))
-        assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.RoomsTabs))
+        assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.SettingsPage("tabs")))
         assertTrue(shouldNavigateOnTabTap(Screen.Today, Screen.Settings))
         assertFalse(shouldNavigateOnTabTap(Screen.Settings, Screen.Settings))
         assertFalse(shouldNavigateOnTabTap(Screen.Today, Screen.Today))
