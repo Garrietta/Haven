@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +26,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +46,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import com.garrietta.haven.DetailPopupTitleHeader
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
@@ -50,6 +55,9 @@ import com.garrietta.haven.data.HeadlineClause
 import com.garrietta.haven.data.HomeHeadline
 import com.garrietta.haven.data.HomeSubline
 import com.garrietta.haven.data.domainCardColors
+import com.garrietta.haven.data.groupEntitiesByRoom
+import com.garrietta.haven.data.isHomeRoomEntity
+import com.garrietta.haven.data.isLightShownOnHome
 import com.garrietta.haven.data.roomDigest
 import com.garrietta.haven.data.switchIsActive
 import com.garrietta.haven.data.tapToggles
@@ -193,6 +201,8 @@ internal fun RoomCard(
         Row(
             modifier
                 .fillMaxWidth()
+                .reportCardBounds(roomPanelSourceId(room.areaId))
+                .hideWhenMorphSource(roomPanelSourceId(room.areaId))
                 .clip(MaterialTheme.shapes.extraLarge)
                 .background(quiet.container)
                 .clickable(onClickLabel = "Open ${room.name}", onClick = onOpen)
@@ -226,6 +236,8 @@ internal fun RoomCard(
     Column(
         modifier
             .fillMaxWidth()
+            .reportCardBounds(roomPanelSourceId(room.areaId))
+            .hideWhenMorphSource(roomPanelSourceId(room.areaId))
             .clip(leafCard(index))
             .background(colors.container)
             .clickable(onClickLabel = "Open ${room.name}", onClick = onOpen)
@@ -273,6 +285,70 @@ internal fun RoomCard(
                         color = colors.onContainer,
                     )
                 }
+            }
+        }
+    }
+}
+
+/** The id a room's card reports its place under, so its popup can grow out of it. */
+internal fun roomPanelSourceId(areaId: String?): String = "room:${areaId ?: "unassigned"}"
+
+/**
+ * A room, opened from its card: its name, the line that says what is
+ * happening in it, and every device it holds as a tile. A tile opens
+ * its control on top of this popup, so closing the control comes back
+ * here and closing this comes back to Home.
+ */
+@Composable
+fun RoomPanelScreen(
+    vm: HavenViewModel,
+    areaId: String?,
+    navigate: (Screen) -> Unit,
+    onPanelDetail: ((String) -> Unit)? = null,
+) {
+    val states by vm.states.collectAsState()
+    val areas by vm.areas.collectAsState()
+    val entityAreas by vm.entityAreas.collectAsState()
+    val lightOverrides = vm.settingsStore.homeLightOverrides()
+    // The same members, in the same order, as the room has on Home.
+    val members = remember(states.keys, entityAreas, lightOverrides, areaId) {
+        groupEntitiesByRoom(vm.states.value.values.filter { isHomeRoomEntity(it) }, entityAreas)[areaId].orEmpty()
+            .filter { it.domain != "light" || isLightShownOnHome(it, lightOverrides) }
+            .sortedBy { it.friendlyName }
+            .map { it.entityId }
+    }
+    val name = when (areaId) {
+        null -> "No room"
+        else -> vm.settingsStore.roomDisplayNames()[areaId] ?: areas.firstOrNull { it.id == areaId }?.name ?: "Room"
+    }
+    val digest = roomDigest(name, members.mapNotNull(states::get))
+    Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp)) {
+        DetailPopupTitleHeader(name)
+        Text(
+            if (areaId == null) "Devices without a room" else digest.summary,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+        // Rows in a Column, not straight in the Box: a Box would stack them.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val cardWidth = (maxWidth - 12.dp) / 2
+            Column {
+                for ((rowIndex, pair) in members.chunked(2).withIndex()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        for ((colIndex, id) in pair.withIndex()) {
+                            key(id) {
+                                Box(Modifier.width(cardWidth)) {
+                                    HomeRoomCard(vm, id, navigate, rowIndex * 2 + colIndex) {
+                                        if (onPanelDetail != null) onPanelDetail(id) else navigate(Screen.EntityDetail(id))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+                Spacer(Modifier.height(4.dp))
             }
         }
     }

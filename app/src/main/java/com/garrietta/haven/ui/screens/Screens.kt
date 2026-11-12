@@ -717,9 +717,8 @@ fun TodayScreen(
         emptyList(), roomFilter, vm::roomPlacement, vm.userTabs,
         onRoomFilter = {}, onNavigateTab = { navigate(it) },
     ).drop(1)
-    val openRoom: (RoomSection) -> Unit = { room ->
-        vm.roomFilter = if (room.areaId == null) RoomFilter.Unassigned else RoomFilter.Area(room.areaId)
-    }
+    // A card opens its room as a popup that grows out of the card.
+    val openRoom: (RoomSection) -> Unit = { room -> navigate(Screen.RoomPanel(room.areaId)) }
     BackHandler(enabled = isRoomView) { vm.roomFilter = RoomFilter.All }
     val wide = LocalWideLayout.current
     val sectionOrder = resolveOrder(

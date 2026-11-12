@@ -339,6 +339,7 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
     is Screen.VacuumPanel -> "vacuum.t2292"
     is Screen.SecurityPanel -> "alarm_control_panel.bloomington_mode"
     is Screen.GreenhousePanel -> "automation.greenhouse_brain"
+    is Screen.RoomPanel -> com.garrietta.haven.ui.screens.roomPanelSourceId(screen.areaId)
     else -> ""
 }
 
@@ -437,7 +438,7 @@ fun HavenApp(vm: HavenViewModel) {
             is Screen.EntityDetail,
             is Screen.VacuumPanel, is Screen.MediaPanel,
             is Screen.SecurityPanel, is Screen.GreenhousePanel,
-            is Screen.UpdatesPanel, is Screen.HomeStatusPanel -> current
+            is Screen.UpdatesPanel, is Screen.HomeStatusPanel, is Screen.RoomPanel -> current
             else -> null
         }
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -1610,7 +1611,7 @@ fun HavenApp(vm: HavenViewModel) {
                     is Screen.EntityDetail,
                     is Screen.VacuumPanel, is Screen.MediaPanel,
                     is Screen.SecurityPanel, is Screen.GreenhousePanel,
-                    is Screen.UpdatesPanel, is Screen.HomeStatusPanel ->
+                    is Screen.UpdatesPanel, is Screen.HomeStatusPanel, is Screen.RoomPanel ->
                         backstack.getOrNull(backstack.lastIndex - 1) ?: Screen.Today
                     else -> current
                 }
@@ -1837,7 +1838,8 @@ fun HavenApp(vm: HavenViewModel) {
                 val detailFromPanel = detailPrev is Screen.EntityDetail ||
                     detailPrev is Screen.VacuumPanel || detailPrev is Screen.MediaPanel ||
                     detailPrev is Screen.SecurityPanel || detailPrev is Screen.GreenhousePanel ||
-                    detailPrev is Screen.UpdatesPanel || detailPrev is Screen.HomeStatusPanel
+                    detailPrev is Screen.UpdatesPanel || detailPrev is Screen.HomeStatusPanel ||
+                    detailPrev is Screen.RoomPanel
                 // The morph source is the rect captured at open,
                 // NOT the live map: once the base page lays out
                 // (item 4's instant base below), its cards
@@ -2198,6 +2200,7 @@ private fun ScreenContent(
         is Screen.GreenhousePanel -> GreenhousePanelScreen(vm, goBack)
         is Screen.UpdatesPanel -> UpdatesPanelScreen(vm, goBack)
         is Screen.HomeStatusPanel -> HomeStatusPanelScreen(vm, screen.categoryKey, navigate, onPanelDetail)
+        is Screen.RoomPanel -> com.garrietta.haven.ui.screens.RoomPanelScreen(vm, screen.areaId, navigate, onPanelDetail)
         is Screen.CameraClips -> CameraClipsScreen(vm, screen.entityId, goBack)
         is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
         Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)

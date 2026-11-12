@@ -108,6 +108,13 @@ class HavenScreenshotTest {
         shoot("room_folded_dark", FOLDED, vm)
     }
 
+    /** A room card opens its room as a popup over Home. */
+    @Test fun room_popup_folded_light() =
+        shoot("room_popup_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapText("Living Room") }
+
+    @Test fun room_popup_unfolded_dark() =
+        shoot("room_popup_unfolded_dark", UNFOLDED, viewModel(signedIn = true, dark = true)) { tapText("Living Room") }
+
     @Test fun settings_folded_light() =
         shoot("settings_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapTab("Settings") }
 

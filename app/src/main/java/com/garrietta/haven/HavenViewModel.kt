@@ -113,6 +113,8 @@ sealed class Screen {
     data object UpdatesPanel : Screen()
     /** UI rewrite round §7: a Home Status group's full-screen panel. */
     data class HomeStatusPanel(val categoryKey: String) : Screen()
+    /** A room, opened from its card on Home as a popup. A null area is "No room". */
+    data class RoomPanel(val areaId: String?) : Screen()
     /** Scrollable recorded-clips timeline for a camera (long-press on its tile). */
     data class CameraClips(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()

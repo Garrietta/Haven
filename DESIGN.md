@@ -242,7 +242,7 @@ The rooms:
 - **A room with nothing happening** is a single quiet line. The screen is as tall as the house is busy.
 - **Which color** follows a fixed order, because a room can only be one: something open or unlocked, then anything switched on, then active heating or cooling, then media, then a locked door. Open blinds and an idle thermostat color nothing.
 
-A tap on a switch does what a tap can safely do (lights, plugs, fans flip; everything else opens its control); a tap on the card opens the room. Unfolded, the sentence, cameras and status take the left pane and the rooms lead the right. The rules live in `data/RoomDigest.kt` as pure functions and are tested there.
+A tap on a switch does what a tap can safely do (lights, plugs, fans flip; everything else opens its control); a tap on the card opens the room as a popup that grows out of the card, with every device in it as a tile. Nothing on Home leads to another page: a room, a device and a camera are all popups over it. Unfolded, the sentence, cameras and status take the left pane and the rooms lead the right. The rules live in `data/RoomDigest.kt` as pure functions and are tested there.
 
 ## Verifying a change
 
