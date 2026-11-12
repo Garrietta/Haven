@@ -67,10 +67,12 @@ class HaClient(
         states: Map<String, HaEntity>,
         areas: List<HaArea>,
         entityAreas: Map<String, String>,
+        entityDevices: Map<String, String> = emptyMap(),
     ) {
         if (states.isNotEmpty()) _states.value = states
         if (areas.isNotEmpty()) _areas.value = areas
         if (entityAreas.isNotEmpty()) _entityAreas.value = entityAreas
+        if (entityDevices.isNotEmpty()) _entityDevices.value = entityDevices
     }
 
     /**

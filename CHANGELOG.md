@@ -1,5 +1,24 @@
 # Haven Changelog
 
+## 2.5: a Security tab (2026-11-12)
+
+**What you will see**
+
+- A Security tab beside Home on the bar. It opens with one line: "Everything is shut and locked." when it is, or what is not ("Back Door is open, and Side Door is unlocked.") in red.
+- The alarm as four choices: Home, Away, Night and Off. A panel that asks for a code opens its keypad instead.
+- Every camera, as a grid of their pictures. Tap one to open it, live where it can be.
+- Motion detection: each camera's detection switches (motion, person and so on) under the camera's name, with when it last saw motion where the camera reports it. Switches that belong to no camera are listed by their own names.
+- Doors & locks: locks, garage doors and door, window and motion sensors, each opening its own popup. A lock still asks before unlocking.
+- The outdoor siren, which sounds only after a second tap.
+- The cameras have moved off Home to this tab. Manage home page can put them back on Home.
+- Security can be taken off the bar in Rooms & tabs. The bar holds six at most, so with Security, Scenes and Energy all on there is room for one pinned tab or room; a switch that would push a pinned tab off says the bar is full. After the update, Security only appears on its own if it fits beside what you have pinned.
+
+**Under it**
+
+- `data/SecurityPage.kt` (opening line, detection switches by device, labels) with 7 tests; `ui/screens/SecurityScreen.kt` draws it. `barExtraSlots` keeps the bar at six; NavItems has 2 new tests.
+- A one-time move hides the Home Cameras section (`cameras_moved_to_security`). `nav_show_security` is absent until chosen.
+- The state cache restore can carry device links, so the screenshot test draws cameras with their switches.
+
 ## 2.4: drag to reorder in Rooms & tabs (2026-11-12)
 
 **What you will see**

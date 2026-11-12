@@ -648,17 +648,16 @@ private fun NavigationSettings(vm: HavenViewModel) {
     // reachable from Settings -> Browse.
     SectionTitle("Navigation")
     Spacer(Modifier.height(8.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Show Scenes on bar", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = vm.navShowScenes, onCheckedChange = { vm.navShowScenes = it })
-    }
+    // A built-in tab can always be switched off; it can be switched on
+    // only while the tabs and rooms pinned to the bar still fit beside it.
+    val security = vm.navShowSecurity
+    val scenes = vm.navShowScenes
+    val energy = vm.navShowEnergy
+    BarSwitch("Show Security on bar", security, security || vm.canShowBuiltIn(true, scenes, energy)) { vm.navShowSecurity = it }
     Spacer(Modifier.height(8.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Show Energy on bar", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = vm.navShowEnergy, onCheckedChange = { vm.navShowEnergy = it })
-    }
+    BarSwitch("Show Scenes on bar", scenes, scenes || vm.canShowBuiltIn(security, true, energy)) { vm.navShowScenes = it }
+    Spacer(Modifier.height(8.dp))
+    BarSwitch("Show Energy on bar", energy, energy || vm.canShowBuiltIn(security, scenes, true)) { vm.navShowEnergy = it }
     Spacer(Modifier.height(8.dp))
     Text(
         "Up to two extras can sit on the bar — pinned tabs and rooms-as-tabs share the two slots. " +
@@ -701,6 +700,24 @@ private fun NavigationSettings(vm: HavenViewModel) {
         )
         Spacer(Modifier.width(8.dp))
         OutlinedButton(onClick = { vm.resetNavigation() }) { Text("Reset") }
+    }
+}
+
+@Composable
+private fun BarSwitch(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            if (!enabled) {
+                Text(
+                    "Bar full. Unpin a tab or room to make room.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 

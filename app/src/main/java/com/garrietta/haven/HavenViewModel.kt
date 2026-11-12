@@ -57,6 +57,7 @@ import com.garrietta.haven.data.movedByDelta
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.RoomBarItem
+import com.garrietta.haven.ui.components.barExtraSlots
 import com.garrietta.haven.ui.components.canPinBarExtra
 import com.garrietta.haven.ui.screens.RoomFilter
 import com.garrietta.haven.ui.components.NavStyle
@@ -91,6 +92,8 @@ sealed class Screen {
     data object Scenes : Screen()
     /** Stage F: first-class Energy destination (brief §4/§11). */
     data object Energy : Screen()
+    /** The cameras, their motion detection, the alarm, doors and locks. */
+    data object Security : Screen()
     data object Dashboards : Screen()
     data object Areas : Screen()
     data object Search : Screen()
@@ -198,11 +201,32 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         userTabs.count { it.pinned } +
             roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB }
 
+    /**
+     * Once: the cameras leave Home for the Security tab, where they sit
+     * with their motion switches. A stored Home layout keeps everything
+     * else; Manage home page can bring the cameras back.
+     */
+    private fun moveCamerasToSecurity() {
+        if (settingsStore.camerasMovedToSecurity) return
+        settingsStore.homeHiddenSections = settingsStore.homeHiddenSections + "cameras"
+        settingsStore.camerasMovedToSecurity = true
+    }
+
+    /** How many pinned tabs and rooms fit beside the built-in tabs now shown. */
+    fun barExtraSlotsNow(): Int = barExtraSlots(navShowSecurity, navShowScenes, navShowEnergy)
+
     /** Placement-selector gate: may THIS group pin to the bar right now? */
     fun canPinToBar(alreadyOnBar: Boolean): Boolean {
         val roomNavTabs = roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB }
-        return canPinBarExtra(userTabs.count { it.pinned }, roomNavTabs, alreadyOnBar)
+        return canPinBarExtra(userTabs.count { it.pinned }, roomNavTabs, alreadyOnBar, barExtraSlotsNow())
     }
+
+    /**
+     * Whether a built-in tab can be switched on without pushing a pinned
+     * tab or room off the bar: the extras already pinned must still fit.
+     */
+    fun canShowBuiltIn(security: Boolean, scenes: Boolean, energy: Boolean): Boolean =
+        barPinnedExtrasCount() <= barExtraSlots(security, scenes, energy)
 
     fun setRoomPlacement(areaId: String, placement: Placement) {
         if (placement == Placement.NAV_TAB &&
@@ -210,6 +234,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
                 userTabs.count { it.pinned },
                 roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB },
                 roomPlacement(areaId) == Placement.NAV_TAB,
+                barExtraSlotsNow(),
             )
         ) return
         settingsStore.setRoomPlacement(areaId, placement.storageKey())
@@ -246,6 +271,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
                         userTabs.count { it.pinned },
                         roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB },
                         tab.pinned,
+                        barExtraSlotsNow(),
                     )
                 ) return
                 mutateTab(tabId) { it.copy(pinned = true, chip = false, hidden = false) }
@@ -690,6 +716,16 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /** The Home quadrant hero's cameras: the curated Cameras-tab set, from the caller's states snapshot. */
     fun heroCameras(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> = curatedCameras(states)
 
+    /** Every camera the Security tab shows: the curated four first, then the rest by name. */
+    fun securityCameraIds(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> {
+        val curated = curatedCameras(states)
+        val rest = states.values
+            .filter { it.domain == "camera" && it.entityId !in excludedCameras && it.entityId !in curated }
+            .sortedBy { it.friendlyName.lowercase() }
+            .map { it.entityId }
+        return curated + rest
+    }
+
     /**
      * Room management (2026-10-30): thin wrappers over the HA
      * registry mutations. [onDone] receives null on success or
@@ -973,6 +1009,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     init {
+        moveCamerasToSecurity()
         // Last-known camera snapshots paint from the first frame:
         // load them before any composition runs (2026-11-01 polish
         // round). Best effort — see loadDiskSnapshots.
@@ -1241,6 +1278,19 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             settingsStore.navShowEnergy = value
         }
 
+    // Never chosen: on when it fits beside what is already pinned, so an
+    // update never pushes someone's pinned tab off their bar.
+    private var navShowSecurityState by mutableStateOf(
+        settingsStore.navShowSecurity
+            ?: (barPinnedExtrasCount() <= barExtraSlots(true, settingsStore.navShowScenes, settingsStore.navShowEnergy)),
+    )
+    var navShowSecurity: Boolean
+        get() = navShowSecurityState
+        set(value) {
+            navShowSecurityState = value
+            settingsStore.navShowSecurity = value
+        }
+
     /**
      * Folded pill style, owned here so TabManager writes recompose the
      * chrome. The setter persists too (a separate setNavStyle function
@@ -1267,6 +1317,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         navStyle = NavStyle.FLOATING
         navShowScenes = true
         navShowEnergy = true
+        navShowSecurity = true
         // Feedback round 19, item 5: chip placements reset with
         // pins (both are bar/chip surfaces, not tab content).
         userTabs = userTabs.map { it.copy(icon = null, hidden = false, pinned = false, chip = false) }

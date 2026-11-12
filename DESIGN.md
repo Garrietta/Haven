@@ -249,6 +249,12 @@ The rooms:
 
 A tap on a switch does what a tap can safely do (lights, plugs, fans flip; everything else opens its control); a tap on the card opens the room as a popup that grows out of the card, with every device in it as a tile. Nothing on Home leads to another page: a room, a device and a camera are all popups over it. Unfolded, the sentence, cameras and status take the left pane and the rooms lead the right. The rules live in `data/RoomDigest.kt` as pure functions and are tested there.
 
+### Security is where the cameras live
+
+Home keeps to what the house is doing; the Security tab, beside Home on the bar, holds what keeps it safe. It opens with one line in the Secure family when everything is shut and locked, and in the Alert family naming what is not ("Back Door is open"). Under it: the alarm as one choice of four (lime capsule), every camera as a picture that opens it, the switches that turn each camera's detection on and off, and the doors, locks and sensors, each opening its own popup.
+
+A detection switch belongs to a camera only when the entity registry puts it on the camera's device, the same rule as a camera's motion sensor; a switch on no camera's device is listed under its own name. Nothing here unlocks or sounds in one tap: a lock opens its popup, which asks, and the siren wants a second tap. The bar holds six destinations at most, so with Security, Scenes and Energy all shown there is room for one pinned tab or room; a built-in tab can be switched on only while what is pinned still fits. The rules are in `data/SecurityPage.kt`.
+
 ## Verifying a change
 
 A visual change is judged on rendered pixels:

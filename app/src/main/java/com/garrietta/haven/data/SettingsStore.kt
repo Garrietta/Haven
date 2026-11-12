@@ -61,6 +61,22 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("nav_show_energy", true)
         set(value) = prefs.edit().putBoolean("nav_show_energy", value).apply()
 
+    /**
+     * Whether Security is on the bar, or null when it has never been
+     * chosen: the ViewModel then shows it only if the bar has room
+     * beside the tabs and rooms already pinned there.
+     */
+    var navShowSecurity: Boolean?
+        get() = if (prefs.contains("nav_show_security")) prefs.getBoolean("nav_show_security", true) else null
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("nav_show_security") else putBoolean("nav_show_security", value)
+        }.apply()
+
+    /** Set once the cameras have moved from Home to the Security tab. */
+    var camerasMovedToSecurity: Boolean
+        get() = prefs.getBoolean("cameras_moved_to_security", false)
+        set(value) = prefs.edit().putBoolean("cameras_moved_to_security", value).apply()
+
     /** When on, spring animations are replaced with instant state changes. */
     var reduceMotion: Boolean
         get() = prefs.getBoolean("reduce_motion", false)

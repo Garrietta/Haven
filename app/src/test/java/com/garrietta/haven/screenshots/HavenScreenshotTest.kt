@@ -238,6 +238,27 @@ class HavenScreenshotTest {
         assertEquals(listOf("kitchen", "bedroom", "living_room", "garage"), vm.settingsStore.roomOrder())
     }
 
+    private fun withSecurity(vm: HavenViewModel, open: Boolean = false): HavenViewModel {
+        val extra = if (open) {
+            mapOf("binary_sensor.back_door" to com.garrietta.haven.data.HaEntity(
+                "binary_sensor.back_door", "on", mapOf("friendly_name" to "Back Door", "device_class" to "door"),
+            ))
+        } else emptyMap()
+        vm.client.restoreCachedStates(DemoHome.states + DemoHome.security + extra, DemoHome.areas, DemoHome.entityAreas, DemoHome.securityDevices)
+        return vm
+    }
+
+    /** The Security tab: all shut, the alarm, the cameras and their motion switches. */
+    @Test fun security_folded_light() =
+        shoot("security_folded_light", FOLDED, withSecurity(viewModel(signedIn = true, dark = false))) { tapTab("Security") }
+
+    /** The same with a door open: the opening line turns to the alert family. */
+    @Test fun security_folded_dark() =
+        shoot("security_folded_dark", FOLDED, withSecurity(viewModel(signedIn = true, dark = true), open = true)) { tapTab("Security") }
+
+    @Test fun security_unfolded_light() =
+        shoot("security_unfolded_light", UNFOLDED, withSecurity(viewModel(signedIn = true, dark = false))) { tapTab("Security") }
+
     @Test fun thermostat_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
         vm.roomFilter = RoomFilter.Area("living_room")

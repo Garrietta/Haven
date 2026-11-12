@@ -81,4 +81,30 @@ object DemoHome {
         "vacuum.robot" to "garage",
         "binary_sensor.garage_motion" to "garage",
     )
+
+    /**
+     * What the Security tab needs beside the rooms: cameras, the switches
+     * that turn their detection on and off, a motion sensor, an alarm and
+     * a siren. Kept apart so the other screenshots are unchanged.
+     */
+    val security: Map<String, HaEntity> = listOf(
+        entity("camera.front_door_live_view", "idle", "Front Door"),
+        entity("camera.tapo_2_live_view", "idle", "Garage"),
+        entity("camera.backyard", "idle", "Backyard"),
+        entity("switch.front_door_motion_detection", "on", "Front Door Motion detection"),
+        entity("switch.tapo_2_motion_detection", "on", "Garage Motion detection"),
+        entity("switch.tapo_2_person_detection", "off", "Garage Person detection"),
+        entity("binary_sensor.front_door_motion", "off", "Front Door Motion", "device_class" to "motion"),
+        entity("alarm_control_panel.home", "armed_home", "Home Alarm"),
+        entity("siren.outdoor_camera_siren", "off", "Outdoor siren"),
+    ).associateBy { it.entityId }
+
+    val securityDevices: Map<String, String> = mapOf(
+        "camera.front_door_live_view" to "ring",
+        "switch.front_door_motion_detection" to "ring",
+        "binary_sensor.front_door_motion" to "ring",
+        "camera.tapo_2_live_view" to "tapo",
+        "switch.tapo_2_motion_detection" to "tapo",
+        "switch.tapo_2_person_detection" to "tapo",
+    )
 }
