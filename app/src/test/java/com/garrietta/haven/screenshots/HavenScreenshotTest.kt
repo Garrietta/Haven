@@ -342,6 +342,22 @@ class HavenScreenshotTest {
             repeat(40) { frame() }
         }
 
+    /** The Climate tab in Edit: each section's items with grips and crosses, and the search to add more. */
+    @Test fun climate_edit_folded_light() =
+        shoot("climate_edit_folded_light", FOLDED, withClimate(viewModel(signedIn = true, dark = false))) {
+            tapTab("Climate")
+            settle()
+            tapText("Edit")
+        }
+
+    /** The Security tab in Edit. */
+    @Test fun security_edit_folded_dark() =
+        shoot("security_edit_folded_dark", FOLDED, withSecurity(viewModel(signedIn = true, dark = true))) {
+            tapTab("Security")
+            settle()
+            tapText("Edit")
+        }
+
     @Test fun climate_unfolded_light() =
         shoot("climate_unfolded_light", UNFOLDED, withClimate(viewModel(signedIn = true, dark = false))) { tapTab("Climate") }
 

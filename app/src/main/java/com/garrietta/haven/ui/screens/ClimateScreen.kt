@@ -54,6 +54,12 @@ import androidx.compose.ui.unit.dp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ClimateReading
+import com.garrietta.haven.data.CLIMATE_READINGS
+import com.garrietta.haven.data.CLIMATE_THERMOSTATS
+import com.garrietta.haven.data.addedReading
+import com.garrietta.haven.data.climateSectionFor
+import com.garrietta.haven.data.takenOff
+import com.garrietta.haven.data.curated
 import com.garrietta.haven.data.ClimateSummary
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.climateReadings
@@ -102,10 +108,22 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val auxiliary by vm.auxiliaryEntities.collectAsState()
     val areas by vm.areas.collectAsState()
     val areaNames = remember(areas) { areas.associate { it.id to it.name } }
-    val thermostats = climateThermostats(states)
-    val readings = climateReadings(states, entityDevices, deviceInfo.mapValues { it.value.name }, entityAreas, auxiliary, areaNames)
+    // Both sections show what Home Assistant has, arranged by hand
+    // (PageCuration): taken off, added to and put in order in Edit.
+    val exists: (String) -> Boolean = { states[it] != null }
+    val thermostatDefaults = climateThermostats(states).map { it.entityId }
+    val thermostats = curated(thermostatDefaults, vm.curation(CLIMATE_THERMOSTATS), exists).mapNotNull(states::get)
+    val found = climateReadings(states, entityDevices, deviceInfo.mapValues { it.value.name }, entityAreas, auxiliary, areaNames)
+    val readingCuration = vm.curation(CLIMATE_READINGS)
+    val covered = found.flatMap { listOfNotNull(it.temperature?.entityId, it.humidity?.entityId) }.toSet()
+    val byKey = found.associateBy { it.key } +
+        readingCuration.added.filter { it !in covered }.mapNotNull(states::get).associate { it.entityId to addedReading(it, entityAreas) }
+    val readingDefaults = found.map { it.key }
+    val readings = curated(readingDefaults, readingCuration) { it in byKey }.mapNotNull(byKey::get)
     val indoor = readings.filterNot { it.outdoor }
     val outdoor = readings.filter { it.outdoor }
+    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var addQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     val weather = states.values.firstOrNull { it.domain == "weather" }
     val summary = climateSummary(readings, thermostats, weather)
     val dark = isDarkBackdrop(MaterialTheme.colorScheme.background)
@@ -117,8 +135,41 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item(key = "head") {
-            ScreenTitle("Climate")
+            EditableTitle("Climate", editing) { editing = !editing; addQuery = "" }
             Spacer(Modifier.height(12.dp))
+        }
+        if (editing) {
+            pageEditor(
+                vm,
+                sections = listOf(
+                    EditorSection(
+                        CLIMATE_THERMOSTATS, "Thermostats",
+                        thermostats.map { editorItem(it, it.entityId) },
+                        takenOff(thermostatDefaults, vm.curation(CLIMATE_THERMOSTATS)).map { editorItem(states[it], it) },
+                    ),
+                    EditorSection(
+                        CLIMATE_READINGS, "Readings",
+                        readings.map { EditorItem(it.key, it.name, readingSummary(it, it.areaId?.let(areaNames::get))) },
+                        takenOff(readingDefaults, readingCuration).mapNotNull { key ->
+                            byKey[key]?.let { EditorItem(key, it.name, readingSummary(it, it.areaId?.let(areaNames::get))) }
+                        },
+                    ),
+                ),
+                candidates = { q ->
+                    val onPage = (thermostats.map { it.entityId } + readings.flatMap { listOfNotNull(it.key, it.temperature?.entityId, it.humidity?.entityId, it.other?.entityId) }).toSet()
+                    if (q.isEmpty()) emptyList() else states.values
+                        .filter { it.entityId !in onPage && (it.domain == "climate" || it.domain == "sensor") }
+                        .filter { it.friendlyName.lowercase().contains(q) || it.entityId.contains(q) }
+                        .sortedBy { it.friendlyName.lowercase() }
+                        .take(25)
+                },
+                query = addQuery,
+                onQuery = { addQuery = it },
+                onAdd = { entity -> vm.updateCuration(climateSectionFor(entity.entityId)) { it.add(entity.entityId) } },
+            )
+            return@LazyColumn
+        }
+        item(key = "house") {
             // Unfolded, the house and the first thermostat sit side by side
             // rather than each stretching across the whole width.
             val first = thermostats.firstOrNull()
@@ -402,7 +453,7 @@ private fun ReadingCard(
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    reading.temperatureValue?.let { "${fmtDegrees(it)}°" } ?: "—",
+                    reading.temperatureValue?.let { "${fmtDegrees(it)}°" } ?: reading.other?.stateText() ?: "—",
                     style = MaterialTheme.typography.headlineMedium,
                 )
                 Spacer(Modifier.weight(1f))
@@ -417,7 +468,7 @@ private fun ReadingCard(
                 Spacer(Modifier.height(8.dp))
                 ComfortBar(comfortPosition(value, unit), cool.accent, heat.accent)
             }
-            val sensor = reading.temperature ?: reading.humidity
+            val sensor = reading.temperature ?: reading.humidity ?: reading.other
             if (sensor != null) {
                 LaunchedEffect(sensor.entityId) { vm.refreshHistory(sensor.entityId) }
                 val history = vm.historyFor(sensor.entityId)
@@ -485,3 +536,12 @@ private fun WeatherCard(weather: HaEntity, dark: Boolean, onOpen: () -> Unit) {
         }
     }
 }
+
+
+/** A reading as its editor row says it: what it reads, and its room. */
+private fun readingSummary(reading: ClimateReading, areaName: String?): String = listOfNotNull(
+    reading.temperatureValue?.let { "${fmtDegrees(it)}°" },
+    reading.humidityValue?.let { "${Math.round(it)}%" },
+    reading.other?.stateText(),
+    areaName?.takeUnless { it.equals(reading.name, ignoreCase = true) },
+).joinToString(" · ").ifBlank { reading.key }

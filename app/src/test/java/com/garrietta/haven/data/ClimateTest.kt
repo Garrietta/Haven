@@ -112,4 +112,17 @@ class ClimateTest {
         assertEquals(0.5, setpointStep(e("climate.t", "heat", "T", "target_temp_step" to 0.5)), 0.0)
         assertEquals(1.0, setpointStep(e("climate.t", "heat", "T")), 0.0)
     }
+
+    @Test
+    fun aSensorAddedByHandIsItsOwnReading() {
+        val co2 = e("sensor.office_co2", "612", "Office CO2", "device_class" to "carbon_dioxide", "unit_of_measurement" to "ppm")
+        val reading = addedReading(co2, mapOf("sensor.office_co2" to "office"))
+        assertEquals("Office CO2", reading.name)
+        assertEquals("office", reading.areaId)
+        assertEquals(co2, reading.other)
+        assertNull(reading.temperature)
+        val warm = addedReading(temp("sensor.attic_temperature", "81", "Attic Temperature"), emptyMap())
+        assertEquals(81.0, warm.temperatureValue!!, 0.0)
+        assertNull(warm.other)
+    }
 }

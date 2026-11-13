@@ -713,6 +713,21 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun heroCameras(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> = curatedCameras(states)
 
     /** Every camera the Security tab shows: the curated four first, then the rest by name. */
+    /**
+     * The hand arrangement of each tab section (Security's cameras, Climate's
+     * readings...), observed so an edit redraws the tab at once.
+     */
+    private val curations = androidx.compose.runtime.mutableStateMapOf<String, com.garrietta.haven.data.PageCuration>()
+
+    fun curation(section: String): com.garrietta.haven.data.PageCuration =
+        curations.getOrPut(section) { settingsStore.pageCuration(section) }
+
+    fun updateCuration(section: String, change: (com.garrietta.haven.data.PageCuration) -> com.garrietta.haven.data.PageCuration) {
+        val next = change(curation(section))
+        curations[section] = next
+        settingsStore.setPageCuration(section, next)
+    }
+
     fun securityCameraIds(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> {
         val curated = curatedCameras(states)
         val rest = states.values

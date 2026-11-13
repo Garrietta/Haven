@@ -40,6 +40,12 @@ import androidx.compose.ui.unit.dp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.ALARM_ARM_MODES
+import com.garrietta.haven.data.SECURITY_DETECTION
+import com.garrietta.haven.data.SECURITY_DOORS
+import com.garrietta.haven.data.SECURITY_CAMERAS
+import com.garrietta.haven.data.securitySectionFor
+import com.garrietta.haven.data.takenOff
+import com.garrietta.haven.data.curated
 import com.garrietta.haven.data.CameraSecurity
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.SIREN_ID
@@ -84,12 +90,22 @@ import com.garrietta.haven.ui.theme.colors
 fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val entityDevices by vm.entityDevices.collectAsState()
-    val cameraIds = vm.securityCameraIds(states)
+    // Each section shows what Home Assistant has, arranged by hand
+    // (PageCuration): taken off, added to and put in order in Edit.
+    val exists: (String) -> Boolean = { states[it] != null }
+    val cameraDefaults = vm.securityCameraIds(states)
+    val cameraIds = curated(cameraDefaults, vm.curation(SECURITY_CAMERAS), exists)
     val cameras = securityCameras(cameraIds, states, entityDevices)
     val loose = looseDetectionSwitches(cameraIds, states, entityDevices)
+    val detectionDefaults = (cameras.flatMap { it.switches } + loose).map { it.entityId }.distinct()
+    val detectionIds = curated(detectionDefaults, vm.curation(SECURITY_DETECTION), exists)
+    val doorDefaults = securityDoorIds(states)
+    val doorIds = curated(doorDefaults, vm.curation(SECURITY_DOORS), exists)
     val summary = securitySummary(states)
     val alarm = securityAlarm(states)
     val columns = if (LocalWideLayout.current) 3 else 2
+    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var addQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
 
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
@@ -97,10 +113,38 @@ fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         item(key = "head") {
-            ScreenTitle("Security")
+            EditableTitle("Security", editing) { editing = !editing; addQuery = "" }
             Spacer(Modifier.height(12.dp))
-            SummaryCard(summary.line, summary.calm)
-            Spacer(Modifier.height(20.dp))
+            if (!editing) {
+                SummaryCard(summary.line, summary.calm)
+                Spacer(Modifier.height(20.dp))
+            }
+        }
+        if (editing) {
+            fun section(key: String, title: String, defaults: List<String>, shown: List<String>) = EditorSection(
+                key, title,
+                shown.map { editorItem(states[it], it) },
+                takenOff(defaults, vm.curation(key)).map { editorItem(states[it], it) },
+            )
+            pageEditor(
+                vm,
+                sections = listOf(
+                    section(SECURITY_CAMERAS, "Cameras", cameraDefaults, cameraIds),
+                    section(SECURITY_DOORS, "Doors & locks", doorDefaults, doorIds),
+                    section(SECURITY_DETECTION, "Motion detection", detectionDefaults, detectionIds),
+                ),
+                candidates = { q ->
+                    val onPage = (cameraIds + doorIds + detectionIds).toSet()
+                    if (q.isEmpty()) emptyList() else states.values
+                        .filter { it.entityId !in onPage && (it.friendlyName.lowercase().contains(q) || it.entityId.contains(q)) }
+                        .sortedBy { it.friendlyName.lowercase() }
+                        .take(25)
+                },
+                query = addQuery,
+                onQuery = { addQuery = it },
+                onAdd = { entity -> vm.updateCuration(securitySectionFor(entity.entityId)) { it.add(entity.entityId) } },
+            )
+            return@LazyColumn
         }
         if (alarm != null) {
             item(key = "alarm") {
@@ -140,11 +184,11 @@ fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             Spacer(Modifier.height(12.dp))
             SectionTitle("Motion detection")
             Spacer(Modifier.height(8.dp))
-            MotionDetection(vm, cameras, loose)
+            MotionDetection(vm, cameras, loose, detectionIds)
             Spacer(Modifier.height(20.dp))
         }
         item(key = "doors") {
-            DoorsAndLocks(states, navigate)
+            DoorsAndLocks(states, doorIds, navigate)
         }
         if (states[SIREN_ID] != null) {
             item(key = "siren") {
@@ -216,25 +260,35 @@ private fun AlarmChoices(vm: HavenViewModel, alarm: HaEntity, onNeedsCode: () ->
  * motion sensor and no switch still gets a row, so its last motion shows.
  */
 @Composable
-private fun MotionDetection(vm: HavenViewModel, cameras: List<CameraSecurity>, loose: List<HaEntity>) {
-    val rows = buildList<@Composable () -> Unit> {
+private fun MotionDetection(vm: HavenViewModel, cameras: List<CameraSecurity>, loose: List<HaEntity>, order: List<String>) {
+    val position = order.withIndex().associate { (index, id) -> id to index }
+    val keyed = buildList<Pair<String, @Composable () -> Unit>> {
+        fun add(key: String, row: @Composable () -> Unit) = add(key to row)
         for (camera in cameras) {
             val motion = camera.motionSensor?.let { sensor ->
                 if (sensor.state == "on") "Motion now"
                 else formatHaTimestamp(sensor.lastChanged)?.let { "Last motion $it" }
             }
             if (camera.switches.isEmpty()) {
-                if (motion != null) add { DetectionRow(vm, null, camera.name, motion, camera.cameraId) }
+                if (motion != null) add("motion:" + camera.cameraId) { DetectionRow(vm, null, camera.name, motion, camera.cameraId) }
             } else {
                 camera.switches.forEachIndexed { index, switch ->
                     val label = detectionLabel(switch, camera.name)
                     val sub = if (index == 0 && motion != null) "$label · $motion" else label
-                    add { DetectionRow(vm, switch, camera.name, sub, camera.cameraId) }
+                    add(switch.entityId) { DetectionRow(vm, switch, camera.name, sub, camera.cameraId) }
                 }
             }
         }
-        for (switch in loose) add { DetectionRow(vm, switch, switch.friendlyName, null, null) }
+        for (switch in loose) add(switch.entityId) { DetectionRow(vm, switch, switch.friendlyName, null, null) }
+        // Switches added by hand that belong to no camera listed.
+        val listed = map { it.first }.toSet()
+        for (id in order) if (id !in listed) vm.states.value[id]?.let { e -> add(id) { DetectionRow(vm, e, e.friendlyName, null, null) } }
     }
+    // A switch taken off in Edit is not listed; the rest keep the arranged order.
+    val rows = keyed
+        .filter { (key, _) -> key.startsWith("motion:") || key in position }
+        .sortedBy { (key, _) -> position[key] ?: Int.MAX_VALUE }
+        .map { it.second }
     if (rows.isEmpty()) {
         Text(
             "No motion switches found. A camera whose device has a motion detection switch in Home Assistant shows it here.",
@@ -273,42 +327,35 @@ private fun DetectionRow(vm: HavenViewModel, switch: HaEntity?, title: String, s
     )
 }
 
-/** Locks, garage doors and the door, window and motion sensors, each opening its own popup. */
-@Composable
-private fun DoorsAndLocks(states: Map<String, HaEntity>, navigate: (Screen) -> Unit) {
+/** What Doors & locks shows by default: the locks, the garage doors and gates, then the door, window and motion sensors. */
+private fun securityDoorIds(states: Map<String, HaEntity>): List<String> {
     val locks = states.values.filter { it.domain == "lock" }.sortedBy { it.friendlyName.lowercase() }
     val garages = states.values
         .filter { it.domain == "cover" && it.attrString("device_class") in setOf("garage", "door", "gate") }
         .sortedBy { it.friendlyName.lowercase() }
     val sensors = securityChecklist(states.values.filter { it.domain == "binary_sensor" })
-    if (locks.isEmpty() && garages.isEmpty() && sensors.isEmpty()) return
+    return (locks + garages).map { it.entityId } + sensors.map { it.entityId }
+}
+
+/** Locks, garage doors and the door, window and motion sensors, in [ids]' order, each opening its own popup. */
+@Composable
+private fun DoorsAndLocks(states: Map<String, HaEntity>, ids: List<String>, navigate: (Screen) -> Unit) {
+    if (ids.isEmpty()) return
+    val checks = securityChecklist(states.values.filter { it.domain == "binary_sensor" }).associateBy { it.entityId }
     SectionTitle("Doors & locks")
     Spacer(Modifier.height(8.dp))
     MenuGroup(Modifier.fillMaxWidth()) {
-        var first = true
-        fun divider() = if (first) { first = false; false } else true
-        for (entity in locks + garages) {
-            if (divider()) MenuDivider()
+        ids.forEachIndexed { index, id ->
+            val entity = states[id] ?: return@forEachIndexed
+            if (index > 0) MenuDivider()
+            val check = checks[id]
             MenuRow(
-                badgeKey = entity.entityId,
+                badgeKey = id,
                 badgeKind = shapeForDomain(entity.domain),
                 icon = domainIcon(entity),
-                title = entity.friendlyName,
-                subtitle = entity.stateText(),
-                onClick = { navigate(Screen.EntityDetail(entity.entityId)) },
-                flat = true,
-            )
-        }
-        for (row in sensors) {
-            if (divider()) MenuDivider()
-            val entity = states[row.entityId] ?: continue
-            MenuRow(
-                badgeKey = row.entityId,
-                badgeKind = shapeForDomain(entity.domain),
-                icon = domainIcon(entity),
-                title = row.name,
-                subtitle = row.statusText,
-                onClick = { navigate(Screen.EntityDetail(row.entityId)) },
+                title = check?.name ?: entity.friendlyName,
+                subtitle = check?.statusText ?: entity.stateText(),
+                onClick = { navigate(Screen.EntityDetail(id)) },
                 flat = true,
             )
         }

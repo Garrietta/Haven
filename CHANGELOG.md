@@ -1,5 +1,17 @@
 # Haven Changelog
 
+## 2.12: Security and Climate, arranged by hand (2026-11-13)
+
+**What you will see**
+
+- Security and Climate each have Edit beside their title. It turns the tab into a list of what it shows, section by section (cameras, doors & locks, motion detection; thermostats, readings): drag an item by its grip to reorder it, tap its cross to take it off, and Show brings back anything taken off.
+- Add to this tab searches every entity and puts the one picked in the section it belongs to (a camera with the cameras, a switch with motion detection, a sensor with the readings); the search stays open for several. A sensor that is neither temperature nor humidity (CO2, air quality) gets a card of its own showing its value and its day.
+- Anything Home Assistant adds later still appears, after what has been arranged.
+
+**Under it**
+
+- `data/PageCuration.kt` (taken off, added, order, per section; `PageCurationTest`), stored as `page_curation_<section>` in `SettingsStore`; the editor is `ui/screens/PageEditor.kt`, shared by both tabs.
+
 ## 2.11: Widgets (2026-11-13)
 
 **What you will see**

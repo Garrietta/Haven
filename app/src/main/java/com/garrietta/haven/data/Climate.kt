@@ -16,6 +16,8 @@ data class ClimateReading(
     val temperature: HaEntity?,
     val humidity: HaEntity?,
     val outdoor: Boolean,
+    /** A reading added by hand that is neither (air quality, CO2, pressure): shown as its own value. */
+    val other: HaEntity? = null,
 ) {
     val temperatureValue: Double? get() = temperature?.state?.toDoubleOrNull()
     val humidityValue: Double? get() = humidity?.state?.toDoubleOrNull()
@@ -172,3 +174,19 @@ fun presetLabel(preset: String): String =
 
 /** How far one tap of − or + moves a set point: the thermostat's own step, else a whole degree. */
 fun setpointStep(t: HaEntity): Double = t.attrDouble("target_temp_step")?.takeIf { it > 0 } ?: 1.0
+
+
+/**
+ * A reading for an entity put on the Climate tab by hand: a temperature
+ * or humidity sensor as one, anything else (CO2, air quality, pressure)
+ * as a value of its own.
+ */
+fun addedReading(entity: HaEntity, entityAreas: Map<String, String>): ClimateReading = ClimateReading(
+    key = entity.entityId,
+    name = climateName(entity.friendlyName),
+    areaId = entityAreas[entity.entityId],
+    temperature = entity.takeIf(::isTemperatureSensor),
+    humidity = entity.takeIf(::isHumiditySensor),
+    outdoor = soundsOutdoor(entity.friendlyName),
+    other = entity.takeUnless { isTemperatureSensor(it) || isHumiditySensor(it) },
+)

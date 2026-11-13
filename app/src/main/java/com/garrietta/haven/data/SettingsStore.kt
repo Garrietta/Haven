@@ -191,6 +191,13 @@ class SettingsStore(context: Context) {
      * temporarily); the section renders only ids that resolve, while the
      * Manage sheet lists every stored id so a stale one can be removed.
      */
+    /** How a tab's section has been arranged by hand (see [PageCuration]); stored per section key. */
+    fun pageCuration(section: String): PageCuration = PageCuration.fromJson(prefs.getString("page_curation_$section", null))
+
+    fun setPageCuration(section: String, curation: PageCuration) {
+        prefs.edit().putString("page_curation_$section", curation.toJson()).apply()
+    }
+
     fun favoriteEntityIds(): List<String> {
         val raw = prefs.getString("favorites_json", null) ?: return emptyList()
         return try {
