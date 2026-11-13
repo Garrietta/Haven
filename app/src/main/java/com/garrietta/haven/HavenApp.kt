@@ -886,6 +886,11 @@ fun HavenApp(vm: HavenViewModel) {
             else if (backstack.size > 1) {
                 navDirection = -1
                 backstack.removeAt(backstack.lastIndex)
+            } else if (backstack.lastOrNull() != Screen.Today) {
+                // A tab's landing is one step from Home, not from leaving:
+                // Back goes Home first, and only Back from Home leaves.
+                goTop(Screen.Today)
+                navDirection = -1
             }
         }
         val signOut: () -> Unit = {
@@ -909,7 +914,7 @@ fun HavenApp(vm: HavenViewModel) {
             backstack.clear()
             backstack.add(Screen.Today)
         }
-        BackHandler(enabled = backstack.size > 1) { goBack() }
+        BackHandler(enabled = backstack.size > 1 || backstack.lastOrNull() != Screen.Today) { goBack() }
         // Morph open effects: the morph objects are captured
         // synchronously above (falling back to a fade-only appearance
         // when the card never reported bounds, e.g. a board card);

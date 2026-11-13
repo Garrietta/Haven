@@ -1,5 +1,12 @@
 # Haven Changelog
 
+## 2.10: Back goes Home first, and rooms fill one entity at a time (2026-11-13)
+
+**What you will see**
+
+- Back on another tab's landing (Security, Climate, Scenes, a room tab) goes to Home; Back on Home leaves the app. It used to leave from any tab.
+- An area's Add list shows each device with its entities under it. Add all puts the whole device in the room; Add on an entity puts just that one. The list stays open, so several can be added in a row.
+
 ## 2.9: A Climate tab, and rooms without a plug's housekeeping (2026-11-13)
 
 **What you will see**

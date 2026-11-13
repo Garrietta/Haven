@@ -73,4 +73,17 @@ class DeviceGroupingTest {
         assertEquals("Heater, Heater LED, Heater power", (members[1] as AreaMember.Device).contents)
         assertEquals("input_boolean.vents", (members[2] as AreaMember.Lone).entity.entityId)
     }
+
+    @Test
+    fun theAddListGroupsEntitiesUnderTheirDevice() {
+        val groups = pickerGroups(
+            listOf(state("switch.fan", "Greenhouse Fan"), state("switch.heater", "Greenhouse Heater"), state("light.lamp", "Lamp")),
+            entityDevices = mapOf("switch.fan" to "plug", "switch.heater" to "plug"),
+            deviceNames = mapOf("plug" to "Dual outlet"),
+        )
+        assertEquals(listOf("Dual outlet", "Lamp"), groups.map { it.name })
+        assertEquals("plug", groups[0].deviceId)
+        assertEquals(listOf("Greenhouse Fan", "Greenhouse Heater"), groups[0].entities.map { it.friendlyName })
+        assertEquals(null, groups[1].deviceId)
+    }
 }

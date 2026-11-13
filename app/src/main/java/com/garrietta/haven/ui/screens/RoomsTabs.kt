@@ -1,6 +1,8 @@
 package com.garrietta.haven.ui.screens
 
 import com.garrietta.haven.data.AreaMember
+import com.garrietta.haven.data.nameUnderDevice
+import com.garrietta.haven.data.pickerGroups
 import com.garrietta.haven.data.areaMembers
 import androidx.compose.runtime.rememberCoroutineScope
 import com.garrietta.haven.data.HaArea
@@ -269,14 +271,22 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
                                 candidate.entityId.lowercase().contains(q) ||
                                 (deviceInfo[entityDevices[candidate.entityId]]?.name?.lowercase()?.contains(q) == true)
                         }
-                        Triple(matches, all.size, { id: String -> cleanDeviceName(deviceInfo[entityDevices[id]]?.name) })
+                        pickerGroups(
+                            matches,
+                            entityDevices,
+                            deviceInfo.mapValues { (_, info) -> cleanDeviceName(info.name) ?: info.name },
+                        ) to all.size
                     },
                     // What was picked moves, and only that: one outlet of a dual
                     // plug can be the greenhouse fan while the other is elsewhere.
                     onAdd = { candidate ->
-                        addFor = null
                         vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
                             done(err, "${candidate.friendlyName} moved to ${area.name}")
+                        }
+                    },
+                    onAddDevice = { deviceId, name ->
+                        scope.launch {
+                            done(vm.admin.updateDevice(deviceId) { it.put("area_id", area.id) }, "$name moved to ${area.name}")
                         }
                     },
                     onRemove = { member ->
@@ -536,8 +546,9 @@ private fun RoomSettings(
     onAdding: () -> Unit,
     addQuery: String,
     onAddQuery: (String) -> Unit,
-    candidatesFor: (String) -> Triple<List<com.garrietta.haven.data.HaEntity>, Int, (String) -> String?>,
+    candidatesFor: (String) -> Pair<List<com.garrietta.haven.data.PickerGroup>, Int>,
     onAdd: (com.garrietta.haven.data.HaEntity) -> Unit,
+    onAddDevice: (deviceId: String, name: String) -> Unit,
     onRemove: (AreaMember) -> Unit,
     placement: Placement,
     done: (String?, String) -> Unit,
@@ -655,23 +666,40 @@ private fun RoomSettings(
         )
         Spacer(Modifier.height(8.dp))
         val q = addQuery.trim().lowercase()
-        val (candidates, total, deviceNameOf) = candidatesFor(q)
+        val (groups, total) = candidatesFor(q)
         if (q.isEmpty() && total > 25) {
             Text("Showing 25 of $total — type to search all.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (candidates.isEmpty()) {
+        if (groups.isEmpty()) {
             Text("No entities match \"$addQuery\".", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        candidates.forEach { candidate ->
-            val deviceName = deviceNameOf(candidate.entityId)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.weight(1f)) {
-                    Text(candidate.friendlyName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (deviceName != null) {
-                        Text(deviceName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+        // A device with its entities under it: Add all moves the device,
+        // Add on an entity moves that entity alone. The list stays open,
+        // so several can be added one after another; each leaves the list
+        // as it lands in the room.
+        groups.forEach { group ->
+            val deviceId = group.deviceId
+            if (deviceId != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    Text(group.name, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (group.entities.size > 1) TextButton(onClick = { onAddDevice(deviceId, group.name) }) { Text("Add all") }
                 }
-                OutlinedButton(onClick = { onAdd(candidate) }) { Text("Add") }
+            }
+            group.entities.forEach { candidate ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(start = if (deviceId != null) 12.dp else 0.dp),
+                ) {
+                    Text(
+                        if (deviceId != null) nameUnderDevice(candidate.friendlyName, group.name) else candidate.friendlyName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(onClick = { onAdd(candidate) }) { Text("Add") }
+                }
             }
         }
     }

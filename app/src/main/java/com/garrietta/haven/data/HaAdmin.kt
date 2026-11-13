@@ -571,3 +571,25 @@ fun areaMembers(
     }
     return (devices + lone.map { AreaMember.Lone(it) }).sortedBy { it.name.lowercase() }
 }
+
+
+/** One group in an area's "Add" list: a device and those of its entities that can go in, or an entity on no device. */
+data class PickerGroup(val deviceId: String?, val name: String, val entities: List<HaEntity>)
+
+/**
+ * The "Add" list grouped as Home Assistant groups it: each device with
+ * its entities under it, so a whole device or one of its entities can be
+ * added, then the entities that belong to no device. Devices in name
+ * order, the lone entities after them.
+ */
+fun pickerGroups(
+    candidates: List<HaEntity>,
+    entityDevices: Map<String, String>,
+    deviceNames: Map<String, String>,
+): List<PickerGroup> {
+    val (withDevice, lone) = candidates.partition { entityDevices[it.entityId] != null }
+    val devices = withDevice.groupBy { entityDevices.getValue(it.entityId) }.map { (id, list) ->
+        PickerGroup(id, deviceNames[id] ?: list.minBy { it.friendlyName.length }.friendlyName, list.sortedBy { it.friendlyName.lowercase() })
+    }.sortedBy { it.name.lowercase() }
+    return devices + lone.sortedBy { it.friendlyName.lowercase() }.map { PickerGroup(null, it.friendlyName, listOf(it)) }
+}
