@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.ui.components.columnReorderRow
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -85,6 +86,7 @@ import com.garrietta.haven.data.semanticVisual
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.DetailPopupTitleHeader
+import com.garrietta.haven.ui.components.SectionTitle
 
 /**
  * Stage D (redesign): the Home dashboard's two new sections, kept out of
@@ -128,7 +130,7 @@ fun HomeStatusSection(
     ).filter { "status:${it.category.key}" !in hiddenSections }
     val anyCategoryVisible = HomeStatusCategory.entries.any { "status:${it.key}" !in hiddenSections }
 
-    Text("Home Status", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    SectionTitle("Home Status")
     Spacer(Modifier.height(8.dp))
     if (items.isEmpty()) {
         Card(
@@ -339,7 +341,7 @@ fun FavoritesSection(
     val resolved = vm.favorites.mapNotNull { states[it] }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Favorites", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+        SectionTitle("Favorites", Modifier.weight(1f))
         // Round 21, item 7: the Arrange button is gone — a
         // long-press on any favorite enters Arrange mode.
         // The pencil stays always-composed (round 18).
@@ -677,9 +679,27 @@ fun FavoritesSheet(
             if (query.isNotBlank() && visibleFavorites.isEmpty() && vm.favorites.isNotEmpty()) {
                 Text("No favorites match \"$query\".", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            for (id in visibleFavorites) {
+            // Favorites move by their grips; the order is saved when the
+            // finger lifts. While a search narrows the list, a drag moves
+            // a favorite among the ones shown and the rest keep their places.
+            val favoriteReorder = com.garrietta.haven.ui.components.rememberColumnReorder(visibleFavorites.size) { from, to ->
+                vm.setFavoriteOrder(com.garrietta.haven.ui.components.reorderSubset(vm.favorites, visibleFavorites, from, to))
+            }
+            for ((index, id) in visibleFavorites.withIndex()) {
                 val entity = states[id]
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .columnReorderRow(favoriteReorder, index)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(vertical = 2.dp),
+                ) {
+                    com.garrietta.haven.ui.components.ColumnReorderHandle(
+                        favoriteReorder, index,
+                        label = entity?.friendlyName ?: id,
+                        onStep = { delta -> vm.moveFavorite(id, delta) },
+                        modifier = Modifier.size(40.dp).padding(8.dp),
+                    )
                     Text(
                         if (entity != null) customTitleFor(sheetCustom.titles, id, entity.friendlyName) else "Unknown entity: $id",
                         fontSize = 14.sp,
@@ -688,15 +708,8 @@ fun FavoritesSheet(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    // Expressive-menus round: 44dp squircle buttons
-                    // (was bare IconButtons) — same taps, larger targets.
-                    SheetIconSquircleButton(Icons.Filled.ArrowUpward, "Move favorite up", onClick = { vm.moveFavorite(id, -1) })
-                    Spacer(Modifier.width(4.dp))
-                    SheetIconSquircleButton(Icons.Filled.ArrowDownward, "Move favorite down", onClick = { vm.moveFavorite(id, 1) })
-                    Spacer(Modifier.width(4.dp))
                     SheetIconSquircleButton(Icons.Filled.Delete, "Remove favorite", onClick = { vm.removeFavorite(id) })
                 }
-                Spacer(Modifier.height(4.dp))
             }
             // Feedback round, item 6: the standalone "Add devices"
             // list is DELIBERATELY GONE (the user: "I don't even

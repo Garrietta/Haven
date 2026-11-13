@@ -9,54 +9,45 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.pow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import com.garrietta.haven.ui.theme.Corner
+import com.garrietta.haven.ui.theme.HavenChrome
+import com.garrietta.haven.ui.theme.Palette
+import com.garrietta.haven.ui.theme.StateFamily
 import com.garrietta.haven.ui.theme.StateShape
+import com.garrietta.haven.ui.theme.leafCard
+import com.garrietta.haven.ui.theme.signal
 
-/**
- * Pure design-token logic for the ARCHITECTURE AND SYSTEM FOUNDATIONS round.
- *
- * The color pipeline maps each HA domain to explicit Material 3 tonal
- * containers, never static hex fills — except where a glyph tint needs a
- * warm-to-cool color-temperature ramp (lights), which is still a pure
- * function of kelvin, not a hardcoded fill.
- *
- * DEVIATION (media): the spec asks for dynamic artwork extraction (Palette /
- * Monet seed colors, as Koda does) where artwork exists. Haven's pipeline
- * carries no artwork bitmap for media entities — MediaControl shows
- * title/artist text only, and no Palette or Coil dependency exists — so
- * media falls back to the tonal mapping (playing = tertiary family,
- * idle = surfaceContainerHighest) everywhere. No artwork path was invented.
+/*
+ * Component tokens: the decisions that turn an entity and its state into
+ * a color, a shape or a size. Everything here is a pure function (no
+ * composition, no Android), so each rule is unit-tested on the JVM, and
+ * every color it returns is a Palette tone or a scheme role. The roles
+ * themselves live in ui/theme/Color.kt.
  */
 
 /**
- * The general card shape (expressive-menus round, item 6): three
- * 28dp corners + one 12dp corner, the 12dp corner rotating by grid
- * index — the UI rewrite's card rule, now the app-wide default for
- * card shells. A per-entity or global shape-picker override still
- * beats it everywhere (the picker is the user's explicit choice);
- * this is only the fallback. Single (non-grid) cards use index 0.
- * Pure, so the rule itself is unit-testable via its callers' tests.
+ * The default card outline for a grid position: Haven's leaf card, its
+ * tight corner turning with the index. A shape the user picked for an
+ * entity (see [cardCornerOption]) wins over this everywhere.
  */
+fun generalCardShape(index: Int): RoundedCornerShape = leafCard(index)
+
 /**
- * Customization round, item 1: EIGHT card-corner variants, cycling by
- * grid index so a grid never reads as identical tiles. Variants 0-3
- * are the expressive-menus rule (three 28dp + one 12dp, rotating);
- * 4-7 add the sharper / softer / pillow / diagonal edges the user
- * asked for. The center/badge language is untouched — only the
- * outer edges vary. Per-entity corner picks (CARD_CORNER_OPTIONS
- * keys "corners_0".."corners_7", via shapeForKey) beat this cycle.
+ * The eight outlines the card-shape picker offers, by the number stored
+ * in its "corners_N" key. 0-3 are the leaf card's four rotations; 4-7
+ * are the sharp, soft, pillow and diagonal alternatives. The numbers are
+ * persisted, so their meaning is frozen.
  */
-fun generalCardShape(index: Int): RoundedCornerShape = when ((index % 8 + 8) % 8) {
-    0 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomEnd = 12.dp, bottomStart = 28.dp)
-    1 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomEnd = 28.dp, bottomStart = 12.dp)
-    2 -> RoundedCornerShape(topStart = 28.dp, topEnd = 12.dp, bottomEnd = 28.dp, bottomStart = 28.dp)
-    3 -> RoundedCornerShape(topStart = 12.dp, topEnd = 28.dp, bottomEnd = 28.dp, bottomStart = 28.dp)
-    4 -> RoundedCornerShape(8.dp)
-    5 -> RoundedCornerShape(28.dp)
+fun cardCornerOption(option: Int): RoundedCornerShape = when (Math.floorMod(option, 8)) {
+    0, 1, 2, 3 -> leafCard(option)
+    4 -> RoundedCornerShape(Corner.xs)
+    5 -> RoundedCornerShape(Corner.xl)
     6 -> RoundedCornerShape(36.dp)
-    else -> RoundedCornerShape(topStart = 28.dp, topEnd = 12.dp, bottomEnd = 12.dp, bottomStart = 28.dp)
+    else -> RoundedCornerShape(topStart = Corner.xl, topEnd = Corner.sm, bottomEnd = Corner.sm, bottomStart = Corner.xl)
 }
 
 // ---------------------------------------------------------------------------
+// Light color temperature// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Light color temperature (spec item 2: secondary -> tertiary by kelvin)
 // ---------------------------------------------------------------------------
@@ -65,10 +56,9 @@ fun generalCardShape(index: Int): RoundedCornerShape = when ((index % 8 + 8) % 8
 fun lightTempBlendFraction(kelvin: Int?): Float =
     if (kelvin == null) 0.5f else (kelvin - 2000).coerceIn(0, 4500) / 4500f
 
-/** Glyph tint following bulb color temperature: warm amber to cool white-blue.
- * Not a scheme role: a continuous kelvin ramp (2000K→6500K), not a container. */
+/** A glyph tint that follows the bulb's color temperature, warm amber to cool white. */
 fun lightColorTempTint(kelvin: Int?): Color =
-    lerp(Color(0xFFFFB300), Color(0xFFCCE4FF), lightTempBlendFraction(kelvin))
+    lerp(Palette.Honey.t80, Palette.Frost.t90, lightTempBlendFraction(kelvin))
 
 /** The container a lit light lives in, blended across secondary -> tertiary by kelvin. */
 fun lightContainerColor(scheme: ColorScheme, kelvin: Int?, isOn: Boolean): Color =
@@ -197,38 +187,28 @@ fun coverIsMoving(state: String): Boolean = state == "opening" || state == "clos
 // weather condition. All pure, all unit-tested.
 // ---------------------------------------------------------------------------
 
-/**
- * Semantic state colors, NOT ColorScheme roles: the scheme has no
- * heat/cool role, so heating orange and cooling blue are named values
- * owned here — the single source of truth. Every heat/cool constant
- * elsewhere (dial arcs, tiles, thermostat pages) must reference these,
- * never re-declare the hex. Values are run #38's Google-Home
- * orange/blue: container pastels are unreadable as dial text/thumbs.
- */
-val HeatOrange = Color(0xFFD84315)
-val CoolBlue = Color(0xFF1565C0)
+/** Heating and cooling at full strength: dial arcs, setpoints, the mode readout. */
+val HeatOrange = Palette.HeatSignal
+val CoolBlue = Palette.CoolSignal
+
+/** A climate entity that is neither heating nor cooling right now. */
+val ClimateNeutral = Palette.Cloud.t60
 
 /**
- * Prominent dynamic color for a climate entity: warm orange while
- * heating, cool blue while cooling. hvac_action, when present,
- * decides completely (it is the live truth): heating/preheating →
- * heat, cooling → cool, anything else (idle, off, fan, drying) →
- * neutral — an idle thermostat in heat mode is not heating, so it
- * must not read heat-colored. Only when hvac_action is absent does
- * the mode state decide, with heat_cool / auto defaulting to the
- * heating color (the heating selector is the default selector).
- * Off, dry, and fan_only have no heating/cooling direction and get
- * the neutral blue-gray — never a heating or cooling color for a
- * state that is neither.
+ * The color a climate entity speaks in. hvac_action is the live truth
+ * and decides whenever it is present: heating is heat, cooling is cool,
+ * anything else (idle, off, fan, drying) is neutral, because a
+ * thermostat in heat mode that is not running is not heating. Only
+ * without it does the mode decide, heat_cool and auto reading as heat.
  */
 fun climateModeColor(state: String, hvacAction: String?): Color = when {
     hvacAction == "heating" || hvacAction == "preheating" -> HeatOrange
     hvacAction == "cooling" -> CoolBlue
-    hvacAction != null -> Color(0xFF78909C)
+    hvacAction != null -> ClimateNeutral
     state == "heat" -> HeatOrange
     state == "cool" -> CoolBlue
     state == "heat_cool" || state == "auto" -> HeatOrange
-    else -> Color(0xFF78909C)
+    else -> ClimateNeutral
 }
 
 /**
@@ -260,50 +240,43 @@ fun sensorKind(entityId: String, deviceClass: String?, friendlyName: String?): S
 }
 
 /**
- * Semantic badge colors for sensors (Round 4, replacing the
- * #89 purely-muted sensor badges): warm coral-red for
- * temperature, sky-blue for humidity. Fixed hues, not scheme
- * roles — the scheme has no temperature/humidity role — with
- * glyph colors floored to 3:1 against the fill (the large-icon
- * floor used elsewhere for 26dp glyphs). Pure and synchronous:
- * badgeColors calls this with the entity alone, so no badge can
- * flash a different shade before settling.
+ * The family a sensor's reading belongs to. Null for a reading with no
+ * meaning of its own (a count, a text state), which stays neutral.
+ */
+fun sensorFamily(kind: SensorKind): StateFamily? = when (kind) {
+    SensorKind.TEMPERATURE -> StateFamily.Heat
+    SensorKind.HUMIDITY -> StateFamily.Water
+    SensorKind.POWER -> StateFamily.Power
+    SensorKind.BATTERY -> StateFamily.On
+    SensorKind.LIGHT -> StateFamily.Caution
+    SensorKind.PRESSURE -> StateFamily.Cool
+    SensorKind.OTHER -> null
+}
+
+/**
+ * A badge fill and glyph for a sensor where the theme is not known:
+ * mid tones that read on either ground. Tiles do not use this; they
+ * take the sensor's family through domainCardColors.
  */
 fun sensorBadgeColors(kind: SensorKind): Pair<Color, Color>? = when (kind) {
-    SensorKind.TEMPERATURE -> Color(0xFFEF5350) to Color.White
-    SensorKind.HUMIDITY -> Color(0xFF29B6F6) to Color(0xFF01579B)
+    SensorKind.TEMPERATURE -> Palette.Ember.t60 to Palette.Ember.t10
+    SensorKind.HUMIDITY -> Palette.Rain.t70 to Palette.Rain.t10
     else -> null
 }
 
-/** Card-face tint for a sensor, at the same low alpha climate and weather cards use. Null for OTHER. */
+/** The hue a sensor's card is washed with where it is drawn nested. Null for [SensorKind.OTHER]. */
 fun sensorCardTint(kind: SensorKind): Color? = when (kind) {
-    SensorKind.TEMPERATURE -> Color(0xFFEF5350)
-    SensorKind.HUMIDITY -> Color(0xFF29B6F6)
+    SensorKind.TEMPERATURE -> Palette.Ember.t60
+    SensorKind.HUMIDITY -> Palette.Rain.t70
     else -> null
 }
 
 /**
- * Feedback round 20, item 2: the ONE chart-line color source. The
- * 24h strips used accentFor(entityId) — a per-entity hash color —
- * so two temperature sensors drew different lines (the 5179 sensor
- * teal, the Temperature sensor red). Lines are keyed by
- * measurement, never by entity: temperature and humidity use the
- * exact badge-bypass hues; power, battery, illuminance, and
- * pressure use their matrix rows' badge tones (pale on dark
- * theme, deep ink on light theme, so the line reads on both);
- * unclassified sensors share the MEDIA row tones, so any two
- * like sensors still match. Badges themselves are untouched
- * (they already follow the bypasses). Pure, unit-tested.
+ * The line a chart is drawn in. Keyed by what is measured, never by
+ * which entity, so two temperature sensors always draw the same line.
  */
-fun chartLineColor(kind: SensorKind, isDark: Boolean): Color = when (kind) {
-    SensorKind.TEMPERATURE -> Color(0xFFEF5350)
-    SensorKind.HUMIDITY -> Color(0xFF29B6F6)
-    SensorKind.POWER -> if (isDark) Color(0xFFFFE082) else Color(0xFF261900)
-    SensorKind.BATTERY -> if (isDark) Color(0xFFA6F285) else Color(0xFF143800)
-    SensorKind.LIGHT -> if (isDark) Color(0xFFB8F397) else Color(0xFF1B3708)
-    SensorKind.PRESSURE -> if (isDark) Color(0xFFA5C8FF) else Color(0xFF001C3A)
-    SensorKind.OTHER -> if (isDark) Color(0xFFDAB9FF) else Color(0xFF2B1246)
-}
+fun chartLineColor(kind: SensorKind, isDark: Boolean): Color =
+    (sensorFamily(kind) ?: StateFamily.Media).signal(isDark)
 
 /**
  * Light container scaled by brightness: the kelvin-tinted container
@@ -444,23 +417,23 @@ fun ensureContrast(foreground: Color, background: Color, minRatio: Float = 4.5f)
 }
 
 // ---------------------------------------------------------------------------
+/** The color of the sky right now, by Home Assistant condition. */
 fun weatherConditionColor(condition: String?): Color = when (condition?.lowercase()) {
-    "sunny", "clear" -> Color(0xFFFFB300)
-    "clear-night" -> Color(0xFF5C6BC0)
-    "partlycloudy", "partly-cloudy" -> Color(0xFF90A4AE)
-    "cloudy" -> Color(0xFF78909C)
-    "rainy", "pouring" -> Color(0xFF1E88E5)
-    "snowy", "snowy-rainy" -> Color(0xFF81D4FA)
-    "lightning", "lightning-rainy" -> Color(0xFF7E57C2)
-    "fog" -> Color(0xFF9E9E9E)
-    "hail" -> Color(0xFF4FC3F7)
-    "windy", "windy-variant" -> Color(0xFF80CBC4)
-    else -> Color(0xFF90A4AE)
+    "sunny", "clear" -> Palette.Honey.t80
+    "clear-night" -> Palette.Guard.t50
+    "partlycloudy", "partly-cloudy" -> Palette.Cloud.t70
+    "cloudy" -> Palette.Cloud.t60
+    "rainy", "pouring" -> Palette.Frost.t50
+    "snowy", "snowy-rainy" -> Palette.Rain.t85
+    "lightning", "lightning-rainy" -> Palette.Tune.t50
+    "fog" -> Palette.Cream.t60
+    "hail" -> Palette.Rain.t70
+    "windy", "windy-variant" -> Palette.Dew.t70
+    else -> Palette.Cloud.t70
 }
 
 // ---------------------------------------------------------------------------
-// Round 8 dark-theme pass (audit vs the Koda dark reference: true-black
-// background, white primary text, blue selected pill, colorful content)
+// Dark ground
 // ---------------------------------------------------------------------------
 
 /**
@@ -472,20 +445,14 @@ fun weatherConditionColor(condition: String?): Color = when (condition?.lowercas
 fun isDarkBackdrop(color: Color): Boolean = color.luminance() < 0.5f
 
 /**
- * Dark-theme condition colors. The saturated hues (sunny amber,
- * rainy blue, snowy sky, lightning purple) are already bright
- * against black and are kept identical to light — same semantic
- * colors, not a second palette. Only the grey family changes: the
- * light greys (partly-cloudy blue-grey, cloudy blue-grey, fog
- * grey) read as flat grey blobs on black at light values, so
- * their dark variants are brightened to clear the background
- * while staying grey (a cloud is still grey, just legible grey).
- * Pure, unit-tested.
+ * Condition colors on true black. The saturated ones are already bright
+ * enough and stay as they are; only the greys lift, because a mid grey
+ * cloud on black is a flat blob.
  */
 fun weatherConditionColorDark(condition: String?): Color = when (condition?.lowercase()) {
-    "partlycloudy", "partly-cloudy" -> Color(0xFFB0BEC5)
-    "cloudy" -> Color(0xFFA7BAC2)
-    "fog" -> Color(0xFFBDBDBD)
+    "partlycloudy", "partly-cloudy" -> Palette.Cloud.t80
+    "cloudy" -> Palette.Cloud.t70
+    "fog" -> Palette.Cream.t70
     else -> weatherConditionColor(condition)
 }
 
@@ -494,19 +461,14 @@ fun weatherConditionColorThemed(condition: String?, isDark: Boolean): Color =
     if (isDark) weatherConditionColorDark(condition) else weatherConditionColor(condition)
 
 /**
- * Glyph color for a condition chip/badge fill. Light theme keeps
- * the historical white glyph everywhere (unchanged). Dark theme:
- * light fills (sunny amber, brightened cloudy greys, rainy blue,
- * snowy sky) take a near-black glyph, because a white glyph on a
- * mid-grey/amber chip fails the 3:1 large-glyph floor and the icon
- * dissolves into the chip — the "grey blob" defect. Dark fills
- * (clear-night indigo, lightning purple) keep white. Every branch
- * clears 3:1 against its fill. Pure, unit-tested.
+ * The glyph on a condition chip: dark ink on a light fill, white on a
+ * dark one, decided by the fill's own luminance so every chip clears
+ * the 3:1 icon floor in both themes. (isDark is kept for call sites; the
+ * fill alone decides.)
  */
-fun weatherChipGlyphColor(fill: Color, isDark: Boolean): Color {
-    if (!isDark) return Color.White
-    return if (relativeLuminance(fill) > 0.22f) Color(0xFF102027) else Color.White
-}
+@Suppress("UNUSED_PARAMETER")
+fun weatherChipGlyphColor(fill: Color, isDark: Boolean): Color =
+    if (relativeLuminance(fill) > 0.22f) Palette.Cloud.t10 else Color.White
 
 /**
  * Secondary text floored to 4.5:1 against its backdrop — the #92
@@ -522,63 +484,35 @@ fun legibleSecondaryOn(scheme: ColorScheme, backdrop: Color): Color =
 fun legibleSecondary(scheme: ColorScheme): Color =
     legibleSecondaryOn(scheme, scheme.background)
 
-/**
- * Selected-pill fill and glyph, shared by the folded PillNav and
- * the unfolded VerticalSidePill so the two chrome variants can
- * never disagree. Light: the directive's lime #97F676 (visual-
- * fidelity round §2, replacing Stage B's #BEE986) — a fixed Haven
- * identity token, NOT scheme.secondaryContainer, so the selected
- * pill stays lime whether dynamic color is on or off. Dark:
- * Haven's ACCENTS blue (0xFF3B82F6 — the same value as the blue
- * entry in Expressive.kt's ACCENTS list, and the Koda selected-
- * pill blue reference), because dynamic-dark secondaryContainer is
- * a dim desaturated tone that reads as a grey blob on black.
- * Glyphs: near-black #0A2005 on lime (≈11:1), white on blue
- * (3.68:1, above the 3:1 large-glyph floor). Pure, unit-tested.
+/*
+ * Navigation chrome. The bar looks the same by day and by night (see
+ * HavenChrome): near-black green, a lime capsule on the selected tab.
+ * The scheme and isDark parameters are kept so call sites read like any
+ * other color lookup; they do not change the answer.
  */
-/**
- * UI rewrite round (2026-11-03): the navigation chrome is theme-independent —
- * the same near-black container, lime capsule, ink glyph, and pale-sage
- * unselected icons in BOTH light and dark themes. This supersedes Round 8's
- * split tokens (Koda-blue dark pill, secondaryContainer light pill), which
- * produced the flagged blue-highlight bug on the unfolded dark rail. The
- * scheme/isDark parameters stay so call sites need no signature change.
- */
-val PillBarContainer = Color(0xFF161D17)
-val PillBarActiveCapsule = Color(0xFF9BF67C)
-val PillBarActiveGlyph = Color(0xFF0A2005)
-val PillBarUnselectedGlyph = Color(0xFFD7E2D4)
+val PillBarContainer = HavenChrome.bar
+val PillBarActiveCapsule = HavenChrome.capsule
+val PillBarActiveGlyph = HavenChrome.onCapsule
+val PillBarUnselectedGlyph = HavenChrome.idleGlyph
 
+@Suppress("UNUSED_PARAMETER")
 fun selectedPillFill(scheme: ColorScheme, isDark: Boolean): Color = PillBarActiveCapsule
 
+@Suppress("UNUSED_PARAMETER")
 fun selectedPillGlyph(scheme: ColorScheme, isDark: Boolean): Color = PillBarActiveGlyph
 
-fun pillUnselectedGlyph(scheme: ColorScheme, isDark: Boolean): Color =
-    // Feedback round 3, item 1 (video ba): CORRECTION of round 2
-    // item 5. Round 2 removed the pill background and made the
-    // unselected glyph theme-aware — but the user wants the pill
-    // AND its background kept; only the transition clip box goes.
-    // With the opaque #161D17 container restored, the round-2
-    // glyph change's precondition (no dark container) is gone, so
-    // the #108 law returns: pale sage #D7E2D4 in BOTH themes.
-    PillBarUnselectedGlyph
+@Suppress("UNUSED_PARAMETER")
+fun pillUnselectedGlyph(scheme: ColorScheme, isDark: Boolean): Color = PillBarUnselectedGlyph
 
 // ---------------------------------------------------------------------------
-// Stage B token slots for Stage E (semantic colors).
+// Semantic states
 // ---------------------------------------------------------------------------
 /**
- * Stage B ONLY defines these slots. The full domain+state → visual
- * mapping (with deliberate light+dark variants, reused across Home,
- * rooms, badges, and summaries) is Stage E's work in a new
- * SemanticColors.kt — do NOT resolve colors from this enum here,
- * and do NOT half-build the mapping in this file in a way Stage E
- * must rip out. Each slot names the brief §7 semantic state and
- * its intended meaning; Stage E assigns the actual colors.
- *
- * Palette vs state, kept sharp (Stage B rule): the fixed sage/lime
- * palette above is the DESIGN SYSTEM (surfaces, chrome, text). The
- * slots below are DEVICE-STATE colors, always automatic from real
- * HA states, never manual overrides and never wallpaper-derived.
+ * What an entity's state means, independent of its domain. Status rows
+ * and attention dots resolve an entity to one of these and then to a
+ * color family (data/SemanticColors.kt). Device-state color always
+ * comes from the real Home Assistant state: it is never a manual
+ * override and never follows the wallpaper.
  */
 enum class SemanticState {
     /** Light/switch on: warm yellow/lime. */

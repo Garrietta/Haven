@@ -1,5 +1,219 @@
 # Haven Changelog
 
+## 2.13: Hold a tile to change its color and icon (2026-11-13)
+
+**What you will see**
+
+- Press and hold a tile for its options: a color and an icon, each applied the moment it is tapped so the tile changes behind the sheet, its name and its badge shape. Arrange tiles moved into the same sheet. The round switches on Home's room cards now show the icon and color picked for a device too.
+- About a hundred icons, by group: lights, power, heating and cooling, doors and windows, water and garden, kitchen and laundry, media, security, rooms. Haven draws the ones Material has no picture of: fan, heater, garage door, sprinklers, valve, humidifier, air purifier, water heater, gate, dishwasher, oven, lamp.
+- A device with no icon picked gets a better one by itself: a fan the fan, a garage door the garage door, blinds and curtains their own, and a switch named for what it powers ("Greenhouse Heater", "Sprinklers", "Coffee Maker") that thing.
+- The temperature under Home's sentence opens the Climate tab, not one thermostat's popup.
+
+**Under it**
+
+- The glyphs are drawn and written by `tools/glyphs.py` into `ui/components/HavenGlyphs.kt`; the catalog and the default-icon rule (`suggestedIconKey`, `CardIconsTest`) are in `ui/components/CardIcons.kt`, and the sheet is `ui/screens/CardSettings.kt`. Stored icon keys are unchanged.
+
+## 2.12: Security and Climate, arranged by hand (2026-11-13)
+
+**What you will see**
+
+- Security and Climate each have Edit beside their title. It turns the tab into a list of what it shows, section by section (cameras, doors & locks, motion detection; thermostats, readings): drag an item by its grip to reorder it, tap its cross to take it off, and Show brings back anything taken off.
+- Add to this tab searches every entity and puts the one picked in the section it belongs to (a camera with the cameras, a switch with motion detection, a sensor with the readings); the search stays open for several. A sensor that is neither temperature nor humidity (CO2, air quality) gets a card of its own showing its value and its day.
+- Anything Home Assistant adds later still appears, after what has been arranged.
+
+**Under it**
+
+- `data/PageCuration.kt` (taken off, added, order, per section; `PageCurationTest`), stored as `page_curation_<section>` in `SettingsStore`; the editor is `ui/screens/PageEditor.kt`, shared by both tabs.
+
+## 2.11: Widgets (2026-11-13)
+
+**What you will see**
+
+- Three home screen widgets. **Climate**: the thermostat at work, in its color (ember heating, frost cooling), what it reads and is doing, and its set point with − and + either side; a tap elsewhere opens its dial. **Controls**: up to six favorite switches and lights as tiles, lit when on, a tap to switch (with no favorites, the lights that are on). **Security**: whether the house is shut and the alarm, in the calm or the alert color.
+- Widgets answer a tap at once and settle to what Home Assistant reports, and keep up while Haven is open.
+
+**Under it**
+
+- `widget/HavenWidgets.kt` (Glance) draws from the states the app saves (`haven_state_cache.json`), which `WidgetHa` refreshes for the widget's own entities and writes back; taps go through the REST API with the app's sign-in, refreshing the token and trying the local address before the cloud one. What each shows is pure (`data/WidgetModels.kt`, `WidgetModelsTest`).
+
+## 2.10: Back goes Home first, and rooms fill one entity at a time (2026-11-13)
+
+**What you will see**
+
+- Back on another tab's landing (Security, Climate, Scenes, a room tab) goes to Home; Back on Home leaves the app. It used to leave from any tab.
+- An area's Add list shows each device with its entities under it. Add all puts the whole device in the room; Add on an entity puts just that one. The list stays open, so several can be added in a row.
+
+## 2.9: A Climate tab, and rooms without a plug's housekeeping (2026-11-13)
+
+**What you will see**
+
+- A Climate tab sits right of Security. At its top, the house in one card: what it is inside (the thermostat's reading), the humidity, the outside, and what the thermostat is doing, in ember while heating and frost while cooling.
+- Each thermostat is a card: its reading, its set point with − and + beside it (or heat and cool set points for a range), its modes, its comfort settings (an ecobee's Home, Away and Sleep) and its fan, with the dial and history a tap away.
+- Rooms lists every temperature and humidity reading, one card a device (an ecobee remote sensor's temperature and humidity together), each with a bar placing it between cold and hot and its last day as a line. Outside holds the weather and any outdoor sensor.
+- Show Climate on bar is under Home & navigation.
+- A device's configuration and diagnostic entities no longer fill the room it is in. A dual smart plug in the Greenhouse shows its two outlets, not also its LED, auto-update, cloud connection and signal level, on Home, on the room's page and in its count.
+- Adding to an area moves just what you picked: one outlet of a dual plug can be the greenhouse fan while the other is elsewhere. The area lists each device with what of it is there, by name, and Remove takes all of it out.
+
+**Under it**
+
+- `data/Climate.kt` holds the rules (which sensors, grouped by device, outdoor by name, the summary, a thermostat's activity, labels), tested in `ClimateTest`. `ui/screens/ClimateScreen.kt` draws them; `navShowClimate` joins the bar's built-ins.
+- The entity registry's `entity_category` and `hidden_by` mark auxiliary entities (`HaClient.auxiliaryEntities`); they are left out of `entityAreas`, so out of every room.
+
+## 2.8: Devices land in their area (2026-11-12)
+
+**What you will see**
+
+- A device you put in an area in Home Assistant now shows up there in Haven, on Home and in Settings. Before, a heater or fan set to Greenhouse left Greenhouse at "0 devices" and empty on Home.
+- A device's page in Settings leads with its on/off. Its entities follow in Home Assistant's groups (Controls, Sensors, Configuration, Diagnostic), named without the device's name in front, with a switch on anything that turns on and off and a Press button on buttons. Tap one for its controls; the tune button opens its settings.
+- An area in Areas, labels & zones lists its devices, the way Home Assistant does: one row for a smart plug rather than one for each of its sensors and timers. Add a device and Remove move the whole device; something that belongs to no device still moves on its own.
+
+**Under it**
+
+- Android's `JSONObject.optString` returns the text "null" for a JSON null, so every `"area_id": null` on an entity read as an area called "null" and hid the device's area behind it. `JSONObject.text()` (`data/HaJson.kt`) reads null as empty, and the registry, event and media parsers use it. The JVM's org.json returns "" there, which is why no test caught it.
+- `entityGroup`, `mainControl`, `nameUnderDevice` and `areaMembers` in `HaAdmin.kt` are pure and tested in `DeviceGroupingTest`.
+
+## 2.7: Haven updates itself (2026-11-12)
+
+**What you will see**
+
+- Settings, App updates shows the build installed and the newest test build. Download and install fetches it and hands it to Android, which asks you to confirm. The first time, Android asks you to let Haven install apps.
+- The App updates row in Settings says when a newer build is waiting.
+
+**Under it**
+
+- CI's new `publish-test-build` job replaces one pre-release, `test-build`, after every signed build, with the APK and a `Build: <run number>` line. The app knows its own run number (`BuildConfig.BUILD_NUMBER`, 0 locally), so a higher one is newer. The repository is public, so no sign-in is needed.
+- `update/ApkInstaller.kt` downloads into the cache and commits a `PackageInstaller` session; `UpdateInstallReceiver` shows Android's confirmation and words a refusal (an APK signed with another key cannot update this one). `REQUEST_INSTALL_PACKAGES` is new.
+- A debug build says that test builds install beside it, since they are the release app.
+
+## 2.6: Settings laid out like Home Assistant's (2026-11-12)
+
+**What you will see**
+
+- Settings opens on Home Assistant's own sections, in its order: Devices & services, Automations & scenes, Areas, labels & zones, Dashboards, People, System and About. Haven's own settings follow under Haven: Appearance, Device styles, Home & navigation, Notifications and Connection.
+- Devices & services has Home Assistant's four tabs. Integrations: reload, disable or delete one, and add a new one by answering Home Assistant's own questions (a step that needs a browser sign-in opens the browser). Devices: rename, move to an area, disable, and see their entities. Entities: search every entity and open its page, with Home Assistant's settings (name, icon, area, entity ID, visible, enabled) and how its card looks in Haven. Helpers: create and delete.
+- Automations & scenes lists every automation with its switch and when it last ran, every scene and every script: run, switch, delete, or start a new one.
+- Areas, labels & zones holds your rooms (each with Home Assistant's settings and Haven's, and a grip to set their order on Home), and adds floors, labels and zones.
+- People lists people with their trackers, to add, rename or remove, and the users. System has updates, repairs, logs, backups, the general settings (name, units, time zone, location), checking the configuration, reloading YAML and restarting, which asks first. About shows the versions.
+- Device styles sets the color, badge shape and card shape for each type of device (every lamp, every lock) with a preview. The Card settings, Badge shape and Card shape rows are gone from popups; one device can still differ from its type on its own page.
+- Rooms and tabs each have one place: rooms under Areas, your tabs under Home & navigation. Browse, Shapes, Rooms & tabs, User tabs and the Create hub are gone from Settings.
+- Every list in Settings reorders by dragging its grip: Home sections, favorites, dashboard cards, rooms, tabs and a tab's cards. The arrows are gone.
+
+**Under it**
+
+- `data/HaAdminApi.kt` makes the calls (the WebSocket admin commands and the REST config API, through new awaited `HaClient.command` and `HaClient.rest`); `data/HaAdmin.kt` parses the replies, with 11 tests. `ui/screens/Settings*.kt` are the pages, routed by `Screen.SettingsPage(route)`.
+- `RoomsTabs.kt` now draws Areas and Your tabs as two pages. `Screen.RoomsTabs`, `Screen.BuilderHub` and the type-defaults dialog are gone; `reorderSubset` moves the shown part of a list among the rest.
+- An area carries its floor.
+
+## 2.5: a Security tab (2026-11-12)
+
+**What you will see**
+
+- A Security tab beside Home on the bar. It opens with one line: "Everything is shut and locked." when it is, or what is not ("Back Door is open, and Side Door is unlocked.") in red.
+- The alarm as four choices: Home, Away, Night and Off. A panel that asks for a code opens its keypad instead.
+- Every camera, as a grid of their pictures. Tap one to open it, live where it can be.
+- Motion detection: each camera's detection switches (motion, person and so on) under the camera's name, with when it last saw motion where the camera reports it. Switches that belong to no camera are listed by their own names.
+- Doors & locks: locks, garage doors and door, window and motion sensors, each opening its own popup. A lock still asks before unlocking.
+- The outdoor siren, which sounds only after a second tap.
+- The cameras have moved off Home to this tab. Manage home page can put them back on Home.
+- Security can be taken off the bar in Rooms & tabs. The bar holds six at most, so with Security, Scenes and Energy all on there is room for one pinned tab or room; a switch that would push a pinned tab off says the bar is full. After the update, Security only appears on its own if it fits beside what you have pinned.
+
+**Under it**
+
+- `data/SecurityPage.kt` (opening line, detection switches by device, labels) with 7 tests; `ui/screens/SecurityScreen.kt` draws it. `barExtraSlots` keeps the bar at six; NavItems has 2 new tests.
+- A one-time move hides the Home Cameras section (`cameras_moved_to_security`). `nav_show_security` is absent until chosen.
+- The state cache restore can carry device links, so the screenshot test draws cameras with their switches.
+
+## 2.4: drag to reorder in Rooms & tabs (2026-11-12)
+
+**What you will see**
+
+- Rooms & tabs lists each room and each tab as one row: a grip, its icon, its name, and a line saying how many devices or cards it holds and where it is pinned.
+- Hold a row's grip and drag it to move it. The row lifts and the others step out of its way; the order is saved when you let go. The order of rooms is the order Home shows them in, and the order of tabs is the order of User Tabs.
+- Tap a row to open its settings under it: names, icon, devices and where it is pinned for a room; title, icon, cards and where it is pinned for a tab. One row is open at a time, so the list stays short enough to reorder.
+- A tab's cards reorder the same way, by their grips. The up and down arrows are gone everywhere on this screen.
+- With TalkBack, each grip offers Move up and Move down.
+
+**Under it**
+
+- `ui/components/ReorderList.kt`: `LazyListReorder` for rows of a LazyColumn (reads where rows really are, so rows of different heights reorder correctly, and scrolls the list while a row is held near an edge) and `ColumnReorder` for equal rows inside one item. The rules (which row is under the dragged row's middle, edge scroll speed, equal-row steps) are pure functions with 5 tests.
+- Rooms & tabs moved out of `Screens.kt` into `ui/screens/RoomsTabs.kt`; `HavenViewModel.setTabOrder` writes a whole tab order at once.
+- Screenshot tests open a room and drag one, and check the stored order. The screen is drawn on its own in them: nothing on it animates at rest, so the test pushes state changes through by hand.
+
+## 2.3: device popups lead with one control (2026-11-12)
+
+**What you will see**
+
+- A lamp's popup opens on one large slab in the lamp's yellow. The fill is the brightness: drag up or down anywhere on it to set the level, tap it to switch the lamp on or off. It replaces the small on/off pill and the thin brightness slider.
+- Warm to cool is a track painted from amber to cool white, with a handle where the lamp sits. Tap a point on it or drag the handle.
+- Switches, fans and locks lead with the same slab. A fan's fill is its speed and can be dragged; a plug with a meter says how many watts it is drawing; a lock is full and blue while locked and asks before unlocking, as before. The Turn on / Turn off / Toggle buttons are gone from these popups.
+- The card options at the foot of every popup (Card settings, Badge shape, Card shape) sit together in one group under "Customize".
+- The lamp's details card no longer repeats on and brightness; it keeps the room, when it last changed and its smart plug.
+
+**Under it**
+
+- `ui/controls/ControlSlab.kt`: `ControlSlab` and the four device slabs, plus `ColorTempTrack`. The level, kelvin and watt rules are pure functions with 7 tests.
+- `powerWatts` (data/SemanticColors.kt) is the one reading of a plug's meter, used by the tile's family and the slab's caption.
+- Screenshot tests for the switch, fan and lock popups and the lamp popup at night.
+
+## 2.2: popups that grow, not stretch (2026-11-12)
+
+**What you will see**
+
+- A device, room or status popup now grows out of its tile as itself: it is laid out at full size from the first frame and revealed through a window that opens from the tile's rectangle to the popup's. It used to be the finished popup scaled down to the tile and back up, which stretched its text and icons on the way.
+- Opening and closing settle the way Rondo's music player does: no bounce against the popup's edges, and a calmer arrival.
+- Pull-to-dismiss runs the same motion backwards under your finger.
+
+**Under it**
+
+- `RevealWindowShape` (ui/components/MorphOverlay.kt) clips a full-size layer to the in-between rectangle; the folded surface and the unfolded centered popup both use it, moved but never scaled.
+- `popupMorphSpring` is 350 / 0.95, Rondo's player transform, up from 500 / 0.85, on the owner's word that the popups felt underworked beside that player.
+- The centered popup measures itself for the drag range only when fully open.
+
+## 2.1: Home as rooms (2026-11-11)
+
+The first screen is laid out around the rooms of the house rather than a grid of equal tiles.
+
+**What you will see**
+
+- Home opens with a sentence about the house: how many lights are on, and whether the doors are locked. The last word is a pill in that state's color, so "locked" reads calm and "unlocked" reads as a warning. A welcome message you set yourself still replaces it.
+- Under it, one card per room. A room with something happening wears that state's color and says what in a line ("Floor Lamp is on, Heating to 70°"); a room with nothing happening is a single quiet line.
+- Each card carries the room's devices as round switches. Tap a light, plug or fan to flip it; tap anything else, or hold any of them, to open its controls, which grow out of the switch.
+- Tap a card to open that room as a popup that grows out of the card: its name, what is happening in it, and every device as a tile. A tile opens its control on top; closing that comes back to the room, and closing the room comes back to Home. The chip view of a room is no longer how a room opens.
+- The sentence is also the controls. Each line ends in a state word you can tap to undo it: "on" turns those lights off, "open" closes the garage door, "running" sends the vacuum home, "playing" pauses. "locked" opens the lock's control instead of unlocking. Tap the inside temperature to open the thermostat.
+- A lit lamp is yellow everywhere: its tile, its switch on a room card and the "on" in the sentence. The room card itself stays green.
+- Home Status is gone from Home while the sentence is showing, since the sentence does its job. Cameras, Favorites and the other Home sections follow the rooms, in the order you set.
+
+**Under it**
+
+- `data/RoomDigest.kt` decides each room's color, sentence, temperature and switches, and the headline with its actions; `ui/screens/RoomsHome.kt` draws them. 17 tests cover the rules.
+- A new state family, Light, on the Volt ramp. By day its badge is the bright tone, the one exception to the tone recipe besides Quiet.
+- Rooms shown as cards follow the same placement setting the chips did. "No room" is always the quiet line.
+
+## 2.0: a new identity (2026-11-10)
+
+A redesign of the whole visual system, not a feedback round. `DESIGN.md` is now the source of truth for how the app looks and moves.
+
+**What you will see**
+
+- A new logo: a house with the light on in its doorway and the sun rising behind the roof. New launcher icon (with a themed-icon version), a splash screen that matches the app's background, and a Haven icon on notifications in place of the stock info glyph.
+- A new typeface, Google Sans Flex, rounded, across the whole app. Text that used to look double-spaced or letter-spaced now sits properly.
+- A rebuilt sign-in screen: the address and the instances found on your network in one card, one "Sign in" button, and the access-token route one tap away.
+- Home opens on the Haven signature and the greeting as the big line.
+- Lime now means "this one" everywhere: the selected tab, room, mode and choice.
+- Tiles for temperature, humidity and motion follow the same color recipe as every other tile. Every default card is a leaf card; the sharp and pillow outlines are still in the shape picker.
+- Settings rows have calmer badges, and a wide control (the thermostat range steppers) now drops under its text instead of squeezing the title.
+
+**Under it**
+
+- Every color is a tone of a generated palette (`tools/palette.py`) read through ten state families; no hex values in screens. Hues are the ones the app already used.
+- The theme is `MaterialExpressiveTheme` on material3 1.5. Toolchain: AGP 9.3, Kotlin 2.4, Gradle 9.6, compileSdk 37 (targetSdk still 35).
+- Haven's own springs are unchanged in value and now live in `Motion.kt`.
+- A screenshot harness renders the real app on the JVM with a demo home: `./gradlew :app:recordRoborazziDebug`.
+- CI tests, renders and builds the signed release for every pull request and for `main`.
+- 538 unit tests pass. Tests that pinned hex values now pin the decisions and the contrast floors.
+
+**Not yet seen on a phone:** motion, haptics, camera streams and real insets cannot be judged on the JVM. Worth a look on the Fold: the splash on a cold start, the sign-in screen with the keyboard up, popup morphs with the new type sizes, and the themed icon.
+
 ## Feedback round 25 (2026-11-05, seven items from his written spec on #135 — no video attached)
 
 PASSES from #135 (do not regress): badge glyphs match their cards; vacuum/garage split heroes; swipe-down settles at tap-outside calm speed; no tile flash on ×3 cycles; default card shapes stable on Climate/Lights tabs; Settings compact on unfolded; Tall visibly doubles.

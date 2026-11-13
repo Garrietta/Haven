@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Home screen widgets: their names and what the picker says they do. -->
+    <string name="widget_climate_label">Climate</string>
+    <string name="widget_climate_description">Your thermostat: what it reads, what it is doing, and its set point to change</string>
+    <string name="widget_controls_label">Controls</string>
+    <string name="widget_controls_description">Your favorite switches and lights, a tap to turn on or off</string>
+    <string name="widget_security_label">Security</string>
+    <string name="widget_security_description">Whether the house is shut, and the alarm</string>
+</resources>

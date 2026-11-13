@@ -1,5 +1,8 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.ui.components.ColumnReorderHandle
+import com.garrietta.haven.ui.components.columnReorderRow
+import com.garrietta.haven.ui.components.rememberColumnReorder
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.ChevronRight
@@ -76,6 +79,8 @@ import com.garrietta.haven.data.parseCardYaml
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.components.accentFor
 import org.json.JSONObject
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.ScreenTitle
 
 /**
  * User tabs: a title plus cards, each card stored as YAML text. Tab pages
@@ -99,7 +104,7 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             Spacer(Modifier.height(16.dp))
             Text("This tab was deleted.", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
+            Button(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Your tabs") }
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -109,10 +114,10 @@ fun UserTabScreen(vm: HavenViewModel, tabId: String, navigate: (Screen) -> Unit)
             // vanishing into the background — the 2026-10-29
             // verdict's "hermostat" frame). Titles stay fully
             // rendered through the whole morph and at rest.
-            Text(tab.title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            ScreenTitle(tab.title, Modifier.weight(1f))
             // Round 21, item 7: the Arrange button is gone — a
             // long-press on any tile enters Arrange mode.
-            OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Edit") }
+            OutlinedButton(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Edit") }
         }
         Spacer(Modifier.height(12.dp))
         if (tab.cards.isEmpty()) {
@@ -202,7 +207,7 @@ private fun TabCardView(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Fix in Rooms & tabs") }
+                OutlinedButton(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Fix in Your tabs") }
             }
         }
     } else {
@@ -237,7 +242,7 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         contentPadding = PaddingValues(bottom = 96.dp),
     ) {
         item {
-            Text("User tabs", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ScreenTitle("User tabs")
             Spacer(Modifier.height(8.dp))
             Text("Your custom tabs. Hidden tabs live in Manage tabs.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(16.dp))
@@ -246,7 +251,7 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             item {
                 Text("No custom tabs yet.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
+                Button(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Your tabs") }
             }
         } else {
             items(visibleTabs) { tab ->
@@ -268,7 +273,7 @@ fun UserTabsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         }
         item {
             Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = { navigate(Screen.RoomsTabs) }) { Text("Rooms & tabs") }
+            OutlinedButton(onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }) { Text("Your tabs") }
         }
     }
 }
@@ -310,12 +315,7 @@ internal fun TabEditorCard(
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = { vm.moveTab(tab.id, -1) }) {
-                    Icon(Icons.Filled.ArrowUpward, contentDescription = "Move tab left")
-                }
-                IconButton(onClick = { vm.moveTab(tab.id, 1) }) {
-                    Icon(Icons.Filled.ArrowDownward, contentDescription = "Move tab right")
-                }
+                // The tab's place in the order is its row's grip in Rooms & tabs.
                 IconButton(onClick = { vm.deleteTab(tab.id) }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Delete tab")
                 }
@@ -351,13 +351,29 @@ internal fun TabEditorCard(
                 // one placement, so the two can never disagree.
             }
             Spacer(Modifier.height(12.dp))
+            // A card is moved by its grip; the new order is written once,
+            // when the finger lifts.
+            val cardReorder = rememberColumnReorder(tab.cards.size) { from, to -> vm.moveCardInTab(tab.id, from, to) }
             for ((index, yaml) in tab.cards.withIndex()) {
                 val type = try {
                     cardType(parseCardYaml(yaml))
                 } catch (e: Exception) {
                     "?"
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .columnReorderRow(cardReorder, index)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(vertical = 2.dp),
+                ) {
+                    ColumnReorderHandle(
+                        cardReorder,
+                        index,
+                        label = "card ${index + 1}",
+                        onStep = { delta -> vm.moveCardInTab(tab.id, index, (index + delta).coerceIn(tab.cards.indices)) },
+                        modifier = Modifier.size(40.dp).padding(8.dp),
+                    )
                     Box {
                         OutlinedButton(onClick = { typeMenuFor = index }) { Text(type) }
                         DropdownMenu(
@@ -393,20 +409,13 @@ internal fun TabEditorCard(
                     IconButton(onClick = { onEditYaml(index, yaml) }) {
                         Icon(Icons.Filled.Edit, contentDescription = "Edit card YAML")
                     }
-                    IconButton(onClick = { vm.moveCardInTab(tab.id, index, index - 1) }) {
-                        Icon(Icons.Filled.ArrowUpward, contentDescription = "Move card up")
-                    }
-                    IconButton(onClick = { vm.moveCardInTab(tab.id, index, index + 1) }) {
-                        Icon(Icons.Filled.ArrowDownward, contentDescription = "Move card down")
-                    }
                     IconButton(onClick = { vm.removeCardFromTab(tab.id, index) }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Remove card")
                     }
                 }
-                Spacer(Modifier.height(4.dp))
             }
             Spacer(Modifier.height(8.dp))
-            Text("Add a card", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            SectionTitle("Add a card")
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {

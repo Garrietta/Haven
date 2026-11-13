@@ -67,10 +67,12 @@ class HaClient(
         states: Map<String, HaEntity>,
         areas: List<HaArea>,
         entityAreas: Map<String, String>,
+        entityDevices: Map<String, String> = emptyMap(),
     ) {
         if (states.isNotEmpty()) _states.value = states
         if (areas.isNotEmpty()) _areas.value = areas
         if (entityAreas.isNotEmpty()) _entityAreas.value = entityAreas
+        if (entityDevices.isNotEmpty()) _entityDevices.value = entityDevices
     }
 
     /**
@@ -115,6 +117,13 @@ class HaClient(
      * Empty until the entity registry arrives: empty means
      * unknown, never "no motion sensor".
      */
+    /**
+     * Entities Home Assistant files as configuration or diagnostics, or
+     * has hidden: kept out of rooms and lists of what a room holds.
+     */
+    private val _auxiliaryEntities = MutableStateFlow<Set<String>>(emptySet())
+    val auxiliaryEntities: StateFlow<Set<String>> = _auxiliaryEntities.asStateFlow()
+
     private val _entityDevices = MutableStateFlow<Map<String, String>>(emptyMap())
     val entityDevices: StateFlow<Map<String, String>> = _entityDevices.asStateFlow()
 
@@ -456,9 +465,9 @@ class HaClient(
                                     domain = entityId.substringBefore("."),
                                     oldState = oldState?.optString("state")?.ifEmpty { null },
                                     newState = incoming,
-                                    deviceClass = attributes?.optString("device_class")?.ifEmpty { null },
-                                    friendlyName = attributes?.optString("friendly_name")?.ifEmpty { null },
-                                    parentId = context?.optString("parent_id")?.ifEmpty { null },
+                                    deviceClass = attributes?.text("device_class")?.ifEmpty { null },
+                                    friendlyName = attributes?.text("friendly_name")?.ifEmpty { null },
+                                    parentId = context?.text("parent_id")?.ifEmpty { null },
                                 )
                             )
                         }
@@ -513,9 +522,14 @@ class HaClient(
             val items = registryItems(msg)
             val list = mutableListOf<HaArea>()
             for (o in items) {
-                val id = o.optString("area_id").ifEmpty { o.optString("id") }
+                val id = o.text("area_id").ifEmpty { o.text("id") }
                 if (id.isEmpty()) continue
-                list.add(HaArea(id, o.optString("name"), o.optString("icon").ifEmpty { null }))
+                list.add(
+                    HaArea(
+                        id, o.text("name"), o.text("icon").ifEmpty { null },
+                        o.text("floor_id").ifEmpty { null },
+                    ),
+                )
             }
             if (list.isNotEmpty()) _areas.value = list.sortedBy { it.name }
         })
@@ -523,26 +537,24 @@ class HaClient(
             val items = registryItems(msg)
             val entityToArea = mutableMapOf<String, String?>()
             val entityToDevice = mutableMapOf<String, String>()
+            val auxiliary = mutableSetOf<String>()
             for (o in items) {
                 val entityId = o.optString("entity_id")
                 if (entityId.isEmpty()) continue
-                val areaId = o.optString("area_id")
+                if (o.text("entity_category").isNotEmpty() || o.text("hidden_by").isNotEmpty()) auxiliary += entityId
+                val areaId = o.text("area_id")
                 if (areaId.isNotEmpty()) entityToArea[entityId] = areaId
-                val deviceId = o.optString("device_id")
-                // Feedback round, item 8: HA carries the literal
-                // string "null" as device_id for a set of entities
-                // (proven, not guessed: org.json optString returns
-                // "" for JSON null and for a missing key, so a
-                // "null" reaching here is a real string) — treating
-                // it as a device id renders a "Device null" row
-                // with 18 entities on Garrett's phone. Treat it as
-                // absent; those entities surface under the
-                // Favorites sheet's Ungrouped row instead.
+                val deviceId = o.text("device_id")
+                // An entity with no device has "device_id": null, which
+                // [text] reads as "" (Android's optString would have made it
+                // the text "null" and a "Device null" row). The literal check
+                // stays as a guard for a registry that really sends the text.
                 if (deviceId.isNotEmpty() && !deviceId.equals("null", ignoreCase = true)) entityToDevice[entityId] = deviceId
             }
             if (entityToArea.isNotEmpty() || entityToDevice.isNotEmpty()) {
                 registryEntityAreas = entityToArea
                 registryEntityDevices = entityToDevice
+                _auxiliaryEntities.value = auxiliary
                 publishEntityAreas()
             }
         })
@@ -553,14 +565,14 @@ class HaClient(
             for (d in items) {
                 val id = d.optString("id")
                 if (id.isEmpty()) continue
-                val areaId = d.optString("area_id")
+                val areaId = d.text("area_id")
                 if (areaId.isNotEmpty()) deviceToArea[id] = areaId
                 // Manufacturer per device: the second Ring signal.
                 // Camera state attributes on this instance do not
                 // carry `brand`, which is why run #38's label never
                 // fired — the device registry is the ground truth
                 // for who made the device.
-                val maker = d.optString("manufacturer")
+                val maker = d.text("manufacturer")
                 if (maker.isNotEmpty()) deviceToMaker[id] = maker
                 // Device info for device-aware search (item 3).
                 // Feedback round 17, item 4: the literal string
@@ -568,11 +580,11 @@ class HaClient(
                 // registry name fields, and the picker rendered
                 // it verbatim. Mirrors the device_id "null" guard
                 // below: a "null" name is treated as absent.
-                val displayName = d.optString("name_by_user").ifEmpty { d.optString("name") }
+                val displayName = d.text("name_by_user").ifEmpty { d.text("name") }
                 if (displayName.isNotEmpty() && !displayName.equals("null", ignoreCase = true)) {
                     deviceInfoById[id] = HaDeviceInfo(
                         displayName,
-                        d.optString("model").ifEmpty { null },
+                        d.text("model").ifEmpty { null },
                         maker.ifEmpty { null },
                     )
                 }
@@ -597,9 +609,14 @@ class HaClient(
      */
     private fun publishEntityAreas() {
         if (registryEntityAreas.isEmpty() && registryEntityDevices.isEmpty()) return
+        // A device's configuration and diagnostic entities (a smart plug's
+        // LED, auto-update and signal level) and hidden ones stay with the
+        // device, as on Home Assistant's own area pages, rather than filling
+        // the room the device is in.
+        val auxiliary = _auxiliaryEntities.value
         _entityAreas.value = resolveEntityAreas(
             registryEntityAreas, registryEntityDevices, registryDeviceAreas,
-        )
+        ).filterKeys { it !in auxiliary }
         _entityDevices.value = registryEntityDevices
     }
 
@@ -992,7 +1009,7 @@ class HaClient(
                         mediaContentId = c.optString("media_content_id"),
                         mediaContentType = c.optString("media_content_type"),
                         title = c.optString("title"),
-                        thumbnail = c.optString("thumbnail").ifEmpty { null },
+                        thumbnail = c.text("thumbnail").ifEmpty { null },
                         canPlay = c.optBoolean("can_play", false),
                         canExpand = c.optBoolean("can_expand", false),
                     ),
@@ -1053,6 +1070,42 @@ class HaClient(
         }, onResult = { msg ->
             onDone(msg.optBoolean("success", false))
         })
+    }
+
+    /**
+     * One command, awaited: the result message, or null when Home
+     * Assistant does not answer within [timeoutMs] (not connected, or
+     * a command this version does not know). Settings uses it for the
+     * registries and admin lists it reads on demand.
+     */
+    suspend fun command(type: String, timeoutMs: Long = 10_000, build: (JSONObject) -> Unit = {}): JSONObject? =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                val id = sendCommand(type, build) { msg -> if (cont.isActive) cont.resumeWith(Result.success(msg)) }
+                cont.invokeOnCancellation { pending.remove(id) }
+            }
+        }
+
+    /**
+     * One REST call to the instance's API, as (HTTP status, body). Status
+     * is 0 when the request could not be made at all. [path] starts with
+     * "/api/".
+     */
+    suspend fun rest(method: String, path: String, body: JSONObject? = null): Pair<Int, String?> = withContext(Dispatchers.IO) {
+        try {
+            val requestBody = body?.toString()?.toRequestBody("application/json".toMediaTypeOrNull())
+                ?: if (method == "POST") "".toRequestBody(null) else null
+            val req = Request.Builder()
+                .url("$instanceUrl$path")
+                .header("Authorization", "Bearer $token")
+                .method(method, requestBody)
+                .build()
+            http.newCall(req).execute().use { resp -> resp.code to resp.body?.string() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            0 to e.message
+        }
     }
 
     /** Saves an automation/script/scene config through the REST config API. */

@@ -57,6 +57,7 @@ import com.garrietta.haven.data.movedByDelta
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.RoomBarItem
+import com.garrietta.haven.ui.components.barExtraSlots
 import com.garrietta.haven.ui.components.canPinBarExtra
 import com.garrietta.haven.ui.screens.RoomFilter
 import com.garrietta.haven.ui.components.NavStyle
@@ -91,6 +92,10 @@ sealed class Screen {
     data object Scenes : Screen()
     /** Stage F: first-class Energy destination (brief §4/§11). */
     data object Energy : Screen()
+    /** The cameras, their motion detection, the alarm, doors and locks. */
+    data object Security : Screen()
+    /** Thermostats, and every temperature and humidity reading. */
+    data object Climate : Screen()
     data object Dashboards : Screen()
     data object Areas : Screen()
     data object Search : Screen()
@@ -99,8 +104,8 @@ sealed class Screen {
     data object Settings : Screen()
     /** A user-created tab; Home and Settings are the built-in tabs. */
     data class UserTab(val tabId: String) : Screen()
-    /** Feedback round 19, item 5: the unified Rooms & tabs manager (Settings) — replaces RoomManager + TabManager. */
-    data object RoomsTabs : Screen()
+    /** A page under Settings, named by its route (see SettingsRoute). */
+    data class SettingsPage(val route: String) : Screen()
     /** Feedback round 19, item 5: a room pinned as a navigation tab — renders Today with that room's filter. */
     data class RoomTab(val areaId: String) : Screen()
     data object HomeEditor : Screen()
@@ -113,6 +118,8 @@ sealed class Screen {
     data object UpdatesPanel : Screen()
     /** UI rewrite round §7: a Home Status group's full-screen panel. */
     data class HomeStatusPanel(val categoryKey: String) : Screen()
+    /** A room, opened from its card on Home as a popup. A null area is "No room". */
+    data class RoomPanel(val areaId: String?) : Screen()
     /** Scrollable recorded-clips timeline for a camera (long-press on its tile). */
     data class CameraClips(val entityId: String) : Screen()
     data class AreaDetail(val areaId: String) : Screen()
@@ -121,12 +128,6 @@ sealed class Screen {
     data object SceneBuilder : Screen()
     data object ScriptBuilder : Screen()
     data object HelperBuilder : Screen()
-    /** Round 24, item 5: the builder hub — one entry point to
-     * the four existing builders, reached from Settings' single
-     * "Automations, scenes & helpers" row. Not a destination tab
-     * and not the settings epic; just the old Create section as
-     * its own screen. */
-    data object BuilderHub : Screen()
 }
 
 /**
@@ -143,6 +144,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val tabsStore = TabsStore(application)
     val cardSizeStore = CardSizeStore(application)
     val client = HaClient(viewModelScope)
+
+    /** Home Assistant's own settings, for Settings' Home Assistant pages. */
+    val admin = com.garrietta.haven.data.HaAdminApi(client)
+
+    /** Where home is, from the home zone, as a starting point for a new zone. */
+    fun homeLocationGuess(): Pair<Double, Double>? {
+        val home = client.states.value["zone.home"] ?: return null
+        val lat = home.attrDouble("latitude") ?: return null
+        val lon = home.attrDouble("longitude") ?: return null
+        return lat to lon
+    }
 
     /** User-created tabs, in pill-bar order. Loaded synchronously so the app can open on the first tab. */
     var userTabs by mutableStateOf<List<UserTab>>(tabsStore.loadTabs())
@@ -196,11 +208,32 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         userTabs.count { it.pinned } +
             roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB }
 
+    /**
+     * Once: the cameras leave Home for the Security tab, where they sit
+     * with their motion switches. A stored Home layout keeps everything
+     * else; Manage home page can bring the cameras back.
+     */
+    private fun moveCamerasToSecurity() {
+        if (settingsStore.camerasMovedToSecurity) return
+        settingsStore.homeHiddenSections = settingsStore.homeHiddenSections + "cameras"
+        settingsStore.camerasMovedToSecurity = true
+    }
+
+    /** How many pinned tabs and rooms fit beside the built-in tabs now shown. */
+    fun barExtraSlotsNow(): Int = barExtraSlots(navShowSecurity, navShowScenes, navShowEnergy, navShowClimate)
+
     /** Placement-selector gate: may THIS group pin to the bar right now? */
     fun canPinToBar(alreadyOnBar: Boolean): Boolean {
         val roomNavTabs = roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB }
-        return canPinBarExtra(userTabs.count { it.pinned }, roomNavTabs, alreadyOnBar)
+        return canPinBarExtra(userTabs.count { it.pinned }, roomNavTabs, alreadyOnBar, barExtraSlotsNow())
     }
+
+    /**
+     * Whether a built-in tab can be switched on without pushing a pinned
+     * tab or room off the bar: the extras already pinned must still fit.
+     */
+    fun canShowBuiltIn(security: Boolean, scenes: Boolean, energy: Boolean, climate: Boolean = navShowClimate): Boolean =
+        barPinnedExtrasCount() <= barExtraSlots(security, scenes, energy, climate)
 
     fun setRoomPlacement(areaId: String, placement: Placement) {
         if (placement == Placement.NAV_TAB &&
@@ -208,6 +241,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
                 userTabs.count { it.pinned },
                 roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB },
                 roomPlacement(areaId) == Placement.NAV_TAB,
+                barExtraSlotsNow(),
             )
         ) return
         settingsStore.setRoomPlacement(areaId, placement.storageKey())
@@ -244,6 +278,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
                         userTabs.count { it.pinned },
                         roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB },
                         tab.pinned,
+                        barExtraSlotsNow(),
                     )
                 ) return
                 mutateTab(tabId) { it.copy(pinned = true, chip = false, hidden = false) }
@@ -325,18 +360,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun closeShapePicker() { shapePickerTarget = null }
 
     /**
-     * Feedback round 15, item 5: the Domain defaults dialog
-     * (Settings -> Shapes) — one dialog for all three per-domain
-     * defaults, so a domain's badge shape, card shape, and tile
-     * color are set in one place instead of three pickers.
-     */
-    var domainDefaultsOpen by mutableStateOf(false)
-        private set
-
-    fun openDomainDefaults() { domainDefaultsOpen = true }
-    fun closeDomainDefaults() { domainDefaultsOpen = false }
-
-    /**
      * Customization round, item 2: bumped whenever Card settings
      * saves, so every surface reading the customization maps
      * recomposes immediately (same pattern as shapePrefsVersion).
@@ -346,12 +369,23 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun bumpCardCustom() { cardCustomVersion++ }
 
-    /** The entity whose Card settings sheet is open, or null. */
+    /** The entity whose tile options sheet is open, or null. */
     var cardSettingsTarget by mutableStateOf<String?>(null)
         private set
 
-    fun openCardSettings(entityId: String) { cardSettingsTarget = entityId }
-    fun closeCardSettings() { cardSettingsTarget = null }
+    /** Arrange mode for the grid the sheet was opened from, when that grid has one. */
+    var cardSettingsArrange by mutableStateOf<(() -> Unit)?>(null)
+        private set
+
+    fun openCardSettings(entityId: String, onArrange: (() -> Unit)? = null) {
+        cardSettingsArrange = onArrange
+        cardSettingsTarget = entityId
+    }
+
+    fun closeCardSettings() {
+        cardSettingsTarget = null
+        cardSettingsArrange = null
+    }
 
     // ---- Connection switcher (feedback round 16, item 7) ----
     //
@@ -458,6 +492,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val areas = client.areas
     val entityAreas = client.entityAreas
     val entityDevices = client.entityDevices
+    val auxiliaryEntities = client.auxiliaryEntities
     val deviceInfo = client.deviceInfo
 
     /**
@@ -607,6 +642,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val frontDoorRtspUrl: String?
         get() = frontDoorRtspUrl(connectionLocalUrl)
 
+    /** The live stream's address using the path ring-mqtt reports, or the default path when it reports none. */
+    fun frontDoorRtspUrlFor(path: String?): String? =
+        frontDoorRtspUrl(connectionLocalUrl, path ?: com.garrietta.haven.data.FRONT_DOOR_RTSP_PATH)
+
     /** Why the live session last stopped, for the panel's paused UI. Null while never stopped. */
     var frontDoorLiveStopReason by mutableStateOf<String?>(null)
         private set
@@ -683,6 +722,31 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The Home quadrant hero's cameras: the curated Cameras-tab set, from the caller's states snapshot. */
     fun heroCameras(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> = curatedCameras(states)
+
+    /** Every camera the Security tab shows: the curated four first, then the rest by name. */
+    /**
+     * The hand arrangement of each tab section (Security's cameras, Climate's
+     * readings...), observed so an edit redraws the tab at once.
+     */
+    private val curations = androidx.compose.runtime.mutableStateMapOf<String, com.garrietta.haven.data.PageCuration>()
+
+    fun curation(section: String): com.garrietta.haven.data.PageCuration =
+        curations.getOrPut(section) { settingsStore.pageCuration(section) }
+
+    fun updateCuration(section: String, change: (com.garrietta.haven.data.PageCuration) -> com.garrietta.haven.data.PageCuration) {
+        val next = change(curation(section))
+        curations[section] = next
+        settingsStore.setPageCuration(section, next)
+    }
+
+    fun securityCameraIds(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> {
+        val curated = curatedCameras(states)
+        val rest = states.values
+            .filter { it.domain == "camera" && it.entityId !in excludedCameras && it.entityId !in curated }
+            .sortedBy { it.friendlyName.lowercase() }
+            .map { it.entityId }
+        return curated + rest
+    }
 
     /**
      * Room management (2026-10-30): thin wrappers over the HA
@@ -878,6 +942,8 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val file = java.io.File(getApplication<Application>().filesDir, "haven_state_cache.json")
                 file.writeText(text)
+                // The widgets draw from this file: bring them up to date with it.
+                com.garrietta.haven.widget.HavenWidgets.updateAll(getApplication())
             } catch (_: Exception) {
                 // Disk cache is best effort.
             }
@@ -967,6 +1033,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     init {
+        moveCamerasToSecurity()
         // Last-known camera snapshots paint from the first frame:
         // load them before any composition runs (2026-11-01 polish
         // round). Best effort — see loadDiskSnapshots.
@@ -1059,6 +1126,15 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         tabsStore.saveTabs(userTabs)
     }
 
+    /** Puts the tabs in the order of [ids]; a tab missing from [ids] keeps its place at the end. */
+    fun setTabOrder(ids: List<String>) {
+        val byId = userTabs.associateBy { it.id }
+        val ordered = ids.mapNotNull { byId[it] } + userTabs.filter { it.id !in ids }
+        if (ordered.map { it.id } == userTabs.map { it.id }) return
+        userTabs = ordered
+        tabsStore.saveTabs(userTabs)
+    }
+
     fun moveTab(tabId: String, delta: Int) {
         val list = userTabs.toMutableList()
         val i = list.indexOfFirst { it.id == tabId }
@@ -1088,6 +1164,13 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeFavorite(entityId: String) {
         favorites = favorites - entityId
+        settingsStore.setFavoriteEntityIds(favorites)
+    }
+
+    /** Puts the favorites in the order of [ids], as a drag leaves them. */
+    fun setFavoriteOrder(ids: List<String>) {
+        if (ids.toSet() != favorites.toSet() || ids == favorites) return
+        favorites = ids
         settingsStore.setFavoriteEntityIds(favorites)
     }
 
@@ -1226,6 +1309,31 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             settingsStore.navShowEnergy = value
         }
 
+    // Never chosen: on when it fits beside what is already pinned, so an
+    // update never pushes someone's pinned tab off their bar.
+    private var navShowSecurityState by mutableStateOf(
+        settingsStore.navShowSecurity
+            ?: (barPinnedExtrasCount() <= barExtraSlots(true, settingsStore.navShowScenes, settingsStore.navShowEnergy)),
+    )
+    var navShowSecurity: Boolean
+        get() = navShowSecurityState
+        set(value) {
+            navShowSecurityState = value
+            settingsStore.navShowSecurity = value
+        }
+
+    // Never chosen: on when it fits beside Security and what is pinned.
+    private var navShowClimateState by mutableStateOf(
+        settingsStore.navShowClimate
+            ?: (barPinnedExtrasCount() <= barExtraSlots(navShowSecurityState, settingsStore.navShowScenes, settingsStore.navShowEnergy, true)),
+    )
+    var navShowClimate: Boolean
+        get() = navShowClimateState
+        set(value) {
+            navShowClimateState = value
+            settingsStore.navShowClimate = value
+        }
+
     /**
      * Folded pill style, owned here so TabManager writes recompose the
      * chrome. The setter persists too (a separate setNavStyle function
@@ -1252,6 +1360,8 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         navStyle = NavStyle.FLOATING
         navShowScenes = true
         navShowEnergy = true
+        navShowSecurity = true
+        navShowClimate = true
         // Feedback round 19, item 5: chip placements reset with
         // pins (both are bar/chip surfaces, not tab content).
         userTabs = userTabs.map { it.copy(icon = null, hidden = false, pinned = false, chip = false) }
@@ -1770,6 +1880,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setClimateFanMode(id: String, mode: String) =
         client.callService("climate", "set_fan_mode", id, JSONObject().put("fan_mode", mode))
+
+    /** An ecobee comfort setting (Home, Away, Sleep) or any thermostat's preset. */
+    fun setClimatePresetMode(id: String, preset: String) =
+        client.callService("climate", "set_preset_mode", id, JSONObject().put("preset_mode", preset))
 
     // ---- Dashboard editing ----
 

@@ -61,10 +61,10 @@ import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.DomainBadge
-import com.garrietta.haven.ui.components.KodaMenuDivider
-import com.garrietta.haven.ui.components.KodaMenuGroup
-import com.garrietta.haven.ui.components.KodaMenuRow
-import com.garrietta.haven.ui.components.KodaMenuSection
+import com.garrietta.haven.ui.components.MenuDivider
+import com.garrietta.haven.ui.components.MenuGroup
+import com.garrietta.haven.ui.components.MenuRow
+import com.garrietta.haven.ui.components.MenuSection
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.components.DialogTitleText
 import com.garrietta.haven.ui.components.ShimmerBox
@@ -94,6 +94,9 @@ import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.theme.HavenChrome
+import androidx.compose.foundation.text.TextAutoSize
 
 
 /**
@@ -175,9 +178,9 @@ internal fun ThermostatDisplayRangeRows(vm: HavenViewModel, states: Map<String, 
         else ->
             "Automatic — the dial range follows your setpoints."
     }
-    KodaMenuSection("Thermostat")
-    KodaMenuGroup {
-        KodaMenuRow(
+    MenuSection("Thermostat")
+    MenuGroup {
+        MenuRow(
             badgeKey = "thermostat-range",
             badgeKind = ExpressiveKind.SUNNY,
             icon = Icons.Filled.Thermostat,
@@ -186,8 +189,8 @@ internal fun ThermostatDisplayRangeRows(vm: HavenViewModel, states: Map<String, 
             onClick = null,
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "thermostat-min",
             badgeKind = ExpressiveKind.BUN,
             icon = Icons.Filled.Thermostat,
@@ -218,8 +221,8 @@ internal fun ThermostatDisplayRangeRows(vm: HavenViewModel, states: Map<String, 
             },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "thermostat-max",
             badgeKind = ExpressiveKind.WAVE,
             icon = Icons.Filled.Thermostat,
@@ -250,8 +253,8 @@ internal fun ThermostatDisplayRangeRows(vm: HavenViewModel, states: Map<String, 
             },
             flat = true,
         )
-        KodaMenuDivider()
-        KodaMenuRow(
+        MenuDivider()
+        MenuRow(
             badgeKey = "thermostat-reset",
             badgeKind = ExpressiveKind.CLOUD,
             icon = Icons.Filled.Thermostat,
@@ -516,18 +519,24 @@ private fun FilledOptionRow(
                 onClick = { onSelect(value) },
                 modifier = Modifier.weight(1f),
                 height = 48.dp,
+                // Selected is the lime capsule, like every other
+                // choice in the app, unless the caller tints it.
                 containerColor = active?.first
-                    ?: if (isSelected) scheme.primaryContainer else scheme.secondaryContainer,
+                    ?: if (isSelected) HavenChrome.capsule else scheme.surfaceContainerHigh,
                 contentColor = active?.second
-                    ?: if (isSelected) scheme.onPrimaryContainer else scheme.onSecondaryContainer,
-                contentPadding = PaddingValues(horizontal = 12.dp),
+                    ?: if (isSelected) HavenChrome.onCapsule else scheme.onSurfaceVariant,
+                contentPadding = PaddingValues(horizontal = 8.dp),
             ) {
+                // Four modes share a cover-screen row, and the longest
+                // label ("Heat • Cool") does not fit at full size: step
+                // it down before cutting it off.
                 Text(
                     label,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    fontSize = 14.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = 14.sp, stepSize = 0.5.sp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                 )
             }
         }
@@ -996,7 +1005,7 @@ private fun ThermostatHistorySection(entity: HaEntity, vm: HavenViewModel, state
     val hum = sensors.firstOrNull { it.entityId.contains("humidity") }
     if (temp == null && hum == null) return
     Spacer(Modifier.height(12.dp))
-    Text("Last 24 hours", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    SectionTitle("Last 24 hours")
     Spacer(Modifier.height(8.dp))
     if (temp != null) ThermostatSensorHistory(temp, vm)
     if (hum != null) ThermostatSensorHistory(hum, vm)

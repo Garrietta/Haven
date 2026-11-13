@@ -2,76 +2,50 @@ package com.garrietta.haven.data
 
 import androidx.compose.ui.graphics.Color
 import com.garrietta.haven.ui.components.SemanticState
+import com.garrietta.haven.ui.components.sensorFamily
+import com.garrietta.haven.ui.components.sensorKind
+import com.garrietta.haven.ui.theme.Palette
+import com.garrietta.haven.ui.theme.StateFamily
+import com.garrietta.haven.ui.theme.attentionDot
+import com.garrietta.haven.ui.theme.colors
 
-/**
- * Stage E (redesign): the CENTRALIZED semantic color system — the single
- * domain+state -> visual mapping the brief's §7 requires. Stage B defined
- * the [SemanticState] slots; this file fills them with deliberate light
- * AND dark variants and the pure resolver that maps a live entity to its
- * slot. Every onContainer pair clears 4.5:1 against its container in both
- * themes (unit-tested); glyphs use onContainer, so the 3:1 icon floor is
- * covered by the same test.
+/*
+ * Which color family an entity in a given state gets.
  *
- * Division of labor, stated plainly: semantic colors communicate STATE
- * on the surfaces that read state at a glance — Home Status rows and the
- * §9 condition dots (nav, room). They do NOT replace the tile badge
- * pipeline ([badgeColors]): that pipeline carries verified behavior
- * Stage E must not regress — the #92 primary+onPrimary contrast fix for
- * lit-light badges, the dual heat_cool setpoint containers, and the
- * wallpaper-dynamic accent washes (the standing "dynamic coloring stays
- * prominent" law). A future round may migrate badge domains one by one
- * with a device verdict each; this overnight program, with no device
- * verification possible, does not rewrite verified code blind.
+ * This is the decision layer above ui/theme/Color.kt: the families and
+ * their tones are defined there, and this file only answers "what does
+ * this state mean". Two resolvers share the families so the same state
+ * is the same color everywhere:
  *
- * Colors are never the ONLY indicator: status text always accompanies
- * every semantic surface, and Unknown/Unavailable slots keep their
- * explicit labels.
+ *   semanticStateFor / semanticVisual   status rows, attention dots
+ *   domainCardColors                    tiles, badges, switch tracks
+ *
+ * Color is never the only signal. Every surface that takes a state
+ * color also shows the state in words, and Unknown and Unavailable keep
+ * their explicit labels.
  */
 
-/** A semantic visual: container fill + content (text/glyph) color. */
+/** A semantic visual: container fill and the text or glyph on it. */
 data class SemanticVisual(val container: Color, val onContainer: Color)
 
-/**
- * The filled mapping. Light containers are pastels (the mockup's lime
- * on-light, lavender media, peach climate, yellow plug family) with dark
- * content; dark containers are the same hues deepened, with light
- * content. Families share pairs deliberately: heating IS the coral
- * family, cooling IS the blue family, motion amber IS the unlocked
- * amber — the same state means the same color app-wide.
- */
-fun semanticVisual(state: SemanticState, isDark: Boolean): SemanticVisual = when (state) {
-    SemanticState.DeviceOn -> if (isDark) SemanticVisual(Color(0xFF4A5D23), Color(0xFFE8F5C8))
-        else SemanticVisual(Color(0xFFDDEBBE), Color(0xFF2A3A12))
-    SemanticState.DeviceOff -> if (isDark) SemanticVisual(Color(0xFF2B2B2B), Color(0xFFC9C9C4))
-        else SemanticVisual(Color(0xFFE8E6DF), Color(0xFF5B5A51))
-    SemanticState.LockLocked -> if (isDark) SemanticVisual(Color(0xFF1E3A5F), Color(0xFFD6E4F5))
-        else SemanticVisual(Color(0xFFD6E4F5), Color(0xFF1E3A5F))
-    SemanticState.LockUnlocked -> if (isDark) SemanticVisual(Color(0xFF5A3E00), Color(0xFFF5E0B8))
-        else SemanticVisual(Color(0xFFF5E0B8), Color(0xFF5A3E00))
-    SemanticState.LockFault, SemanticState.AlarmFault, SemanticState.EnergyCritical ->
-        if (isDark) SemanticVisual(Color(0xFF93000A), Color(0xFFFFCDC4))
-        else SemanticVisual(Color(0xFFF9DEDC), Color(0xFF410E0B))
-    SemanticState.OpenAlert, SemanticState.HeatingActive ->
-        if (isDark) SemanticVisual(Color(0xFF7A2E22), Color(0xFFF8D7CF))
-        else SemanticVisual(Color(0xFFF8D7CF), Color(0xFF7A1F14))
-    SemanticState.ClosedNeutral, SemanticState.MotionClear, SemanticState.ClimateIdle, SemanticState.MediaIdle ->
-        if (isDark) SemanticVisual(Color(0xFF2B2B2B), Color(0xFFC9C9C4))
-        else SemanticVisual(Color(0xFFE8E6DF), Color(0xFF5B5A51))
-    SemanticState.MotionActive -> if (isDark) SemanticVisual(Color(0xFF5A3E00), Color(0xFFF5E0B8))
-        else SemanticVisual(Color(0xFFF5E0B8), Color(0xFF5A3E00))
-    SemanticState.CoolingActive -> if (isDark) SemanticVisual(Color(0xFF1E3A5F), Color(0xFFD6E4F5))
-        else SemanticVisual(Color(0xFFD6E4F5), Color(0xFF1E3A5F))
-    SemanticState.MediaPlaying -> if (isDark) SemanticVisual(Color(0xFF3D2E63), Color(0xFFE4DCF5))
-        else SemanticVisual(Color(0xFFE4DCF5), Color(0xFF3D2E63))
-    SemanticState.EnergyLow -> if (isDark) SemanticVisual(Color(0xFF3A4218), Color(0xFFE8EDC8))
-        else SemanticVisual(Color(0xFFE8EDC8), Color(0xFF3A4218))
-    SemanticState.EnergyHigh -> if (isDark) SemanticVisual(Color(0xFF5A3200), Color(0xFFFBE3C2))
-        else SemanticVisual(Color(0xFFFBE3C2), Color(0xFF5A3200))
-    SemanticState.Unavailable -> if (isDark) SemanticVisual(Color(0xFF2E2E2E), Color(0xFF9E9E9E))
-        else SemanticVisual(Color(0xFFE0E0E0), Color(0xFF5F5F5A))
-    SemanticState.Unknown -> if (isDark) SemanticVisual(Color(0xFF2B2B2B), Color(0xFFC9C9C4))
-        else SemanticVisual(Color(0xFFE8E6DF), Color(0xFF5B5A51))
+/** The family a semantic state is drawn in. Families are shared on purpose: heating and an open door are both warm, cooling and locked are both cool. */
+fun semanticFamily(state: SemanticState): StateFamily = when (state) {
+    SemanticState.DeviceOn -> StateFamily.On
+    SemanticState.LockLocked -> StateFamily.Secure
+    SemanticState.LockUnlocked, SemanticState.MotionActive -> StateFamily.Caution
+    SemanticState.LockFault, SemanticState.AlarmFault, SemanticState.EnergyCritical -> StateFamily.Alert
+    SemanticState.OpenAlert, SemanticState.HeatingActive -> StateFamily.Heat
+    SemanticState.CoolingActive -> StateFamily.Cool
+    SemanticState.MediaPlaying -> StateFamily.Media
+    SemanticState.EnergyLow -> StateFamily.Power
+    SemanticState.EnergyHigh -> StateFamily.Caution
+    SemanticState.DeviceOff, SemanticState.ClosedNeutral, SemanticState.MotionClear,
+    SemanticState.ClimateIdle, SemanticState.MediaIdle, SemanticState.Unavailable,
+    SemanticState.Unknown -> StateFamily.Quiet
 }
+
+fun semanticVisual(state: SemanticState, isDark: Boolean): SemanticVisual =
+    semanticFamily(state).colors(isDark).let { SemanticVisual(it.container, it.onContainer) }
 
 /**
  * Energy thresholds (watts) for power-sensor slots. These are DOCUMENTED
@@ -184,219 +158,113 @@ fun hasImportantAlert(entities: List<HaEntity>): Boolean = entities.any { entity
         (entity.domain == "alarm_control_panel" && entity.state == "triggered")
 }
 
-/**
- * §9 condition-dot fill: a saturated alert red that reads on both the
- * light pill (sage container) and the dark pill (near-black). Dots are
- * indicators, not text, but the color is chosen from the red family so
- * it cannot be mistaken for a routine state.
- */
-fun alertDotColor(isDark: Boolean): Color =
-    if (isDark) Color(0xFFEF5350) else Color(0xFFD32F2F)
+/** The attention dot's fill: red on either ground, so it is never mistaken for a routine state. */
+fun alertDotColor(isDark: Boolean): Color = attentionDot(isDark)
 
 /**
- * UI rewrite round §2: the Home dashboard card's colors — the user's
- * complete domain color matrix (2026-11-03), implemented exactly:
- * card hex → outer squircle surface; badge/switch hex → top-left
- * polygon badge fill AND top-right switch track when active. This
- * extends the centralized SemanticColors system (no second system is
- * forked); tiles and detail panels keep badgeColors.
- *
- * The resolver is STATE-based (the refactor's was domain-based): the
- * same domain renders different rows for locked vs unlocked, heating
- * vs cooling, armed vs disarmed.
- *
- * Glyph rule: icons inside ACTIVE light-mode badges render white;
- * inside active dark-mode badges they render deep tonal ink (#0A2005
- * for green rows, #111D52 otherwise) — every active pair clears
- * 4.5:1 (unit-tested).
- *
- * INACTIVE reconciliation (both rules satisfied): the matrix row is
- * card #EFF1E8/#1C201B with badge/switch #52564E/#8C9188, and the
- * user's explicit rule puts dark badge polygons on #2A2F28 so the
- * shape never disappears against the #1C201B card. So: light badge
- * fill #52564E with white glyph; dark badge fill #2A2F28 with glyph
- * #8C9188; switch track #52564E/#8C9188 with a muted thumb. Measured
- * dark inactive glyph contrast is ~4.2:1 — below 4.5 but above the
- * 3:1 icon floor; both hexes are user-specified, so the pair is kept
- * and reported, not altered.
- *
- * JUDGMENT CALLS (no matrix row exists; previous behavior kept):
- * - Climate with no heating/cooling action and not heat_cool mode
- *   (idle/off/fan_only) keeps the Heating row (the previous CLIMATE
- *   family) — greying an idle thermostat would be a regression.
- * - Lock jammed → Unlocked row (attention color); locking →
- *   Locked, unlocking → Unlocked.
- * - Alarm triggered/pending/armed_* → Armed row; unknown alarm
- *   states → Disarmed row (the previous LOCK family values).
- * - Media idle/paused (including favorited wide cards) keeps the
- *   Media row — a paused favorite must not read as dead.
- * - Vacuum docked/idle/paused → Inactive row (off); vacuum error →
- *   null (previous badge pipeline, so faults keep their tint).
- * - Binary sensors (motion/door/window) → null (previous pipeline);
- *   the matrix has no binary-sensor row.
- * - Generic non-power sensors → null (previous pipeline); the
- *   matrix's "Sensor" is read as power sensors. Temperature and
- *   humidity sensors are EXCLUDED by callers (coral/sky standing law)
- *   and also resolve to null here, so no path can override them.
- * - Greenhouse/irrigation name match applies to every domain EXCEPT
- *   climate (a greenhouse thermostat still reads as climate).
- * - Warm-white/cool-daylight light variants are NOT in the matrix
- *   and are not invented: lights use the Light On row. The kelvin/
- *   brightness container tint the refactor kept for lights is
- *   superseded by the matrix wherever domainCardColors resolves
- *   (HomeRoomCard's kelvin fallback only runs when it returns null,
- *   which lights never do now).
+ * A tile's colors: the card fill, the polygon badge behind its icon, and
+ * the icon. All three come from one family (see FamilyColors for the
+ * tone recipe), which is what makes a grid of tiles read as one set.
  */
 data class DomainCardColors(val container: Color, val badgeBg: Color, val badgeGlyph: Color)
 
-/** One row of the user's matrix: light/dark card + badge + dark glyph ink. */
-private enum class MatrixRow(
-    val lightContainer: Color,
-    val darkContainer: Color,
-    val lightBadge: Color,
-    val darkBadge: Color,
-    val darkInk: Color,
-) {
-    LIGHT_ON(Color(0xFFC8F5A6), Color(0xFF2B4E14), Color(0xFF1B3708), Color(0xFFB8F397), Color(0xFF0A2005)),
-    HEATING(Color(0xFFFFD1B9), Color(0xFF532215), Color(0xFF8C1D00), Color(0xFFFFB59E), Color(0xFF111D52)),
-    COOLING(Color(0xFFBDDEFF), Color(0xFF1A304E), Color(0xFF001C3A), Color(0xFFA5C8FF), Color(0xFF111D52)),
-    HEAT_COOL(Color(0xFFFFD1B9), Color(0xFF3E2723), Color(0xFF8C1D00), Color(0xFFFFCCBC), Color(0xFF111D52)),
-    LOCKED(Color(0xFFCCD7FF), Color(0xFF222C61), Color(0xFF111D52), Color(0xFFB9C3FF), Color(0xFF111D52)),
-    UNLOCKED(Color(0xFFFFCDC4), Color(0xFF5C1916), Color(0xFF410002), Color(0xFFFFB4AB), Color(0xFF111D52)),
-    DISARMED(Color(0xFFCCD7FF), Color(0xFF222C61), Color(0xFF111D52), Color(0xFFB9C3FF), Color(0xFF111D52)),
-    ARMED(Color(0xFFFFD1B9), Color(0xFF532215), Color(0xFF8C1D00), Color(0xFFFFB59E), Color(0xFF111D52)),
-    MEDIA(Color(0xFFEFCEFF), Color(0xFF3B2554), Color(0xFF2B1246), Color(0xFFDAB9FF), Color(0xFF111D52)),
-    POWER(Color(0xFFFFE082), Color(0xFF4D3800), Color(0xFF261900), Color(0xFFFFE082), Color(0xFF111D52)),
-    VACUUM_ACTIVE(Color(0xFFC8F5A6), Color(0xFF2B4E14), Color(0xFF1B3708), Color(0xFFB8F397), Color(0xFF0A2005)),
-    GREENHOUSE(Color(0xFFC8F5A6), Color(0xFF1F3D0C), Color(0xFF143800), Color(0xFFA6F285), Color(0xFF0A2005)),
-    WEATHER(Color(0xFFBDDEFF), Color(0xFF1A304E), Color(0xFF001C3A), Color(0xFFA5C8FF), Color(0xFF111D52)),
-    INACTIVE(Color(0xFFE6EBD3), Color(0xFF1C201B), Color(0xFF52564E), Color(0xFF2A2F28), Color(0xFF111D52)),
-}
+private fun StateFamily.card(isDark: Boolean): DomainCardColors =
+    colors(isDark).let { DomainCardColors(it.container, it.accent, it.onAccent) }
 
-/** A matrix row as card colors, with the glyph rule applied. */
-private fun MatrixRow.toCardColors(isDark: Boolean): DomainCardColors {
-    val badgeBg = if (isDark) darkBadge else lightBadge
-    val container = if (isDark) darkContainer else lightContainer
-    val glyph = if (isDark) {
-        if (this == MatrixRow.INACTIVE) {
-            // Round 24, item 1: the inactive dark glyph follows
-            // the preset dark rule (the container's hue at full
-            // saturation and 0.72 HSL lightness — see
-            // presetBadgeColors) instead of the flat #8C9188
-            // gray, so a closed garage door or a docked vacuum
-            // carries a vibrant tint of its own sage container
-            // instead of a plain gray icon. The bright tint
-            // clears 4.5:1 on the dark badge (pinned by
-            // DomainCardColorsTest).
-            val (h, _, _) = rgbToHsl(container.red, container.green, container.blue)
-            hslToColor(h, 1.0f, 0.72f)
-        } else {
-            darkInk
-        }
-    } else {
-        // Feedback round 4, item 3 — EXTENDED by round 24,
-        // item 1 to the INACTIVE row: the badge glyph is the
-        // card's pastel container color ("as green as the
-        // switch" — the switch thumb already uses the
-        // container, see domainSwitchColors/presetSwitchColors),
-        // while the badge polygon stays deep tonal ink. The
-        // inactive light pair is sage #E6EBD3 on #52564E
-        // (~6:1), so a closed garage door or a docked vacuum
-        // never renders a plain white icon on its sage card.
-        // Every light pair still clears 4.5:1 (pastel on deep
-        // ink), pinned by DomainCardColorsTest. Dark is
-        // untouched: a dark container glyph would fail on the
-        // light badge.
-        lightContainer
-    }
-    return DomainCardColors(container, badgeBg, glyph)
-}
+/** The resting tile: off, idle, unavailable. Also what a preset tile wears while its entity is off. */
+fun inactiveCardColors(isDark: Boolean): DomainCardColors = StateFamily.Quiet.card(isDark)
 
-/**
- * Feedback round 2, item 1: the matrix INACTIVE row as card
- * colors, for preset cards whose entity is off. MatrixRow stays
- * private to this file (the matrix is a closed table); callers
- * use this accessor, never a reconstructed gray.
- */
-fun inactiveCardColors(isDark: Boolean): DomainCardColors =
-    MatrixRow.INACTIVE.toCardColors(isDark)
+/** The watts a plug-style switch reports on itself, or null when it has no meter. */
+fun powerWatts(entity: HaEntity): Double? =
+    entity.attrDouble("current_power_w")
+        ?: entity.attrDouble("power")
+        ?: entity.attrDouble("current_power")
 
 /** A power reading on the entity itself (plug-style switches/sensors). */
-private fun hasPowerReading(entity: HaEntity): Boolean =
-    entity.attrDouble("current_power_w") != null ||
-        entity.attrDouble("power") != null ||
-        entity.attrDouble("current_power") != null
+private fun hasPowerReading(entity: HaEntity): Boolean = powerWatts(entity) != null
 
-fun domainCardColors(entity: HaEntity, isDark: Boolean): DomainCardColors? {
+/**
+ * The family a tile is drawn in, from the entity's live state. Null for
+ * a domain with no tile meaning of its own; callers then fall back to
+ * the neutral surface.
+ *
+ * The calls worth knowing, because they are choices and not lookups:
+ * - A thermostat that is on but idle stays [StateFamily.Heat] rather
+ *   than going quiet: a grey thermostat reads as broken.
+ * - Media stays [StateFamily.Media] when paused, so a favourite that is
+ *   not playing does not look dead.
+ * - A plug with a power reading is [StateFamily.Power], a plain switch
+ *   is [StateFamily.On].
+ * - Anything named greenhouse or irrigation is [StateFamily.On], except
+ *   a thermostat, which is always climate.
+ * - Sensors take the family of what they measure; a reading with no
+ *   meaning of its own stays quiet.
+ */
+fun domainFamily(entity: HaEntity): StateFamily? {
     if (entity.state == "unavailable" || entity.state == "unknown" || entity.state.isBlank()) {
-        return MatrixRow.INACTIVE.toCardColors(isDark)
+        return StateFamily.Quiet
     }
-    // Greenhouse/irrigation identity wins over domain — except
-    // climate, which always reads as climate.
     if (entity.domain != "climate" &&
         (entity.entityId.contains("greenhouse", ignoreCase = true) ||
             entity.entityId.contains("irrigation", ignoreCase = true) ||
             entity.friendlyName.contains("greenhouse", ignoreCase = true) ||
             entity.friendlyName.contains("irrigation", ignoreCase = true))
     ) {
-        return MatrixRow.GREENHOUSE.toCardColors(isDark)
+        return StateFamily.On
     }
     return when (entity.domain) {
-        "light" ->
-            if (entity.state == "on") MatrixRow.LIGHT_ON.toCardColors(isDark)
-            else MatrixRow.INACTIVE.toCardColors(isDark)
+        "light" -> if (entity.state == "on") StateFamily.Light else StateFamily.Quiet
         "switch", "input_boolean", "fan" -> when {
-            entity.state != "on" -> MatrixRow.INACTIVE.toCardColors(isDark)
-            hasPowerReading(entity) -> MatrixRow.POWER.toCardColors(isDark)
-            else -> MatrixRow.LIGHT_ON.toCardColors(isDark)
+            entity.state != "on" -> StateFamily.Quiet
+            hasPowerReading(entity) -> StateFamily.Power
+            else -> StateFamily.On
         }
         "climate" -> when (entity.attrString("hvac_action")) {
-            "heating" -> MatrixRow.HEATING.toCardColors(isDark)
-            "cooling" -> MatrixRow.COOLING.toCardColors(isDark)
-            else -> if (entity.state == "heat_cool") MatrixRow.HEAT_COOL.toCardColors(isDark)
-                else MatrixRow.HEATING.toCardColors(isDark)
+            "cooling" -> StateFamily.Cool
+            else -> StateFamily.Heat
         }
         "lock" -> when (entity.state) {
-            "locked", "locking" -> MatrixRow.LOCKED.toCardColors(isDark)
-            else -> MatrixRow.UNLOCKED.toCardColors(isDark)
+            "locked", "locking" -> StateFamily.Secure
+            else -> StateFamily.Alert
         }
         "cover" -> when (entity.state) {
-            "open", "opening" -> MatrixRow.UNLOCKED.toCardColors(isDark)
-            else -> MatrixRow.LOCKED.toCardColors(isDark)
+            "open", "opening" -> StateFamily.Alert
+            else -> StateFamily.Secure
         }
         "alarm_control_panel" -> when {
-            entity.state == "disarmed" -> MatrixRow.DISARMED.toCardColors(isDark)
             entity.state == "triggered" || entity.state == "pending" ||
-                entity.state.startsWith("armed") -> MatrixRow.ARMED.toCardColors(isDark)
-            else -> MatrixRow.DISARMED.toCardColors(isDark)
+                entity.state.startsWith("armed") -> StateFamily.Heat
+            else -> StateFamily.Secure
         }
-        "media_player" -> MatrixRow.MEDIA.toCardColors(isDark)
+        "media_player" -> StateFamily.Media
         "vacuum" -> when (entity.state) {
-            "cleaning", "returning" -> MatrixRow.VACUUM_ACTIVE.toCardColors(isDark)
-            "error" -> null
-            else -> MatrixRow.INACTIVE.toCardColors(isDark)
+            "cleaning", "returning" -> StateFamily.On
+            "error" -> StateFamily.Alert
+            else -> StateFamily.Quiet
         }
-        "weather" -> MatrixRow.WEATHER.toCardColors(isDark)
+        "weather" -> StateFamily.Cool
         "sensor" ->
-            if (entity.attrString("device_class") == "power" || hasPowerReading(entity)) {
-                MatrixRow.POWER.toCardColors(isDark)
-            } else {
-                null
-            }
+            if (entity.attrString("device_class") == "power" || hasPowerReading(entity)) StateFamily.Power
+            else sensorFamily(
+                sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName),
+            ) ?: StateFamily.Quiet
+        "binary_sensor" -> when {
+            entity.state != "on" -> StateFamily.Quiet
+            entity.attrString("device_class") == "motion" -> StateFamily.Caution
+            else -> StateFamily.Alert
+        }
         else -> null
     }
 }
 
+fun domainCardColors(entity: HaEntity, isDark: Boolean): DomainCardColors? =
+    domainFamily(entity)?.card(isDark)
+
 /**
- * Switch track/thumb colors for a card's M3 pill switch, from the same
- * matrix rows: the track follows the entity's state row (the badge
- * hex), the checked thumb uses the checked state's card hex, the
- * unchecked thumb is muted. For on/off toggleables the unchecked
- * track is the Inactive row's switch hex (#52564E/#8C9188 — note the
- * dark track differs from the dark badge polygon #2A2F28 by the
- * reconciliation above); for locks/covers the unchecked track is the
- * other-state row (Unlocked/Closed), because unlocked/closed are live
- * states, not "off". Null for domains with no card switch.
+ * A tile switch's colors. The track is the family's badge tone and the
+ * thumb is the card's own fill, so the switch looks cut from the tile.
+ * Off uses the quiet track; a lock or cover has no "off", so its other
+ * position is its other state's family.
  */
 data class CardSwitchColors(
     val trackChecked: Color,
@@ -405,28 +273,30 @@ data class CardSwitchColors(
     val thumbUnchecked: Color,
 )
 
+/** The quiet switch track and its thumb, shared by every tile switch. */
+fun restingSwitchTrack(isDark: Boolean): Color = if (isDark) Palette.Moss.t60 else Palette.Moss.t35
+
+fun restingSwitchThumb(isDark: Boolean): Color = if (isDark) Palette.Moss.t20 else Color.White
+
 fun domainSwitchColors(entity: HaEntity, isDark: Boolean): CardSwitchColors? {
-    val mutedThumb = if (isDark) Color(0xFF9E9E9E) else Color.White
-    val inactiveTrack = if (isDark) Color(0xFF8C9188) else Color(0xFF52564E)
+    val thumb = restingSwitchThumb(isDark)
     return when (entity.domain) {
-        "light", "switch", "input_boolean", "fan" -> {
-            // Mirrors domainCardColors: lights always Light On; other
-            // toggleables with a power reading resolve to Power.
-            val onRow = if (entity.domain == "light") MatrixRow.LIGHT_ON
-                else if (hasPowerReading(entity)) MatrixRow.POWER
-                else MatrixRow.LIGHT_ON
-            val on = onRow.toCardColors(isDark)
-            CardSwitchColors(on.badgeBg, on.container, inactiveTrack, mutedThumb)
+        "light" -> {
+            // A lit lamp's track is its bright yellow, so the thumb is the dark ink on it.
+            val lit = StateFamily.Light.card(isDark)
+            CardSwitchColors(lit.badgeBg, lit.badgeGlyph, restingSwitchTrack(isDark), thumb)
+        }
+        "switch", "input_boolean", "fan" -> {
+            val on = (if (hasPowerReading(entity)) StateFamily.Power else StateFamily.On).card(isDark)
+            CardSwitchColors(on.badgeBg, on.container, restingSwitchTrack(isDark), thumb)
         }
         "lock" -> {
-            val locked = MatrixRow.LOCKED.toCardColors(isDark)
-            val unlocked = MatrixRow.UNLOCKED.toCardColors(isDark)
-            CardSwitchColors(locked.badgeBg, locked.container, unlocked.badgeBg, mutedThumb)
+            val locked = StateFamily.Secure.card(isDark)
+            CardSwitchColors(locked.badgeBg, locked.container, StateFamily.Alert.card(isDark).badgeBg, thumb)
         }
         "cover" -> {
-            val open = MatrixRow.UNLOCKED.toCardColors(isDark)
-            val closed = MatrixRow.LOCKED.toCardColors(isDark)
-            CardSwitchColors(open.badgeBg, open.container, closed.badgeBg, mutedThumb)
+            val open = StateFamily.Alert.card(isDark)
+            CardSwitchColors(open.badgeBg, open.container, StateFamily.Secure.card(isDark).badgeBg, thumb)
         }
         else -> null
     }

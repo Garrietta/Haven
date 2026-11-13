@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.garrietta.haven.ui.components.relativeLuminance
 
 /**
  * Stage B (redesign): the pinned Haven light/dark palettes are the
@@ -78,23 +79,49 @@ class ThemeTest {
     }
 
     @Test
-    fun pinnedLightIdentityValues() {
-        // Warm off-white background, charcoal text, lime primary
-        // container — the mockup sage/lime identity, not wallpaper.
-        assertEquals(Color(0xFFFAF7F0), light.background)
-        assertEquals(Color(0xFF1E1E1A), light.onSurface)
-        assertEquals(Color(0xFF1E1E1A), light.onBackground)
-        assertEquals(Color(0xFFC1E88A), light.primaryContainer)
+    fun lightIdentity() {
+        // Paper ground, near-black ink, the leaf green for actions and
+        // a lime container: Haven's own palette, never the wallpaper's.
+        assertEquals(Palette.Cream.t98, light.background)
+        assertEquals(light.background, light.surface)
+        assertEquals(Palette.Cream.t10, light.onSurface)
+        assertEquals(Palette.Leaf.t40, light.primary)
+        assertEquals(Palette.Leaf.t90, light.primaryContainer)
+        // Containers step away from the page in order.
+        val steps = listOf(
+            light.surfaceContainerLowest, light.background, light.surfaceContainerLow,
+            light.surfaceContainer, light.surfaceContainerHigh, light.surfaceContainerHighest,
+        ).map { relativeLuminance(it) }
+        assertEquals(steps.sortedDescending(), steps)
     }
 
     @Test
-    fun pinnedDarkIdentityValues() {
-        // True-black background and container steps (Round 8),
-        // with the pinned warm light-grey secondary floor.
+    fun darkIdentity() {
+        // True black, containers climbing out of it in order, and the
+        // lime itself as the color of things you can press.
         assertEquals(Color.Black, dark.background)
-        assertEquals(Color(0xFF121212), dark.surface)
-        assertEquals(Color(0xFF383838), dark.surfaceContainerHighest)
-        assertEquals(Color(0xFFC9C9C4), dark.onSurfaceVariant)
+        assertEquals(Color.Black, dark.surface)
+        assertEquals(Palette.Lime, dark.primary)
+        val steps = listOf(
+            dark.background, dark.surfaceContainerLow, dark.surfaceContainer,
+            dark.surfaceContainerHigh, dark.surfaceContainerHighest,
+        ).map { relativeLuminance(it) }
+        assertEquals(steps.sorted(), steps)
+        assertEquals(steps.size, steps.toSet().size)
+    }
+
+    @Test
+    fun wallpaperColorKeepsHavensDarkGround() {
+        // The dynamic-color option takes accents from the wallpaper but
+        // never the black ground or the container steps.
+        val foreign = androidx.compose.material3.darkColorScheme(
+            primary = Color.Magenta, background = Color.Gray, surface = Color.Gray, surfaceContainer = Color.Gray,
+        ).withHavenDarkSurfaces()
+        assertEquals(Color.Magenta, foreign.primary)
+        assertEquals(dark.background, foreign.background)
+        assertEquals(dark.surface, foreign.surface)
+        assertEquals(dark.surfaceContainer, foreign.surfaceContainer)
+        assertEquals(dark.surfaceContainerHighest, foreign.surfaceContainerHighest)
     }
 
     @Test

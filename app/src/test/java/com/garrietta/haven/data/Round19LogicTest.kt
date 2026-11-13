@@ -41,7 +41,9 @@ class Round19LogicTest {
     // Item 4: the front-door quadrant badge rule, built literally.
     @Test
     fun quadrantShowsLiveOnlyForHealthyRingSource() {
-        assertTrue(frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, false))
+        assertTrue(frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, false, rtspProven = true))
+        // Being available is not being live: no frame, no badge.
+        assertFalse(frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, false))
     }
 
     @Test

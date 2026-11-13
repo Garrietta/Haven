@@ -17,6 +17,7 @@ import com.garrietta.haven.ui.components.morphEnterContentAlpha
 import com.garrietta.haven.ui.components.morphPanelBackgroundBlend
 import com.garrietta.haven.ui.components.morphPopupShape
 import com.garrietta.haven.ui.components.tileMorphTransform
+import com.garrietta.haven.ui.components.RevealWindowShape
 import com.garrietta.haven.ui.components.dragProgressAfterDelta
 import com.garrietta.haven.ui.components.dragRangeForCenteredPopup
 import com.garrietta.haven.ui.components.dragRangeForPanelOverlay
@@ -220,7 +221,7 @@ import com.garrietta.haven.ui.components.windowSizeClassFor
 import com.garrietta.haven.ui.components.SheetPageContent
 import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.shapeForDomain
-import com.garrietta.haven.ui.components.KodaMenuRow
+import com.garrietta.haven.ui.components.MenuRow
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.PillBarActiveCapsule
 import com.garrietta.haven.ui.components.PillBarActiveGlyph
@@ -260,7 +261,7 @@ import com.garrietta.haven.ui.components.showPillOnSwipeDown
 import com.garrietta.haven.ui.components.heroHeaderAlpha
 import com.garrietta.haven.ui.theme.popupMorphSpring
 import com.garrietta.haven.ui.theme.springBounds
-import com.garrietta.haven.ui.theme.kodaBarSpec
+import com.garrietta.haven.ui.theme.barSpring
 import com.garrietta.haven.ui.theme.springSpatial
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.dialogHeaderState
@@ -269,12 +270,13 @@ import com.garrietta.haven.ui.controls.formatTemp
 import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
 import com.garrietta.haven.ui.screens.AutomationBuilderScreen
-import com.garrietta.haven.ui.screens.BuilderHubScreen
 import com.garrietta.haven.ui.screens.CameraClipsScreen
 import com.garrietta.haven.ui.screens.DashboardEditScreen
 import com.garrietta.haven.ui.screens.DashboardsScreen
 import com.garrietta.haven.ui.screens.EnergyScreen
 import com.garrietta.haven.ui.screens.ScenesScreen
+import com.garrietta.haven.ui.screens.SecurityScreen
+import com.garrietta.haven.ui.screens.ClimateScreen
 import com.garrietta.haven.ui.screens.DetailPageScreen
 import com.garrietta.haven.ui.screens.HelperBuilderScreen
 import com.garrietta.haven.ui.screens.HomeEditorScreen
@@ -284,9 +286,9 @@ import com.garrietta.haven.ui.screens.SceneBuilderScreen
 import com.garrietta.haven.ui.screens.ScriptBuilderScreen
 import com.garrietta.haven.ui.screens.SearchScreen
 import com.garrietta.haven.ui.screens.RoomFilter
-import com.garrietta.haven.ui.screens.RoomsTabsScreen
+import com.garrietta.haven.ui.screens.AppearanceControls
+import com.garrietta.haven.ui.screens.SettingsPageHost
 import com.garrietta.haven.ui.screens.SettingsScreen
-import com.garrietta.haven.ui.screens.DomainDefaultsDialog
 import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.CardSettingsSheet
 import com.garrietta.haven.ui.screens.rememberCardCustom
@@ -301,6 +303,18 @@ import com.garrietta.haven.ui.screens.VacuumPanelScreen
 import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
 import com.garrietta.haven.ui.theme.resolveHavenIsDark
+import com.garrietta.haven.ui.theme.Palette
+import com.garrietta.haven.ui.theme.HavenChrome
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.LocalMorphGhosts
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import com.garrietta.haven.ui.components.drawMorphGhost
+import com.garrietta.haven.ui.components.ghostMatchesSource
+import com.garrietta.haven.ui.components.morphGhostAlpha
+import androidx.compose.ui.draw.drawWithContent
+import com.garrietta.haven.data.FRONT_DOOR_INFO_SENSOR_ID
+import com.garrietta.haven.data.ringMqttLivePath
+import com.garrietta.haven.data.frontDoorNotLiveLine
 
 // Stage C: the navigation model (NavItem, pillBarItems, tabIcons,
 // selectedNavIndex) moved to ui/components/NavItems.kt as pure,
@@ -308,7 +322,7 @@ import com.garrietta.haven.ui.theme.resolveHavenIsDark
 // and picker icon overrides. See that file for the contract.
 
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
-    Screen.Today, Screen.Scenes, Screen.Energy, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs, Screen.Settings -> true
+    Screen.Today, Screen.Security, Screen.Climate, Screen.Scenes, Screen.Energy, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs, Screen.Settings -> true
     is Screen.UserTab -> true
     is Screen.RoomTab -> true
     else -> false
@@ -327,6 +341,7 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
     is Screen.VacuumPanel -> "vacuum.t2292"
     is Screen.SecurityPanel -> "alarm_control_panel.bloomington_mode"
     is Screen.GreenhousePanel -> "automation.greenhouse_brain"
+    is Screen.RoomPanel -> com.garrietta.haven.ui.screens.roomPanelSourceId(screen.areaId)
     else -> ""
 }
 
@@ -425,7 +440,7 @@ fun HavenApp(vm: HavenViewModel) {
             is Screen.EntityDetail,
             is Screen.VacuumPanel, is Screen.MediaPanel,
             is Screen.SecurityPanel, is Screen.GreenhousePanel,
-            is Screen.UpdatesPanel, is Screen.HomeStatusPanel -> current
+            is Screen.UpdatesPanel, is Screen.HomeStatusPanel, is Screen.RoomPanel -> current
             else -> null
         }
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -433,6 +448,9 @@ fun HavenApp(vm: HavenViewModel) {
         // shapes, reported alongside cardBounds (see reportCardShape).
         val cardShapes = remember { mutableStateMapOf<String, androidx.compose.ui.graphics.Shape>() }
         val cardColors = remember { mutableStateMapOf<String, Color>() }
+        // The open morph's source tile, recorded as a layer (see
+        // LocalMorphGhosts). Plain map: written and read while drawing.
+        val morphGhosts = remember { mutableMapOf<String, GraphicsLayer>() }
         // Traveling-header state (2026-10-29 pop-up round): cards
         // report header rects here, measurement frames report their
         // pop-up header target here (id + rect, so a stale target from
@@ -868,6 +886,11 @@ fun HavenApp(vm: HavenViewModel) {
             else if (backstack.size > 1) {
                 navDirection = -1
                 backstack.removeAt(backstack.lastIndex)
+            } else if (backstack.lastOrNull() != Screen.Today) {
+                // A tab's landing is one step from Home, not from leaving:
+                // Back goes Home first, and only Back from Home leaves.
+                goTop(Screen.Today)
+                navDirection = -1
             }
         }
         val signOut: () -> Unit = {
@@ -891,7 +914,7 @@ fun HavenApp(vm: HavenViewModel) {
             backstack.clear()
             backstack.add(Screen.Today)
         }
-        BackHandler(enabled = backstack.size > 1) { goBack() }
+        BackHandler(enabled = backstack.size > 1 || backstack.lastOrNull() != Screen.Today) { goBack() }
         // Morph open effects: the morph objects are captured
         // synchronously above (falling back to a fade-only appearance
         // when the card never reported bounds, e.g. a board card);
@@ -1118,6 +1141,7 @@ fun HavenApp(vm: HavenViewModel) {
                     homeRightScrollState = homeRightScrollState,
                     navigate = navigate,
                     goBack = goBack,
+                    goTop = goTop,
                     // Feedback round 5, item 1: panel cards open the stacked panel-detail
                     // layer instead of pushing EntityDetail (see openPanelDetail).
                     onPanelDetail = { entityId -> openPanelDetail(entityId) },
@@ -1174,11 +1198,18 @@ fun HavenApp(vm: HavenViewModel) {
             // cost. PanelDetailAnim was missing from the old
             // when-branch; that gap is closed here (its progress
             // was unreadable at the root before this round).
+            // The progress each surface is DRAWN at: the finger's while a
+            // pull is in flight, the animation's otherwise. The source
+            // tile decides when to reappear from this, so it must be
+            // the same number the surface uses. Reading the animation
+            // alone left the tile hidden for as long as a finger held
+            // the popup at the bottom of a pull, after the surface had
+            // already landed and gone: an empty slot.
             val rootMorphProgress: () -> Float = {
                 topMorphProgress(
-                    panelDetailAnim?.let { panelDetailProgress.value },
-                    detailAnim?.let { detailProgress.value },
-                    popoutAnim?.let { popoutProgress.value },
+                    panelDetailAnim?.let { dragProgressFor(panelDetailProgress, panelDetailDrag)() },
+                    detailAnim?.let { dragProgressFor(detailProgress, detailDrag)() },
+                    popoutAnim?.let { dragProgressFor(popoutProgress, popoutDrag)() },
                 )
             }
             // Round 21, item 8: the id of the card currently hidden
@@ -1205,6 +1236,7 @@ fun HavenApp(vm: HavenViewModel) {
                 LocalCardBounds provides cardBounds,
                 LocalCardShapes provides cardShapes,
                 LocalCardColors provides cardColors,
+                LocalMorphGhosts provides morphGhosts,
                 // The camera panel's quadrant is a morph source too
                 // (see CameraQuadrant): its rect anchors the panel
                 // morph, and the opaque panel covers it while open,
@@ -1406,7 +1438,7 @@ fun HavenApp(vm: HavenViewModel) {
                     // the user's bar (hideable Scenes/Energy, up to
                     // two pinned tabs); Settings submenus resolve
                     // to Settings for the active highlight below.
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot())
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate)
                     // Stage E §9: the Home dot lights only for a real
                     // important alert (unlocked lock, open door/window,
                     // triggered alarm) — never a count, never for
@@ -1587,7 +1619,7 @@ fun HavenApp(vm: HavenViewModel) {
                     is Screen.EntityDetail,
                     is Screen.VacuumPanel, is Screen.MediaPanel,
                     is Screen.SecurityPanel, is Screen.GreenhousePanel,
-                    is Screen.UpdatesPanel, is Screen.HomeStatusPanel ->
+                    is Screen.UpdatesPanel, is Screen.HomeStatusPanel, is Screen.RoomPanel ->
                         backstack.getOrNull(backstack.lastIndex - 1) ?: Screen.Today
                     else -> current
                 }
@@ -1648,7 +1680,7 @@ fun HavenApp(vm: HavenViewModel) {
                         if (reduceMotionTop) {
                             EnterTransition.None togetherWith ExitTransition.None
                         } else {
-                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot()).map { it.screen }
+                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate).map { it.screen }
                             // Feedback round 17, item 6: NO fades.
                             // The old slide + fade let the outgoing
                             // and incoming pages show through each
@@ -1736,7 +1768,7 @@ fun HavenApp(vm: HavenViewModel) {
             // unmount it cleanly.
             key(LocalWideLayout.current) {
                 if (!LocalWideLayout.current && isTopLevel(current)) {
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot())
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate)
                     val selectedIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     // Stage E §9: same Home dot as the rail.
                     // Collected here so only the bar recomposes on
@@ -1814,7 +1846,8 @@ fun HavenApp(vm: HavenViewModel) {
                 val detailFromPanel = detailPrev is Screen.EntityDetail ||
                     detailPrev is Screen.VacuumPanel || detailPrev is Screen.MediaPanel ||
                     detailPrev is Screen.SecurityPanel || detailPrev is Screen.GreenhousePanel ||
-                    detailPrev is Screen.UpdatesPanel || detailPrev is Screen.HomeStatusPanel
+                    detailPrev is Screen.UpdatesPanel || detailPrev is Screen.HomeStatusPanel ||
+                    detailPrev is Screen.RoomPanel
                 // The morph source is the rect captured at open,
                 // NOT the live map: once the base page lays out
                 // (item 4's instant base below), its cards
@@ -1836,6 +1869,7 @@ fun HavenApp(vm: HavenViewModel) {
                         dragHandle = detailHandle,
                         isClosing = detailExiting && !detailDrag.settling,
                         landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        ghost = { morphGhosts[anim.entityId] },
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                             content(anim.screen)
@@ -1861,6 +1895,7 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
                     landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    ghost = { morphGhosts[anim.entityId] },
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
                         content(anim.screen)
@@ -1905,6 +1940,7 @@ fun HavenApp(vm: HavenViewModel) {
                         dragHandle = panelDetailHandle,
                         isClosing = panelDetailExiting && !panelDetailDrag.settling,
                         landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        ghost = { morphGhosts[anim.entityId] },
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
                             DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() }, navigate = navigate)
@@ -1920,6 +1956,7 @@ fun HavenApp(vm: HavenViewModel) {
                     isClosing = panelDetailExiting && !panelDetailDrag.settling,
                     dragHandle = panelDetailHandle,
                     landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    ghost = { morphGhosts[anim.entityId] },
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides true) {
                         DetailPageScreen(vm, anim.entityId, onBack = { dismissPanelDetail() }, navigate = navigate)
@@ -1952,6 +1989,7 @@ fun HavenApp(vm: HavenViewModel) {
                         dragHandle = popoutHandle,
                         isClosing = popoutExiting && !popoutDrag.settling,
                         landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                        ghost = { morphGhosts[anim.id] },
                     ) {
                         ThermostatPopoutContent(
                             vm, anim.id,
@@ -1972,6 +2010,7 @@ fun HavenApp(vm: HavenViewModel) {
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
                     landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                    ghost = { morphGhosts[anim.id] },
                 ) {
                     ThermostatPopoutContent(
                         vm, anim.id,
@@ -2093,15 +2132,10 @@ fun HavenApp(vm: HavenViewModel) {
             if (vm.shapePickerTarget != null) {
                 ShapePickerDialog(vm, vm.shapePickerTarget!!, onClose = { vm.closeShapePicker() })
             }
-            // Feedback round 15, item 5: Domain defaults dialog,
-            // same overlay layer as the shape picker.
-            if (vm.domainDefaultsOpen) {
-                DomainDefaultsDialog(vm, onClose = { vm.closeDomainDefaults() })
-            }
             // Customization round, item 2: Card settings sheet,
             // above every other overlay like the shape picker.
             if (vm.cardSettingsTarget != null) {
-                CardSettingsSheet(vm, vm.cardSettingsTarget!!, onDismiss = { vm.closeCardSettings() })
+                CardSettingsSheet(vm, vm.cardSettingsTarget!!, onArrange = vm.cardSettingsArrange, onDismiss = { vm.closeCardSettings() })
             }
             }
         }
@@ -2123,6 +2157,8 @@ private fun ScreenContent(
     homeRightScrollState: ScrollState,
     navigate: (Screen) -> Unit,
     goBack: () -> Unit,
+    /** Switches to a tab, as the bar does. */
+    goTop: (Screen) -> Unit,
     // Feedback round 5, item 1: panel cards open the stacked panel-detail layer. Default is a
     // no-op so existing call sites are unaffected; the HavenApp content lambda passes the real
     // opener, and only the HomeStatusPanel branch forwards it.
@@ -2136,7 +2172,7 @@ private fun ScreenContent(
     onSignOut: () -> Unit,
 ) {
     when (screen) {
-        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() })
+        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() }, openTab = goTop)
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)
@@ -2154,9 +2190,14 @@ private fun ScreenContent(
         )
         is Screen.UserTab -> UserTabScreen(vm, screen.tabId, navigate)
         // Stage F destinations (first-class bar items, brief §4).
+        Screen.Security -> SecurityScreen(vm, navigate)
+        Screen.Climate -> ClimateScreen(vm, navigate)
         Screen.Scenes -> ScenesScreen(vm)
         Screen.Energy -> EnergyScreen(vm)
-        Screen.RoomsTabs -> RoomsTabsScreen(vm, goBack, navigate)
+        is Screen.SettingsPage -> SettingsPageHost(
+            vm, screen.route, goBack, navigate,
+            AppearanceControls(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor, onSignOut),
+        )
         Screen.HomeEditor -> HomeEditorScreen(vm, goBack, navigate)
         is Screen.RoomTab -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() })
         // Detail pages replaced the old generic detail screen: per-domain
@@ -2169,6 +2210,7 @@ private fun ScreenContent(
         is Screen.GreenhousePanel -> GreenhousePanelScreen(vm, goBack)
         is Screen.UpdatesPanel -> UpdatesPanelScreen(vm, goBack)
         is Screen.HomeStatusPanel -> HomeStatusPanelScreen(vm, screen.categoryKey, navigate, onPanelDetail)
+        is Screen.RoomPanel -> com.garrietta.haven.ui.screens.RoomPanelScreen(vm, screen.areaId, navigate, onPanelDetail)
         is Screen.CameraClips -> CameraClipsScreen(vm, screen.entityId, goBack)
         is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
         Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)
@@ -2178,7 +2220,6 @@ private fun ScreenContent(
         Screen.HelperBuilder -> HelperBuilderScreen(vm, goBack)
         // Round 24, item 5: the builder hub (Settings' single
         // "Automations, scenes & helpers" row opens it).
-        Screen.BuilderHub -> BuilderHubScreen(vm, goBack, navigate)
     }
 }
 
@@ -2304,6 +2345,8 @@ private fun PanelOverlay(
     // Feedback round 11, item 2: the source tile's outline, passed
     // through to MorphSurface so the exit lands on its corners.
     landingShape: androidx.compose.ui.graphics.Shape? = null,
+    // The source tile's recording, passed through to MorphSurface.
+    ghost: (() -> GraphicsLayer?)? = null,
     content: @Composable () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -2342,6 +2385,7 @@ private fun PanelOverlay(
                 isClosing = isClosing,
                 onPlaced = onPanelPlaced,
                 landingShape = landingShape,
+                ghost = ghost,
             ) {
                 CompositionLocalProvider(
                     LocalHeroTarget provides heroTargetReporter,
@@ -2487,6 +2531,8 @@ private fun CenteredPopup(
     // cream over the hidden tile on exit. Declared before the
     // content lambda (round 5 lesson).
     fromBackground: Color? = null,
+    // The source tile's recording (see LocalMorphGhosts).
+    ghost: (() -> GraphicsLayer?)? = null,
     content: @Composable () -> Unit,
 ) {
     // Feedback round 7: the surface's placed rect in root
@@ -2587,8 +2633,8 @@ private fun CenteredPopup(
                         // captured from the sourced branch; the
                         // sourceless branch keeps 1f.
                         val p = progress()
-                        var popupScaleX = 1f
-                        var popupScaleY = 1f
+                        var windowWidth = size.width
+                        var windowHeight = size.height
                         if (source != null) {
                             val targetLeft = overlayOrigin.x + (overlayWidthPx - size.width) / 2f
                             val targetTop = overlayOrigin.y + (overlayHeightPx - size.height) / 2f
@@ -2598,12 +2644,14 @@ private fun CenteredPopup(
                             )
                             val morph = tileMorphTransform(source, target, p)
                             transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                            // Moved, never scaled: the popup is revealed
+                            // through a window that grows from the tile
+                            // (see RevealWindowShape).
                             translationX = morph.translationX
                             translationY = morph.translationY
-                            scaleX = morph.scaleX
-                            scaleY = morph.scaleY
-                            popupScaleX = morph.scaleX
-                            popupScaleY = morph.scaleY
+                            val window = lerpRect(source, target, p)
+                            windowWidth = window.width
+                            windowHeight = window.height
                             // Feedback round 17, item 1: the
                             // container alpha, mirroring
                             // MorphSurface — the old opaque-from-
@@ -2646,11 +2694,13 @@ private fun CenteredPopup(
                             scaleY = enter.scale
                             alpha = enter.alpha
                         }
-                        shape = morphPopupShape(p, landingShape, popupScaleX, popupScaleY)
+                        shape = RevealWindowShape(morphPopupShape(p, landingShape, 1f, 1f), windowWidth, windowHeight)
                         clip = true
                     }
                     .onGloballyPositioned { coords ->
-                        placedRect = coords.boundsInRoot()
+                        // Measured open: the drag range is worked out from
+                        // the popup at rest, not from where it is mid-flight.
+                        if (progress() >= 0.999f) placedRect = coords.boundsInRoot()
                         onPanelPlaced?.invoke(coords.boundsInRoot())
                     }
                     // Consume taps on the surface so they never
@@ -2683,6 +2733,21 @@ private fun CenteredPopup(
                     Modifier.fillMaxSize().drawBehind {
                         val p = progress().coerceIn(0f, 1f)
                         drawRect(lerp(fromBackground ?: containerColor, containerColor, morphPanelBackgroundBlend(p)))
+                    }
+                    // The tile's own content over the popup's, fading in as
+                    // the surface nears the tile (same as MorphSurface).
+                    .drawWithContent {
+                        drawContent()
+                        val p = progress().coerceIn(0f, 1f)
+                        val layer = ghost?.invoke()
+                        if (layer != null && source != null && morphSwapContainerAlpha(p) > 0f &&
+                            ghostMatchesSource(layer.size, source)
+                        ) {
+                            val targetLeft = overlayOrigin.x + (overlayWidthPx - size.width) / 2f
+                            val targetTop = overlayOrigin.y + (overlayHeightPx - size.height) / 2f
+                            val target = Rect(targetLeft, targetTop, targetLeft + size.width, targetTop + size.height)
+                            drawMorphGhost(layer, morphGhostAlpha(p), lerpRect(source, target, p).width, 1f, 1f)
+                        }
                     },
                 ) {
                 // Feedback round 7: drag range is the vertical
@@ -2739,8 +2804,7 @@ private fun CenteredPopup(
                             // full-size content ever appears
                             // inside a still-small rect.
                             .graphicsLayer {
-                                alpha = if (isClosing) morphCloseContentAlpha(progress())
-                                else morphEnterContentAlpha(progress())
+                                alpha = morphEnterContentAlpha(progress())
                             },
                     ) {
                         content()
@@ -2973,7 +3037,10 @@ private fun FrontDoorCameraPanel(
     val frontDoorSource = resolveFrontDoorCameraSource(states)
     // Round 21, item 3: the ring-mqtt RTSP URL for the fallback
     // live attempt (null off-LAN — RTSP exists only on the Pi).
-    val rtspUrl = vm.frontDoorRtspUrl
+    // The live stream leads whenever the phone is on the home network,
+    // whichever entity the fallback picture would come from: it is the
+    // only source here that is the door right now.
+    val rtspUrl = vm.frontDoorRtspUrlFor(ringMqttLivePath(states[FRONT_DOOR_INFO_SENSOR_ID]?.attributes))
     val engaged = vm.frontDoorLiveEngaged
     val stopReason = vm.frontDoorLiveStopReason
 
@@ -3236,13 +3303,13 @@ private fun FrontDoorCameraPanel(
         // unavailable" — the live_view proxy serves the last
         // motion recording by construction.
         phase == FrontDoorLivePhase.MJPEG && rtspFrames -> "Live"
-        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && !rtspFailed && rtspUrl != null -> "Connecting to live view…"
+        phase == FrontDoorLivePhase.MJPEG && frontDoorSource != null && !rtspFailed && rtspUrl != null -> "Connecting to live view…"
         phase == FrontDoorLivePhase.MJPEG && mjpegError != null && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> "Recording unavailable"
         // Camera fallback round: the fallback source gets a neutral
         // status line — no liveness claim (no LIVE badge either),
         // and no recording claim. On a fallback-body error the
         // later mjpegError branch reports "Live view unavailable".
-        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && mjpegError == null -> "Front door camera"
+        phase == FrontDoorLivePhase.MJPEG && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID && mjpegError == null -> frontDoorNotLiveLine(rtspUrl)
         phase == FrontDoorLivePhase.MJPEG && live69a1Failed -> "Live view unavailable — showing latest recording"
         phase == FrontDoorLivePhase.MJPEG && liveRestarts > 0 && !mjpegFrames -> "Reconnecting to live view…"
         phase == FrontDoorLivePhase.MJPEG && mjpegFrames && switchOn -> "Live view"
@@ -3347,44 +3414,32 @@ private fun FrontDoorCameraPanel(
                             )
                         }
                     }
+                    rtspUrl != null && !rtspFailed -> {
+                        CameraRtspPlayerBody(
+                            vm, rtspUrl, enterProgress,
+                            onFirstFrame = {
+                                Log.d("Haven", "FrontDoorLive: RTSP first frame")
+                                rtspFrames = true
+                                vm.markFrontDoorRtspProven()
+                            },
+                            onPlayerError = { message ->
+                                Log.w("Haven", "FrontDoorLive: RTSP error: $message — falling back")
+                                rtspFrames = false
+                                vm.clearFrontDoorRtspProven()
+                                rtspFailed = true
+                            },
+                        )
+                    
+                    }
                     frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> {
-                        // Round 21, item 3: the live_view MJPEG
-                        // proxy serves the last motion recording by
-                        // construction — it can never be the live
-                        // path. The RTSP attempt goes FIRST (LAN
-                        // only, rtspUrl null off-LAN): a first frame
-                        // proves liveness in-session (badge LIVE +
-                        // quadrant proof); an error or the 8s
-                        // first-frame timeout latches rtspFailed and
-                        // the panel falls through to the LABELED
-                        // recording below (recording = true, so the
-                        // body reads "Loading recording…" /
-                        // "Recording unavailable" instead of
-                        // pretending to be live).
-                        if (rtspUrl != null && !rtspFailed) {
-                            CameraRtspPlayerBody(
-                                vm, rtspUrl, enterProgress,
-                                onFirstFrame = {
-                                    Log.d("Haven", "FrontDoorLive: RTSP fallback first frame")
-                                    rtspFrames = true
-                                    vm.markFrontDoorRtspProven()
-                                },
-                                onPlayerError = { message ->
-                                    Log.w("Haven", "FrontDoorLive: RTSP fallback error: $message — showing recording")
-                                    rtspFrames = false
-                                    vm.clearFrontDoorRtspProven()
-                                    rtspFailed = true
-                                },
-                            )
-                        } else {
-                            CameraMjpegBody(
-                                vm, FRONT_DOOR_LIVE_VIEW_ID, enterProgress, recording = true, onClose = onClose,
-                                onError = { message ->
-                                    Log.w("Haven", "FrontDoorLive: fallback live_view error: $message")
-                                    mjpegError = message
-                                },
-                            )
-                        }
+                        CameraMjpegBody(
+                            vm, FRONT_DOOR_LIVE_VIEW_ID, enterProgress, recording = true, onClose = onClose,
+                            onError = { message ->
+                                Log.w("Haven", "FrontDoorLive: fallback live_view error: $message")
+                                mjpegError = message
+                            },
+                        )
+                    
                     }
                     !live69a1Failed && switchOn && live69a1Ready -> {
                         // Visual-fidelity round §3: keyed on the
@@ -3508,7 +3563,7 @@ private fun FrontDoorCameraPanel(
                     Spacer(Modifier.width(8.dp))
                     Row(
                         Modifier.clip(RoundedCornerShape(50))
-                            .background(Color(0xFFD32F2F))
+                            .background(Palette.Alarm.t50)
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -4150,7 +4205,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, currentS
     // Haven's indicator and takes Koda's spec. Reduce-motion
     // keeps the stiff snap.
     val indicatorSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
-        else kodaBarSpec()
+        else barSpring()
     // Feedback round 17, item 3: the indicator offset comes from
     // the item INDEX ([railIndicatorTop]), never from measured
     // window rects. The old boundsInWindow measurements went
@@ -4218,7 +4273,7 @@ private fun VerticalSidePill(items: List<NavItem>, selectedIndex: Int?, currentS
             // slightly to #263026 (~1.35:1). A small bump, not
             // a rework; the folded pill bar keeps
             // PillBarContainer in both themes.
-            color = if (isDark) Color(0xFF263026) else PillBarContainer,
+            color = if (isDark) HavenChrome.barOnBlack else PillBarContainer,
             tonalElevation = 0.dp,
             shadowElevation = 6.dp,
         ) {
@@ -4420,7 +4475,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, currentScreen: Sc
                         // 12dp) and 4dp item gap are kept likewise.
                         val itemPadding by animateDpAsState(
                             if (highlighted) 20.dp else 12.dp,
-                            animationSpec = kodaBarSpec(),
+                            animationSpec = barSpring(),
                             label = "pillItemPadding",
                         )
                         val capsuleColor by animateColorAsState(
@@ -4442,7 +4497,7 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, currentScreen: Sc
                                 ) { onTap() }
                                 .background(capsuleColor, CircleShape)
                                 .padding(horizontal = itemPadding)
-                                .animateContentSize(kodaBarSpec()),
+                                .animateContentSize(barSpring()),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
@@ -4465,10 +4520,10 @@ private fun PillNav(items: List<NavItem>, selectedIndex: Int?, currentScreen: Sc
                             AnimatedVisibility(
                                 visible = highlighted,
                                 enter = fadeIn() + expandHorizontally(
-                                    animationSpec = kodaBarSpec()
+                                    animationSpec = barSpring()
                                 ),
                                 exit = fadeOut() + shrinkHorizontally(
-                                    animationSpec = kodaBarSpec()
+                                    animationSpec = barSpring()
                                 ),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -4642,6 +4697,6 @@ fun DetailPopupHeader(
 @Composable
 fun SectionHeader(title: String) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        SectionTitle(title)
     }
 }

@@ -15,7 +15,16 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -449,81 +458,111 @@ fun Modifier.hideHeroWhenMorphSource(id: String): Modifier = composed {
 }
 
 /**
- * Hides this layout's BODY while it is the active morph source
- * (layout unchanged, alpha only) — the 2026-10-29 verdict-fix round's
- * answer to the weather pop-up still doubling on #67. The header hide
- * above covers only the header row: the source card's arc, humidity
- * line, sensor chart, and lamp hero stayed visible while the pop-up's
- * duplicate content faded in over them, so two copies of the same
- * content shared the screen. Callers gate this on their morph-source
- * flag, exactly like [hideWhenMorphSource]: nested/destination cards
- * sharing the entity id must never hide.
+ * The source tile of every open morph, recorded as a layer, by entity id.
  *
- * 2026-10-30 centered-dialog round: the hide is progress-driven
- * ([LocalMorphCardAlpha], same curve as [hideWhenMorphSource]),
- * NOT binary. The binary hide caused the exit flash the verdict
- * reports (grid flickering blank tiles on dismiss): at progress 0
- * the dialog is already invisible, but the body only returned when
- * the dismiss coroutine cleared state frames later — blank cards
- * with no dialog. Progress-driven, the body fades back over the
- * last 40% of exit and is fully visible at progress 0, before any
- * state clear — and on enter it is gone by progress 0.4, before
- * the dialog content fades in at 0.7, so no doubling returns.
+ * A tile that opens a popup stops drawing itself while the popup is up
+ * (see [hideWhenMorphSource]) but keeps recording what it would have
+ * drawn into a [GraphicsLayer] and leaves it here. The morphing surface
+ * draws that layer inside itself as it nears the tile, so the shrinking
+ * card carries the tile's own content and lands as the tile, instead of
+ * arriving as a blank block of the tile's color.
+ *
+ * A plain map, written and read in the draw phase: the tile draws before
+ * the overlay in the same frame, so the overlay always sees this frame's
+ * recording and nothing needs to recompose when an entry changes.
  */
-fun Modifier.hideBodyWhenMorphSource(id: String): Modifier = composed {
-    val hiddenId = LocalHiddenCardId.current
-    val cardAlpha = LocalMorphCardAlpha.current
-    if (id == hiddenId) {
-        // Feedback round 22, item 3: the progress read happens
-        // HERE, during composition — not inside graphicsLayer.
-        // The graphicsLayer-only read never re-evaluated on
-        // device (#132: the source tile stayed fully visible
-        // behind the open popup at rest), so the alpha now comes
-        // from a composition-observed read: this card — and only
-        // this card — recomposes per animation frame while it is
-        // the hidden source, and the alpha follows morphCardAlpha
-        // exactly (gone by progress 0.4, back over the last 40%
-        // of exit, fully visible at progress 0 before any state
-        // clears). Non-source cards never read the progress, so
-        // they pay no per-frame recomposition cost.
-        val alpha = cardAlpha()
-        graphicsLayer { this.alpha = alpha }
-    } else {
-        graphicsLayer { alpha = 1f }
+val LocalMorphGhosts = staticCompositionLocalOf<MutableMap<String, GraphicsLayer>> { mutableMapOf() }
+
+/**
+ * Kept so call sites read the same: a morph source's body is hidden with
+ * the rest of it by [hideWhenMorphSource], which every caller of this
+ * also applies to the same card or to an ancestor of it. Hiding the body
+ * a second time here would blank the tile's recording, which is what the
+ * morphing surface draws on the way back.
+ */
+@Suppress("UNUSED_PARAMETER")
+fun Modifier.hideBodyWhenMorphSource(id: String): Modifier = this
+
+/**
+ * Marks a tile as something a popup can open from.
+ *
+ * While it is the source of the open morph it draws nothing in place:
+ * the morphing surface is the one visible card, from the frame it leaves
+ * the tile to the frame it lands back on it ([morphTileAlpha] decides
+ * which frame that is; the two are never both visible and never both
+ * absent). It keeps recording itself into [LocalMorphGhosts] the whole
+ * time, so the surface can show the tile's content as it comes home.
+ *
+ * Nothing is removed from layout: removing the card would reflow the
+ * grid and move the rect the morph is flying to. A tile that is not a
+ * morph source draws normally and records nothing.
+ *
+ * The alpha is read during composition, not inside the draw block: only
+ * the one source tile recomposes per frame, and on a phone a draw-only
+ * read was seen not to re-run.
+ */
+fun Modifier.hideWhenMorphSource(id: String): Modifier = composed {
+    if (id != LocalHiddenCardId.current) return@composed this
+    val visible = LocalMorphCardAlpha.current() > 0f
+    val ghosts = LocalMorphGhosts.current
+    val layer = rememberGraphicsLayer()
+    DisposableEffect(id, layer) {
+        onDispose { if (ghosts[id] === layer) ghosts.remove(id) }
+    }
+    drawWithContent {
+        layer.record { this@drawWithContent.drawContent() }
+        ghosts[id] = layer
+        if (visible) drawLayer(layer)
     }
 }
 
 /**
- * Renders this layout with the morph source's progress-driven alpha
- * while it is the active morph source (layout unchanged). The alpha
- * comes from [LocalMorphCardAlpha]: 1 at morph start (the card is
- * fully visible under the still-transparent surface), fading to 0
- * once the surface is opaque, and fading back in over the last 40%
- * of an animated exit — so the card never vanishes in a single frame
- * and never pops back in stages. Alpha, not removal: removing the
- * card would reflow the grid and invalidate the captured source
- * rect mid-morph.
+ * How visible the tile's recording is inside the morphing surface at
+ * [progress] (0 = on the tile, 1 = the open popup). Fully there as the
+ * surface leaves or lands on the tile, gone by 40% of the way out. The
+ * popup's own content comes in over [morphEnterContentAlpha]'s window
+ * (15% to 50%), so the two cross over and the surface is never empty.
+ * The same curve runs in both directions: closing is opening, reversed.
  */
-fun Modifier.hideWhenMorphSource(id: String): Modifier = composed {
-    val hiddenId = LocalHiddenCardId.current
-    val cardAlpha = LocalMorphCardAlpha.current
-    if (id == hiddenId) {
-        // Feedback round 22, item 3: the progress read happens
-        // HERE, during composition — not inside graphicsLayer.
-        // The graphicsLayer-only read never re-evaluated on
-        // device (#132: the source tile stayed fully visible
-        // behind the open popup at rest), so the alpha now comes
-        // from a composition-observed read: this card — and only
-        // this card — recomposes per animation frame while it is
-        // the hidden source, and the alpha follows morphCardAlpha
-        // exactly (gone by progress 0.4, back over the last 40%
-        // of exit, fully visible at progress 0 before any state
-        // clears). Non-source cards never read the progress, so
-        // they pay no per-frame recomposition cost.
-        val alpha = cardAlpha()
-        graphicsLayer { this.alpha = alpha }
-    } else {
-        graphicsLayer { alpha = 1f }
+fun morphGhostAlpha(progress: Float): Float =
+    1f - smoothstep(0.05f, 0.40f, progress)
+
+/**
+ * Whether a recording is of the tile this morph is flying to. Two tiles
+ * can share an entity id (a favourite and its room tile); the recording
+ * left under that id is whichever drew last, so it is only used when its
+ * size is the source rect's, to within a pixel of rounding each way.
+ */
+fun ghostMatchesSource(ghostSize: IntSize, source: Rect): Boolean =
+    kotlin.math.abs(ghostSize.width - source.width) <= 2f &&
+        kotlin.math.abs(ghostSize.height - source.height) <= 2f
+
+/**
+ * Draws a tile's recording inside a morphing surface whose own layer is
+ * scaled by ([surfaceScaleX], [surfaceScaleY]) to the rect it currently
+ * covers, [rectWidth] wide. The recording is drawn from the surface's
+ * top-left corner at one uniform scale, the one that makes it exactly as
+ * wide as the rect, so its content is never stretched while the surface
+ * is still taller than the tile, and it sits pixel-for-pixel on the tile
+ * when the surface lands.
+ */
+fun DrawScope.drawMorphGhost(
+    layer: GraphicsLayer,
+    alpha: Float,
+    rectWidth: Float,
+    surfaceScaleX: Float,
+    surfaceScaleY: Float,
+) {
+    val width = layer.size.width
+    if (alpha <= 0f || width <= 0 || surfaceScaleX <= 0f || surfaceScaleY <= 0f) return
+    val fit = rectWidth / width
+    withTransform({ scale(fit / surfaceScaleX, fit / surfaceScaleY, pivot = Offset.Zero) }) {
+        drawIntoCanvas { canvas ->
+            val bounds = Rect(0f, 0f, width.toFloat(), layer.size.height.toFloat())
+            canvas.saveLayer(bounds, Paint().apply { this.alpha = alpha })
+            drawLayer(layer)
+            canvas.restore()
+        }
     }
 }
 
@@ -1197,6 +1236,23 @@ data class TileMorph(
     val scaleY: Float,
 )
 
+/**
+ * [inner], drawn [width] by [height] from the layer's top-left corner,
+ * whatever the layer's own size.
+ *
+ * This is how a popup grows out of a tile. The popup is laid out once at
+ * its full size and shown through a window that grows from the tile's
+ * rectangle to the popup's, its top-left corner riding the window's. The
+ * older way scaled the finished popup down to the tile and back up, which
+ * stretched its text and icons unevenly on the way (a wide tile becomes a
+ * tall popup) and read as a picture of a popup, not the popup itself.
+ * The music player in Rondo grows the same way.
+ */
+class RevealWindowShape(private val inner: Shape, private val width: Float, private val height: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        inner.createOutline(Size(width.coerceAtLeast(0f), height.coerceAtLeast(0f)), layoutDirection, density)
+}
+
 fun tileMorphTransform(source: Rect, target: Rect, progress: Float): TileMorph {
     val p = progress.coerceIn(0f, 1f)
     val rect = lerpRect(source, target, p)
@@ -1689,6 +1745,9 @@ fun MorphSurface(
     // is GONE — header badges render in place and fade with the
     // content curves (see morphHeaderBadgeAlpha), so this surface
     // carries no traveler slot anymore.
+    // The source tile's recording (see [LocalMorphGhosts]), read at
+    // draw time. Null for a surface with no tile to land on.
+    ghost: (() -> GraphicsLayer?)? = null,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -1705,13 +1764,12 @@ fun MorphSurface(
                 val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
                 val rect = lerpRect(source, target, p)
                 transformOrigin = TransformOrigin(0f, 0f)
+                // Moved, never scaled: the surface is revealed through a
+                // window the size of the in-between rectangle (see
+                // RevealWindowShape).
                 translationX = rect.left - target.left
                 translationY = rect.top - target.top
-                scaleX = if (target.width > 0f) rect.width / target.width else 1f
-                scaleY = if (target.height > 0f) rect.height / target.height else 1f
-                // Round 17: the clip divides out the layer scale,
-                // so visible corners follow the landing ramp.
-                shape = morphSurfaceShape(p, landingShape, scaleX, scaleY)
+                shape = RevealWindowShape(morphSurfaceShape(p, landingShape), rect.width, rect.height)
                 clip = true
             }
             .drawBehind {
@@ -1742,6 +1800,18 @@ fun MorphSurface(
                 val containerAlpha = morphSwapContainerAlpha(p)
                 drawRect(blended.copy(alpha = blended.alpha * containerAlpha))
             }
+            // The tile's own content, over the popup's, fading in as
+            // the surface nears the tile: what makes it land as the
+            // tile and not as a blank block of the tile's color.
+            .drawWithContent {
+                drawContent()
+                val p = progress?.invoke()?.coerceIn(0f, 1f) ?: 1f
+                val layer = ghost?.invoke()
+                if (layer != null && morphSwapContainerAlpha(p) > 0f && ghostMatchesSource(layer.size, source)) {
+                    val rect = lerpRect(source, target, p)
+                    drawMorphGhost(layer, morphGhostAlpha(p), rect.width, 1f, 1f)
+                }
+            }
             .then(
                 if (onPlaced != null) Modifier.onGloballyPositioned { onPlaced(it.boundsInWindow()) }
                 else Modifier,
@@ -1750,11 +1820,10 @@ fun MorphSurface(
         Box(
             Modifier.size(targetWidthDp, targetHeightDp)
                 .graphicsLayer {
-                    alpha = when {
-                        progress == null -> 1f
-                        isClosing -> morphCloseContentAlpha(progress())
-                        else -> morphEnterContentAlpha(progress())
-                    }
+                    // One curve for opening, closing and a finger-held
+                    // pull, so the popup's content hands over to the
+                    // tile's recording the same way in every direction.
+                    alpha = if (progress == null) 1f else morphEnterContentAlpha(progress())
                 },
             contentAlignment = Alignment.TopStart,
         ) {

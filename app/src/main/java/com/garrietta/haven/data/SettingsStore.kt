@@ -61,6 +61,29 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("nav_show_energy", true)
         set(value) = prefs.edit().putBoolean("nav_show_energy", value).apply()
 
+    /**
+     * Whether Security is on the bar, or null when it has never been
+     * chosen: the ViewModel then shows it only if the bar has room
+     * beside the tabs and rooms already pinned there.
+     */
+    var navShowSecurity: Boolean?
+        get() = if (prefs.contains("nav_show_security")) prefs.getBoolean("nav_show_security", true) else null
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("nav_show_security") else putBoolean("nav_show_security", value)
+        }.apply()
+
+    /** Climate on the bar, beside Security; null until chosen. */
+    var navShowClimate: Boolean?
+        get() = if (prefs.contains("nav_show_climate")) prefs.getBoolean("nav_show_climate", true) else null
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("nav_show_climate") else putBoolean("nav_show_climate", value)
+        }.apply()
+
+    /** Set once the cameras have moved from Home to the Security tab. */
+    var camerasMovedToSecurity: Boolean
+        get() = prefs.getBoolean("cameras_moved_to_security", false)
+        set(value) = prefs.edit().putBoolean("cameras_moved_to_security", value).apply()
+
     /** When on, spring animations are replaced with instant state changes. */
     var reduceMotion: Boolean
         get() = prefs.getBoolean("reduce_motion", false)
@@ -168,6 +191,13 @@ class SettingsStore(context: Context) {
      * temporarily); the section renders only ids that resolve, while the
      * Manage sheet lists every stored id so a stale one can be removed.
      */
+    /** How a tab's section has been arranged by hand (see [PageCuration]); stored per section key. */
+    fun pageCuration(section: String): PageCuration = PageCuration.fromJson(prefs.getString("page_curation_$section", null))
+
+    fun setPageCuration(section: String, curation: PageCuration) {
+        prefs.edit().putString("page_curation_$section", curation.toJson()).apply()
+    }
+
     fun favoriteEntityIds(): List<String> {
         val raw = prefs.getString("favorites_json", null) ?: return emptyList()
         return try {

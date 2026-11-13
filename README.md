@@ -1,45 +1,81 @@
-# Haven
+<p align="center"><img src="docs/icon.svg" width="112" alt=""></p>
 
-A native Material 3 Expressive Home Assistant client for Android.
+<h1 align="center">Haven</h1>
 
-Haven is **not** a Lovelace WebView shell like the official app. It talks to Home Assistant over the WebSocket API + REST and renders dashboards, areas, and entity controls natively in Kotlin/Compose — with the same expressive design language as Relay, Koda, and Pixel Music: real M3E polygons (`graphics-shapes`), bouncy springs (380 / 0.62), dynamic Material You color, per-entity accent colors, a pill-bar bottom navigation, and a control designed for each entity domain. No WebView anywhere in v1.
+<p align="center">Home Assistant, designed.<br>A native Material 3 Expressive client for Android, built for a foldable.</p>
 
-## Login
+<p align="center">
+  <img src="docs/screens/home-light.png" width="23%" alt="Home, light theme">
+  <img src="docs/screens/room-light.png" width="23%" alt="A room, light theme">
+  <img src="docs/screens/thermostat-dark.png" width="23%" alt="The thermostat popup, dark theme">
+  <img src="docs/screens/sign-in-dark.png" width="23%" alt="Sign-in, dark theme">
+</p>
+
+Haven is not a dashboard in a WebView. It talks to your Home Assistant over the WebSocket and REST APIs and draws every screen natively in Kotlin and Compose: the rooms, the devices, the controls. It connects only to your own instance.
+
+## What it does
+
+- **Home.** A greeting, your rooms as chips, live camera quadrants, a status summary, favorites, and every room's devices as tiles that take the color of what they are doing.
+- **A control designed for each kind of device.** Lights (brightness, color temperature), switches, covers and garage doors, a thermostat dial with dual setpoints, locks, media players, fans, vacuums, sensors with 24-hour history, weather, cameras (HLS, RTSP and MJPEG), scenes, scripts, automations, to-do lists, helpers and alarm panels.
+- **Your own layout.** Reorder and resize cards, pin a tile's color, pick badge and card shapes, build custom tabs from cards or YAML, choose which rooms are chips and which are tabs.
+- **Boards.** Reads your Lovelace dashboards and renders the common card types natively, with in-app editing for storage-mode dashboards.
+- **Builders.** Create automations, scenes, scripts and helpers from the app.
+- **Around the phone.** Android Device Controls, and notifications for the garage, motion and lights.
+- **Folded and unfolded.** A floating bar on the cover screen; a side rail and two panes when the window is at least 600dp wide and wider than it is tall.
+
+## Signing in
 
 Two ways in, both against your own instance:
 
-- **Sign in with Home Assistant (OAuth + PKCE S256).** The app opens your instance's authorize page in the browser and comes back via `haven://auth-callback`. Home Assistant requires the client-ID URL to declare that redirect, so this repo's GitHub Pages site (`https://garrietta.github.io/Haven/`) carries the `<link rel="redirect_uri">` tag. Tokens refresh automatically; a dead refresh token sends you back to sign-in.
-- **Long-lived access token (fallback, always works).** Create one in your HA profile (Profile → Long-Lived Access Tokens) and paste it in. Tokens are encrypted at rest with an AndroidKeystore AES-256/GCM key and are never sent anywhere except your instance.
+- **Sign in with Home Assistant** (OAuth with PKCE). The instance's own sign-in page opens inside Haven and returns through `haven://auth-callback`. Home Assistant requires the client-id URL to declare that redirect, which is what this repository's GitHub Pages site (`docs/index.html`) is for. Tokens refresh on their own.
+- **A long-lived access token**, for setups the sign-in page cannot reach. Create one in Home Assistant under Profile → Security.
 
-## What v1 covers
+Tokens are encrypted on the device with an Android Keystore AES-256/GCM key and are sent nowhere but your instance. Plain `http://` is allowed because instances on a home network usually are.
 
-- **Today screen:** greeting, weather dial, who's home, now playing, lights-on summary with all-off, and attention alerts.
-- **Boards:** reads your instance's Lovelace config and renders it natively — Entities, Tile, Button, Light, Thermostat, Glance, Sensor, Weather Forecast, Media Control, Area, stacks, grids, Conditional, Markdown. Unknown card types get an honest placeholder, never a web page. **In-app editing:** create views, add/remove/reorder cards, and save the dashboard back to the instance (`lovelace/config/save`, storage-mode dashboards).
-- **Entity controls, one design per domain:** light (blooming bulb toggle, brightness, color-temp, hue dots), switch (pill toggle), cover incl. garage door (door visual, open/close/stop, position slider), climate (**both** a dial and a slider, mode + preset chips), vacuum (start/pause/dock/locate, fan speed, battery), media player (transport, volume, source select), fan (speed slider, presets, oscillate), lock (unlock asks first), sensor/binary_sensor tiles, weather (dial + forecast), camera (snapshot tile + fullscreen), scene/script tap-fire, automation toggle + Run, todo checklists, helpers (input_boolean/number/select/text/datetime, timer, counter), alarm keypad.
-- **Creation inside the app:** guided automation builder (trigger → condition → action), scene builder (capture current device states), script builder (service-call steps), helper builder (input_*, timer, counter). Automations/scripts/scenes save over the REST config API (`POST /api/config/<kind>/config/<kind>.<slug>`); helpers save over WebSocket (`<domain>/create`).
-- **Areas browser, entity search** (name / id / area / domain), and **entity detail** with attributes and a 24-hour history sparkline.
-- **Live updates** over WebSocket (`get_states` + `subscribe_events state_changed`) with automatic reconnect.
+## Design
 
-## Honest gaps (v1)
+Haven has its own identity, described in full in [DESIGN.md](DESIGN.md): a calm paper-and-black canvas where color is spent on what the home is doing, one typeface (Google Sans Flex), leaf-cornered cards, polygon badges that bloom when a device turns on, and a lime that always means "this one".
 
-These are known, not hidden. They are the next rounds, not bugs:
+Colors are generated, not picked: `tools/palette.py` writes every tone the app uses, and `tools/logo.py` writes the icon, splash and in-app mark from one piece of geometry.
 
-- **Not yet verified against a live instance:** automation/script/scene REST saves, helper creates for `timer`/`counter` (the `<domain>/create` pattern is directly evidenced only for `input_number`), todo item create/update/delete (only `todo/item/move` was seen in reference code), and the OAuth Pages propagation (GitHub Pages can take minutes to publish; long-lived tokens work regardless). If a save fails, the builder says so on screen — it never pretends success.
-- **Not built (roadmap):** release signing (debug APK only this round), Wear/Auto, widgets, voice satellite, energy view, admin panels (template evaluator, service JSON editor, backups), floors in the areas browser, multi-dashboard editing (v1 edits the default dashboard), picture/map/history-graph/logbook cards (placeholder for now), todo *list* creation (lists come from integrations like Local Todo; item CRUD is in).
-- **Design notes:** OAuth uses PKCE S256 (the reference app's no-PKCE shortcut was deliberately not copied). Dashboard editing writes the full config back (storage-mode only; YAML-mode dashboards can't be saved this way).
+## Building
 
-## Build
+Requirements: JDK 17 or newer and the Android SDK (platform 37, build-tools 36).
 
 ```sh
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug            # debug APK, installs beside the release app
+./gradlew :app:testDebugUnitTest        # unit tests (pure logic, plus first-frame renders)
+./gradlew :app:recordRoborazziDebug     # screenshots to app/build/outputs/roborazzi
 ```
 
-GitHub Actions builds a debug APK on every push to `main` and on manual dispatch (`.github/workflows/build.yml`, JDK 17, SDK 35). The APK artifact is `haven-debug`.
+The screenshot run renders the real app on the JVM with a seeded demo home, folded and unfolded, light and dark. It is how a visual change is checked without a phone.
 
-## Architecture
+CI (`.github/workflows/build.yml`) runs the tests and uploads the screenshots and a debug APK for every pull request and every push to `main`, and builds the signed release APK for both (not for pull requests from forks).
 
-- `data/HaClient.kt` — OkHttp WebSocket client (auth, states, events, services, registries, Lovelace, todo) + REST (history, camera proxy, config saves).
-- `data/TokenStore.kt` — Keystore AES/GCM token storage. `data/SettingsStore.kt` — theme / reduce-motion prefs.
-- `ui/theme/` — M3E polygon shapes + morphing, dynamic color, house spring.
-- `ui/controls/` — one control per entity domain. `ui/screens/` — login, Today, boards + editor, areas/search/detail, builders.
-- No WebView, no JavaScript bridge, no third-party HA SDK. Original code throughout; R1HA (Unlicense) was used only as API reference.
+## Layout of the code
+
+| Path | Holds |
+|---|---|
+| `data/HaClient.kt` | The WebSocket and REST client: auth, states, events, services, registries, Lovelace, history, cameras. |
+| `data/` | Stores (tokens, settings, tabs, card sizes, state cache) and pure logic, each rule unit-tested. |
+| `HavenViewModel.kt` | App state and every action a screen can take. |
+| `HavenApp.kt` | The root: theme, navigation, the bar and rail, popups and their morphs. |
+| `ui/theme/` | The design system: palette, color roles, type, shape, motion, the theme. |
+| `ui/components/` | Shared pieces: brand, headings, menus, badges, the morph overlay. |
+| `ui/controls/` | One control per device domain. |
+| `ui/screens/` | Sign-in, Home, panels, tabs, boards, settings, builders. |
+| `HavenControlsService.kt` | Android Device Controls. |
+
+## Status
+
+Haven is a personal app that works day to day on one household's setup, and a few things reflect that honestly:
+
+- The vacuum, media, security and greenhouse panels are wired to specific entity ids (`data/HomePanels.kt`). Everything else follows your instance.
+- Release builds are signed but not minified, and `targetSdk` is 35.
+- Not built: Wear, Auto, home-screen widgets, voice, the energy dashboard, and picture, map, history-graph and logbook cards.
+
+## Credits and license
+
+Google Sans Flex is © The Google Sans Flex Project Authors, under the SIL Open Font License 1.1 ([licenses/GoogleSansFlex-OFL.txt](licenses/GoogleSansFlex-OFL.txt)). The bundled file is a Latin subset of the original.
+
+Home Assistant is a trademark of the Open Home Foundation. Haven is an independent client and is not affiliated with it.

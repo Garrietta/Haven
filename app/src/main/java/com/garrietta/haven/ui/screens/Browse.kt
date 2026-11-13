@@ -40,6 +40,8 @@ import com.garrietta.haven.data.groupEntitiesByDevice
 import com.garrietta.haven.data.deviceMatchesQuery
 import com.garrietta.haven.data.deviceDisplayName
 import com.garrietta.haven.data.attachDeviceInfo
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.ScreenTitle
 
 const val UNASSIGNED_AREA = "__unassigned__"
 
@@ -58,7 +60,7 @@ fun AreasScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     ) {
         item {
             Spacer(Modifier.height(16.dp))
-            Text("Areas", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            ScreenTitle("Areas")
             Spacer(Modifier.height(12.dp))
         }
         items(areas) { area ->
@@ -157,7 +159,7 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             .background(MaterialTheme.colorScheme.background),
     ) {
         Spacer(Modifier.height(16.dp))
-        Text("Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        ScreenTitle("Search")
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = query,
@@ -185,7 +187,7 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                     .sortedBy { (it.info?.name ?: it.deviceId).lowercase() }
                 if (deviceGroups.isNotEmpty()) {
                     item {
-                        Text("Devices", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        SectionTitle("Devices")
                         Spacer(Modifier.height(8.dp))
                     }
                     items(deviceGroups) { group ->
@@ -202,7 +204,7 @@ fun SearchScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                         Spacer(Modifier.height(8.dp))
                     }
                     item {
-                        Text("Entities", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        SectionTitle("Entities")
                         Spacer(Modifier.height(8.dp))
                     }
                 }

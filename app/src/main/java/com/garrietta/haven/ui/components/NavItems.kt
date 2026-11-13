@@ -9,6 +9,8 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Thermostat
@@ -22,6 +24,8 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speaker
 import androidx.compose.material.icons.outlined.Thermostat
@@ -44,6 +48,19 @@ import com.garrietta.haven.data.parseCardYaml
 
 /** Feedback round 15, item 3: the bar holds at most two pinned custom tabs (six tabs total). */
 const val MAX_PINNED_TABS = 2
+
+/** The most destinations the bar holds: wider and the folded pill no longer fits its labels. */
+const val MAX_BAR_ITEMS = 6
+
+/**
+ * How many pinned tabs and rooms the bar has room for beside the
+ * built-in destinations shown: two, or fewer when Security, Scenes and
+ * Energy are all on, so the bar never passes [MAX_BAR_ITEMS].
+ */
+fun barExtraSlots(showSecurity: Boolean, showScenes: Boolean, showEnergy: Boolean, showClimate: Boolean = false): Int {
+    val builtIns = 2 + listOf(showSecurity, showScenes, showEnergy, showClimate).count { it }
+    return (MAX_BAR_ITEMS - builtIns).coerceIn(0, MAX_PINNED_TABS)
+}
 
 /** One pill-bar / side-rail destination. */
  data class NavItem(
@@ -91,10 +108,16 @@ fun pillBarItems(
     showEnergy: Boolean = true,
     pinnedTabs: List<UserTab> = emptyList(),
     roomTabs: List<RoomBarItem> = emptyList(),
+    showSecurity: Boolean = false,
+    showClimate: Boolean = false,
 ): List<NavItem> {
     val items = mutableListOf(
         NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home),
     )
+    // Security sits beside Home: the two answer "is the house all right".
+    if (showSecurity) items += NavItem(Screen.Security, "Security", Icons.Filled.Security, Icons.Outlined.Security)
+    // Climate beside it: how the house feels.
+    if (showClimate) items += NavItem(Screen.Climate, "Climate", Icons.Filled.Thermostat, Icons.Outlined.Thermostat)
     if (showScenes) items += NavItem(Screen.Scenes, "Scenes", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
     if (showEnergy) items += NavItem(Screen.Energy, "Energy", Icons.Filled.Bolt, Icons.Outlined.Bolt)
     val extras = mutableListOf<NavItem>()
@@ -107,7 +130,7 @@ fun pillBarItems(
             ?: (Icons.Filled.GridView to Icons.Outlined.GridView)
         extras += NavItem(Screen.RoomTab(room.areaId), room.title, icon, outlined)
     }
-    items += extras.take(MAX_PINNED_TABS)
+    items += extras.take(barExtraSlots(showSecurity, showScenes, showEnergy, showClimate))
     items += NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
     return items
 }
@@ -129,7 +152,6 @@ fun pillBarItems(
  */
 fun navActiveScreen(current: Screen): Screen = when (current) {
     Screen.HomeEditor,
-    Screen.RoomsTabs,
     Screen.Dashboards,
     Screen.Areas,
     Screen.Search,
@@ -138,9 +160,9 @@ fun navActiveScreen(current: Screen): Screen = when (current) {
     Screen.SceneBuilder,
     Screen.ScriptBuilder,
     Screen.HelperBuilder,
-    Screen.BuilderHub,
     Screen.UpdatesPanel,
     -> Screen.Settings
+    is Screen.SettingsPage -> Screen.Settings
     else -> current
 }
 
@@ -191,8 +213,8 @@ fun shouldApplyFoldedNavClearance(isWideLayout: Boolean): Boolean = !isWideLayou
  * Nav-tab option at the cap; the ViewModel setters are the
  * backstop.
  */
-fun canPinBarExtra(pinnedTabCount: Int, roomNavTabCount: Int, alreadyOnBar: Boolean): Boolean =
-    alreadyOnBar || pinnedTabCount + roomNavTabCount + 1 <= MAX_PINNED_TABS
+fun canPinBarExtra(pinnedTabCount: Int, roomNavTabCount: Int, alreadyOnBar: Boolean, slots: Int = MAX_PINNED_TABS): Boolean =
+    alreadyOnBar || pinnedTabCount + roomNavTabCount + 1 <= slots
 fun tabSlideDirection(barScreens: List<Screen>, from: Screen, to: Screen): Int? {
     val fromRank = barScreens.indexOf(from)
     val toRank = barScreens.indexOf(to)

@@ -77,6 +77,7 @@ import com.garrietta.haven.ui.screens.dialTapZone
 import com.garrietta.haven.ui.screens.dialValueFromAngle
 import com.garrietta.haven.ui.screens.isHandleGrab
 import com.garrietta.haven.ui.theme.ExpressiveKind
+import com.garrietta.haven.ui.theme.Palette
 import com.garrietta.haven.ui.theme.MorphPolygon
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenSpring
@@ -116,9 +117,9 @@ val LocalModalActive = compositionLocalOf { false }
 /** Stable per-entity accent color, hashed from the entity id (same idea as Relay's palettes).
  * Not a scheme role: an identity palette — each entity keeps its accent across launches. */
 private val ACCENTS = listOf(
-    Color(0xFFF59E0B), Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFF8B5CF6),
-    Color(0xFFEC4899), Color(0xFFF97316), Color(0xFF84CC16), Color(0xFF3B82F6),
-    Color(0xFFEAB308), Color(0xFF14B8A6), Color(0xFFF43F5E), Color(0xFFA855F7),
+    Palette.Honey.t70, Palette.Sage.t60, Palette.Dew.t60, Palette.Tune.t60,
+    Palette.Alarm.t70, Palette.Ember.t60, Palette.Leaf.t70, Palette.Frost.t60,
+    Palette.Volt.t70, Palette.Rain.t60, Palette.Ember.t70, Palette.Guard.t60,
 )
 
 fun accentFor(entityId: String): Color {
@@ -182,7 +183,7 @@ fun shapeForKey(key: String): Shape? = when (key) {
     // Customization round, item 1: card-corner picks resolve to the
     // general card shape at that variant index (unknown suffix -> null).
     "corners_0", "corners_1", "corners_2", "corners_3", "corners_4", "corners_5", "corners_6", "corners_7" ->
-        generalCardShape(key.removePrefix("corners_").toIntOrNull() ?: 0)
+        cardCornerOption(key.removePrefix("corners_").toIntOrNull() ?: 0)
     "sunny" -> polygonShape(ExpressiveKind.SUNNY)
     "flower" -> polygonShape(ExpressiveKind.FLOWER)
     "bun" -> polygonShape(ExpressiveKind.BUN)
@@ -467,13 +468,8 @@ fun badgeColors(
  * below resolves through this, so tiles, travelers, and headers
  * can never disagree about the matrix row.
  */
-fun badgeCardColors(entity: HaEntity, isDark: Boolean): com.garrietta.haven.data.DomainCardColors? {
-    if (entity.domain == "sensor") {
-        val kind = sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName)
-        if (kind == SensorKind.TEMPERATURE || kind == SensorKind.HUMIDITY) return null
-    }
-    return com.garrietta.haven.data.domainCardColors(entity, isDark)
-}
+fun badgeCardColors(entity: HaEntity, isDark: Boolean): com.garrietta.haven.data.DomainCardColors? =
+    com.garrietta.haven.data.domainCardColors(entity, isDark)
 
 /**
  * Feedback round 17, item 1: the dashboard tile's EXACT badge
@@ -592,111 +588,6 @@ fun TravelingBadge(
             modifier = Modifier.size(26.dp),
         )
     }
-}
-
-/**
- * Koda Settings menu DNA, adapted to Haven's dynamic colors (the layout /
- * surface / badge / header pattern, never Koda's hardcoded palette):
- * near-black screen background (the dynamic dark scheme already is),
- * dark rounded-rectangle rows, shaped icon badges in muted tones,
- * ALL-CAPS muted section headers, bold title + muted subtitle rows, and
- * a right chevron on rows that navigate. Used by Settings and by menu
- * rows in sheets, so every menu in the app reads as one set.
- */
-@Composable
-fun KodaMenuSection(title: String, modifier: Modifier = Modifier) {
-    Text(
-        title.uppercase(),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 1.2.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-    )
-}
-
-@Composable
-fun KodaMenuRow(
-    badgeKey: String,
-    badgeKind: ExpressiveKind,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String?,
-    onClick: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-    trailing: (@Composable () -> Unit)? = null,
-    /** Flat rows render background-less, for use inside a [KodaMenuGroup]. */
-    flat: Boolean = false,
-) {
-    val accent = accentFor(badgeKey)
-    val row = Modifier
-        .fillMaxWidth()
-        .then(if (flat) Modifier else Modifier.background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.large))
-        .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-        .padding(horizontal = 12.dp, vertical = 16.dp)
-    Row(row.then(modifier), verticalAlignment = Alignment.CenterVertically) {
-        // Expressive-menus round: the badge grows from an icon-sized
-        // blob to a 48dp expressive polygon with a 28dp icon, so menu
-        // rows (sheet Details / Badge shape / Card shape, Settings)
-        // read as large pressable shapes, not cramped rows.
-        Box(
-            Modifier.size(48.dp).background(accent.copy(alpha = 0.20f), polygonShape(badgeKind)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(28.dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            if (subtitle != null) {
-                Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        // Feedback round 16, item 3: a default buffer between the
-        // label and the trailing control (switches included) — a
-        // long title used to run flush into the switch.
-        Spacer(Modifier.width(12.dp))
-        if (trailing != null) {
-            trailing()
-        } else if (onClick != null) {
-            Icon(
-                Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/**
- * Inset grouped rounded section (spec item 9): an extraLarge-corner
- * surfaceContainer card holding flat [KodaMenuRow]s separated by
- * [KodaMenuDivider]s. Used by Settings; the sheet Details row keeps its
- * standalone 20dp row.
- */
-@Composable
-fun KodaMenuGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        modifier = modifier,
-        shape = generalCardShape(0),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-    ) {
-        Column(content = content)
-    }
-}
-
-/**
- * A 0.5dp divider indented to the text-start boundary: row padding 12dp
- * + badge 48dp + gap 12dp = 72dp from the card edge (badge grew in
- * the expressive-menus round; the indent follows it).
- */
-@Composable
-fun KodaMenuDivider(indent: Dp = 72.dp, modifier: Modifier = Modifier) {
-    HorizontalDivider(
-        modifier = modifier.padding(start = indent),
-        thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant,
-    )
 }
 
 /**

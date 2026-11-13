@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.UserTab
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -96,7 +97,7 @@ class NavItemsTest {
         // and Rooms & tabs cleared the indicator on the
         // 2026-11-04 runs).
         for (screen in listOf(
-            Screen.HomeEditor, Screen.RoomsTabs,
+            Screen.HomeEditor, Screen.SettingsPage("areas/areas"),
             Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs,
             Screen.AutomationBuilder, Screen.SceneBuilder, Screen.ScriptBuilder,
             Screen.HelperBuilder, Screen.UpdatesPanel,
@@ -203,5 +204,29 @@ class NavItemsTest {
         assertEquals(NavStyle.COMPACT, navStyleFromKey("compact"))
         assertEquals(NavStyle.FLOATING, navStyleFromKey("bogus"))
         assertEquals(NavStyle.FLOATING, navStyleFromKey(""))
+    }
+
+    @Test
+    fun securitySitsBesideHomeAndTheBarStaysAtSix() {
+        val a = com.garrietta.haven.data.UserTab("a", "A", emptyList(), pinned = true)
+        val b = com.garrietta.haven.data.UserTab("b", "B", emptyList(), pinned = true)
+        val bar = pillBarItems(pinnedTabs = listOf(a, b), showSecurity = true)
+        assertEquals(listOf("Home", "Security", "Scenes", "Energy", "A", "Settings"), bar.map { it.label })
+        assertEquals(6, bar.size)
+        // With Scenes off there is room for both pinned tabs again.
+        assertEquals(
+            listOf("Home", "Security", "Energy", "A", "B", "Settings"),
+            pillBarItems(showScenes = false, pinnedTabs = listOf(a, b), showSecurity = true).map { it.label },
+        )
+    }
+
+    @Test
+    fun extraSlotsShrinkAsBuiltInsAreShown() {
+        assertEquals(2, barExtraSlots(showSecurity = false, showScenes = true, showEnergy = true))
+        assertEquals(1, barExtraSlots(showSecurity = true, showScenes = true, showEnergy = true))
+        assertEquals(2, barExtraSlots(showSecurity = true, showScenes = false, showEnergy = true))
+        assertEquals(2, barExtraSlots(showSecurity = false, showScenes = false, showEnergy = false))
+        assertFalse(canPinBarExtra(1, 0, alreadyOnBar = false, slots = 1))
+        assertTrue(canPinBarExtra(1, 0, alreadyOnBar = true, slots = 1))
     }
 }

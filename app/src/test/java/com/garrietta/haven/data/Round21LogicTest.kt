@@ -16,6 +16,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.garrietta.haven.ui.theme.StateFamily
+import com.garrietta.haven.ui.theme.colors
 
 /**
  * Feedback round 21: the room-chip tap mapping (item 1), the
@@ -175,8 +177,14 @@ class Round21LogicTest {
         assertFalse(
             frontDoorQuadrantShowsLive(FRONT_DOOR_LIVE_VIEW_ID, true, rtspProven = true),
         )
-        assertTrue(
+        // The badge is earned by live frames whichever entity the
+        // picture comes from: an available camera with no live frame
+        // yet reads Recording.
+        assertFalse(
             frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, false),
+        )
+        assertTrue(
+            frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, false, rtspProven = true),
         )
         assertFalse(
             frontDoorQuadrantShowsLive(FRONT_DOOR_RING_MQTT_CAMERA_ID, true),
@@ -197,11 +205,11 @@ class Round21LogicTest {
             detailPageAccent(presets, HaEntity(garage, "closed", emptyMap()), true),
         )
         assertEquals(
-            Color(0xFF1A304E),
+            StateFamily.Cool.colors(isDark = true).container,
             detailPageAccent(presets, HaEntity(garage, "open", emptyMap()), true),
         )
         assertEquals(
-            Color(0xFFBDDEFF),
+            StateFamily.Cool.colors(isDark = false).container,
             detailPageAccent(presets, HaEntity(garage, "open", emptyMap()), false),
         )
         assertNull(
@@ -213,7 +221,7 @@ class Round21LogicTest {
     fun detailAccentGatedForLights() {
         val presets = mapOf("light.lamp_socket_1" to "lime")
         assertEquals(
-            Color(0xFF2B4E14),
+            StateFamily.On.colors(isDark = true).container,
             detailPageAccent(presets, HaEntity("light.lamp_socket_1", "on", emptyMap()), true),
         )
         assertNull(

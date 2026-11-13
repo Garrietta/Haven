@@ -29,7 +29,7 @@ val HOME_SECTIONS: List<Pair<String, String>> = listOf(
     // UNBUNDLED into four independent toggles (Security, Robot
     // vacuum, TV & media, Greenhouse & irrigation). The legacy
     // "round3" key is migrated at every read site (see
-    // migrateRound3SectionOrder / migrateRound3Hidden below) so no
+    // migrateLegacySectionOrder / migrateLegacyHiddenSections below) so no
     // stored preference is ever lost: combined-on maps to all four
     // on, combined-off maps to all four off.
     "round3-security" to "Security",
@@ -90,7 +90,7 @@ val ROUND3_BLOCK_KEYS: List<String> = listOf(
  * HomeEditor) rather than by rewriting stored orders, so a stored
  * order is never mutated by merely rendering it.
  */
-fun migrateRound3SectionOrder(stored: List<String>): List<String> =
+fun migrateLegacySectionOrder(stored: List<String>): List<String> =
     stored.flatMap { if (it == "round3") ROUND3_BLOCK_KEYS else listOf(it) }
 
 /**
@@ -99,7 +99,7 @@ fun migrateRound3SectionOrder(stored: List<String>): List<String> =
  * hidden, combined-shown (or absent) maps to all four shown. The
  * legacy key itself is always dropped. Pure and unit-tested.
  */
-fun migrateRound3Hidden(hidden: Set<String>): Set<String> =
+fun migrateLegacyHiddenSections(hidden: Set<String>): Set<String> =
     if ("round3" in hidden) hidden - "round3" + ROUND3_BLOCK_KEYS.toSet()
     else hidden - "round3"
 

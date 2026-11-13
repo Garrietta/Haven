@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Customization round, item 4: the adaptive background is now
-         the gradient drawable; this color is kept only as the
-         legacy fallback tone (capsule lime, never charcoal, so no
-         dark frame can ever read through a mask again). -->
-    <color name="ic_launcher_background">#9BF67C</color>
+    <!-- The window before Compose has drawn a frame: the same paper the
+         light scheme uses for its background (Palette.Cream.t98), so the
+         launch never flashes a different color. Night has its own value. -->
+    <color name="haven_window">#FCF9EF</color>
 </resources>

@@ -97,22 +97,47 @@ const val FRONT_DOOR_LIVE_STREAM_SWITCH_ID = "switch.front_door_live_stream"
 const val FRONT_DOOR_BATTERY_SENSOR_ID = "sensor.front_door_battery"
 
 /**
- * Front Door live probe (Round 5 Bug C): the ring-mqtt live camera
- * for the same doorbell — verified present in the HA template
- * export (state idle, with ring-mqtt siblings). The core Ring
- * integration's camera.front_door_live_view proxy serves only the
- * last motion recording MP4, so it can never be the live path; when
- * switch.front_door_live_stream is on, the panel streams THIS
- * entity's proxy instead (its source is the live ring-mqtt feed),
- * after a ~2s settle wait for the switch to report on. Frames from
- * this entity earn the LIVE badge; frames from the live_view proxy
- * never do (see frontDoorShowsLiveBadge).
+ * The doorbell's second camera entity. It was long taken for ring-mqtt's
+ * live camera, and it is not one: its siblings in the entity list
+ * (button.front_door_69a1_identify, two switch.front_door_69a1_mute, the
+ * event.front_door_69a1 pair) are what the HomeKit Device integration
+ * creates, and that integration's cameras serve still snapshots, never a
+ * stream. Frames from its proxy were never confirmed live on a phone.
+ * It stays as a picture source behind the live stream; the name of the
+ * constant is historical.
  */
 const val FRONT_DOOR_RING_MQTT_CAMERA_ID = "camera.front_door_69a1"
 
-/** ring-mqtt's RTSP listener on the Pi (port 8554) + the front-door feed path. */
+/**
+ * ring-mqtt's RTSP listener on the Home Assistant host (port 8554) and
+ * the front door's live feed path. This is the only transport Haven has
+ * that is the doorbell's actual live video. The path is the fallback for
+ * when [FRONT_DOOR_INFO_SENSOR_ID] does not name one.
+ */
 const val FRONT_DOOR_RTSP_PORT = 8554
 const val FRONT_DOOR_RTSP_PATH = "5c475ecd13a7_live"
+
+/** ring-mqtt's info sensor for the doorbell; its attributes carry the stream's RTSP address. */
+const val FRONT_DOOR_INFO_SENSOR_ID = "sensor.front_door_info"
+
+/**
+ * The live feed's path as ring-mqtt itself reports it. The info sensor
+ * carries the stream address as an attribute, addressed to the add-on's
+ * internal hostname (rtsp://03cabcc9-ring-mqtt:8554/<id>_live); only the
+ * path is usable from a phone, so only the path is taken. Any attribute
+ * holding an rtsp:// address that ends in _live counts, whatever its key
+ * is called. Null when there is none, and the caller keeps the default.
+ */
+fun ringMqttLivePath(attributes: Map<String, Any?>?): String? {
+    if (attributes == null) return null
+    for (value in attributes.values) {
+        val url = (value as? String)?.trim() ?: continue
+        if (!url.startsWith("rtsp://", ignoreCase = true) || !url.endsWith("_live")) continue
+        val path = url.substringAfter("://").substringAfter('/', "")
+        if (path.isNotEmpty() && path.none { it.isWhitespace() }) return path
+    }
+    return null
+}
 
 /**
  * Round 21, item 3: the ring-mqtt RTSP URL for the front door,
@@ -123,12 +148,25 @@ const val FRONT_DOOR_RTSP_PATH = "5c475ecd13a7_live"
  * URL the app already connects through. IPv6 hosts are bracketed.
  * Pure (no Android types) so it is unit tested.
  */
-fun frontDoorRtspUrl(instanceUrl: String?): String? {
+fun frontDoorRtspUrl(instanceUrl: String?, path: String = FRONT_DOOR_RTSP_PATH): String? {
     val host = connectionHostOf(instanceUrl) ?: return null
     if (!isLocalAddress(instanceUrl)) return null
     val hostPart = if (host.contains(":")) "[$host]" else host
-    return "rtsp://$hostPart:$FRONT_DOOR_RTSP_PORT/$FRONT_DOOR_RTSP_PATH"
+    return "rtsp://$hostPart:$FRONT_DOOR_RTSP_PORT/$path"
 }
+
+/**
+ * What the Front Door panel says when it is not showing live video,
+ * so a recording is never mistaken for the door right now and the
+ * reason is on the screen. [rtspUrl] null means the phone is not on the
+ * home network (the stream exists only there); otherwise the stream was
+ * tried at that address and did not answer, which is worth naming:
+ * the usual cause is the ring-mqtt add-on's RTSP port not being opened
+ * to the network.
+ */
+fun frontDoorNotLiveLine(rtspUrl: String?): String =
+    if (rtspUrl == null) "Live view needs your home network · Showing latest recording"
+    else "Live stream not answering at ${rtspUrl.substringAfter("://").substringBefore('/')} · Showing latest recording"
 
 /**
  * Front-door source resolution (camera fallback round, 2026-11-04):
@@ -201,32 +239,15 @@ fun frontDoorShowsLiveBadge(
 ): Boolean = webrtcFrames || rtspFrames || (mjpegFrames && liveSwitchOn)
 
 /**
- * Feedback round 19, item 4: the Front Door quadrant badge rule,
- * pure so it is unit tested. The quadrant shows the green LIVE
- * badge ONLY when the resolved front-door source is the ring-mqtt
- * live camera (camera.front_door_69a1) and no stream error is
- * reported; every other case — fallback live_view feed, both
- * sources down, a stream error — shows Recording. Built
- * literally per the round spec: a healthy fallback feed still
- * reads Recording, because the LIVE source is what is down.
- * The quadrant renders snapshots, not a live stream, so it has
- * no quadrant-level stream error to report — the call site
- * passes false, and the panel keeps its own stream-error UI.
- * The resolver already treats "unavailable" as down, so a
- * resolved 69a1 source is by construction present and available;
- * [streamError] covers only a load failure on top of that.
- *
- * Round 21, item 3 (SUPERSEDES the round-19 reading above for
- * the fallback): once the RTSP fallback has proven itself
- * streaming this session ([rtspProven] — set on the panel's
- * RTSP first frame, cleared on an RTSP error), the fallback
- * feed IS live, so the quadrant reads LIVE for it too. Before
- * any proof the quadrant stays Recording: the badge is earned
- * by frames, never by the attempt.
+ * Whether the Front Door quadrant on Home may wear the LIVE badge. The
+ * quadrant draws snapshots, so it has no frames of its own to go by: it
+ * reads LIVE only once the panel's live stream has actually produced a
+ * frame this session ([rtspProven], cleared again on a stream error).
+ * Which entity the picture comes from does not earn the badge, and
+ * neither does an attempt.
  */
 fun frontDoorQuadrantShowsLive(resolvedSource: String?, streamError: Boolean, rtspProven: Boolean = false): Boolean =
-    (resolvedSource == FRONT_DOOR_RING_MQTT_CAMERA_ID && !streamError) ||
-        (resolvedSource == FRONT_DOOR_LIVE_VIEW_ID && rtspProven && !streamError)
+    resolvedSource != null && rtspProven && !streamError
 
 /**
  * Pulls the HLS playlist URL out of a WS `camera/stream` result message.

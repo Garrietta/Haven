@@ -1,18 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Light parent kept deliberately: Theme.Material3.DayNight.NoActionBar
-         does not link in this material3 version (AAPT "not found" broke run
-         #42). The dark-mode login fix does NOT depend on the window theme:
-         LoginScreen and the OAuth container paint the scheme background
-         themselves, so the visible background always matches the scheme
-         text. The window background only shows pre-first-frame. -->
+    <!-- The window theme. Compose draws everything, so this only decides
+         what is behind the first frame: the window background is the
+         scheme's own background color (paper by day, black by night,
+         see colors.xml), which is what keeps launch and screen exits
+         from flashing.
+
+         The parent is a platform theme on purpose: the app ships no
+         View-system Material library, so Theme.Material3.* does not
+         exist here.
+
+         There is no windowLightStatusBar: the status bar icon color is
+         set from Compose (StatusBarAppearance), because the app's own
+         Light/Dark setting can differ from the system's. -->
     <style name="Theme.Haven" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/haven_window</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <!-- NOTE: no windowLightStatusBar here on purpose. The icon color is
-             driven dynamically from the background luminance in Compose
-             (StatusBarAppearance in HavenApp, Koda's approach): a hardcoded
-             value is wrong in one theme or the other, and with the transparent
-             bar it made dark-theme icons invisible. -->
+    </style>
+
+    <!-- The launch screen: the mark on the window color, then straight
+         into Theme.Haven (MainActivity calls installSplashScreen). -->
+    <style name="Theme.Haven.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/haven_window</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/haven_splash</item>
+        <item name="postSplashScreenTheme">@style/Theme.Haven</item>
     </style>
 </resources>

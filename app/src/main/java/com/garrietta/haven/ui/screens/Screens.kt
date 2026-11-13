@@ -16,6 +16,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -89,8 +90,8 @@ import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.ui.components.PillSwitch
 import com.garrietta.haven.data.domainSwitchColors
 import com.garrietta.haven.data.hasImportantAlert
-import com.garrietta.haven.data.migrateRound3Hidden
-import com.garrietta.haven.data.migrateRound3SectionOrder
+import com.garrietta.haven.data.migrateLegacyHiddenSections
+import com.garrietta.haven.data.migrateLegacySectionOrder
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.data.customTitleFor
 import com.garrietta.haven.data.customIconKeyFor
@@ -143,10 +144,10 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
 import com.garrietta.haven.data.UpdateSummary
 import com.garrietta.haven.data.updatesSummary
-import com.garrietta.haven.ui.components.KodaMenuDivider
-import com.garrietta.haven.ui.components.KodaMenuGroup
-import com.garrietta.haven.ui.components.KodaMenuRow
-import com.garrietta.haven.ui.components.KodaMenuSection
+import com.garrietta.haven.ui.components.MenuDivider
+import com.garrietta.haven.ui.components.MenuGroup
+import com.garrietta.haven.ui.components.MenuRow
+import com.garrietta.haven.ui.components.MenuSection
 import com.garrietta.haven.ui.components.LocalWideLayout
 import com.garrietta.haven.ui.theme.ExpressiveKind
 import com.garrietta.haven.ui.theme.springSpatial
@@ -209,7 +210,12 @@ import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID
+import com.garrietta.haven.data.HeadlineAction
+import com.garrietta.haven.data.HomeHeadline
+import com.garrietta.haven.data.HomeSubline
 import com.garrietta.haven.data.Placement
+import com.garrietta.haven.data.homeHeadline
+import com.garrietta.haven.data.homeSubline
 import com.garrietta.haven.data.frontDoorQuadrantShowsLive
 import com.garrietta.haven.data.frontDoorResolverStates
 import com.garrietta.haven.data.resolveFrontDoorCameraSource
@@ -217,13 +223,44 @@ import com.garrietta.haven.data.tabPlacementFor
 import com.garrietta.haven.data.displayCameraName
 import com.garrietta.haven.data.isRingCamera
 import java.util.Calendar
+import com.garrietta.haven.ui.theme.Palette
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.HavenLockup
+import com.garrietta.haven.ui.theme.HavenChrome
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import com.garrietta.haven.ui.components.HavenMark
+import com.garrietta.haven.ui.components.HavenWordmark
+import com.garrietta.haven.ui.theme.leafCard
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import com.garrietta.haven.ui.components.ScreenTitle
+import com.garrietta.haven.ui.components.choiceChipColors
 
+/**
+ * Sign-in. One job, so one clear path: the address of the user's Home
+ * Assistant (typed, or picked from the instances found on the network),
+ * then "Sign in". The long-lived token route does the same job for
+ * setups the browser flow cannot reach; it is one tap away behind a
+ * disclosure instead of sharing the screen with the main path.
+ *
+ * The screen paints the scheme background itself, in both themes, so the
+ * text on it is always the scheme's text on the scheme's ground.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LoginScreen(vm: HavenViewModel) {
     var url by remember { mutableStateOf(vm.tokenStore.instanceUrl ?: "") }
     var token by remember { mutableStateOf("") }
-    // The authorize page renders in-app (see OAuthWebViewScreen): Chrome's stack
-    // cannot load this phone's instance, so no browser-based flow is used.
+    var showToken by rememberSaveable { mutableStateOf(false) }
+    // The authorize page renders in-app (see OAuthWebViewScreen): the
+    // phone's browser cannot always reach a LAN instance.
     var oauthUrl by remember { mutableStateOf<String?>(null) }
     if (oauthUrl != null) {
         BackHandler { oauthUrl = null }
@@ -231,166 +268,233 @@ fun LoginScreen(vm: HavenViewModel) {
         return
     }
     val discovered by vm.discoveredInstances.collectAsState()
-    val connecting = vm.connection.collectAsState().value is ConnectionState.Connecting ||
-        vm.connection.collectAsState().value is ConnectionState.Authenticating
+    val conn = vm.connection.collectAsState().value
+    val connecting = conn is ConnectionState.Connecting || conn is ConnectionState.Authenticating
+    val busy = connecting || vm.probing
     // mDNS discovery runs only while the login screen is visible.
     DisposableEffect(Unit) {
         vm.discovery.startMdns()
         onDispose { vm.discovery.stopMdns() }
     }
-    Column(
-        // The login screen paints the scheme background itself: without
-        // this, the window background showed through — white under the
-        // Light activity theme — so dark-mode text was light-on-white and
-        // unreadable, and the screen "bounced" to dark after sign-in when
-        // the Scaffold painted. The DayNight activity theme covers the
-        // window; this covers the content, in both modes, with no
-        // hardcoded color.
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp),
-        verticalArrangement = Arrangement.Center,
+    val scheme = MaterialTheme.colorScheme
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(scheme.background).statusBarsPadding().navigationBarsPadding().imePadding(),
+        contentAlignment = Alignment.TopCenter,
     ) {
-        Text("Haven", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Text(
-            "Your home, designed — not a web page in a frame.",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(24.dp))
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it },
-            label = { Text("Home Assistant URL") },
-            placeholder = { Text("https://home.example.com") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "Find on my network",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(4.dp))
-        if (discovered.isEmpty()) {
+        Column(
+            // At least as tall as the window, so a short form sits in
+            // the middle of a tall screen instead of hanging from the top.
+            Modifier.widthIn(max = 480.dp).fillMaxWidth().verticalScroll(rememberScrollState())
+                .heightIn(min = maxHeight)
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            // Brand
+            HavenMark(Modifier.size(88.dp), turning = true)
+            Spacer(Modifier.height(20.dp))
+            HavenWordmark(fontSize = 44.sp)
+            Spacer(Modifier.height(4.dp))
             Text(
-                "Looking for Home Assistant on your Wi-Fi…",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                "Home Assistant, designed.",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurfaceVariant,
             )
-        } else {
-            for (instance in discovered) {
-                Row(
-                    Modifier.fillMaxWidth().clickable {
-                        url = instance.url
-                        vm.preflight(instance.url) {}
-                    }.padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(instance.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                        Text(instance.url, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(28.dp))
+
+            // Where is your home?
+            Surface(color = scheme.surfaceContainerLow, shape = leafCard(0)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = { url = it },
+                        label = { Text("Home Assistant address") },
+                        placeholder = { Text("https://home.example.com") },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SectionTitle("On your network", Modifier.weight(1f))
+                        TextButton(onClick = { vm.scanNetwork() }, enabled = !vm.scanning) {
+                            Text(if (vm.scanning) "Scanning…" else "Scan")
+                        }
                     }
+                    if (discovered.isEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LoadingIndicator(Modifier.size(20.dp), color = scheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Looking for Home Assistant on your Wi-Fi…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        for (instance in discovered) {
+                            val picked = instance.url == url
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .background(if (picked) scheme.primaryContainer else scheme.surfaceContainerHigh)
+                                    .clickable {
+                                        url = instance.url
+                                        vm.preflight(instance.url) {}
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        instance.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (picked) scheme.onPrimaryContainer else scheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        instance.url,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (picked) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Text(
+                                    if (instance.source == DiscoverySource.MDNS) "Nearby" else "Scan",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (picked) scheme.onPrimaryContainer else scheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    vm.scanMessage?.let { message ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(message, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+
+            // The main path
+            Button(
+                onClick = {
+                    if (url.isNotBlank()) {
+                        // Pre-flight first: a dead address gets an explanation
+                        // here instead of a dead page. On success the authorize
+                        // page opens in-app (OAuthWebViewScreen).
+                        vm.preflight(url) { clean ->
+                            oauthUrl = vm.startOAuth(clean).toString()
+                        }
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) { Text("Sign in with Home Assistant", style = MaterialTheme.typography.titleSmall) }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Opens your instance's sign-in page inside Haven.",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+
+            // Status: what is happening, or what went wrong, right under the action.
+            if (busy) {
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LoadingIndicator(Modifier.size(24.dp), color = scheme.primary)
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        if (instance.source == DiscoverySource.MDNS) "Nearby" else "Scan",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
+                        if (vm.probing) "Checking that address…" else "Connecting…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
                     )
                 }
             }
-        }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = { vm.scanNetwork() },
-            enabled = !vm.scanning,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (vm.scanning) "Scanning…" else "Scan network") }
-        vm.scanMessage?.let { message ->
-            Spacer(Modifier.height(8.dp))
-            Text(message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = {
-                if (url.isNotBlank()) {
-                    // Pre-flight first: a dead address shows an in-app explanation
-                    // instead of a dead page. On success the authorize page opens
-                    // in-app (OAuthWebViewScreen), never in Chrome.
-                    vm.preflight(url) { clean ->
-                        oauthUrl = vm.startOAuth(clean).toString()
+            vm.probeOk?.let { ok ->
+                Spacer(Modifier.height(12.dp))
+                Text(ok, style = MaterialTheme.typography.bodyMedium, color = scheme.primary)
+            }
+            val problem = vm.authError ?: (conn as? ConnectionState.Error)?.message
+            if (problem != null) {
+                Spacer(Modifier.height(12.dp))
+                Surface(color = scheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+                    Text(
+                        problem,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onErrorContainer,
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // The other path
+            Surface(color = scheme.surfaceContainerLow, shape = leafCard(1)) {
+                Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { showToken = !showToken }.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Use an access token instead",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = scheme.onSurface,
+                            )
+                            Text(
+                                "Works when the sign-in page can't be reached.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            if (showToken) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            contentDescription = if (showToken) "Hide" else "Show",
+                            tint = scheme.onSurfaceVariant,
+                        )
+                    }
+                    AnimatedVisibility(visible = showToken) {
+                        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                            OutlinedTextField(
+                                value = token,
+                                onValueChange = { token = it },
+                                label = { Text("Long-lived access token") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            FilledTonalButton(
+                                onClick = {
+                                    if (url.isNotBlank() && token.isNotBlank()) {
+                                        vm.preflight(url) { clean -> vm.loginWithToken(clean, token.trim()) }
+                                    }
+                                },
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                            ) { Text("Connect with token") }
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "Create one in Home Assistant under Profile → Security → Long-lived access tokens.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Sign in with Home Assistant") }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Opens the sign-in page inside Haven.",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(20.dp))
-        Text(
-            "Long-lived access token — no browser needed",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            "Signs in directly from the app, so it works even when the phone's browser can't reach your instance.",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = token,
-            onValueChange = { token = it },
-            label = { Text("Long-lived access token") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(
-            onClick = {
-                if (url.isNotBlank() && token.isNotBlank()) {
-                    vm.preflight(url) { clean -> vm.loginWithToken(clean, token.trim()) }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Connect with token") }
-        if (connecting || vm.probing) {
-            Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(20.dp))
-                Text(
-                    if (vm.probing) "Checking that address…" else "Connecting…",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp),
-                )
             }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Haven talks only to your own instance. Tokens are encrypted on this device and never sent anywhere else.",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
-        vm.probeOk?.let { ok ->
-            Spacer(Modifier.height(16.dp))
-            Text(ok, color = MaterialTheme.colorScheme.primary)
-        }
-        vm.authError?.let { error ->
-            Spacer(Modifier.height(16.dp))
-            Text(error, color = MaterialTheme.colorScheme.error)
-        }
-        val conn = vm.connection.collectAsState().value
-        if (conn is ConnectionState.Error) {
-            Spacer(Modifier.height(8.dp))
-            Text(conn.message, color = MaterialTheme.colorScheme.error)
-        }
-        Spacer(Modifier.height(24.dp))
-        Text(
-            "Long-lived tokens live in your Home Assistant profile: Profile → Long-Lived Access Tokens → Create Token. Haven encrypts tokens on-device and never sends them anywhere except your instance.",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -405,6 +509,8 @@ fun TodayScreen(
     homeRightScrollState: ScrollState,
     navigate: (Screen) -> Unit,
     onReconnectTap: () -> Unit,
+    /** Switches to a tab, as the bar does. */
+    openTab: (Screen) -> Unit = navigate,
 ) {
     val states by vm.states.collectAsState()
     val connection by vm.connection.collectAsState()
@@ -422,7 +528,7 @@ fun TodayScreen(
     // the automatic time-based greeting exactly as before.
     val customWelcome = vm.settingsStore.homeWelcomeMessage
     val greeting = if (customWelcome.isBlank()) autoGreeting else customWelcome
-    val hiddenSections = migrateRound3Hidden(vm.settingsStore.homeHiddenSections)
+    val hiddenSections = migrateLegacyHiddenSections(vm.settingsStore.homeHiddenSections)
     val showSection: (String) -> Boolean = { it !in hiddenSections }
     val entities = states.values
     val weather = entities.firstOrNull { it.domain == "weather" }
@@ -481,9 +587,31 @@ fun TodayScreen(
     // then who's-home, then rooms. Weather and who's-home are plain
     // composables too (WeatherBlock, PresenceBlock), shared by the folded
     // LazyColumn and the unfolded scrolling Column.
+    // The sentence that opens Home, unless the owner wrote a welcome of
+    // their own. It speaks for the devices that live in rooms: a light
+    // group or a helper outside every room would be counted twice.
+    val roomDevices = membership.values.flatten().distinct().mapNotNull(states::get)
+    val headline = if (customWelcome.isBlank() && states.isNotEmpty()) homeHeadline(roomDevices) else null
+    val subline = homeSubline(roomDevices, weather)
+    // A tap on a state word puts that thing back to rest. Unlocking is
+    // the one change the sentence never makes by itself: "locked" opens
+    // the lock's own control instead.
+    val headlineAction: (HeadlineAction) -> Unit = { action ->
+        when (action) {
+            is HeadlineAction.TurnOff -> action.ids.forEach(vm::turnOff)
+            is HeadlineAction.Close -> action.ids.forEach(vm::toggleCover)
+            is HeadlineAction.Lock -> action.ids.forEach(vm::toggleLock)
+            is HeadlineAction.Dock -> action.ids.forEach { vm.callService("vacuum", "return_to_base", it) }
+            is HeadlineAction.Pause -> action.ids.forEach { vm.callService("media_player", "media_pause", it) }
+            is HeadlineAction.Show -> navigate(Screen.EntityDetail(action.id))
+        }
+    }
+    // The temperature under the sentence opens the Climate tab, where every
+    // thermostat and reading is, rather than one thermostat's popup.
+    val openThermostat: (String) -> Unit = { openTab(Screen.Climate) }
     val greetingSection: LazyListScope.() -> Unit = {
         item {
-            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap)
+            GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline, headlineAction, openThermostat)
         }
     }
     val weatherSection: LazyListScope.() -> Unit = {
@@ -502,16 +630,16 @@ fun TodayScreen(
     // Visual-fidelity round §4: the combined block is split into
     // four independently gated blocks (see Round3Panels).
     val round3SecuritySection: LazyListScope.() -> Unit = {
-        if (showSection("round3-security")) item { Round3SecurityBlock(vm, states, navigate) }
+        if (showSection("round3-security")) item { SecurityBlock(vm, states, navigate) }
     }
     val round3VacuumSection: LazyListScope.() -> Unit = {
-        if (showSection("round3-vacuum")) item { Round3VacuumBlock(vm, states, navigate) }
+        if (showSection("round3-vacuum")) item { VacuumBlock(vm, states, navigate) }
     }
     val round3MediaSection: LazyListScope.() -> Unit = {
-        if (showSection("round3-media")) item { Round3MediaBlock(vm, states, navigate) }
+        if (showSection("round3-media")) item { MediaBlock(vm, states, navigate) }
     }
     val round3GreenhouseSection: LazyListScope.() -> Unit = {
-        if (showSection("round3-greenhouse")) item { Round3GreenhouseBlock(vm, states, navigate) }
+        if (showSection("round3-greenhouse")) item { GreenhouseBlock(vm, states, navigate) }
     }
     // Visible room sections, in HA order, after the hidden-section
     // filter: one (areaId, heading, member ids) triple per room,
@@ -584,9 +712,21 @@ fun TodayScreen(
     // item 3 — never inside a pane composable, and never in
     // TodayScreen's remember): the selection survives popup
     // opens, detail returns, and fold/unfold posture changes.
+    // My Home lists the rooms as cards; a card opens that room's view,
+    // where the chips are the way to hop to another room or back. The
+    // cards follow the same placement rule the chips do, and tabs the
+    // owner placed among the chips keep a row of their own.
+    val roomCards = allRooms.filter { it.areaId == null || vm.roomPlacement(it.areaId) == Placement.ROOM_CHIP }
+    val tabChips = buildHomeChips(
+        emptyList(), roomFilter, vm::roomPlacement, vm.userTabs,
+        onRoomFilter = {}, onNavigateTab = { navigate(it) },
+    ).drop(1)
+    // A card opens its room as a popup that grows out of the card.
+    val openRoom: (RoomSection) -> Unit = { room -> navigate(Screen.RoomPanel(room.areaId)) }
+    BackHandler(enabled = isRoomView) { vm.roomFilter = RoomFilter.All }
     val wide = LocalWideLayout.current
     val sectionOrder = resolveOrder(
-        migrateRound3SectionOrder(vm.settingsStore.homeSectionOrder()),
+        migrateLegacySectionOrder(vm.settingsStore.homeSectionOrder()),
         HOME_SECTION_ORDER_DEFAULT,
     )
     if (!wide) {
@@ -607,8 +747,24 @@ fun TodayScreen(
                 // below render in the stored section order — the greeting
                 // is the pinned header and is not orderable.
                 greetingSection()
-                item { RoomFilterChips(roomChips) }
-                item { Spacer(Modifier.height(12.dp)) }
+                if (isRoomView) {
+                    item { RoomFilterChips(roomChips) }
+                    item { Spacer(Modifier.height(12.dp)) }
+                } else {
+                    if (tabChips.isNotEmpty()) {
+                        item { RoomFilterChips(tabChips) }
+                        item { Spacer(Modifier.height(12.dp)) }
+                    }
+                    itemsIndexed(roomCards, key = { _, room -> "roomcard:${room.areaId ?: "unassigned"}" }) { index, room ->
+                        RoomCard(
+                            vm, room, states, index, navigate,
+                            onOpen = { openRoom(room) },
+                            modifier = Modifier.padding(bottom = 10.dp),
+                            resting = room.areaId == null,
+                        )
+                    }
+                    item { Spacer(Modifier.height(6.dp)) }
+                }
                 for (key in sectionOrder) {
                     when (key) {
                         "cameras" -> if (showSection("cameras") && !isRoomView) item { CameraQuadrantHero(vm, navigate, states) }
@@ -617,7 +773,7 @@ fun TodayScreen(
                         // Stage D: Home Status (real entities only,
                         // inline reveal) then Favorites, both hideable
                         // like every other section.
-                        "status" -> if (showSection("status") && !isRoomView) item { HomeStatusSection(vm, states, navigate) }
+                        "status" -> if (showSection("status") && !isRoomView && headline == null) item { HomeStatusSection(vm, states, navigate) }
                         "favorites" -> if (showSection("favorites") && !isRoomView) item { FavoritesSection(vm, states, navigate) }
                         "round3-security" -> if (!isRoomView) round3SecuritySection()
                         "round3-vacuum" -> if (!isRoomView) round3VacuumSection()
@@ -661,9 +817,14 @@ fun TodayScreen(
             Column(
                 Modifier.weight(0.42f).verticalScroll(homeLeftScrollState),
             ) {
-                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap)
-                RoomFilterChips(roomChips)
-                Spacer(Modifier.height(12.dp))
+                GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline, headlineAction, openThermostat)
+                if (isRoomView) {
+                    RoomFilterChips(roomChips)
+                    Spacer(Modifier.height(12.dp))
+                } else if (tabChips.isNotEmpty()) {
+                    RoomFilterChips(tabChips)
+                    Spacer(Modifier.height(12.dp))
+                }
                 // Round 25, item 5 (scoped exception to round 18,
                 // item 1): on unfolded, Cameras + Home Status stay
                 // in the left pane on room views too — the left side
@@ -683,7 +844,7 @@ fun TodayScreen(
                 // status -> favorites already holds in
                 // HOME_SECTION_ORDER_DEFAULT and is unchanged.
                 // Round 25, item 5: stays visible on room views.
-                if (showSection("status")) HomeStatusSection(vm, states, navigate)
+                if (showSection("status") && headline == null) HomeStatusSection(vm, states, navigate)
             }
             Spacer(Modifier.width(16.dp))
             BoxWithConstraints(Modifier.weight(0.58f)) {
@@ -696,6 +857,18 @@ fun TodayScreen(
                 Column(
                     Modifier.fillMaxSize().verticalScroll(homeRightScrollState),
                 ) {
+                    if (!isRoomView) {
+                        Spacer(Modifier.height(16.dp))
+                        roomCards.forEachIndexed { index, room ->
+                            RoomCard(
+                                vm, room, states, index, navigate,
+                                onOpen = { openRoom(room) },
+                                resting = room.areaId == null,
+                            )
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
                     if (showSection("favorites") && !isRoomView) {
                         FavoritesSection(vm, states, navigate, columnsOverride = gridColumns, spacing = 14.dp)
                     }
@@ -718,10 +891,10 @@ fun TodayScreen(
                             // "status" is placed by the left pane
                             // (item 9) — never here, never twice.
                             "status" -> { }
-                            "round3-security" -> if (showSection("round3-security") && !isRoomView) Round3SecurityBlock(vm, states, navigate)
-                            "round3-vacuum" -> if (showSection("round3-vacuum") && !isRoomView) Round3VacuumBlock(vm, states, navigate)
-                            "round3-media" -> if (showSection("round3-media") && !isRoomView) Round3MediaBlock(vm, states, navigate)
-                            "round3-greenhouse" -> if (showSection("round3-greenhouse") && !isRoomView) Round3GreenhouseBlock(vm, states, navigate)
+                            "round3-security" -> if (showSection("round3-security") && !isRoomView) SecurityBlock(vm, states, navigate)
+                            "round3-vacuum" -> if (showSection("round3-vacuum") && !isRoomView) VacuumBlock(vm, states, navigate)
+                            "round3-media" -> if (showSection("round3-media") && !isRoomView) MediaBlock(vm, states, navigate)
+                            "round3-greenhouse" -> if (showSection("round3-greenhouse") && !isRoomView) GreenhouseBlock(vm, states, navigate)
                             "rooms" -> for (section in visibleRooms) {
                                 RoomSectionGrid(section.name, section.members, states, vm, gridColumns, navigate, section.iconKey, spacing = 14.dp, areaId = section.areaId)
                                 Spacer(Modifier.height(16.dp))
@@ -825,6 +998,11 @@ internal fun buildHomeChips(
     }
 }
 
+/**
+ * The row of rooms under the greeting. A selected chip is the lime
+ * capsule, the same signal as the selected tab in the navigation bar:
+ * in Haven, lime means "this one", by day and by night.
+ */
 @Composable
 private fun RoomFilterChips(
     chips: List<HomeChip>,
@@ -835,19 +1013,17 @@ private fun RoomFilterChips(
     ) {
         for (chip in chips) {
             val isSelected = chip.selected
-            val glyphColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+            val glyphColor = if (isSelected) HavenChrome.onCapsule
             else MaterialTheme.colorScheme.onSurfaceVariant
             Box(
-                Modifier.clip(RoundedCornerShape(50))
+                Modifier.clip(CircleShape)
                     .background(
-                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainer,
+                        if (isSelected) HavenChrome.capsule
+                        else MaterialTheme.colorScheme.surfaceContainerHigh,
                     )
                     .clickable { chip.onClick() }
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
-                // Stage G: a room's chosen icon rides in its chip
-                // (Filled variant; unknown keys render no icon).
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val icon = chip.iconKey?.let { tabIconPairForKey(it)?.first }
                     if (icon != null) {
@@ -856,8 +1032,8 @@ private fun RoomFilterChips(
                     }
                     Text(
                         chip.label,
-                        fontSize = 14.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         color = glyphColor,
                         maxLines = 1,
                     )
@@ -877,7 +1053,7 @@ private fun RoomFilterChips(
  */
 @Composable
 private fun WeatherBlock(weather: HaEntity, vm: HavenViewModel, navigate: (Screen) -> Unit) {
-    Text("Weather", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    SectionTitle("Weather")
     Spacer(Modifier.height(8.dp))
     HomeWeatherCard(weather, vm, navigate)
     Spacer(Modifier.height(16.dp))
@@ -1007,7 +1183,7 @@ private fun RoomSectionGrid(
                 Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
             }
-            Text(name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f, fill = false))
+            SectionTitle(name, Modifier.weight(1f, fill = false))
             // Round 21, item 7: the Arrange button is gone — a
             // long-press on any card in this section enters
             // Arrange/resize mode instead (onArrangeToggle below).
@@ -1292,6 +1468,11 @@ fun homeCardShapeByIndex(index: Int): RoundedCornerShape = generalCardShape(inde
 fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, modifier: Modifier = Modifier, cardSize: CardSize = CardSize.NORMAL, navigate: (Screen) -> Unit) {
     val liveEntity by vm.entityFlow(entityId).collectAsState()
     val entity = liveEntity ?: return
+    // Press and hold opens the tile's options (color, icon, name, and
+    // Arrange where this grid has it); in Arrange mode it leaves Arrange.
+    val holdForOptions: () -> Unit = {
+        if (arrangeMode) onArrangeToggle?.invoke() else vm.openCardSettings(entity.entityId, onArrangeToggle)
+    }
     val snap = vm.travelSnapshots[entity.entityId]
     val display = snap ?: entity
     val scheme = MaterialTheme.colorScheme
@@ -1384,7 +1565,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
                 // item 5: navigate is non-null — every caller
                 // passes it, and the sheet fallback is gone.
                 onClick = { if (!arrangeMode) navigate(Screen.EntityDetail(entity.entityId)) },
-                onLongClick = { onArrangeToggle?.invoke() },
+                onLongClick = holdForOptions,
             ),
     ) {
         // Round 24, item 6: the Column fills the Surface height
@@ -1537,6 +1718,11 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // renders nothing (membership rebuilds without it).
     val liveEntity by vm.entityFlow(entityId).collectAsState()
     val entity = liveEntity ?: return
+    // Press and hold opens the tile's options (color, icon, name, and
+    // Arrange where this grid has it); in Arrange mode it leaves Arrange.
+    val holdForOptions: () -> Unit = {
+        if (arrangeMode) onArrangeToggle?.invoke() else vm.openCardSettings(entity.entityId, onArrangeToggle)
+    }
     val accent = accentFor(entity.entityId)
     // Snapshot-held visuals, same rule as tiles and cards: while this
     // card's morph is open, badge/name/state/container resolve from
@@ -1588,13 +1774,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     } else {
         null
     }
-    val cardColors = if (sensorKindForCard == SensorKind.TEMPERATURE ||
-        sensorKindForCard == SensorKind.HUMIDITY
-    ) {
-        null
-    } else {
-        domainCardColors(display, isDark)
-    }
+    val cardColors = domainCardColors(display, isDark)
     // Customization round, item 2: same-store overrides read here
     // as on every other surface (see CardSettings.kt for the list).
     val roomCustom = rememberCardCustom(vm)
@@ -1755,7 +1935,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 // zone split.) While in Arrange mode the tap is
                 // swallowed: no panel, no actuation.
                 onClick = { if (!arrangeMode) openPanel() },
-                onLongClick = { onArrangeToggle?.invoke() },
+                onLongClick = holdForOptions,
             ),
     ) {
         // Round 24, item 6: the Column fills the Surface height
@@ -1776,14 +1956,14 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                         interactionSource = zoneInteraction,
                         indication = null,
                         onClick = { if (!arrangeMode) vm.toggle(entity.entityId) },
-                        onLongClick = { onArrangeToggle?.invoke() },
+                        onLongClick = holdForOptions,
                     )
                 display.domain == "cover" -> Modifier.fillMaxWidth()
                     .combinedClickable(
                         interactionSource = zoneInteraction,
                         indication = null,
                         onClick = { if (!arrangeMode) vm.toggleCover(entity.entityId) },
-                        onLongClick = { onArrangeToggle?.invoke() },
+                        onLongClick = holdForOptions,
                     )
                 else -> Modifier
             }
@@ -1808,7 +1988,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                             interactionSource = badgeInteraction,
                             indication = null,
                             onClick = { if (!arrangeMode) shapeAction() },
-                            onLongClick = { onArrangeToggle?.invoke() },
+                            onLongClick = holdForOptions,
                         ) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1933,7 +2113,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                     interactionSource = textZoneInteraction,
                     indication = null,
                     onClick = { if (!arrangeMode) openPanel() },
-                    onLongClick = { onArrangeToggle?.invoke() },
+                    onLongClick = holdForOptions,
                 ),
             ) {
             Text(
@@ -1991,22 +2171,17 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
  * hidden, exactly as the old section did.
  */
 /**
- * Greeting + connection line (2026-11-01 polish round): a transient
- * connection loss is NEVER a red banner and never a modal — it is a
- * small inline spinner row in this exact slot, in-flow (it pushes
- * content down, it overlays nothing), which clears on its own the
- * moment the connection recovers. The row distinguishes three cases:
- * a retry already in flight (spinner + "Reconnecting…" when cached
- * content is on screen, "Connecting…" on a cold first load, so the
- * subtitle stays stable across Error <-> Connecting cycles during
- * an outage), a hard auth failure (no spinner — the token was
- * rejected and no retry is scheduled — inline variant-colored text
- * that taps through to sign in again), and plain Disconnected
- * (variant-colored "Not connected", no spinner). Retries are
- * indefinite, so there is no "retries exhausted" state to present:
- * the spinner simply stays until the connection recovers or the
- * failure turns into an auth rejection.
+ * The top of Home: the Haven lockup as a small signature, then the
+ * greeting as the one big line on the screen, then the connection state
+ * when there is something to say about it.
+ *
+ * The greeting is the hero rather than the app's name: it is the line
+ * that changes (time of day, or the user's own welcome message), and the
+ * brand does its work at signature size. [showGreeting] hides both, for
+ * users who turned the section off; the connection line always shows,
+ * because "not connected" must never be hidden by a layout preference.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun GreetingBlock(
     greeting: String,
@@ -2014,68 +2189,63 @@ private fun GreetingBlock(
     showGreeting: Boolean,
     hasCachedContent: Boolean,
     onReconnectTap: (() -> Unit)?,
+    /** The house in a sentence; null shows [greeting] instead. */
+    headline: HomeHeadline? = null,
+    subline: HomeSubline? = null,
+    onHeadlineAction: (HeadlineAction) -> Unit = {},
+    onThermostat: (String) -> Unit = {},
 ) {
     if (showGreeting) {
         Spacer(Modifier.height(16.dp))
-        // Mockup masthead (Gemini mockup round, 2026-11-01): the very
-        // large bold "Haven" masthead, with the greeting as the smaller
-        // gray subheading under it — the mockup's header, not a second
-        // greeting. The connection line below is untouched (#83).
-        Text("Haven", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
-        Spacer(Modifier.height(2.dp))
-        Text(greeting, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HavenLockup(markSize = 26.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(14.dp))
+        if (headline != null) {
+            HomeHeadlineText(headline, subline, onHeadlineAction, onThermostat)
+        } else {
+            Text(
+                greeting,
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+        }
     }
     if (!connection.isLive()) {
-        Spacer(Modifier.height(4.dp))
-        when (connection) {
-            is ConnectionState.Connecting, ConnectionState.Authenticating -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (hasCachedContent) "Reconnecting…" else "Connecting to your home…",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                    )
-                }
-            }
-            is ConnectionState.Error -> if (connection.retrying) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (hasCachedContent) "Reconnecting…" else "Connecting…",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                    )
-                }
-            } else {
-                // Round 25, item 1: the tap reconnects in place
-                // (vm.reconnectNow — refresh + reconnect, tokens
-                // untouched). It NEVER signs out; signOut lives only
-                // on the Settings screen's explicit button.
+        Spacer(Modifier.height(6.dp))
+        val waiting = connection is ConnectionState.Connecting ||
+            connection is ConnectionState.Authenticating ||
+            (connection is ConnectionState.Error && connection.retrying)
+        if (waiting) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LoadingIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(6.dp))
                 Text(
-                    "Sign-in expired — tap to reconnect",
+                    when {
+                        hasCachedContent -> "Reconnecting…"
+                        connection is ConnectionState.Error -> "Connecting…"
+                        else -> "Connecting to your home…"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 13.sp,
-                    modifier = if (onReconnectTap != null) Modifier.clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                    ) { onReconnectTap() } else Modifier,
                 )
             }
-            else -> Text(
-                "Not connected",
+        } else if (connection is ConnectionState.Error) {
+            Text(
+                "Sign-in expired — tap to reconnect",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp,
+                modifier = if (onReconnectTap != null) Modifier.clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) { onReconnectTap() } else Modifier,
+            )
+        } else {
+            Text(
+                "Not connected",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -2146,528 +2316,6 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
 }
 
 /**
- * Round 24, item 5: Settings sections are their own
- * composables so SettingsScreen can lay them in one column on
- * narrow screens and two columns on wide screens. Nothing here
- * is new — each section is the old SettingsScreen block, moved
- * verbatim (the Thermostat section is the exception: it moved
- * to ThermostatDisplayRangeRows in the thermostat popout).
- */
-@Composable
-private fun SettingsAppearanceSection(
-    themeMode: String,
-    reduceMotion: Boolean,
-    onThemeMode: (String) -> Unit,
-    onReduceMotion: (Boolean) -> Unit,
-    dynamicColor: Boolean,
-    onDynamicColor: (Boolean) -> Unit,
-) {
-    KodaMenuSection("Appearance")
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for ((value, label) in listOf("system" to "System", "light" to "Light", "dark" to "Dark")) {
-            FilterChip(
-                selected = themeMode == value,
-                onClick = { onThemeMode(value) },
-                label = { Text(label) },
-            )
-        }
-    }
-    Spacer(Modifier.height(8.dp))
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "appearance-motion",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.Autorenew,
-            title = "Reduce motion",
-            subtitle = "Keep animations instant and minimal",
-            onClick = null,
-            trailing = { Switch(checked = reduceMotion, onCheckedChange = onReduceMotion) },
-            flat = true,
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "appearance-dynamic-color",
-            badgeKind = ExpressiveKind.SUNNY,
-            icon = Icons.Filled.Palette,
-            title = "Dynamic color",
-            subtitle = "Follow your wallpaper colors instead of Haven's fixed sage and lime palette. Off by default.",
-            onClick = null,
-            trailing = { Switch(checked = dynamicColor, onCheckedChange = onDynamicColor) },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsBadgesSection(vm: HavenViewModel) {
-    // Stage E §9: condition badges — a dot, never a count.
-    // Device badges are the tiles' own state badges (always on:
-    // they carry tap actions, so they are not a preference).
-    KodaMenuSection("Badges")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "badges-nav",
-            badgeKind = ExpressiveKind.FLOWER,
-            icon = Icons.Filled.Visibility,
-            title = "Navigation badges",
-            subtitle = "Dot on the Home tab when a lock is unlocked, a door or window is open, or the alarm is triggered.",
-            onClick = null,
-            trailing = { Switch(checked = vm.badgeNav, onCheckedChange = { vm.badgeNav = it }) },
-            flat = true,
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "badges-room",
-            badgeKind = ExpressiveKind.WAVE,
-            icon = Icons.Filled.Home,
-            title = "Room badges",
-            subtitle = "Dot on a room heading when that room has an unlocked lock, open door or window, or triggered alarm.",
-            onClick = null,
-            trailing = { Switch(checked = vm.badgeRoom, onCheckedChange = { vm.badgeRoom = it }) },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsConnectionSection(
-    vm: HavenViewModel,
-    connection: ConnectionState,
-    onOpenDialog: () -> Unit,
-) {
-    KodaMenuSection("Connection")
-    KodaMenuGroup {
-        // Feedback round 16, item 7: the Instance row is
-        // tappable and shows Local vs Cloud for the
-        // EFFECTIVE target (anything not a local address
-        // reads Cloud). The subtitle recomputes when
-        // connectionPrefsVersion bumps (switch/save), so
-        // it always shows the live target, not a stale
-        // stored URL.
-        val connTick = vm.connectionPrefsVersion
-        val (connLabel, connTarget) = remember(connTick) { vm.connectionDisplay() }
-        KodaMenuRow(
-            badgeKey = "connection-instance",
-            badgeKind = ExpressiveKind.CLOUD,
-            icon = Icons.Filled.Wifi,
-            title = "Instance",
-            subtitle = connTarget?.let { "$connLabel · $it" } ?: "—",
-            onClick = onOpenDialog,
-            flat = true,
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "connection-status",
-            badgeKind = ExpressiveKind.CLOUD,
-            icon = Icons.Filled.Wifi,
-            title = "Status",
-            subtitle = when (connection) {
-                is ConnectionState.Connected -> "Connected"
-                is ConnectionState.Connecting -> "Connecting…"
-                is ConnectionState.Authenticating -> "Signing in…"
-                is ConnectionState.Error -> (connection as ConnectionState.Error).message
-                else -> "Disconnected"
-            },
-            onClick = null,
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsHomePageSection(navigate: (Screen) -> Unit) {
-    KodaMenuSection("Home page")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "home-manage",
-            badgeKind = ExpressiveKind.SUNNY,
-            icon = Icons.Filled.Home,
-            title = "Manage home page",
-            subtitle = "Choose your welcome message, which sections Home shows, and which lights count as Home lights. Indicator lights are hidden from Home by default and can be added back here.",
-            onClick = { navigate(Screen.HomeEditor) },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsRoomsSection(navigate: (Screen) -> Unit) {
-    KodaMenuSection("Rooms")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "rooms-manage",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.GridView,
-            title = "Rooms & tabs",
-            subtitle = "Rooms (saved to Home Assistant itself) and custom tabs, in one place — pick whether each one pins as a room chip, a navigation tab, or stays hidden.",
-            onClick = { navigate(Screen.RoomsTabs) },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsNotificationsSection(vm: HavenViewModel) {
-    KodaMenuSection("Notifications")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "notif-garage",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.Garage,
-            title = "Garage & door alerts",
-            subtitle = "Notify when a garage door or door opens",
-            onClick = null,
-            flat = true,
-            trailing = {
-                // Feedback round 16, item 3: default
-                // switch–text buffer.
-                Spacer(Modifier.width(12.dp))
-                Switch(checked = vm.notifyGarage, onCheckedChange = { vm.notifyGarage = it })
-            },
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "notif-motion",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.AutoMirrored.Filled.DirectionsRun,
-            title = "Motion alerts",
-            subtitle = "Notify when a motion sensor detects motion",
-            onClick = null,
-            flat = true,
-            trailing = {
-                Spacer(Modifier.width(12.dp))
-                Switch(checked = vm.notifyMotion, onCheckedChange = { vm.notifyMotion = it })
-            },
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "notif-lights",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.Lightbulb,
-            title = "Automated light alerts",
-            subtitle = "Notify when a light turns off by automation or externally — never for your own taps",
-            onClick = null,
-            flat = true,
-            trailing = {
-                Spacer(Modifier.width(12.dp))
-                Switch(checked = vm.notifyLights, onCheckedChange = { vm.notifyLights = it })
-            },
-        )
-        KodaMenuDivider()
-        NotificationPermissionRow()
-    }
-}
-
-@Composable
-private fun SettingsShapesSection(vm: HavenViewModel) {
-    KodaMenuSection("Shapes")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "shapes-badge",
-            badgeKind = ExpressiveKind.SUNNY,
-            icon = Icons.Filled.Palette,
-            title = "Badge shape",
-            subtitle = shapeLabel(vm.settingsStore.globalBadgeShape) ?: "Domain default",
-            onClick = { vm.openShapePicker(null, false) },
-            flat = true,
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "shapes-card",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.GridView,
-            title = "Card shape",
-            subtitle = shapeLabel(vm.settingsStore.globalCardShape) ?: "Default corners",
-            onClick = { vm.openShapePicker(null, true) },
-            flat = true,
-        )
-        KodaMenuDivider()
-        // Feedback round 15, item 5: per-domain defaults —
-        // badge shape, card shape, and tile color for one
-        // entity type (e.g. light), applying to every
-        // entity of that domain unless it has its own
-        // Card settings. Per-entity settings still win.
-        KodaMenuRow(
-            badgeKey = "shapes-domain",
-            badgeKind = ExpressiveKind.SUNNY,
-            icon = Icons.Filled.Tune,
-            title = "Domain defaults",
-            subtitle = "Default shapes and colors by entity type",
-            onClick = { vm.openDomainDefaults() },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsBrowseSection(navigate: (Screen) -> Unit) {
-    KodaMenuSection("Browse")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "browse-boards",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.Dashboard,
-            title = "Boards",
-            subtitle = "Your Lovelace dashboards",
-            onClick = { navigate(Screen.Dashboards) },
-            flat = true,
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "browse-areas",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.GridView,
-            title = "Areas",
-            subtitle = "Rooms and their entities",
-            onClick = { navigate(Screen.Areas) },
-            flat = true,
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "browse-search",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.Search,
-            title = "Search",
-            subtitle = "Find any entity",
-            onClick = { navigate(Screen.Search) },
-            flat = true,
-        )
-        KodaMenuDivider()
-        KodaMenuRow(
-            badgeKey = "browse-usertabs",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.GridView,
-            title = "User tabs",
-            subtitle = "Your custom tabs",
-            onClick = { navigate(Screen.UserTabs) },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsCreateHubSection(navigate: (Screen) -> Unit) {
-    // Round 24, item 5: the four Create rows collapsed into
-    // one hub row — the builders themselves are unchanged,
-    // they just open from the hub screen now.
-    KodaMenuSection("Create")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "create-hub",
-            badgeKind = ExpressiveKind.WAVE,
-            icon = Icons.Filled.Autorenew,
-            title = "Automations, scenes & helpers",
-            subtitle = "Guided builders for automations, scenes, scripts, and helpers — no YAML, no web UI.",
-            onClick = { navigate(Screen.BuilderHub) },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-private fun SettingsSystemSection(
-    vm: HavenViewModel,
-    updateSummary: UpdateSummary,
-    navigate: (Screen) -> Unit,
-) {
-    KodaMenuSection("System")
-    KodaMenuGroup {
-        KodaMenuRow(
-            badgeKey = "system-updates",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.SystemUpdate,
-            title = "System Updates",
-            subtitle = if (updateSummary.available == 0) {
-                "Everything is up to date (${updateSummary.total} sources tracked)"
-            } else {
-                "${updateSummary.available} update${if (updateSummary.available == 1) "" else "s"} available"
-            },
-            onClick = { navigate(Screen.UpdatesPanel) },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-fun SettingsScreen(
-    vm: HavenViewModel,
-    themeMode: String,
-    reduceMotion: Boolean,
-    onThemeMode: (String) -> Unit,
-    onReduceMotion: (Boolean) -> Unit,
-    dynamicColor: Boolean,
-    onDynamicColor: (Boolean) -> Unit,
-    onSignOut: () -> Unit,
-    navigate: (Screen) -> Unit,
-) {
-    val connection by vm.connection.collectAsState()
-    // Feedback round 16, item 7: the connection switcher dialog.
-    var connectionDialog by remember { mutableStateOf(false) }
-    val updateStates by vm.states.collectAsState()
-    val updateSummary = updatesSummary(updateStates)
-    // Koda Settings menu DNA: dark rounded rows with shaped icon badges,
-    // ALL-CAPS muted section headers, and bold title + muted subtitle
-    // rows with chevrons — on Haven's dynamic colors, not Koda's palette.
-    // The explanatory texts the old screen showed under each heading now
-    // live as the rows' subtitles, so nothing is lost in the restyle.
-    LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)
-            // Feedback round 18, item 6: opaque root so sub-screen
-            // transitions never overlap transparent text.
-            .background(MaterialTheme.colorScheme.background),
-        // Feedback round 16, item 8: the last row (Instance
-        // tile) must draw fully — the trailing reserve grows
-        // 16dp -> 32dp so the final row clears the bottom edge.
-        contentPadding = PaddingValues(bottom = 32.dp),
-    ) {
-        item {
-            Text("Settings", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            Spacer(Modifier.height(8.dp))
-            // Round 24, item 5: two columns on wide screens
-            // (left: Appearance through Notifications, right:
-            // Shapes through System plus Sign out), one column
-            // on narrow screens, same section order either way.
-            // The Thermostat section is gone from here — it
-            // lives in the thermostat popout now — and Create
-            // is one hub row.
-            if (LocalWideLayout.current) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column(Modifier.weight(1f)) {
-                        SettingsAppearanceSection(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor)
-                        Spacer(Modifier.height(16.dp))
-                        SettingsBadgesSection(vm)
-                        Spacer(Modifier.height(16.dp))
-                        SettingsConnectionSection(vm, connection) { connectionDialog = true }
-                        Spacer(Modifier.height(16.dp))
-                        SettingsHomePageSection(navigate)
-                        Spacer(Modifier.height(16.dp))
-                        SettingsRoomsSection(navigate)
-                        Spacer(Modifier.height(16.dp))
-                        SettingsNotificationsSection(vm)
-                    }
-                    Column(Modifier.weight(1f)) {
-                        SettingsShapesSection(vm)
-                        Spacer(Modifier.height(16.dp))
-                        SettingsBrowseSection(navigate)
-                        Spacer(Modifier.height(16.dp))
-                        SettingsCreateHubSection(navigate)
-                        Spacer(Modifier.height(16.dp))
-                        SettingsSystemSection(vm, updateSummary, navigate)
-                        Spacer(Modifier.height(24.dp))
-                        OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            "Haven v1.0 (debug). Native client — no WebView. Energy view, admin panels, widgets, Wear/Auto, and voice satellite are later rounds.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            } else {
-                SettingsAppearanceSection(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor)
-                Spacer(Modifier.height(16.dp))
-                SettingsBadgesSection(vm)
-                Spacer(Modifier.height(16.dp))
-                SettingsConnectionSection(vm, connection) { connectionDialog = true }
-                Spacer(Modifier.height(16.dp))
-                SettingsHomePageSection(navigate)
-                Spacer(Modifier.height(16.dp))
-                SettingsRoomsSection(navigate)
-                Spacer(Modifier.height(16.dp))
-                SettingsNotificationsSection(vm)
-                Spacer(Modifier.height(16.dp))
-                SettingsShapesSection(vm)
-                Spacer(Modifier.height(16.dp))
-                SettingsBrowseSection(navigate)
-                Spacer(Modifier.height(16.dp))
-                SettingsCreateHubSection(navigate)
-                Spacer(Modifier.height(16.dp))
-                SettingsSystemSection(vm, updateSummary, navigate)
-                Spacer(Modifier.height(24.dp))
-                OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Haven v1.0 (debug). Native client — no WebView. Energy view, admin panels, widgets, Wear/Auto, and voice satellite are later rounds.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-    // Feedback round 16, item 7: the connection switcher.
-    if (connectionDialog) {
-        ConnectionDialog(vm, onDismiss = { connectionDialog = false })
-    }
-}
-
-/**
- * Round 24, item 5: the builder hub — the old Create section
- * as its own screen, reached from Settings' single
- * "Automations, scenes & helpers" row. The four builders are
- * unchanged; this is just their entry point.
- */
-@Composable
-fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().background(MaterialTheme.colorScheme.background)) {
-        DetailTopBar("Automations, scenes & helpers", onBack)
-        LazyColumn(
-            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(bottom = 16.dp),
-        ) {
-            item {
-                Text(
-                    "Guided builders — no YAML, no web UI. Pick one to start.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
-                KodaMenuGroup {
-                    KodaMenuRow(
-                        badgeKey = "create-automation",
-                        badgeKind = ExpressiveKind.WAVE,
-                        icon = Icons.Filled.Autorenew,
-                        title = "Automation",
-                        subtitle = "Guided builder: pick a trigger, a condition, and an action — no YAML, no web UI.",
-                        onClick = { navigate(Screen.AutomationBuilder) },
-                        flat = true,
-                    )
-                    KodaMenuDivider()
-                    KodaMenuRow(
-                        badgeKey = "create-scene",
-                        badgeKind = ExpressiveKind.WAVE,
-                        icon = Icons.Filled.Palette,
-                        title = "Scene",
-                        subtitle = "Capture the current state of your devices",
-                        onClick = { navigate(Screen.SceneBuilder) },
-                        flat = true,
-                    )
-                    KodaMenuDivider()
-                    KodaMenuRow(
-                        badgeKey = "create-script",
-                        badgeKind = ExpressiveKind.WAVE,
-                        icon = Icons.Filled.Code,
-                        title = "Script",
-                        subtitle = "A reusable sequence of actions",
-                        onClick = { navigate(Screen.ScriptBuilder) },
-                        flat = true,
-                    )
-                    KodaMenuDivider()
-                    KodaMenuRow(
-                        badgeKey = "create-helper",
-                        badgeKind = ExpressiveKind.WAVE,
-                        icon = Icons.Filled.Build,
-                        title = "Helper",
-                        subtitle = "Input booleans, numbers, timers, and more",
-                        onClick = { navigate(Screen.HelperBuilder) },
-                        flat = true,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
  * Feedback round 16, item 7: the connection switcher dialog.
  * Mode + cloud URL save through [HavenViewModel.switchConnection],
  * which reconnects with the existing token (Nabu Casa remote UI
@@ -2678,7 +2326,7 @@ fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
  * permission involved): local on Wi-Fi, cloud elsewhere.
  */
 @Composable
-private fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
+internal fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
     var mode by remember { mutableStateOf(vm.connectionMode) }
     var cloudUrl by remember { mutableStateOf(vm.connectionCloudUrl ?: "") }
     val (label, target) = vm.connectionDisplay()
@@ -2754,7 +2402,7 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
     val camerasTab = vm.userTabs.firstOrNull { it.title == "Cameras" }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Cameras", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+            SectionTitle("Cameras", Modifier.weight(1f))
             if (camerasTab != null) {
                 TextButton(onClick = { navigate(Screen.UserTab(camerasTab.id)) }) { Text("See all") }
             }
@@ -2788,7 +2436,7 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
 }
 
 @Composable
-private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier, corners: RoundedCornerShape = RoundedCornerShape(0.dp)) {
+internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier, corners: RoundedCornerShape = RoundedCornerShape(0.dp)) {
     Box(
         modifier.padding(1.dp).clip(corners)
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -2930,7 +2578,7 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                         if (showLive) {
                             Box(
                                 Modifier.size(6.dp).clip(CircleShape)
-                                    .background(Color(0xFF4CAF50)),
+                                    .background(Palette.Lime),
                             )
                             Spacer(Modifier.width(4.dp))
                             Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -2952,7 +2600,7 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                         ) {
                             Box(
                                 Modifier.size(6.dp).clip(CircleShape)
-                                    .background(Color(0xFFFFC107)),
+                                    .background(Palette.Sun),
                             )
                             Spacer(Modifier.width(4.dp))
                             Text("Motion", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -2974,550 +2622,6 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
 }
 
 /**
- * Feedback round 19, item 5: the unified Rooms & tabs manager.
- * REPLACES RoomManagerScreen + TabManagerScreen (both deleted):
- * one Settings entry, "Rooms & tabs", with the rooms section
- * first (create/rename/delete/assign, writing through to real
- * Home Assistant exactly as before) and the tabs section second
- * (navigation switches, pill style, reset, tab editors, add tab,
- * exactly as before). Every room and every tab carries a
- * placement selector — Room chip (Home chip row), Nav tab
- * (bar/rail), or Hidden (neither surface, still manageable
- * here). Home and Settings stay locked by construction (they
- * have no selector); the 2-cap on bar extras counts pinned tabs
- * plus nav-tab rooms together, and the 6-total holds.
- */
-@Composable
-fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
-    val areas by vm.areas.collectAsState()
-    val entityAreas by vm.entityAreas.collectAsState()
-    val states by vm.states.collectAsState()
-    val deviceInfo by vm.deviceInfo.collectAsState()
-    val entityDevices by vm.entityDevices.collectAsState()
-    var addQuery by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf<String?>(null) }
-    var messageIsError by remember { mutableStateOf(false) }
-    var newRoomName by remember { mutableStateOf("") }
-    var renameText by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var deleteArmed by remember { mutableStateOf<String?>(null) }
-    var addFor by remember { mutableStateOf<String?>(null) }
-    var assignFor by remember { mutableStateOf<String?>(null) }
-    var newTabTitle by remember { mutableStateOf("") }
-    // (tabId, cardIndex, yaml) of the card currently in the YAML editor, if any.
-    var editingCard by remember { mutableStateOf<Triple<String, Int, String>?>(null) }
-    fun done(err: String?, ok: String) {
-        if (err != null) { message = err; messageIsError = true }
-        else { message = ok; messageIsError = false }
-    }
-
-    // Round 24, item 5: display-name + icon mirrors (moved
-    // here from Manage home page, whose duplicate Rooms block
-    // is gone) and the Up/Down reorder (mirrors HomeEditor's
-    // moveRoom: swap with the neighbour in stored room order,
-    // write setRoomOrder + bumpHomePrefs so the order persists).
-    var displayNames by remember { mutableStateOf(vm.settingsStore.roomDisplayNames()) }
-    var roomIcons by remember { mutableStateOf(vm.settingsStore.roomIconKeys()) }
-    fun moveRoom(areaId: String, up: Boolean) {
-        val order = resolveOrder(vm.settingsStore.roomOrder(), areas.map { it.id }).toMutableList()
-        val i = order.indexOf(areaId)
-        val j = if (up) i - 1 else i + 1
-        if (i < 0 || j < 0 || j >= order.size) return
-        order[i] = order[j].also { order[j] = order[i] }
-        vm.settingsStore.setRoomOrder(order)
-        vm.bumpHomePrefs()
-    }
-    // Round 24, item 5: rooms render in stored order (new rooms
-    // append at the end via resolveOrder's canonical fallback).
-    val orderedAreas = resolveOrder(vm.settingsStore.roomOrder(), areas.map { it.id })
-        .mapNotNull { id -> areas.firstOrNull { it.id == id } }
-
-    // Status-bar inset: same missing-inset class as the clips screen
-    // (this root Column was the only other DetailTopBar screen
-    // without one — every sibling pads its root).
-    Column(Modifier.fillMaxSize().statusBarsPadding().background(MaterialTheme.colorScheme.background)) {
-        DetailTopBar("Rooms & tabs", onBack)
-        LazyColumn(
-            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(bottom = 16.dp),
-        ) {
-            item {
-                Text(
-                    "Rooms live in Home Assistant — changes here appear in HA itself. Tabs are local to Haven. " +
-                        "Each room or tab pins to exactly one surface: the Home chip row, the navigation bar, or neither.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = {
-                    vm.refreshAreas()
-                    message = "Refreshing rooms from Home Assistant…"
-                    messageIsError = false
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Refresh from Home Assistant")
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newRoomName,
-                        onValueChange = { newRoomName = it },
-                        label = { Text("New room name") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        val name = newRoomName.trim()
-                        if (name.isEmpty()) return@Button
-                        vm.createRoom(name) { err ->
-                            done(err, "Room \"$name\" created")
-                            if (err == null) newRoomName = ""
-                        }
-                    }) { Text("Add room") }
-                }
-                Spacer(Modifier.height(12.dp))
-                if (message != null) {
-                    Text(
-                        message!!,
-                        fontSize = 13.sp,
-                        color = if (messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-            }
-            items(orderedAreas) { area ->
-                val members = entityAreas.filter { it.value == area.id }.keys
-                    .mapNotNull { states[it] }
-                    .sortedBy { it.friendlyName }
-                Column(
-                    Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(16.dp))
-                        .padding(12.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Round 24, item 5: the room's chosen icon
-                        // leads its heading (same as the Home room
-                        // heading), so the picker's choice is
-                        // visible where the room is managed.
-                        val roomIcon = roomIcons[area.id]?.let { tabIconPairForKey(it)?.first }
-                        if (roomIcon != null) {
-                            Icon(roomIcon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(area.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                        Text(deviceCountLabel(members.size), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = renameText[area.id] ?: area.name,
-                            onValueChange = { renameText = renameText + (area.id to it) },
-                            label = { Text("Rename") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = {
-                            val name = (renameText[area.id] ?: area.name).trim()
-                            if (name.isEmpty() || name == area.name) return@Button
-                            vm.renameRoom(area.id, name) { err -> done(err, "Room renamed to \"$name\"") }
-                        }) { Text("Rename") }
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedButton(onClick = {
-                            if (deleteArmed == area.id) {
-                                deleteArmed = null
-                                vm.deleteRoom(area.id) { err -> done(err, "Room \"${area.name}\" deleted") }
-                            } else {
-                                deleteArmed = area.id
-                                message = "Tap Delete again to confirm"
-                                messageIsError = false
-                            }
-                        }) { Text(if (deleteArmed == area.id) "Confirm delete" else "Delete") }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    // Round 24, item 5: display name + icon picker
-                    // + Up/Down reorder, moved here from Manage
-                    // home page (the duplicate Rooms block there is
-                    // gone). Display overrides only — renaming a
-                    // room here never renames it in Home Assistant
-                    // (the Rename field above does that); the hide
-                    // switch is gone — PlacementSelector Hidden
-                    // below covers visibility.
-                    OutlinedTextField(
-                        value = displayNames[area.id] ?: "",
-                        onValueChange = { value ->
-                            vm.settingsStore.setRoomDisplayName(area.id, value.ifBlank { null })
-                            displayNames = vm.settingsStore.roomDisplayNames()
-                            vm.bumpHomePrefs()
-                        },
-                        label = { Text("Display name (${area.name})") },
-                        placeholder = { Text(area.name) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        var iconMenu by remember { mutableStateOf(false) }
-                        val currentIcon = roomIcons[area.id]
-                        Box {
-                            OutlinedButton(onClick = { iconMenu = true }) {
-                                val pair = currentIcon?.let { tabIconPairForKey(it) }
-                                if (pair != null) {
-                                    Icon(pair.first, null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                }
-                                Text(TAB_ICON_OPTIONS.firstOrNull { it.key == currentIcon }?.label ?: "Automatic icon")
-                            }
-                            DropdownMenu(expanded = iconMenu, onDismissRequest = { iconMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Automatic icon") },
-                                    onClick = {
-                                        vm.settingsStore.setRoomIconKey(area.id, null)
-                                        roomIcons = vm.settingsStore.roomIconKeys()
-                                        vm.bumpHomePrefs()
-                                        iconMenu = false
-                                    },
-                                )
-                                for (option in TAB_ICON_OPTIONS) {
-                                    DropdownMenuItem(
-                                        text = { Text(option.label) },
-                                        leadingIcon = {
-                                            tabIconPairForKey(option.key)?.first?.let {
-                                                Icon(it, null, modifier = Modifier.size(18.dp))
-                                            }
-                                        },
-                                        onClick = {
-                                            vm.settingsStore.setRoomIconKey(area.id, option.key)
-                                            roomIcons = vm.settingsStore.roomIconKeys()
-                                            vm.bumpHomePrefs()
-                                            iconMenu = false
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.weight(1f))
-                        IconButton(onClick = { moveRoom(area.id, true) }) {
-                            Icon(Icons.Filled.ArrowUpward, "Move up", modifier = Modifier.size(20.dp))
-                        }
-                        IconButton(onClick = { moveRoom(area.id, false) }) {
-                            Icon(Icons.Filled.ArrowDownward, "Move down", modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    members.forEach { member ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                            Text(member.friendlyName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            TextButton(onClick = {
-                                vm.assignEntityToRoom(member.entityId, null) { err ->
-                                    done(err, "${member.friendlyName} moved to No room")
-                                }
-                            }) { Text("Remove") }
-                        }
-                    }
-                    Row {
-                        OutlinedButton(onClick = {
-                            if (addFor == area.id) addFor = null else { addFor = area.id; addQuery = "" }
-                        }) {
-                            Text(if (addFor == area.id) "Close" else "Add entity…")
-                        }
-                    }
-                    // Customization round, item 3: the add list
-                    // is SEARCHABLE (was an unfiltered dropdown) and
-                    // shows each candidate's device name when known,
-                    // so entities and devices are both findable here.
-                    // Blank query shows the first 25; a query shows
-                    // all name/id/device matches.
-                    if (addFor == area.id) {
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = addQuery,
-                            onValueChange = { addQuery = it },
-                            label = { Text("Search entities or devices") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        val q = addQuery.trim().lowercase()
-                        val allCandidates = states.values
-                            .filter { entityAreas[it.entityId] != area.id }
-                            .sortedBy { it.friendlyName }
-                        val candidates = if (q.isEmpty()) allCandidates.take(25) else allCandidates.filter { candidate ->
-                            candidate.friendlyName.lowercase().contains(q) ||
-                                candidate.entityId.lowercase().contains(q) ||
-                                (deviceInfo[entityDevices[candidate.entityId]]?.name?.lowercase()?.contains(q) == true)
-                        }
-                        if (q.isEmpty() && allCandidates.size > 25) {
-                            Text("Showing 25 of ${allCandidates.size} — type to search all.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (candidates.isEmpty()) {
-                            Text("No entities match \"$addQuery\".", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        candidates.forEach { candidate ->
-                            // Feedback round 17, item 4: the
-                            // subtitle is omitted when the
-                            // registry name is null, blank, or
-                            // the literal string "null" — the
-                            // 2026-11-04 runs rendered "null"
-                            // verbatim under entity names.
-                            val deviceName = cleanDeviceName(deviceInfo[entityDevices[candidate.entityId]]?.name)
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(candidate.friendlyName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (deviceName != null) {
-                                        Text(deviceName, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                }
-                                OutlinedButton(onClick = {
-                                    addFor = null
-                                    vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
-                                        done(err, "${candidate.friendlyName} moved to ${area.name}")
-                                    }
-                                }) { Text("Add") }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    PlacementSelector(
-                        selected = vm.roomPlacement(area.id),
-                        barDisabled = !vm.canPinToBar(vm.roomPlacement(area.id) == Placement.NAV_TAB),
-                        onSelect = { vm.setRoomPlacement(area.id, it) },
-                    )
-                }
-            }
-            item {
-                // No-room here mirrors Home's room sections
-                // (2026-10-30 verdict round): system entities
-                // (zone/sun/update) are not room-assignable devices
-                // and never appear, so this count agrees with Home.
-                // No room has no area id, so it has no placement:
-                // it is always a Home chip, never a bar tab.
-                val unassigned = states.values
-                    .filter { entityAreas[it.entityId] == null && isHomeRoomEntity(it) }
-                    .sortedBy { it.friendlyName }
-                Column(
-                    Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(16.dp))
-                        .padding(12.dp),
-                ) {
-                    Text("No room", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Text(deviceCountLabel(unassigned.size), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    unassigned.forEach { member ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                            Text(member.friendlyName, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            TextButton(onClick = { assignFor = if (assignFor == member.entityId) null else member.entityId }) {
-                                Text("Assign…")
-                            }
-                        }
-                        if (assignFor == member.entityId) {
-                            DropdownMenu(
-                                expanded = true,
-                                onDismissRequest = { assignFor = null },
-                            ) {
-                                areas.forEach { area ->
-                                    DropdownMenuItem(
-                                        text = { Text(area.name) },
-                                        onClick = {
-                                            assignFor = null
-                                            vm.assignEntityToRoom(member.entityId, area.id) { err ->
-                                                done(err, "${member.friendlyName} moved to ${area.name}")
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            item {
-                Text("Tabs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Home is always first and Settings is always last — everything else here is yours. " +
-                        "Reorder tabs to change their order in User Tabs.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(16.dp))
-                // Stage C: navigation customization lives here (not a new
-                // settings section — Stage G owns the settings IA reorg).
-                // Hidden tabs stay listed below with a selector, so a
-                // hidden tab can always come back; Settings can never be
-                // hidden or removed, by construction in pillBarItems.
-                Text("Navigation", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                // Feedback round 15, item 3: Scenes and Energy are
-                // hideable from the bar/rail; Home and Settings are
-                // locked and have no switch. A hidden built-in tab
-                // stays reachable from Settings -> Browse.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Show Scenes on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    // Feedback round 16, item 3: default switch–text buffer.
-                    Spacer(Modifier.width(12.dp))
-                    Switch(checked = vm.navShowScenes, onCheckedChange = { vm.navShowScenes = it })
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Show Energy on bar", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    // Feedback round 16, item 3: default switch–text buffer.
-                    Spacer(Modifier.width(12.dp))
-                    Switch(checked = vm.navShowEnergy, onCheckedChange = { vm.navShowEnergy = it })
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Up to two extras can sit on the bar — pinned tabs and rooms-as-tabs share the two slots. " +
-                        "Use the placement selector below each room or tab; Home and Settings always stay on the bar.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Pill style", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    var styleExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        OutlinedButton(onClick = { styleExpanded = true }) {
-                            Text(if (vm.navStyle == NavStyle.COMPACT) "Compact" else "Floating")
-                        }
-                        DropdownMenu(
-                            expanded = styleExpanded,
-                            onDismissRequest = { styleExpanded = false },
-                        ) {
-                            DropdownMenuItem(text = { Text("Floating") }, onClick = {
-                                styleExpanded = false
-                                vm.navStyle = NavStyle.FLOATING
-                            })
-                            DropdownMenuItem(text = { Text("Compact") }, onClick = {
-                                styleExpanded = false
-                                vm.navStyle = NavStyle.COMPACT
-                            })
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Reset navigation restores the floating pill, automatic icons, shows all tabs, " +
-                            "puts Scenes and Energy back on the bar, and clears all pins and chip placements. " +
-                            "Your tabs are never deleted by a reset.",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { vm.resetNavigation() }) { Text("Reset") }
-                }
-                Spacer(Modifier.height(16.dp))
-            }
-            for (tab in vm.userTabs) {
-                item {
-                    TabEditorCard(vm, tab, states, onEditYaml = { index, yaml ->
-                        editingCard = Triple(tab.id, index, yaml)
-                    })
-                    Spacer(Modifier.height(8.dp))
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
-                            PlacementSelector(
-                                selected = tabPlacementFor(tab.pinned, tab.chip, tab.hidden),
-                                barDisabled = !vm.canPinToBar(tab.pinned),
-                                onSelect = { vm.setTabPlacement(tab.id, it) },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-            item {
-                Text("Add a tab", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newTabTitle,
-                        onValueChange = { newTabTitle = it },
-                        label = { Text("Tab title") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        val id = vm.addTab(newTabTitle)
-                        newTabTitle = ""
-                        navigate(Screen.UserTab(id))
-                    }) { Text("Add") }
-                }
-                Spacer(Modifier.height(24.dp))
-            }
-        }
-    }
-    editingCard?.let { (tabId, index, yaml) ->
-        CardYamlEditor(
-            initialYaml = yaml,
-            onDismiss = { editingCard = null },
-            onSave = { newYaml ->
-                vm.updateCardYaml(tabId, index, newYaml)
-                editingCard = null
-            },
-        )
-    }
-}
-
-/**
- * Feedback round 19, item 5: the placement selector — three
- * buttons splitting the row, the selected one filled. One
- * control for one placement, so the bar, the chips, and this
- * screen can never disagree about where a group lives. The Nav
- * tab option disables at the bar cap (with the reason line);
- * a group already on the bar is never disabled out from under
- * itself (see canPinToBar's alreadyOnBar rule).
- */
-@Composable
-private fun PlacementSelector(
-    selected: Placement,
-    barDisabled: Boolean,
-    onSelect: (Placement) -> Unit,
-) {
-    Column {
-        Text("Pin as", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PlacementOption("Room chip", selected == Placement.ROOM_CHIP) { onSelect(Placement.ROOM_CHIP) }
-            PlacementOption("Nav tab", selected == Placement.NAV_TAB, enabled = !barDisabled) { onSelect(Placement.NAV_TAB) }
-            PlacementOption("Hidden", selected == Placement.HIDDEN) { onSelect(Placement.HIDDEN) }
-        }
-        if (barDisabled && selected != Placement.NAV_TAB) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Bar full — at most two tabs and rooms-as-tabs combined.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun RowScope.PlacementOption(
-    label: String,
-    selected: Boolean,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    if (selected) {
-        Button(onClick = onClick, enabled = enabled, modifier = Modifier.weight(1f)) {
-            Text(label, maxLines = 1)
-        }
-    } else {
-        OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.weight(1f)) {
-            Text(label, maxLines = 1)
-        }
-    }
-}
-
-/**
  * Feedback round 19, item 6: the notification permission row.
  * The toggles above gate posting per category; this row reports
  * the Android 13+ runtime permission itself, with a button to
@@ -3527,7 +2631,7 @@ private fun RowScope.PlacementOption(
  * refreshes it on the next visit.
  */
 @Composable
-private fun NotificationPermissionRow() {
+internal fun NotificationPermissionRow() {
     val context = LocalContext.current
     val granted = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
         true
@@ -3535,7 +2639,7 @@ private fun NotificationPermissionRow() {
         context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
     }
-    KodaMenuRow(
+    MenuRow(
         badgeKey = "notif-permission",
         badgeKind = ExpressiveKind.BUN,
         icon = Icons.Filled.Notifications,
