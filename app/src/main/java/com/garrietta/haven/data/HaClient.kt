@@ -117,6 +117,13 @@ class HaClient(
      * Empty until the entity registry arrives: empty means
      * unknown, never "no motion sensor".
      */
+    /**
+     * Entities Home Assistant files as configuration or diagnostics, or
+     * has hidden: kept out of rooms and lists of what a room holds.
+     */
+    private val _auxiliaryEntities = MutableStateFlow<Set<String>>(emptySet())
+    val auxiliaryEntities: StateFlow<Set<String>> = _auxiliaryEntities.asStateFlow()
+
     private val _entityDevices = MutableStateFlow<Map<String, String>>(emptyMap())
     val entityDevices: StateFlow<Map<String, String>> = _entityDevices.asStateFlow()
 
@@ -530,9 +537,11 @@ class HaClient(
             val items = registryItems(msg)
             val entityToArea = mutableMapOf<String, String?>()
             val entityToDevice = mutableMapOf<String, String>()
+            val auxiliary = mutableSetOf<String>()
             for (o in items) {
                 val entityId = o.optString("entity_id")
                 if (entityId.isEmpty()) continue
+                if (o.text("entity_category").isNotEmpty() || o.text("hidden_by").isNotEmpty()) auxiliary += entityId
                 val areaId = o.text("area_id")
                 if (areaId.isNotEmpty()) entityToArea[entityId] = areaId
                 val deviceId = o.text("device_id")
@@ -545,6 +554,7 @@ class HaClient(
             if (entityToArea.isNotEmpty() || entityToDevice.isNotEmpty()) {
                 registryEntityAreas = entityToArea
                 registryEntityDevices = entityToDevice
+                _auxiliaryEntities.value = auxiliary
                 publishEntityAreas()
             }
         })
@@ -599,9 +609,14 @@ class HaClient(
      */
     private fun publishEntityAreas() {
         if (registryEntityAreas.isEmpty() && registryEntityDevices.isEmpty()) return
+        // A device's configuration and diagnostic entities (a smart plug's
+        // LED, auto-update and signal level) and hidden ones stay with the
+        // device, as on Home Assistant's own area pages, rather than filling
+        // the room the device is in.
+        val auxiliary = _auxiliaryEntities.value
         _entityAreas.value = resolveEntityAreas(
             registryEntityAreas, registryEntityDevices, registryDeviceAreas,
-        )
+        ).filterKeys { it !in auxiliary }
         _entityDevices.value = registryEntityDevices
     }
 

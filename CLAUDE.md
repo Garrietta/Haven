@@ -16,6 +16,7 @@ MVVM without a DI framework: one `HavenViewModel` owns the `HaClient` and the st
 | Colors, type, shape, motion | `ui/theme/` (`DESIGN.md`) |
 | Which color a state gets | `data/SemanticColors.kt`, `ui/components/DesignTokens.kt` |
 | What a room says on Home (color, sentence, switches) | `data/RoomDigest.kt`, drawn by `ui/screens/RoomsHome.kt` |
+| The Climate tab (thermostats, every temperature and humidity reading) | `data/Climate.kt`, drawn by `ui/screens/ClimateScreen.kt` |
 | Shared UI pieces | `ui/components/` |
 | A device's control | `ui/controls/` |
 | Screens | `ui/screens/` |

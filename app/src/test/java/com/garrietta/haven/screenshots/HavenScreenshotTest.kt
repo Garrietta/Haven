@@ -25,6 +25,8 @@ import com.garrietta.haven.ui.theme.HavenTheme
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.swipeUp
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -292,6 +294,56 @@ class HavenScreenshotTest {
 
     @Test fun security_unfolded_light() =
         shoot("security_unfolded_light", UNFOLDED, withSecurity(viewModel(signedIn = true, dark = false))) { tapTab("Security") }
+
+    /** An ecobee and its remote sensor, a greenhouse sensor and an outdoor one, beside the demo's living room. */
+    private fun withClimate(vm: HavenViewModel): HavenViewModel {
+        fun e(id: String, state: String, name: String, vararg attrs: Pair<String, Any?>) =
+            com.garrietta.haven.data.HaEntity(id, state, mapOf<String, Any?>("friendly_name" to name) + attrs)
+        val extra = listOf(
+            e(
+                "climate.thermostat", "heat", "Main Floor",
+                "hvac_action" to "heating", "temperature" to 70, "current_temperature" to 67, "current_humidity" to 41,
+                "min_temp" to 45, "max_temp" to 95, "hvac_modes" to listOf("heat", "cool", "heat_cool", "off"),
+                "preset_modes" to listOf("home", "away", "sleep"), "preset_mode" to "home",
+                "fan_modes" to listOf("auto", "on"), "fan_mode" to "auto",
+            ),
+            e("sensor.bedroom_temperature", "65.8", "Bedroom Temperature", "device_class" to "temperature", "unit_of_measurement" to "°F"),
+            e("sensor.bedroom_humidity", "44", "Bedroom Humidity", "device_class" to "humidity", "unit_of_measurement" to "%"),
+            e("sensor.greenhouse_temperature", "78.2", "Greenhouse Temperature", "device_class" to "temperature", "unit_of_measurement" to "°F"),
+            e("sensor.greenhouse_humidity", "71", "Greenhouse Humidity", "device_class" to "humidity", "unit_of_measurement" to "%"),
+            e("sensor.outdoor_temperature", "41.5", "Outdoor Temperature", "device_class" to "temperature", "unit_of_measurement" to "°F"),
+        ).associateBy { it.entityId }
+        vm.client.restoreCachedStates(
+            DemoHome.states + extra,
+            DemoHome.areas,
+            DemoHome.entityAreas + mapOf("sensor.bedroom_temperature" to "bedroom", "sensor.bedroom_humidity" to "bedroom"),
+            mapOf(
+                "sensor.bedroom_temperature" to "dev_bedroom", "sensor.bedroom_humidity" to "dev_bedroom",
+                "sensor.living_room_temperature" to "dev_living", "sensor.living_room_humidity" to "dev_living",
+                "sensor.greenhouse_temperature" to "dev_greenhouse", "sensor.greenhouse_humidity" to "dev_greenhouse",
+            ),
+        )
+        return vm
+    }
+
+    /** The Climate tab: the house in one card, the thermostat, each room's air, outside. */
+    @Test fun climate_folded_light() =
+        shoot("climate_folded_light", FOLDED, withClimate(viewModel(signedIn = true, dark = false))) { tapTab("Climate") }
+
+    @Test fun climate_folded_dark() =
+        shoot("climate_folded_dark", FOLDED, withClimate(viewModel(signedIn = true, dark = true))) { tapTab("Climate") }
+
+    /** Scrolled to each room's air: the comfort bars and the outdoor cards. */
+    @Test fun climate_rooms_folded_light() =
+        shoot("climate_rooms_folded_light", FOLDED, withClimate(viewModel(signedIn = true, dark = false))) {
+            tapTab("Climate")
+            settle()
+            compose.onRoot().performTouchInput { swipeUp(startY = bottom * 0.85f, endY = top + 40f, durationMillis = 400) }
+            repeat(40) { frame() }
+        }
+
+    @Test fun climate_unfolded_light() =
+        shoot("climate_unfolded_light", UNFOLDED, withClimate(viewModel(signedIn = true, dark = false))) { tapTab("Climate") }
 
     @Test fun thermostat_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)

@@ -70,6 +70,7 @@ class DeviceGroupingTest {
         )
         assertEquals(listOf("Fan", "Greenhouse heater", "Vents open"), members.map { it.name })
         assertEquals(3, (members[1] as AreaMember.Device).entityCount)
+        assertEquals("Heater, Heater LED, Heater power", (members[1] as AreaMember.Device).contents)
         assertEquals("input_boolean.vents", (members[2] as AreaMember.Lone).entity.entityId)
     }
 }

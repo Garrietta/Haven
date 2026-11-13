@@ -276,6 +276,7 @@ import com.garrietta.haven.ui.screens.DashboardsScreen
 import com.garrietta.haven.ui.screens.EnergyScreen
 import com.garrietta.haven.ui.screens.ScenesScreen
 import com.garrietta.haven.ui.screens.SecurityScreen
+import com.garrietta.haven.ui.screens.ClimateScreen
 import com.garrietta.haven.ui.screens.DetailPageScreen
 import com.garrietta.haven.ui.screens.HelperBuilderScreen
 import com.garrietta.haven.ui.screens.HomeEditorScreen
@@ -321,7 +322,7 @@ import com.garrietta.haven.data.frontDoorNotLiveLine
 // and picker icon overrides. See that file for the contract.
 
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
-    Screen.Today, Screen.Security, Screen.Scenes, Screen.Energy, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs, Screen.Settings -> true
+    Screen.Today, Screen.Security, Screen.Climate, Screen.Scenes, Screen.Energy, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs, Screen.Settings -> true
     is Screen.UserTab -> true
     is Screen.RoomTab -> true
     else -> false
@@ -1431,7 +1432,7 @@ fun HavenApp(vm: HavenViewModel) {
                     // the user's bar (hideable Scenes/Energy, up to
                     // two pinned tabs); Settings submenus resolve
                     // to Settings for the active highlight below.
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity)
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate)
                     // Stage E §9: the Home dot lights only for a real
                     // important alert (unlocked lock, open door/window,
                     // triggered alarm) — never a count, never for
@@ -1673,7 +1674,7 @@ fun HavenApp(vm: HavenViewModel) {
                         if (reduceMotionTop) {
                             EnterTransition.None togetherWith ExitTransition.None
                         } else {
-                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity).map { it.screen }
+                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate).map { it.screen }
                             // Feedback round 17, item 6: NO fades.
                             // The old slide + fade let the outgoing
                             // and incoming pages show through each
@@ -1761,7 +1762,7 @@ fun HavenApp(vm: HavenViewModel) {
             // unmount it cleanly.
             key(LocalWideLayout.current) {
                 if (!LocalWideLayout.current && isTopLevel(current)) {
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity)
+                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate)
                     val selectedIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     // Stage E §9: same Home dot as the rail.
                     // Collected here so only the bar recomposes on
@@ -2182,6 +2183,7 @@ private fun ScreenContent(
         is Screen.UserTab -> UserTabScreen(vm, screen.tabId, navigate)
         // Stage F destinations (first-class bar items, brief §4).
         Screen.Security -> SecurityScreen(vm, navigate)
+        Screen.Climate -> ClimateScreen(vm, navigate)
         Screen.Scenes -> ScenesScreen(vm)
         Screen.Energy -> EnergyScreen(vm)
         is Screen.SettingsPage -> SettingsPageHost(

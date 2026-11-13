@@ -541,7 +541,13 @@ fun nameUnderDevice(name: String, deviceName: String): String {
 sealed class AreaMember {
     abstract val name: String
 
-    data class Device(val deviceId: String, override val name: String, val entityCount: Int) : AreaMember()
+    /** A device, with the entities of it that are in the area (one outlet of two can be). */
+    data class Device(val deviceId: String, override val name: String, val entities: List<HaEntity>) : AreaMember() {
+        val entityCount: Int get() = entities.size
+
+        /** "Greenhouse Fan, Greenhouse Heater": what of the device is here, by name. */
+        val contents: String get() = entities.joinToString(", ") { nameUnderDevice(it.friendlyName, name) }
+    }
 
     data class Lone(val entity: HaEntity) : AreaMember() {
         override val name: String get() = entity.friendlyName
@@ -561,7 +567,7 @@ fun areaMembers(
 ): List<AreaMember> {
     val (withDevice, lone) = entities.partition { entityDevices[it.entityId] != null }
     val devices = withDevice.groupBy { entityDevices.getValue(it.entityId) }.map { (id, list) ->
-        AreaMember.Device(id, deviceNames[id] ?: list.minBy { it.friendlyName.length }.friendlyName, list.size)
+        AreaMember.Device(id, deviceNames[id] ?: list.minBy { it.friendlyName.length }.friendlyName, list.sortedBy { it.friendlyName })
     }
     return (devices + lone.map { AreaMember.Lone(it) }).sortedBy { it.name.lowercase() }
 }

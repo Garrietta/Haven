@@ -94,6 +94,8 @@ sealed class Screen {
     data object Energy : Screen()
     /** The cameras, their motion detection, the alarm, doors and locks. */
     data object Security : Screen()
+    /** Thermostats, and every temperature and humidity reading. */
+    data object Climate : Screen()
     data object Dashboards : Screen()
     data object Areas : Screen()
     data object Search : Screen()
@@ -218,7 +220,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** How many pinned tabs and rooms fit beside the built-in tabs now shown. */
-    fun barExtraSlotsNow(): Int = barExtraSlots(navShowSecurity, navShowScenes, navShowEnergy)
+    fun barExtraSlotsNow(): Int = barExtraSlots(navShowSecurity, navShowScenes, navShowEnergy, navShowClimate)
 
     /** Placement-selector gate: may THIS group pin to the bar right now? */
     fun canPinToBar(alreadyOnBar: Boolean): Boolean {
@@ -230,8 +232,8 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
      * Whether a built-in tab can be switched on without pushing a pinned
      * tab or room off the bar: the extras already pinned must still fit.
      */
-    fun canShowBuiltIn(security: Boolean, scenes: Boolean, energy: Boolean): Boolean =
-        barPinnedExtrasCount() <= barExtraSlots(security, scenes, energy)
+    fun canShowBuiltIn(security: Boolean, scenes: Boolean, energy: Boolean, climate: Boolean = navShowClimate): Boolean =
+        barPinnedExtrasCount() <= barExtraSlots(security, scenes, energy, climate)
 
     fun setRoomPlacement(areaId: String, placement: Placement) {
         if (placement == Placement.NAV_TAB &&
@@ -479,6 +481,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val areas = client.areas
     val entityAreas = client.entityAreas
     val entityDevices = client.entityDevices
+    val auxiliaryEntities = client.auxiliaryEntities
     val deviceInfo = client.deviceInfo
 
     /**
@@ -1291,6 +1294,18 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             settingsStore.navShowSecurity = value
         }
 
+    // Never chosen: on when it fits beside Security and what is pinned.
+    private var navShowClimateState by mutableStateOf(
+        settingsStore.navShowClimate
+            ?: (barPinnedExtrasCount() <= barExtraSlots(navShowSecurityState, settingsStore.navShowScenes, settingsStore.navShowEnergy, true)),
+    )
+    var navShowClimate: Boolean
+        get() = navShowClimateState
+        set(value) {
+            navShowClimateState = value
+            settingsStore.navShowClimate = value
+        }
+
     /**
      * Folded pill style, owned here so TabManager writes recompose the
      * chrome. The setter persists too (a separate setNavStyle function
@@ -1318,6 +1333,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         navShowScenes = true
         navShowEnergy = true
         navShowSecurity = true
+        navShowClimate = true
         // Feedback round 19, item 5: chip placements reset with
         // pins (both are bar/chip surfaces, not tab content).
         userTabs = userTabs.map { it.copy(icon = null, hidden = false, pinned = false, chip = false) }
@@ -1836,6 +1852,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setClimateFanMode(id: String, mode: String) =
         client.callService("climate", "set_fan_mode", id, JSONObject().put("fan_mode", mode))
+
+    /** An ecobee comfort setting (Home, Away, Sleep) or any thermostat's preset. */
+    fun setClimatePresetMode(id: String, preset: String) =
+        client.callService("climate", "set_preset_mode", id, JSONObject().put("preset_mode", preset))
 
     // ---- Dashboard editing ----
 

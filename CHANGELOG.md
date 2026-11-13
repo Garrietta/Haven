@@ -1,5 +1,21 @@
 # Haven Changelog
 
+## 2.9: A Climate tab, and rooms without a plug's housekeeping (2026-11-13)
+
+**What you will see**
+
+- A Climate tab sits right of Security. At its top, the house in one card: what it is inside (the thermostat's reading), the humidity, the outside, and what the thermostat is doing, in ember while heating and frost while cooling.
+- Each thermostat is a card: its reading, its set point with − and + beside it (or heat and cool set points for a range), its modes, its comfort settings (an ecobee's Home, Away and Sleep) and its fan, with the dial and history a tap away.
+- Rooms lists every temperature and humidity reading, one card a device (an ecobee remote sensor's temperature and humidity together), each with a bar placing it between cold and hot and its last day as a line. Outside holds the weather and any outdoor sensor.
+- Show Climate on bar is under Home & navigation.
+- A device's configuration and diagnostic entities no longer fill the room it is in. A dual smart plug in the Greenhouse shows its two outlets, not also its LED, auto-update, cloud connection and signal level, on Home, on the room's page and in its count.
+- Adding to an area moves just what you picked: one outlet of a dual plug can be the greenhouse fan while the other is elsewhere. The area lists each device with what of it is there, by name, and Remove takes all of it out.
+
+**Under it**
+
+- `data/Climate.kt` holds the rules (which sensors, grouped by device, outdoor by name, the summary, a thermostat's activity, labels), tested in `ClimateTest`. `ui/screens/ClimateScreen.kt` draws them; `navShowClimate` joins the bar's built-ins.
+- The entity registry's `entity_category` and `hidden_by` mark auxiliary entities (`HaClient.auxiliaryEntities`); they are left out of `entityAreas`, so out of every room.
+
 ## 2.8: Devices land in their area (2026-11-12)
 
 **What you will see**

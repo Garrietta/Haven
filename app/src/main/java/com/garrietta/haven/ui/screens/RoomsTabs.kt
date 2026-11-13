@@ -131,6 +131,7 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
     val states by vm.states.collectAsState()
     val deviceInfo by vm.deviceInfo.collectAsState()
     val entityDevices by vm.entityDevices.collectAsState()
+    val auxiliary by vm.auxiliaryEntities.collectAsState()
     val floors = rememberLoad("floors") { vm.admin.floors() }
     val labels = rememberLoad("labels") { vm.admin.labels() }
     val zones = rememberLoad("zones") { vm.admin.zones() }
@@ -258,8 +259,10 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
                     addQuery = addQuery,
                     onAddQuery = { addQuery = it },
                     candidatesFor = { q ->
+                        // What can go in a room: not a device's configuration and
+                        // diagnostic entities, which stay with the device.
                         val all = states.values
-                            .filter { entityAreas[it.entityId] != area.id }
+                            .filter { entityAreas[it.entityId] != area.id && it.entityId !in auxiliary }
                             .sortedBy { it.friendlyName }
                         val matches = if (q.isEmpty()) all.take(25) else all.filter { candidate ->
                             candidate.friendlyName.lowercase().contains(q) ||
@@ -268,29 +271,25 @@ fun AreasLabelsZonesPage(vm: HavenViewModel, tab: String, onBack: () -> Unit, na
                         }
                         Triple(matches, all.size, { id: String -> cleanDeviceName(deviceInfo[entityDevices[id]]?.name) })
                     },
-                    // A device moves as a whole, as in Home Assistant; an entity
-                    // with no device moves on its own.
+                    // What was picked moves, and only that: one outlet of a dual
+                    // plug can be the greenhouse fan while the other is elsewhere.
                     onAdd = { candidate ->
                         addFor = null
-                        val deviceId = entityDevices[candidate.entityId]
-                        if (deviceId != null) {
-                            val deviceName = deviceInfo[deviceId]?.name ?: candidate.friendlyName
-                            scope.launch {
-                                done(vm.admin.updateDevice(deviceId) { it.put("area_id", area.id) }, "$deviceName moved to ${area.name}")
-                            }
-                        } else {
-                            vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
-                                done(err, "${candidate.friendlyName} moved to ${area.name}")
-                            }
+                        vm.assignEntityToRoom(candidate.entityId, area.id) { err ->
+                            done(err, "${candidate.friendlyName} moved to ${area.name}")
                         }
                     },
                     onRemove = { member ->
                         when (member) {
+                            // The device leaves, and so does each of its entities
+                            // that was put here on its own.
                             is AreaMember.Device -> scope.launch {
-                                done(
-                                    vm.admin.updateDevice(member.deviceId) { it.put("area_id", org.json.JSONObject.NULL) },
-                                    "${member.name} moved to No area",
-                                )
+                                var err = vm.admin.updateDevice(member.deviceId) { it.put("area_id", org.json.JSONObject.NULL) }
+                                for (entity in member.entities) {
+                                    if (err != null) break
+                                    err = vm.admin.updateEntity(entity.entityId) { it.put("area_id", org.json.JSONObject.NULL) }
+                                }
+                                done(err, "${member.name} moved to No area")
                             }
                             is AreaMember.Lone -> vm.assignEntityToRoom(member.entity.entityId, null) { err ->
                                 done(err, "${member.name} moved to No area")
@@ -632,8 +631,8 @@ private fun RoomSettings(
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(member.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (member is AreaMember.Device && member.entityCount > 1) {
-                    Text("${member.entityCount} entities", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (member is AreaMember.Device) {
+                    Text(member.contents, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             TextButton(onClick = { onRemove(member) }) { Text("Remove") }
@@ -694,9 +693,12 @@ internal fun NavigationSettings(vm: HavenViewModel) {
     // A built-in tab can always be switched off; it can be switched on
     // only while the tabs and rooms pinned to the bar still fit beside it.
     val security = vm.navShowSecurity
+    val climate = vm.navShowClimate
     val scenes = vm.navShowScenes
     val energy = vm.navShowEnergy
-    BarSwitch("Show Security on bar", security, security || vm.canShowBuiltIn(true, scenes, energy)) { vm.navShowSecurity = it }
+    BarSwitch("Show Security on bar", security, security || vm.canShowBuiltIn(true, scenes, energy, climate)) { vm.navShowSecurity = it }
+    Spacer(Modifier.height(8.dp))
+    BarSwitch("Show Climate on bar", climate, climate || vm.canShowBuiltIn(security, scenes, energy, true)) { vm.navShowClimate = it }
     Spacer(Modifier.height(8.dp))
     BarSwitch("Show Scenes on bar", scenes, scenes || vm.canShowBuiltIn(security, true, energy)) { vm.navShowScenes = it }
     Spacer(Modifier.height(8.dp))

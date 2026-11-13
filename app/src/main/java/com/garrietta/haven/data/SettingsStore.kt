@@ -72,6 +72,13 @@ class SettingsStore(context: Context) {
             if (value == null) remove("nav_show_security") else putBoolean("nav_show_security", value)
         }.apply()
 
+    /** Climate on the bar, beside Security; null until chosen. */
+    var navShowClimate: Boolean?
+        get() = if (prefs.contains("nav_show_climate")) prefs.getBoolean("nav_show_climate", true) else null
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("nav_show_climate") else putBoolean("nav_show_climate", value)
+        }.apply()
+
     /** Set once the cameras have moved from Home to the Security tab. */
     var camerasMovedToSecurity: Boolean
         get() = prefs.getBoolean("cameras_moved_to_security", false)
