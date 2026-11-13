@@ -916,6 +916,8 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val file = java.io.File(getApplication<Application>().filesDir, "haven_state_cache.json")
                 file.writeText(text)
+                // The widgets draw from this file: bring them up to date with it.
+                com.garrietta.haven.widget.HavenWidgets.updateAll(getApplication())
             } catch (_: Exception) {
                 // Disk cache is best effort.
             }

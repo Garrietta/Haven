@@ -23,6 +23,7 @@ MVVM without a DI framework: one `HavenViewModel` owns the `HaClient` and the st
 | Stored settings | `data/SettingsStore.kt`, `TabsStore`, `CardSizeStore`, `TokenStore` |
 | Settings pages, and Home Assistant's own settings | `ui/screens/Settings*.kt` (routes in `SettingsHome.kt`), calls in `data/HaAdminApi.kt`, parsers in `data/HaAdmin.kt` |
 | Device Controls, notifications | `HavenControlsService.kt`, `data/HavenNotificationManager.kt` |
+| Home screen widgets | `widget/HavenWidgets.kt`, Home Assistant from outside the app in `widget/WidgetHa.kt`, rules in `data/WidgetModels.kt` |
 | Updating the app itself | `update/` (check in `AppUpdate.kt`, install in `ApkInstaller.kt`); CI's `publish-test-build` job replaces the `test-build` pre-release after every signed build, compared by `BuildConfig.BUILD_NUMBER` |
 
 ## Build, test, look

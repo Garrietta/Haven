@@ -53,6 +53,41 @@
              No metadata XML is required by the Controls API; the
              service's app intent opens MainActivity. Manifest-only
              reference, so pre-R devices never load the class. -->
+        <!-- Home screen widgets. Exported because some launchers broadcast to
+             the provider directly; the filter takes only APPWIDGET_UPDATE. -->
+        <receiver
+            android:name=".widget.ClimateWidgetReceiver"
+            android:label="@string/widget_climate_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_climate_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.ControlsWidgetReceiver"
+            android:label="@string/widget_controls_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_controls_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.SecurityWidgetReceiver"
+            android:label="@string/widget_security_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_security_info" />
+        </receiver>
         <service
             android:name=".HavenControlsService"
             android:label="Haven"

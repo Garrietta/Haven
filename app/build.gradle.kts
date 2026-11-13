@@ -93,6 +93,8 @@ dependencies {
     implementation(libs.compose.icons.core)
     implementation(libs.compose.icons.extended)
     implementation(libs.compose.material3)
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
     implementation(libs.compose.activity)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.graphics.shapes)

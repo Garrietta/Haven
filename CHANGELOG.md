@@ -1,5 +1,16 @@
 # Haven Changelog
 
+## 2.11: Widgets (2026-11-13)
+
+**What you will see**
+
+- Three home screen widgets. **Climate**: the thermostat at work, in its color (ember heating, frost cooling), what it reads and is doing, and its set point with − and + either side; a tap elsewhere opens its dial. **Controls**: up to six favorite switches and lights as tiles, lit when on, a tap to switch (with no favorites, the lights that are on). **Security**: whether the house is shut and the alarm, in the calm or the alert color.
+- Widgets answer a tap at once and settle to what Home Assistant reports, and keep up while Haven is open.
+
+**Under it**
+
+- `widget/HavenWidgets.kt` (Glance) draws from the states the app saves (`haven_state_cache.json`), which `WidgetHa` refreshes for the widget's own entities and writes back; taps go through the REST API with the app's sign-in, refreshing the token and trying the local address before the cloud one. What each shows is pure (`data/WidgetModels.kt`, `WidgetModelsTest`).
+
 ## 2.10: Back goes Home first, and rooms fill one entity at a time (2026-11-13)
 
 **What you will see**
