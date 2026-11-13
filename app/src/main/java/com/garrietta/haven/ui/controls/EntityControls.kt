@@ -1,4 +1,5 @@
 package com.garrietta.haven.ui.controls
+import com.garrietta.haven.ui.components.suggestedIconKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.formatCondition
@@ -218,7 +219,16 @@ fun sensorDisplayName(entity: HaEntity): String {
 fun entityIcon(iconKeys: Map<String, String>, entity: HaEntity): ImageVector =
     cardIconForKey(customIconKeyFor(iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
 
-fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
+/**
+ * A device's icon when none was picked: what it is, where Home Assistant
+ * or its name says (a fan, a garage door, a switch called "Heater"; see
+ * [suggestedIconKey]), else its domain's.
+ */
+fun domainIcon(entity: HaEntity): ImageVector =
+    cardIconForKey(suggestedIconKey(entity.domain, entity.attrString("device_class"), entity.friendlyName))
+        ?: domainBaseIcon(entity)
+
+private fun domainBaseIcon(entity: HaEntity): ImageVector = when (entity.domain) {
     "light" -> Icons.Filled.Lightbulb
     "switch", "input_boolean" -> Icons.Filled.Power
     "cover" -> Icons.Filled.Home

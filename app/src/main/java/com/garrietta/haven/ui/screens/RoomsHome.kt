@@ -67,6 +67,8 @@ import com.garrietta.haven.ui.components.hideWhenMorphSource
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.components.reportCardBounds
 import com.garrietta.haven.ui.controls.domainIcon
+import com.garrietta.haven.data.detailBadgeOverride
+import com.garrietta.haven.ui.controls.entityIcon
 import com.garrietta.haven.ui.theme.StateFamily
 import com.garrietta.haven.ui.theme.colors
 import com.garrietta.haven.ui.theme.leafCard
@@ -89,7 +91,7 @@ private const val STATE_PILL = "state"
  * state's color, and the pill is a button: it puts that thing back to
  * rest. "on" turns those lights off, "open" closes the door. The line
  * under it gives the temperatures, and the inside one opens the
- * thermostat.
+ * Climate tab.
  */
 @Composable
 internal fun HomeHeadlineText(
@@ -113,7 +115,7 @@ internal fun HomeHeadlineText(
                     color = scheme.onSurfaceVariant,
                     textDecoration = if (id != null) TextDecoration.Underline else null,
                     modifier = if (id != null) {
-                        Modifier.clickable(onClickLabel = "Open the thermostat", role = Role.Button) { onThermostat(id) }
+                        Modifier.clickable(onClickLabel = "Open Climate", role = Role.Button) { onThermostat(id) }
                     } else {
                         Modifier
                     },
@@ -374,6 +376,12 @@ private fun RoomSwitch(
     navigate: (Screen) -> Unit,
 ) {
     val lit = if (switchIsActive(entity)) domainCardColors(entity, isDark) else null
+    // A color and icon picked for the device (press and hold its tile)
+    // show here too: the color while it is on, the icon always.
+    val custom = rememberCardCustom(vm)
+    val pinned = detailBadgeOverride(custom.tilePresets, entity, isDark, custom.domainTilePresets)
+        ?.takeIf { lit != null }
+    val icon = entityIcon(custom.iconKeys, entity)
     val open: () -> Unit = {
         when (cardTapRoute(entity.domain, entity.entityId)) {
             CardTapRoute.CLIMATE_POPOUT -> vm.openClimatePopout(entity.entityId)
@@ -387,7 +395,7 @@ private fun RoomSwitch(
             .reportCardBounds(entity.entityId)
             .hideWhenMorphSource(entity.entityId)
             .clip(CircleShape)
-            .background(lit?.badgeBg ?: onContainer.copy(alpha = RESTING_SWITCH_ALPHA))
+            .background(pinned?.first ?: lit?.badgeBg ?: onContainer.copy(alpha = RESTING_SWITCH_ALPHA))
             .combinedClickable(
                 role = if (tapToggles(entity)) Role.Switch else Role.Button,
                 onLongClickLabel = "Open controls",
@@ -398,9 +406,9 @@ private fun RoomSwitch(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            domainIcon(entity),
+            icon,
             contentDescription = null,
-            tint = lit?.badgeGlyph ?: onContainer,
+            tint = pinned?.second ?: lit?.badgeGlyph ?: onContainer,
             modifier = Modifier.size(24.dp),
         )
     }

@@ -1141,6 +1141,7 @@ fun HavenApp(vm: HavenViewModel) {
                     homeRightScrollState = homeRightScrollState,
                     navigate = navigate,
                     goBack = goBack,
+                    goTop = goTop,
                     // Feedback round 5, item 1: panel cards open the stacked panel-detail
                     // layer instead of pushing EntityDetail (see openPanelDetail).
                     onPanelDetail = { entityId -> openPanelDetail(entityId) },
@@ -2134,7 +2135,7 @@ fun HavenApp(vm: HavenViewModel) {
             // Customization round, item 2: Card settings sheet,
             // above every other overlay like the shape picker.
             if (vm.cardSettingsTarget != null) {
-                CardSettingsSheet(vm, vm.cardSettingsTarget!!, onDismiss = { vm.closeCardSettings() })
+                CardSettingsSheet(vm, vm.cardSettingsTarget!!, onArrange = vm.cardSettingsArrange, onDismiss = { vm.closeCardSettings() })
             }
             }
         }
@@ -2156,6 +2157,8 @@ private fun ScreenContent(
     homeRightScrollState: ScrollState,
     navigate: (Screen) -> Unit,
     goBack: () -> Unit,
+    /** Switches to a tab, as the bar does. */
+    goTop: (Screen) -> Unit,
     // Feedback round 5, item 1: panel cards open the stacked panel-detail layer. Default is a
     // no-op so existing call sites are unaffected; the HavenApp content lambda passes the real
     // opener, and only the HomeStatusPanel branch forwards it.
@@ -2169,7 +2172,7 @@ private fun ScreenContent(
     onSignOut: () -> Unit,
 ) {
     when (screen) {
-        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() })
+        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() }, openTab = goTop)
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)

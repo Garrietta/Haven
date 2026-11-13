@@ -13,6 +13,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import org.junit.Assert.assertEquals
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.garrietta.haven.HavenApp
@@ -164,6 +167,40 @@ class HavenScreenshotTest {
         val vm = viewModel(signedIn = true, dark = false)
         vm.roomFilter = RoomFilter.Area("bedroom")
         shoot("fan_popup_folded_light", FOLDED, vm) { tapText("Ceiling Fan") }
+    }
+
+    /**
+     * Press and hold a tile: its options sheet, color and icon applied as
+     * they are tapped, with Arrange beside them.
+     */
+    private fun holdTile(name: String) {
+        // The tile is the first node with the name (the room's line and the bar repeat it).
+        compose.onAllNodesWithText(name).onFirst().performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(800)
+        compose.onAllNodesWithText(name).onFirst().performTouchInput { up() }
+    }
+
+    @Test fun tile_options_folded_light() {
+        val vm = viewModel(signedIn = true, dark = false)
+        vm.roomFilter = RoomFilter.Area("kitchen")
+        shoot("tile_options_folded_light", FOLDED, vm) { holdTile("Coffee Maker") }
+    }
+
+    @Test fun tile_options_folded_dark() {
+        val vm = viewModel(signedIn = true, dark = true)
+        vm.roomFilter = RoomFilter.Area("bedroom")
+        shoot("tile_options_folded_dark", FOLDED, vm) { holdTile("Ceiling Fan") }
+    }
+
+    /**
+     * The whole sheet, every icon group, Haven's own glyphs among them:
+     * drawn in a window tall enough to hold it, because a scroll waits
+     * on an animation the hand-driven clock never runs.
+     */
+    @Test fun tile_options_icons_light() {
+        val vm = viewModel(signedIn = true, dark = false)
+        vm.roomFilter = RoomFilter.Area("kitchen")
+        shoot("tile_options_icons_light", "w384dp-h2700dp-xhdpi", vm) { holdTile("Coffee Maker") }
     }
 
     /** A lock's pop-up: full and secure while locked. */

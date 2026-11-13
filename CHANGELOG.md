@@ -1,5 +1,18 @@
 # Haven Changelog
 
+## 2.13: Hold a tile to change its color and icon (2026-11-13)
+
+**What you will see**
+
+- Press and hold a tile for its options: a color and an icon, each applied the moment it is tapped so the tile changes behind the sheet, its name and its badge shape. Arrange tiles moved into the same sheet. The round switches on Home's room cards now show the icon and color picked for a device too.
+- About a hundred icons, by group: lights, power, heating and cooling, doors and windows, water and garden, kitchen and laundry, media, security, rooms. Haven draws the ones Material has no picture of: fan, heater, garage door, sprinklers, valve, humidifier, air purifier, water heater, gate, dishwasher, oven, lamp.
+- A device with no icon picked gets a better one by itself: a fan the fan, a garage door the garage door, blinds and curtains their own, and a switch named for what it powers ("Greenhouse Heater", "Sprinklers", "Coffee Maker") that thing.
+- The temperature under Home's sentence opens the Climate tab, not one thermostat's popup.
+
+**Under it**
+
+- The glyphs are drawn and written by `tools/glyphs.py` into `ui/components/HavenGlyphs.kt`; the catalog and the default-icon rule (`suggestedIconKey`, `CardIconsTest`) are in `ui/components/CardIcons.kt`, and the sheet is `ui/screens/CardSettings.kt`. Stored icon keys are unchanged.
+
 ## 2.12: Security and Climate, arranged by hand (2026-11-13)
 
 **What you will see**

@@ -509,6 +509,8 @@ fun TodayScreen(
     homeRightScrollState: ScrollState,
     navigate: (Screen) -> Unit,
     onReconnectTap: () -> Unit,
+    /** Switches to a tab, as the bar does. */
+    openTab: (Screen) -> Unit = navigate,
 ) {
     val states by vm.states.collectAsState()
     val connection by vm.connection.collectAsState()
@@ -604,7 +606,9 @@ fun TodayScreen(
             is HeadlineAction.Show -> navigate(Screen.EntityDetail(action.id))
         }
     }
-    val openThermostat: (String) -> Unit = { vm.openClimatePopout(it) }
+    // The temperature under the sentence opens the Climate tab, where every
+    // thermostat and reading is, rather than one thermostat's popup.
+    val openThermostat: (String) -> Unit = { openTab(Screen.Climate) }
     val greetingSection: LazyListScope.() -> Unit = {
         item {
             GreetingBlock(greeting, connection, showSection("greeting"), states.isNotEmpty(), onReconnectTap, headline, subline, headlineAction, openThermostat)
@@ -1464,6 +1468,11 @@ fun homeCardShapeByIndex(index: Int): RoundedCornerShape = generalCardShape(inde
 fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, arrangeMode: Boolean = false, onArrangeToggle: (() -> Unit)? = null, modifier: Modifier = Modifier, cardSize: CardSize = CardSize.NORMAL, navigate: (Screen) -> Unit) {
     val liveEntity by vm.entityFlow(entityId).collectAsState()
     val entity = liveEntity ?: return
+    // Press and hold opens the tile's options (color, icon, name, and
+    // Arrange where this grid has it); in Arrange mode it leaves Arrange.
+    val holdForOptions: () -> Unit = {
+        if (arrangeMode) onArrangeToggle?.invoke() else vm.openCardSettings(entity.entityId, onArrangeToggle)
+    }
     val snap = vm.travelSnapshots[entity.entityId]
     val display = snap ?: entity
     val scheme = MaterialTheme.colorScheme
@@ -1556,7 +1565,7 @@ fun HomeRoomMediaCard(vm: HavenViewModel, entityId: String, gridIndex: Int = 0, 
                 // item 5: navigate is non-null — every caller
                 // passes it, and the sheet fallback is gone.
                 onClick = { if (!arrangeMode) navigate(Screen.EntityDetail(entity.entityId)) },
-                onLongClick = { onArrangeToggle?.invoke() },
+                onLongClick = holdForOptions,
             ),
     ) {
         // Round 24, item 6: the Column fills the Surface height
@@ -1709,6 +1718,11 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
     // renders nothing (membership rebuilds without it).
     val liveEntity by vm.entityFlow(entityId).collectAsState()
     val entity = liveEntity ?: return
+    // Press and hold opens the tile's options (color, icon, name, and
+    // Arrange where this grid has it); in Arrange mode it leaves Arrange.
+    val holdForOptions: () -> Unit = {
+        if (arrangeMode) onArrangeToggle?.invoke() else vm.openCardSettings(entity.entityId, onArrangeToggle)
+    }
     val accent = accentFor(entity.entityId)
     // Snapshot-held visuals, same rule as tiles and cards: while this
     // card's morph is open, badge/name/state/container resolve from
@@ -1921,7 +1935,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                 // zone split.) While in Arrange mode the tap is
                 // swallowed: no panel, no actuation.
                 onClick = { if (!arrangeMode) openPanel() },
-                onLongClick = { onArrangeToggle?.invoke() },
+                onLongClick = holdForOptions,
             ),
     ) {
         // Round 24, item 6: the Column fills the Surface height
@@ -1942,14 +1956,14 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                         interactionSource = zoneInteraction,
                         indication = null,
                         onClick = { if (!arrangeMode) vm.toggle(entity.entityId) },
-                        onLongClick = { onArrangeToggle?.invoke() },
+                        onLongClick = holdForOptions,
                     )
                 display.domain == "cover" -> Modifier.fillMaxWidth()
                     .combinedClickable(
                         interactionSource = zoneInteraction,
                         indication = null,
                         onClick = { if (!arrangeMode) vm.toggleCover(entity.entityId) },
-                        onLongClick = { onArrangeToggle?.invoke() },
+                        onLongClick = holdForOptions,
                     )
                 else -> Modifier
             }
@@ -1974,7 +1988,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                             interactionSource = badgeInteraction,
                             indication = null,
                             onClick = { if (!arrangeMode) shapeAction() },
-                            onLongClick = { onArrangeToggle?.invoke() },
+                            onLongClick = holdForOptions,
                         ) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -2099,7 +2113,7 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
                     interactionSource = textZoneInteraction,
                     indication = null,
                     onClick = { if (!arrangeMode) openPanel() },
-                    onLongClick = { onArrangeToggle?.invoke() },
+                    onLongClick = holdForOptions,
                 ),
             ) {
             Text(

@@ -369,12 +369,23 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun bumpCardCustom() { cardCustomVersion++ }
 
-    /** The entity whose Card settings sheet is open, or null. */
+    /** The entity whose tile options sheet is open, or null. */
     var cardSettingsTarget by mutableStateOf<String?>(null)
         private set
 
-    fun openCardSettings(entityId: String) { cardSettingsTarget = entityId }
-    fun closeCardSettings() { cardSettingsTarget = null }
+    /** Arrange mode for the grid the sheet was opened from, when that grid has one. */
+    var cardSettingsArrange by mutableStateOf<(() -> Unit)?>(null)
+        private set
+
+    fun openCardSettings(entityId: String, onArrange: (() -> Unit)? = null) {
+        cardSettingsArrange = onArrange
+        cardSettingsTarget = entityId
+    }
+
+    fun closeCardSettings() {
+        cardSettingsTarget = null
+        cardSettingsArrange = null
+    }
 
     // ---- Connection switcher (feedback round 16, item 7) ----
     //

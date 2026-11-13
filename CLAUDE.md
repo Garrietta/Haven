@@ -18,6 +18,7 @@ MVVM without a DI framework: one `HavenViewModel` owns the `HaClient` and the st
 | What a room says on Home (color, sentence, switches) | `data/RoomDigest.kt`, drawn by `ui/screens/RoomsHome.kt` |
 | The Climate tab (thermostats, every temperature and humidity reading) | `data/Climate.kt`, drawn by `ui/screens/ClimateScreen.kt` |
 | Shared UI pieces | `ui/components/` |
+| A tile's options (color, icon, name), the icon catalog | `ui/screens/CardSettings.kt`, `ui/components/CardIcons.kt` |
 | A device's control | `ui/controls/` |
 | Screens | `ui/screens/` |
 | Stored settings | `data/SettingsStore.kt`, `TabsStore`, `CardSizeStore`, `TokenStore` |
@@ -51,13 +52,14 @@ Breaking one is a bug even when it compiles. Reasons are in `DESIGN.md`.
 5. **Corners come from `Corner` / `MaterialTheme.shapes`; cards default to `leafCard`.** A container is never a polygon and a badge is never a rectangle.
 6. **Motion uses the named springs in `Motion.kt`.** Never an inline `spring(...)`. Their numbers were tuned on the phone: do not change one without a device pass.
 7. **Headings and menus use the shared components**: `ScreenTitle`, `SectionTitle`, `MenuSection` / `MenuGroup` / `MenuRow`.
-8. **The logo is generated** (`tools/logo.py`). Change the geometry there, never the XML or `BrandGeometry.kt`.
+8. **The logo is generated** (`tools/logo.py`). Change the geometry there, never the XML or `BrandGeometry.kt`. Haven's own icon glyphs are generated the same way (`tools/glyphs.py` writes `HavenGlyphs.kt`).
 
 ## Frozen: stored in users' settings
 
 Renaming any of these silently resets or breaks a saved choice.
 
 - Tile preset keys (`lime`, `heating`, `cooling`, `lock`, `alert`, `media`, `amber`, `sage`).
+- Icon keys in `CARD_ICON_OPTIONS` (add new ones freely).
 - `corners_0` .. `corners_7`, and the keys in `SHAPE_OPTIONS`.
 - Home section keys, including `round3-security`, `round3-vacuum`, `round3-media`, `round3-greenhouse`.
 - SharedPreferences file and key names in the stores.
