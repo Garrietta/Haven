@@ -206,6 +206,28 @@ fun StateFamily.ramp(): TonalRamp = when (this) {
     StateFamily.Quiet -> Palette.Moss
 }
 
+/**
+ * The ground a room card wears: its family's color, only just (t95 by
+ * day, t17 by night). The room still says what it is doing, but the card
+ * does not shout it; the switches on it, and a lit lamp's glow, carry
+ * the color. Quiet rooms keep their own resting tone.
+ */
+fun StateFamily.roomGround(isDark: Boolean): Color =
+    if (this == StateFamily.Quiet) colors(isDark).container else ramp().let { if (isDark) it.t17 else it.t95 }
+
+/**
+ * The hot centre of a moment's glow ([grainGlow]): a lit lamp's light,
+ * near white by day, and for heating and cooling a deeper tone of the
+ * family, an ember or a frost, rather than a white spot.
+ */
+fun StateFamily.glow(isDark: Boolean): Color = ramp().let {
+    when {
+        isDark -> it.t40
+        this == StateFamily.Light -> it.t99
+        else -> it.t80
+    }
+}
+
 fun StateFamily.colors(isDark: Boolean): FamilyColors = when (this) {
     // Quiet is not a color, it is the absence of one, so it does not
     // take the pastel recipe: it stays close to the page. By night its

@@ -1,5 +1,7 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.ui.theme.glow
+import com.garrietta.haven.ui.theme.grainGlow
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Garage
@@ -1864,13 +1866,18 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
         ?: homeCardShapeByIndex(gridIndex)
     val isPolygonCard = cardOutline !is RoundedCornerShape
     var confirmUnlock by remember(entityId) { mutableStateOf(false) }
+    // A light that is on is the tile's moment: its color glows from the
+    // badge's corner across the card, brighter the brighter the lamp, with
+    // grain over it. A pinned color keeps its flat tile.
+    val tileGlows = display.domain == "light" && display.state == "on" && roomPreset == null
+    val tileBrightness = (display.attrInt("brightness") ?: 255).coerceIn(0, 255) / 255f
     Surface(
         // Card-outline shape (2026-10-30 picker): a per-entity
         // override beats the global default; without either, the
         // §1 stable alternating asymmetric shape (never
         // extraLarge here — the mockup's cards are asymmetric).
         shape = cardOutline,
-        color = container,
+        color = if (tileGlows) androidx.compose.ui.graphics.Color.Transparent else container,
         // Feedback round 5, item 3: 136dp is a FLOOR, not a
         // ceiling. The fixed height left ≤6dp of slack on the
         // filmed variants (48dp garage door visual, 26sp climate
@@ -1920,6 +1927,17 @@ fun HomeRoomCard(vm: HavenViewModel, entityId: String, navigate: (Screen) -> Uni
             .graphicsLayer(scaleX = pressScale, scaleY = pressScale)
             .hideWhenMorphSource(entity.entityId)
             .hideBodyWhenMorphSource(entity.entityId)
+            .then(
+                if (tileGlows) {
+                    Modifier.clip(cardOutline).grainGlow(
+                        hot = androidx.compose.ui.graphics.lerp(container, com.garrietta.haven.ui.theme.StateFamily.Light.glow(isDark), 0.2f + 0.45f * tileBrightness),
+                        ground = container,
+                        from = Offset(0.14f, 0.16f),
+                    )
+                } else {
+                    Modifier
+                },
+            )
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,

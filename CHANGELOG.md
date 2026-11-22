@@ -1,5 +1,18 @@
 # Haven Changelog
 
+## 2.14: The things that are on are the color (2026-11-22)
+
+**What you will see**
+
+- A lamp that is on now glows: its round switch on Home is lit from the middle, near white fading to amber, brighter the brighter the lamp, and its tile in a room glows from the badge's corner across the card. There is fine grain over the glow, so it reads as light rather than a colored shape.
+- A thermostat heating or cooling glows on the Climate tab, an ember or a frost spreading from its reading. At rest it is flat.
+- Room cards on Home are quieter: each keeps its color, only just, so the switches that are on and the lit lamps stand out.
+- Bold text is a little lighter throughout.
+
+**Under it**
+
+- One texture, `ui/theme/Grain.kt` (`grainGlow`: a radial gradient between two tones of a state's own color with tiled luminance noise laid on in Overlay), used only on these moments. `StateFamily.roomGround` and `StateFamily.glow` add the quiet card tone and the glow's hot tone to the palette's roles. The Bold cut is 600 (was 660). Direction from the unslop rules: quiet chrome, color in one or two moments.
+
 ## 2.13: Hold a tile to change its color and icon (2026-11-13)
 
 **What you will see**

@@ -1,5 +1,10 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.ui.theme.ramp
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.geometry.Offset
+import com.garrietta.haven.ui.theme.roomGround
+import com.garrietta.haven.ui.theme.grainGlow
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -241,7 +246,7 @@ internal fun RoomCard(
             .reportCardBounds(roomPanelSourceId(room.areaId))
             .hideWhenMorphSource(roomPanelSourceId(room.areaId))
             .clip(leafCard(index))
-            .background(colors.container)
+            .background(digest.family.roomGround(isDark))
             .clickable(onClickLabel = "Open ${room.name}", onClick = onOpen)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -382,6 +387,10 @@ private fun RoomSwitch(
     val pinned = detailBadgeOverride(custom.tilePresets, entity, isDark, custom.domainTilePresets)
         ?.takeIf { lit != null }
     val icon = entityIcon(custom.iconKeys, entity)
+    // A lamp that is on is the one thing on the card drawn as light: its
+    // badge glows from the middle, brighter the brighter the lamp.
+    val glowing = entity.domain == "light" && lit != null && pinned == null
+    val brightness = (entity.attrInt("brightness") ?: 255).coerceIn(0, 255) / 255f
     val open: () -> Unit = {
         when (cardTapRoute(entity.domain, entity.entityId)) {
             CardTapRoute.CLIMATE_POPOUT -> vm.openClimatePopout(entity.entityId)
@@ -395,7 +404,20 @@ private fun RoomSwitch(
             .reportCardBounds(entity.entityId)
             .hideWhenMorphSource(entity.entityId)
             .clip(CircleShape)
-            .background(pinned?.first ?: lit?.badgeBg ?: onContainer.copy(alpha = RESTING_SWITCH_ALPHA))
+            .then(
+                if (glowing) {
+                    Modifier.grainGlow(
+                        // Toward the lamp's near-white in both themes: the badge is
+                        // already the bright tone by night, and light only gets lighter.
+                        hot = lerp(lit!!.badgeBg, StateFamily.Light.ramp().t98, 0.25f + 0.5f * brightness),
+                        ground = lit.badgeBg,
+                        from = Offset(0.4f, 0.34f),
+                        reach = 0.8f,
+                    )
+                } else {
+                    Modifier.background(pinned?.first ?: lit?.badgeBg ?: onContainer.copy(alpha = RESTING_SWITCH_ALPHA))
+                },
+            )
             .combinedClickable(
                 role = if (tapToggles(entity)) Role.Switch else Role.Button,
                 onLongClickLabel = "Open controls",

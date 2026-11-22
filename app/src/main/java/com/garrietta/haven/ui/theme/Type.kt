@@ -52,7 +52,7 @@ private fun family(width: Float, opticalSize: Float) = FontFamily(
     cut(FontWeight.Normal, 400, width, opticalSize),
     cut(FontWeight.Medium, 500, width, opticalSize),
     cut(FontWeight.SemiBold, 590, width, opticalSize),
-    cut(FontWeight.Bold, 660, width, opticalSize),
+    cut(FontWeight.Bold, 600, width, opticalSize),
     cut(FontWeight.ExtraBold, 760, width, opticalSize),
     cut(FontWeight.Black, 860, width, opticalSize),
 )

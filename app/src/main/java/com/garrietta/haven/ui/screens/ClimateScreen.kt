@@ -1,5 +1,7 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.ui.theme.glow
+import com.garrietta.haven.ui.theme.grainGlow
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -314,11 +316,27 @@ private fun HouseCard(summary: ClimateSummary, thermostat: HaEntity?, dark: Bool
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ThermostatCard(t: HaEntity, vm: HavenViewModel, dark: Boolean, index: Int, onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    val fam = thermostatFamily(t).colors(dark)
+    val family = thermostatFamily(t)
+    val fam = family.colors(dark)
     val step = setpointStep(t)
     val current = t.attrDouble("current_temperature")
     val humidity = t.attrDouble("current_humidity")
-    Surface(color = fam.container, contentColor = fam.onContainer, shape = leafCard(index + 1), modifier = modifier.fillMaxWidth()) {
+    // A thermostat heating or cooling is the tab's moment: an ember or a
+    // frost glowing from its reading, with grain over it. At rest it is flat.
+    val working = t.attrString("hvac_action") in setOf("heating", "cooling")
+    val shape = leafCard(index + 1)
+    Surface(
+        color = if (working) androidx.compose.ui.graphics.Color.Transparent else fam.container,
+        contentColor = fam.onContainer,
+        shape = shape,
+        modifier = modifier.fillMaxWidth().then(
+            if (working) {
+                Modifier.clip(shape).grainGlow(hot = family.glow(dark), ground = fam.container, from = Offset(0.88f, 0.12f), reach = 1.2f)
+            } else {
+                Modifier
+            },
+        ),
+    ) {
         Column(Modifier.padding(20.dp)) {
             Row(Modifier.fillMaxWidth().clickable(onClick = onOpen), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
