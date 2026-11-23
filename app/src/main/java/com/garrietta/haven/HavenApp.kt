@@ -3043,6 +3043,9 @@ private fun FrontDoorCameraPanel(
     // whichever entity the fallback picture would come from: it is the
     // only source here that is the door right now.
     val rtspUrl = vm.frontDoorRtspUrlFor(ringMqttLivePath(states[FRONT_DOOR_INFO_SENSOR_ID]?.attributes))
+    // Away from home (no RTSP), or when RTSP does not answer: the same
+    // live stream relayed by Home Assistant as HLS, through Nabu Casa.
+    val relayId = com.garrietta.haven.data.frontDoorRelayCamera(states)
     val engaged = vm.frontDoorLiveEngaged
     val stopReason = vm.frontDoorLiveStopReason
 
@@ -3085,6 +3088,9 @@ private fun FrontDoorCameraPanel(
     // and on Live-tab activation (see the effects below).
     var rtspFrames by remember { mutableStateOf(false) }
     var rtspFailed by remember { mutableStateOf(false) }
+    var relayFrames by remember { mutableStateOf(false) }
+    var relayFailed by remember { mutableStateOf(false) }
+    val relayLeads = relayId != null && !relayFailed && (rtspUrl == null || rtspFailed)
 
     // Engagement: the Live tab owns the switch. Resetting the probe
     // on every Live activation keeps a stale phase from surviving a
@@ -3285,7 +3291,7 @@ private fun FrontDoorCameraPanel(
     // recording with the switch on (the #93 rule's error).
     // Round 21, item 3: rtspFrames feeds the badge — RTSP frames
     // are live by construction, no switch involved.
-    val showLive = frontDoorShowsLiveBadge(webrtcFrames, mjpegFrames, switchOn, rtspFrames = rtspFrames)
+    val showLive = frontDoorShowsLiveBadge(webrtcFrames, mjpegFrames, switchOn, rtspFrames = rtspFrames || relayFrames)
     // Round 4: clean user-facing status only — the #93 debug
     // "Live path: …" wording (switch + MJPEG internals, WebRTC
     // outcomes, "?" placeholders) is retired. The LIVE badge
@@ -3305,7 +3311,9 @@ private fun FrontDoorCameraPanel(
         // unavailable" — the live_view proxy serves the last
         // motion recording by construction.
         phase == FrontDoorLivePhase.MJPEG && rtspFrames -> "Live"
+        phase == FrontDoorLivePhase.MJPEG && relayFrames -> "Live · through Home Assistant"
         phase == FrontDoorLivePhase.MJPEG && frontDoorSource != null && !rtspFailed && rtspUrl != null -> "Connecting to live view…"
+        phase == FrontDoorLivePhase.MJPEG && relayLeads -> "Connecting to live view through Home Assistant…"
         phase == FrontDoorLivePhase.MJPEG && mjpegError != null && frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> "Recording unavailable"
         // Camera fallback round: the fallback source gets a neutral
         // status line — no liveness claim (no LIVE badge either),
@@ -3432,6 +3440,20 @@ private fun FrontDoorCameraPanel(
                             },
                         )
                     
+                    }
+                    relayLeads && relayId != null -> {
+                        FrontDoorRelayBody(
+                            vm, relayId, enterProgress,
+                            onFirstFrame = {
+                                Log.d("Haven", "FrontDoorLive: relay first frame")
+                                relayFrames = true
+                            },
+                            onFailed = { message ->
+                                Log.w("Haven", "FrontDoorLive: relay error: $message — falling back")
+                                relayFrames = false
+                                relayFailed = true
+                            },
+                        )
                     }
                     frontDoorSource == FRONT_DOOR_LIVE_VIEW_ID -> {
                         CameraMjpegBody(
@@ -3718,6 +3740,67 @@ private fun CameraLiveBody(
         // onError is deliberately NOT forwarded: the fallback body
         // owns error display from here (same content, MJPEG).
         onPlayerError = { hlsFailed = true },
+    )
+}
+
+/**
+ * The doorbell's live stream relayed by Home Assistant: the relay camera's
+ * HLS playlist (Home Assistant answers once ring-mqtt has woken the
+ * doorbell, which can take several seconds), played like any other HLS
+ * camera. It fails over to the recording if no playlist comes in 20s or
+ * no frame in 30s, so the panel never hangs on "Loading".
+ */
+@Composable
+private fun FrontDoorRelayBody(
+    vm: HavenViewModel,
+    relayId: String,
+    enterProgress: () -> Float,
+    onFirstFrame: () -> Unit,
+    onFailed: (String) -> Unit,
+) {
+    var playlist by remember(relayId) { mutableStateOf<String?>(null) }
+    var framed by remember(relayId) { mutableStateOf(false) }
+    var failed by remember(relayId) { mutableStateOf(false) }
+    fun fail(message: String) {
+        if (!failed) {
+            failed = true
+            onFailed(message)
+        }
+    }
+    LaunchedEffect(relayId) {
+        vm.client.requestHlsUrl(relayId) { url, diagnostic ->
+            if (url != null) playlist = url else fail(diagnostic ?: "no HLS playlist")
+        }
+        delay(20_000)
+        if (playlist == null) fail("no HLS playlist in 20s")
+        delay(10_000)
+        if (!framed) fail("no frame in 30s")
+    }
+    val url = playlist
+    if (url == null) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            val last = vm.lastCameraFrame(FRONT_DOOR_LIVE_VIEW_ID)
+            if (last != null) {
+                Image(
+                    bitmap = last.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.25f },
+                )
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Waking the doorbell…", color = Color.White, fontSize = 16.sp)
+            }
+        }
+        return
+    }
+    CameraHlsPlayerBody(
+        vm, relayId, url, enterProgress,
+        onFirstFrame = {
+            framed = true
+            onFirstFrame()
+        },
+        onPlayerError = { fail(it) },
     )
 }
 

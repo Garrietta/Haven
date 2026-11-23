@@ -1407,7 +1407,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Camera entities that must never appear in the Cameras tab. */
-    private val excludedCameras = setOf("camera.eufy_ae_c10_map", "camera.front_door_69a1")
+    // The relay of the doorbell's live stream is the Front Door camera
+    // again, not a camera of its own; the Front Door panel uses it.
+    private val excludedCameras = setOf(
+        "camera.eufy_ae_c10_map", "camera.front_door_69a1",
+        com.garrietta.haven.data.FRONT_DOOR_RELAY_CAMERA_ID,
+    )
 
     /**
      * The curated Cameras set, in tab order: Garage (Tapo C110),

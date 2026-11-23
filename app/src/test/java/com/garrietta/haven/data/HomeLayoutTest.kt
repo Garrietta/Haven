@@ -15,7 +15,14 @@ import org.junit.Test
 class HomeLayoutTest {
 
     private fun e(id: String, state: String, name: String, vararg attrs: Pair<String, Any?>) =
-        HaEntity(id, state, mapOf("friendly_name" to name) + attrs.toMap())
+        HaEntity(id, state, mapOf("friendly_name" to name) + attrs.toMap(), lastChanged = "2026-11-22T12:00:00+00:00")
+
+    /** Something that stopped answering [days] days before [now]. */
+    private fun gone(id: String, name: String, days: Long, vararg attrs: Pair<String, Any?>) =
+        HaEntity(id, "unavailable", mapOf("friendly_name" to name) + attrs.toMap(),
+            lastChanged = java.time.Instant.ofEpochMilli(now - days * 86_400_000L).toString())
+
+    private val now = java.time.OffsetDateTime.parse("2026-11-23T03:00:00+00:00").toInstant().toEpochMilli()
 
     private val areas = listOf(
         HaArea("living_room", "Living Room"),
@@ -41,12 +48,17 @@ class HomeLayoutTest {
         e("switch.robot_child_lock", "off", "Robot Vacuum Child Lock"),
         e("media_player.family_room_tv", "unavailable", "Vizio TV"),
         e("media_player.tv", "unavailable", "TV"),
-        e("media_player.bedroom_tv", "unavailable", "Bedroom TV"),
+        gone("media_player.bedroom_tv", "Bedroom TV", days = 3),
+        gone("media_player.nest_hub", "Kitchen Display", days = 18),
+        gone("media_player.speaker_group", "Surround Sound", days = 18),
+        gone("sensor.old_thermometer_temperature", "TP350S Temperature", days = 18, "device_class" to "temperature"),
+        HaEntity("camera.old_doorbell", "unavailable", mapOf("friendly_name" to "Front Door 69A1", "restored" to true),
+            lastChanged = "2026-11-22T12:00:00+00:00"),
         e("switch.greenhouse_heater", "off", "Greenhouse Heater"),
         e("switch.greenhouse_fan", "on", "Greenhouse Fan"),
         e("switch.outlet_led", "on", "Dual outlet LED"),
         e("switch.sprinklers", "off", "Sprinklers"),
-        e("switch.sprinkler_togglex", "unavailable", "Sprinkler Timer Togglex"),
+        gone("switch.sprinkler_togglex", "Sprinkler Timer Togglex", days = 18),
         e("light.outdoor_floodlight", "off", "Outdoor camera Floodlight"),
         e("camera.outdoor_hd", "idle", "Outdoor camera HD Stream"),
         e("alarm_control_panel.home_mode", "disarmed", "Home Mode"),
@@ -97,39 +109,55 @@ class HomeLayoutTest {
         "d_out" to DeviceFacts("Outdoor camera", "C402"),
     )
 
-    private val places = homePlaces(states, areas, entityAreas, entityDevices, devices, auxiliary = setOf("switch.outlet_led"))
-    private fun place(name: String) = places.first { it.name == name }
+    private val places = homeGroups(states, entityDevices, devices, auxiliary = setOf("switch.outlet_led"), nowMillis = now)
+    private fun group(name: String) = places.first { it.name == name }
 
     @Test
-    fun theHouseFallsIntoPlacesInOrder() {
+    fun devicesFallIntoGroupsByWhatTheyAreInOrder() {
         assertEquals(
-            listOf(WHOLE_HOME, "Living Room", "Bedroom", "Garage", "Outside", "Greenhouse"),
+            listOf(GROUP_CLIMATE, GROUP_LIGHTS, GROUP_DOORS, GROUP_GREENHOUSE, GROUP_VACUUM, GROUP_MEDIA),
             places.map { it.name },
         )
     }
 
     @Test
-    fun aPlaceWithNoAreaIsReadOffTheDeviceName() {
-        assertEquals(listOf("cover.garage_door"), place("Garage").entityIds)
-        assertEquals("place:garage", place("Garage").id)
-        assertEquals(null, place("Garage").areaId)
-        assertEquals(listOf("light.outdoor_floodlight"), place("Outside").entityIds)
-        // A name matching an area joins the area.
-        assertEquals("greenhouse", place("Greenhouse").areaId)
+    fun homeAssistantsAreasAreNotRead() {
+        // The lamps are in the Living Room area; on Home they are Lights.
+        assertEquals(listOf("light.lamp_socket_1", "light.outdoor_floodlight", "light.standing_lamp"), group(GROUP_LIGHTS).entityIds)
+        assertTrue(places.all { it.areaId == null })
+    }
+
+    @Test
+    fun theGreenhouseIsEverythingNamedForIt() {
+        assertEquals(listOf("switch.greenhouse_fan", "switch.greenhouse_heater", "switch.sprinklers"), group(GROUP_GREENHOUSE).entityIds)
+        assertEquals(GROUP_GREENHOUSE, deviceGroup(e("switch.x", "off", "Garden Pump")))
+        assertEquals(GROUP_SWITCHES, deviceGroup(e("switch.coffee", "off", "Coffee Maker")))
+        assertEquals(GROUP_DOORS, deviceGroup(e("cover.garage_door", "closed", "Garage Door")))
+    }
+
+    @Test
+    fun leftoversAreLeftOut() {
+        val all = places.flatMap { it.entityIds }
+        assertFalse("media_player.nest_hub" in all)
+        assertFalse("media_player.speaker_group" in all)
+        // A TV switched off a few days ago is still a TV.
+        assertTrue("media_player.bedroom_tv" in all)
+        assertTrue(isLeftover(states.getValue("camera.old_doorbell"), now))
+        assertTrue(isLeftover(states.getValue("sensor.old_thermometer_temperature"), now))
+        assertFalse(isLeftover(states.getValue("media_player.bedroom_tv"), now))
+        assertFalse(isLeftover(states.getValue("light.lamp_socket_1"), now))
     }
 
     @Test
     fun aPlugShownAsALightIsOneTile() {
-        val living = place("Living Room").entityIds
-        assertTrue("light.lamp_socket_1" in living)
+        assertTrue("light.lamp_socket_1" in group(GROUP_LIGHTS).entityIds)
         assertFalse(places.any { "switch.smart_plug_3_socket_1" in it.entityIds })
     }
 
     @Test
     fun aDeviceInTheRegistryTwiceIsOneTile() {
         val all = places.flatMap { it.entityIds }
-        assertTrue("media_player.family_room_tv" in all)
-        assertFalse("media_player.tv" in all)
+        assertEquals(1, all.count { it == "media_player.family_room_tv" || it == "media_player.tv" })
         assertTrue("vacuum.robot" in all)
         assertFalse("vacuum.robot_homekit" in all)
     }
@@ -145,36 +173,13 @@ class HomeLayoutTest {
     }
 
     @Test
-    fun withinAPlaceLightsComeBeforeTheVacuumAndTheTv() {
-        assertEquals(
-            listOf("light.lamp_socket_1", "light.standing_lamp", "vacuum.robot", "media_player.family_room_tv"),
-            place("Living Room").entityIds,
-        )
-    }
-
-    @Test
-    fun theWholeHomeHasTheThermostatAndItsReading() {
-        assertEquals(listOf("climate.thermostat"), place(WHOLE_HOME).entityIds)
-        assertEquals(listOf("sensor.thermostat_current_temperature"), place(WHOLE_HOME).readingIds)
-    }
-
-    @Test
-    fun placesAreNamedByAreasFirstThenCommonWords() {
-        val names = listOf("Living Room", "Greenhouse")
-        assertEquals("Living Room", placeNamed("Living Room Camera", names))
-        assertEquals("Greenhouse", placeNamed("Greenhouse Heater", names))
-        assertEquals("Garage", placeNamed("Garage Door", names))
-        assertEquals("Front Door", placeNamed("Ring Doorbell", names))
-        assertEquals("Outside", placeNamed("Outdoor camera Floodlight", names))
-        assertEquals("Living Room", placeNamed("Family Room TV", names))
-        assertEquals(null, placeNamed("Thermostat", names))
-        // Whole words only: "yard" is not found in "Lanyard".
-        assertEquals(null, placeNamed("Lanyard charger", names))
+    fun climateHasTheThermostat() {
+        assertEquals(listOf("climate.thermostat"), group(GROUP_CLIMATE).entityIds)
     }
 
     @Test
     fun theStatusDeckSaysHowEachThingIs() {
-        val deck = homeStatus(states, places)
+        val deck = homeStatus(states, places, now)
         assertEquals(
             listOf(StatusKind.Climate, StatusKind.Security, StatusKind.Lights, StatusKind.Garage, StatusKind.Greenhouse, StatusKind.Vacuum, StatusKind.Media),
             deck.map { it.kind },
@@ -193,7 +198,7 @@ class HomeLayoutTest {
     @Test
     fun anOpenGarageTurnsSecurityAndTheGarageToAlert() {
         val open = states + ("cover.garage_door" to e("cover.garage_door", "open", "Garage Door", "device_class" to "garage"))
-        val deck = homeStatus(open, places).associateBy { it.kind }
+        val deck = homeStatus(open, places, now).associateBy { it.kind }
         assertEquals(StateFamily.Alert, deck.getValue(StatusKind.Security).family)
         assertEquals("Garage Door open", deck.getValue(StatusKind.Security).value)
         assertEquals(StateFamily.Alert, deck.getValue(StatusKind.Garage).family)
@@ -209,12 +214,10 @@ class HomeLayoutTest {
     }
 
     @Test
-    fun aPlaceHeadingCarriesItsReadingsAndWhatIsOn() {
-        // The thermostat's tile shows the temperature; its heading need not.
-        assertEquals("", placeLine(place(WHOLE_HOME), states))
-        assertEquals("68°", placeLine(place(WHOLE_HOME).copy(entityIds = emptyList()), states))
-        assertEquals("Lamp is on", placeLine(place("Living Room"), states))
-        assertEquals("Greenhouse Fan is on", placeLine(place("Greenhouse"), states))
+    fun aGroupHeadingSaysWhatIsOn() {
+        assertEquals("Lamp is on", placeLine(group(GROUP_LIGHTS), states))
+        assertEquals("Greenhouse Fan is on", placeLine(group(GROUP_GREENHOUSE), states))
+        assertEquals("", placeLine(group(GROUP_CLIMATE), states))
     }
 
     @Test
@@ -223,9 +226,9 @@ class HomeLayoutTest {
     }
 
     @Test
-    fun aDeviceNameLosesItsPlace() {
-        assertEquals("Heater", shortName("Greenhouse Heater", "Greenhouse"))
-        assertEquals("Lamp", shortName("Lamp", "Living Room"))
-        assertEquals("Greenhouse", shortName("Greenhouse", "Greenhouse"))
+    fun aDeviceNameLosesItsGroup() {
+        assertEquals("Heater", shortName("Greenhouse Heater", GROUP_GREENHOUSE))
+        assertEquals("Lamp", shortName("Lamp", GROUP_LIGHTS))
+        assertEquals("Greenhouse", shortName("Greenhouse", GROUP_GREENHOUSE))
     }
 }

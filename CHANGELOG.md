@@ -1,5 +1,18 @@
 # Haven Changelog
 
+## 3.1: Devices, not rooms; the doorbell live from anywhere (2026-11-23)
+
+**What you will see**
+
+- Home groups your devices by what they are: Climate, Lights, Doors, Greenhouse, Plugs & switches, Vacuum, and TV & audio. It no longer goes by rooms or categories in Home Assistant.
+- Old devices that stopped working are gone from Home: anything that has not answered for a week, or that Home Assistant only remembers from an old setup. A TV that is off for the evening still shows.
+- The front door's live view now works away from home, through your Nabu Casa link. It says "Live · through Home Assistant" and takes a few seconds to wake the doorbell. At home it is still the instant direct stream.
+- The Lights and TV & audio sheets open to their full height, so no row of tiles is cut off.
+
+**Under it**
+
+- `homeGroups` replaces the area-based places (`deviceGroup`, `isLeftover`, `STALE_DAYS`); `HomeLayoutTest` covers groups and leftovers. A Generic Camera (`camera.127_0_0_1`) was added to Home Assistant for ring-mqtt's stream; the Front Door panel plays it as HLS when the RTSP stream is out of reach (`FrontDoorRelayBody`, `frontDoorRelayCamera`, `FrontDoorRelayTest`).
+
 ## 3.0: Home, rebuilt around the house (2026-11-23)
 
 **What you will see**

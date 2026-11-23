@@ -81,10 +81,11 @@ import com.garrietta.haven.data.HomePlace
 import com.garrietta.haven.data.SECURITY_CAMERAS
 import com.garrietta.haven.data.StatusCard
 import com.garrietta.haven.data.StatusKind
-import com.garrietta.haven.data.WHOLE_HOME
+import com.garrietta.haven.data.GROUP_GREENHOUSE
+import com.garrietta.haven.data.isLeftover
 import com.garrietta.haven.data.climateLine
 import com.garrietta.haven.data.curated
-import com.garrietta.haven.data.homePlaces
+import com.garrietta.haven.data.homeGroups
 import com.garrietta.haven.data.homeStatus
 import com.garrietta.haven.data.isLightShownOnHome
 import com.garrietta.haven.data.isWideTile
@@ -122,8 +123,9 @@ import org.json.JSONObject
  *     colored only when something is running or wants a look. A card
  *     opens its page.
  *  3. The cameras, as a carousel of their pictures.
- *  4. The places, each a heading (with its readings and what is on)
- *     over the devices in it as tiles. A tile is the device: a tap does
+ *  4. The devices, in groups by what they are (climate, lights, doors,
+ *     the greenhouse, plugs, the vacuum, TV and audio), each group a
+ *     heading (with what is on) over its devices as tiles. A tile is the device: a tap does
  *     what a tap can safely do (lights and plugs flip; a garage door, a
  *     lock or a thermostat opens its control), a long press opens the
  *     device. The thermostat's tile is wide and takes − and + directly.
@@ -136,22 +138,26 @@ import org.json.JSONObject
 @Composable
 fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
-    val areas by vm.areas.collectAsState()
-    val entityAreas by vm.entityAreas.collectAsState()
     val entityDevices by vm.entityDevices.collectAsState()
     val deviceInfo by vm.deviceInfo.collectAsState()
     val auxiliary by vm.auxiliaryEntities.collectAsState()
     val lightOverrides = vm.settingsStore.homeLightOverrides()
-    val places = remember(states, areas, entityAreas, entityDevices, deviceInfo, auxiliary, lightOverrides) {
-        homePlaces(
-            states, areas, entityAreas, entityDevices,
+    // Home goes by the devices alone (not Home Assistant's areas), and
+    // leaves out leftovers: what has not answered for a week.
+    val now = System.currentTimeMillis()
+    val places = remember(states, entityDevices, deviceInfo, auxiliary, lightOverrides) {
+        homeGroups(
+            states, entityDevices,
             deviceInfo.mapValues { (_, d) -> DeviceFacts(d.name, d.model) },
             auxiliary,
+            nowMillis = now,
             shownOnHome = { isLightShownOnHome(it, lightOverrides) },
         )
     }
-    val status = remember(states, places) { homeStatus(states, places) }
-    val cameraIds = curated(vm.securityCameraIds(states), vm.curation(SECURITY_CAMERAS)) { states[it] != null }
+    val status = remember(states, places) { homeStatus(states, places, now) }
+    val cameraIds = curated(vm.securityCameraIds(states), vm.curation(SECURITY_CAMERAS)) { id ->
+        states[id]?.let { !isLeftover(it, now) } == true
+    }
     val weather = states.values.firstOrNull { it.domain == "weather" }
     val people = remember(states) { peopleHome(states.values.filter { it.domain == "device_tracker" }) }
     val connection by vm.connection.collectAsState()
@@ -462,7 +468,11 @@ private fun LazyListScope.places(
 private fun PlaceHeading(place: HomePlace, states: Map<String, HaEntity>, navigate: (Screen) -> Unit, modifier: Modifier) {
     val scheme = MaterialTheme.colorScheme
     // The greenhouse has a page of its own (automations, watering).
-    val opens: (() -> Unit)? = if (place.name.equals("Greenhouse", ignoreCase = true)) ({ navigate(Screen.GreenhousePanel) }) else null
+    val opens: (() -> Unit)? = when (place.name) {
+        GROUP_GREENHOUSE -> ({ navigate(Screen.GreenhousePanel) })
+        com.garrietta.haven.data.GROUP_VACUUM -> ({ navigate(Screen.VacuumPanel) })
+        else -> null
+    }
     Row(
         modifier.fillMaxWidth().then(if (opens != null) Modifier.clickable(onClickLabel = "Open ${place.name}", onClick = opens) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
@@ -507,7 +517,7 @@ private fun DeviceTile(entity: HaEntity, place: HomePlace, actions: TileActions,
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.96f else 1f, pressBounce(), label = "tilePress")
-    val name = custom.titles[entity.entityId] ?: shortName(entity.friendlyName, place.name.takeIf { it != WHOLE_HOME }.orEmpty())
+    val name = custom.titles[entity.entityId] ?: shortName(entity.friendlyName, place.name)
     val accent = accentFor(entity.entityId)
     val badge = com.garrietta.haven.ui.components.tileBadgePair(custom.tilePresets, custom.domainTilePresets, entity, isDark, scheme, accent)
     Box(
@@ -622,14 +632,15 @@ private fun CategorySheet(
     actions: TileActions,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // Opens straight to its full height: a half-open sheet would cut the tiles off mid-row.
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             Text(title, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
             val members = ids.mapNotNull(states::get)
             for ((r, row) in members.chunked(2).withIndex()) {
                 Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((c, entity) in row.withIndex()) {
-                        DeviceTile(entity, HomePlace("sheet", WHOLE_HOME, null, emptyList()), actions, Modifier.weight(1f), r * 2 + c)
+                        DeviceTile(entity, HomePlace("sheet", "", null, emptyList()), actions, Modifier.weight(1f), r * 2 + c)
                     }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }

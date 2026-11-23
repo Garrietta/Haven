@@ -3,38 +3,52 @@ package com.garrietta.haven.data
 import com.garrietta.haven.ui.theme.StateFamily
 
 /*
- * How Home organizes the house: the places in it, the devices a person
- * uses in each, and the status deck that answers "is everything all
- * right" before anything is pressed.
+ * How Home organizes the house: the devices in it, grouped by what they
+ * are, and the status deck that answers "is everything all right" before
+ * anything is pressed.
  *
- * A place is a Home Assistant area when a device has one. When it has
- * none, the place is read off the device's own name ("Garage Camera",
- * "Greenhouse Heater", "Outdoor camera"), so a home whose areas are only
- * half filled in still falls into rooms. What is left belongs to the
- * whole home (a thermostat, a speaker group).
+ * Home goes by the devices alone. Home Assistant's areas, floors, labels
+ * and categories are not read: in a home where they were never kept up
+ * they say more about the past than the house. A device belongs to a
+ * group by what it is (a light, a thermostat, a door, a TV), except that
+ * whatever is named for the greenhouse, the sprinklers or the garden is
+ * the Greenhouse, wherever it plugs in.
  *
- * Only what a person controls is a tile. A device's settings (a camera's
- * detection switches, a vacuum's child lock), its readings and its
- * buttons stay on the device's own page, and a device that reaches Home
- * Assistant twice (a plug exposed as a light and a switch, a TV through
- * two integrations) is one tile. Everything here is a pure function, so
- * it is tested without a screen.
+ * Only active, useful devices are tiles. A leftover is left out: an
+ * entity Home Assistant restored from a setup that no longer loads, or
+ * one that has not answered for a week ([STALE_DAYS]); a TV that is
+ * merely switched off for the evening stays. A device's settings (a
+ * camera's detection switches, a vacuum's child lock), its readings and
+ * its buttons stay on the device's own page, and a device that reaches
+ * Home Assistant twice (a plug exposed as a light and a switch, a TV
+ * through two integrations) is one tile. Everything here is a pure
+ * function, so it is tested without a screen.
  */
 
-/** One place in the house and the devices on its tiles, in order. */
+/** One group of devices on Home and the devices on its tiles, in order. */
 data class HomePlace(
-    /** The area id, or "place:" and the name for a place read off device names. */
+    /** "group:" and the group's name. */
     val id: String,
     val name: String,
-    /** The Home Assistant area, when the place is one. */
+    /** Never set: Home does not read Home Assistant's areas. Kept for the tile options sheet's signature. */
     val areaId: String?,
     val entityIds: List<String>,
-    /** Temperature and humidity readings in the place, for its heading. */
+    /** Temperature and humidity readings that belong to the group, for its heading. */
     val readingIds: List<String> = emptyList(),
 )
 
-/** The name of the place for devices that belong to no room. */
-const val WHOLE_HOME = "Whole home"
+/** The groups, in the order Home shows them. */
+const val GROUP_CLIMATE = "Climate"
+const val GROUP_LIGHTS = "Lights"
+const val GROUP_DOORS = "Doors"
+const val GROUP_GREENHOUSE = "Greenhouse"
+const val GROUP_SWITCHES = "Plugs & switches"
+const val GROUP_VACUUM = "Vacuum"
+const val GROUP_MEDIA = "TV & audio"
+private val GROUP_ORDER = listOf(GROUP_CLIMATE, GROUP_LIGHTS, GROUP_DOORS, GROUP_GREENHOUSE, GROUP_SWITCHES, GROUP_VACUUM, GROUP_MEDIA)
+
+/** A device that has not answered for this many days is a leftover. */
+const val STALE_DAYS = 7L
 
 /** What a device-registry entry says about a device: its name and model. */
 data class DeviceFacts(val name: String?, val model: String?)
@@ -51,61 +65,62 @@ private val MAJOR_DOMAINS = setOf("vacuum", "camera", "climate", "media_player",
 /** One of these per physical device. */
 private val ONE_PER_DEVICE = setOf("vacuum", "climate", "cover", "lock", "media_player", "alarm_control_panel")
 
-/**
- * Words that name a place, matched whole in a device's name. Several
- * words can name one place ("family room" is the living room).
- */
-private val PLACE_WORDS: List<Pair<String, String>> = listOf(
-    "living room" to "Living Room", "family room" to "Living Room", "lounge" to "Living Room",
-    "front door" to "Front Door", "doorbell" to "Front Door", "porch" to "Front Door",
-    "back door" to "Back Door",
-    "greenhouse" to "Greenhouse", "garage" to "Garage",
-    "kitchen" to "Kitchen", "dining" to "Dining Room", "bedroom" to "Bedroom", "office" to "Office",
-    "bathroom" to "Bathroom", "laundry" to "Laundry", "basement" to "Basement", "nursery" to "Nursery",
-    "hallway" to "Hallway", "attic" to "Attic",
-    "backyard" to "Outside", "back yard" to "Outside", "patio" to "Outside", "deck" to "Outside",
-    "driveway" to "Outside", "garden" to "Outside", "yard" to "Outside", "outdoor" to "Outside", "outside" to "Outside",
-)
-
-/** The order places come in on Home: the whole home, the living spaces, then the edges of the house. */
-private val PLACE_ORDER = listOf(
-    WHOLE_HOME, "Living Room", "Kitchen", "Dining Room", "Office", "Bedroom", "Nursery", "Bathroom",
-    "Laundry", "Hallway", "Basement", "Attic", "Garage", "Front Door", "Back Door", "Outside", "Greenhouse",
-)
+/** Names that make a device part of the greenhouse, whatever it is. */
+private val GREENHOUSE_WORDS = listOf("greenhouse", "sprinkler", "irrigation", "garden", "watering", "plant")
 
 private fun normalized(text: String): String =
     " " + text.lowercase().replace('’', '\'').replace(Regex("[^a-z0-9']+"), " ").trim() + " "
 
-/** The place [text] names, or null: a Home Assistant area's name first, then the common words. */
-fun placeNamed(text: String, areaNames: Collection<String>): String? {
-    val haystack = normalized(text)
-    areaNames.sortedByDescending { it.length }.firstOrNull { haystack.contains(normalized(it)) }?.let { return it }
-    return PLACE_WORDS.firstOrNull { (word, _) -> haystack.contains(normalized(word)) }?.second
-}
-
 private fun HaEntity.known(): Boolean = state != "unavailable" && state != "unknown" && state.isNotBlank()
 
+private fun isoMillis(iso: String?): Long? = iso?.let {
+    runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
+}
+
 /**
- * The devices on Home's tiles, grouped into places.
- *
- * [entityAreas] is each entity's area (its own or its device's),
- * [entityDevices] its device, [devices] what the registry says about each
- * device, and [auxiliary] the entities Home Assistant marks as settings,
- * diagnostics or hidden. [shownOnHome] decides lights the owner has taken
- * off or put back.
+ * Whether [entity] is a leftover rather than a device in use: restored by
+ * Home Assistant from a setup that no longer loads, or not answering and
+ * not for at least [STALE_DAYS] days as of [nowMillis]. A device that is
+ * answering is never a leftover, however old its last change.
  */
-fun homePlaces(
+fun isLeftover(entity: HaEntity, nowMillis: Long): Boolean {
+    if (entity.attrBool("restored") == true) return true
+    if (entity.known()) return false
+    val since = isoMillis(entity.lastChanged) ?: return false
+    return nowMillis - since >= STALE_DAYS * 24 * 60 * 60 * 1000
+}
+
+/** The group a device belongs to, by what it is and, for the greenhouse, by its name. */
+fun deviceGroup(entity: HaEntity, deviceName: String? = null): String? {
+    val names = normalized("${deviceName.orEmpty()} ${entity.friendlyName} ${entity.entityId.substringAfter('.').replace('_', ' ')}")
+    if (entity.domain != "climate" && GREENHOUSE_WORDS.any { names.contains(" $it") }) return GROUP_GREENHOUSE
+    return when (entity.domain) {
+        "climate", "water_heater", "humidifier" -> GROUP_CLIMATE
+        "light" -> GROUP_LIGHTS
+        "cover", "lock", "valve" -> GROUP_DOORS
+        "switch", "fan", "input_boolean" -> GROUP_SWITCHES
+        "vacuum" -> GROUP_VACUUM
+        "media_player" -> GROUP_MEDIA
+        else -> null
+    }
+}
+
+/**
+ * The devices on Home's tiles, in groups.
+ *
+ * [entityDevices] is each entity's device, [devices] what the registry
+ * says about each device, and [auxiliary] the entities Home Assistant
+ * marks as settings, diagnostics or hidden. [nowMillis] dates leftovers.
+ * [shownOnHome] decides lights the owner has taken off or put back.
+ */
+fun homeGroups(
     states: Map<String, HaEntity>,
-    areas: List<HaArea>,
-    entityAreas: Map<String, String>,
     entityDevices: Map<String, String>,
     devices: Map<String, DeviceFacts>,
     auxiliary: Set<String>,
+    nowMillis: Long,
     shownOnHome: (HaEntity) -> Boolean = { !isIndicatorLight(it) || it.domain != "light" },
 ): List<HomePlace> {
-    val areaById = areas.associateBy { it.id }
-    val areaNames = areas.map { it.name }
-
     // A physical device can be in the registry twice (a TV added by two
     // integrations): the same name and model are taken to be one device.
     fun deviceKey(entityId: String): String? {
@@ -116,10 +131,11 @@ fun homePlaces(
         return if (!name.isNullOrEmpty() && !model.isNullOrEmpty()) "$name|$model" else deviceId
     }
 
-    val byDevice = states.values.groupBy { deviceKey(it.entityId) }
+    val live = states.values.filterNot { isLeftover(it, nowMillis) }
+    val byDevice = live.groupBy { deviceKey(it.entityId) }
     fun deviceHas(key: String?, domains: Set<String>) = key != null && byDevice[key].orEmpty().any { it.domain in domains }
 
-    val candidates = states.values.filter { e ->
+    val candidates = live.filter { e ->
         e.domain in CONTROL_DOMAINS &&
             e.entityId !in auxiliary &&
             (e.domain != "light" || shownOnHome(e)) &&
@@ -135,51 +151,41 @@ fun homePlaces(
     }
 
     // One per device for the things a device is (a vacuum, a thermostat),
-    // preferring one that answers, then one with an area, then the
-    // shortest id; and a device's switches lose any that do not answer
-    // when another does.
+    // preferring one that answers, then the shortest id; and a device's
+    // switches lose any that do not answer when another does.
     val kept = candidates.groupBy { deviceKey(it.entityId) to (if (it.domain in ONE_PER_DEVICE) it.domain else it.entityId) }
         .flatMap { (group, members) ->
             if (group.first == null || members.size == 1) members
-            else listOf(
-                members.sortedWith(
-                    compareBy<HaEntity>({ !it.known() }, { entityAreas[it.entityId] == null }, { it.entityId.length }, { it.entityId }),
-                ).first(),
-            )
+            else listOf(members.sortedWith(compareBy<HaEntity>({ !it.known() }, { it.entityId.length }, { it.entityId })).first())
         }
         .let { list ->
             val answering = list.filter { it.domain == "switch" && it.known() }.mapNotNull { deviceKey(it.entityId) }.toSet()
             list.filterNot { it.domain == "switch" && !it.known() && deviceKey(it.entityId) in answering }
         }
 
-    fun placeOf(e: HaEntity): Pair<String, String?> {
-        entityAreas[e.entityId]?.let { id -> areaById[id]?.let { return it.name to it.id } }
-        val deviceName = entityDevices[e.entityId]?.let { devices[it]?.name }.orEmpty()
-        val named = placeNamed("$deviceName ${e.friendlyName}", areaNames) ?: return WHOLE_HOME to null
-        val area = areas.firstOrNull { it.name.equals(named, ignoreCase = true) }
-        return (area?.name ?: named) to area?.id
-    }
+    fun deviceName(e: HaEntity) = entityDevices[e.entityId]?.let { devices[it]?.name }
+    val grouped = kept.groupBy { deviceGroup(it, deviceName(it)) }.filterKeys { it != null }
 
-    val readings = states.values.filter {
+    // Readings named for the greenhouse go under it; the thermostat's own
+    // tile shows the inside temperature, so Climate's heading needs none.
+    val greenhouseReadings = live.filter {
         it.domain == "sensor" && it.entityId !in auxiliary && it.known() &&
-            it.attrString("device_class") in setOf("temperature", "humidity")
-    }
+            it.attrString("device_class") in setOf("temperature", "humidity") &&
+            deviceGroup(HaEntity("switch.x", "off", it.attributes), deviceName(it)) == GROUP_GREENHOUSE
+    }.sortedBy { it.attrString("device_class") != "temperature" }.map { it.entityId }
 
-    val grouped = kept.groupBy { placeOf(it) }
-    val readingsByPlace = readings.groupBy { placeOf(it) }
-    return grouped.map { (place, members) ->
-        val (name, areaId) = place
+    return grouped.map { (name, members) ->
         HomePlace(
-            id = areaId ?: "place:" + name.lowercase().replace(' ', '_'),
+            id = "group:" + name!!.lowercase().replace(' ', '_'),
             name = name,
-            areaId = areaId,
+            areaId = null,
             entityIds = members.sortedWith(compareBy({ tileRank(it) }, { it.friendlyName.lowercase() })).map { it.entityId },
-            readingIds = readingsByPlace[place].orEmpty().sortedBy { it.attrString("device_class") != "temperature" }.map { it.entityId },
+            readingIds = if (name == GROUP_GREENHOUSE) greenhouseReadings else emptyList(),
         )
-    }.sortedWith(compareBy({ PLACE_ORDER.indexOf(it.name).let { i -> if (i < 0) PLACE_ORDER.size else i } }, { it.name }))
+    }.sortedBy { GROUP_ORDER.indexOf(it.name) }
 }
 
-/** Within a place: the thermostat, then entrances, lights, the rest. */
+/** Within a group: the thermostat, then entrances, lights, the rest. */
 private fun tileRank(e: HaEntity): Int = when (e.domain) {
     "climate" -> 0
     "cover", "lock" -> 1
@@ -303,7 +309,8 @@ data class StatusCard(
  * fixed order, saying how it is. A card is colored only when something
  * wants attention or is running; at rest it is quiet.
  */
-fun homeStatus(states: Map<String, HaEntity>, places: List<HomePlace>): List<StatusCard> {
+fun homeStatus(allStates: Map<String, HaEntity>, places: List<HomePlace>, nowMillis: Long): List<StatusCard> {
+    val states = allStates.filterValues { !isLeftover(it, nowMillis) }
     val onTiles = places.flatMap { it.entityIds }.mapNotNull(states::get)
     val cards = mutableListOf<StatusCard>()
 
@@ -362,7 +369,7 @@ fun homeStatus(states: Map<String, HaEntity>, places: List<HomePlace>): List<Sta
         )
     }
 
-    places.firstOrNull { it.name.equals("Greenhouse", ignoreCase = true) }?.let { gh ->
+    places.firstOrNull { it.name == GROUP_GREENHOUSE }?.let { gh ->
         val members = gh.entityIds.mapNotNull(states::get)
         val running = members.filter { tileActive(it) }
         val value = when (running.size) {

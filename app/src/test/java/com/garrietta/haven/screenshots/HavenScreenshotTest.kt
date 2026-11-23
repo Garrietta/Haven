@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import org.junit.Assert.assertEquals
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performScrollTo
@@ -100,6 +101,20 @@ class HavenScreenshotTest {
         compose.onAllNodesWithText(text).onFirst().performClick()
     }
 
+    /** Taps the status card titled [title] (its heading below has the same word, but is not a button). */
+    private fun tapCard(title: String) {
+        // Near its left edge: a card at the end of the row can be partly off screen.
+        compose.onAllNodes(androidx.compose.ui.test.hasText(title) and androidx.compose.ui.test.hasClickAction()).onFirst()
+            .performTouchInput { click(androidx.compose.ui.geometry.Offset(24f, height / 2f)) }
+        // A bottom sheet is its own window: Android lays it out on the main
+        // looper, and the sheet waits for that size before it slides up, so
+        // the looper runs between frames.
+        repeat(SHEET_FRAMES) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            frame()
+        }
+    }
+
     /** Opens a light, plug or fan's controls from the button in its tile's corner (a tap on the tile switches it). */
     private fun openTile(name: String) {
         reveal(name)
@@ -165,12 +180,12 @@ class HavenScreenshotTest {
         shoot("room_folded_dark", FOLDED, vm)
     }
 
-    /** A room card opens its room as a popup over Home. */
-    @Test fun room_popup_folded_light() =
-        shoot("room_popup_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapText("Living Room") }
+    /** The Lights card opens a sheet of every light, each a tile. */
+    @Test fun lights_sheet_folded_light() =
+        shoot("lights_sheet_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapCard("Lights") }
 
-    @Test fun room_popup_unfolded_dark() =
-        shoot("room_popup_unfolded_dark", UNFOLDED, viewModel(signedIn = true, dark = true)) { tapText("Living Room") }
+    @Test fun lights_sheet_unfolded_dark() =
+        shoot("lights_sheet_unfolded_dark", UNFOLDED, viewModel(signedIn = true, dark = true)) { tapCard("Lights") }
 
     @Test fun settings_folded_light() =
         shoot("settings_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapTab("Settings") }
@@ -452,6 +467,8 @@ class HavenScreenshotTest {
     private companion object {
         /** Long enough for every spring in the app to come to rest. */
         const val SETTLE_MS = 1_500L
+        /** About a second and a half of frames: long enough for a bottom sheet to finish sliding up. */
+        const val SHEET_FRAMES = 90
 
         /** The Fold's cover screen, in dp. */
         const val FOLDED = "w384dp-h880dp-xhdpi"

@@ -169,6 +169,32 @@ fun frontDoorNotLiveLine(rtspUrl: String?): String =
     else "Live stream not answering at ${rtspUrl.substringAfter("://").substringBefore('/')} · Showing latest recording"
 
 /**
+ * Home Assistant's own camera for ring-mqtt's live stream: a Generic
+ * Camera whose stream source is rtsp://127.0.0.1:8554/<doorbell>_live,
+ * ring-mqtt's listener as seen from the Home Assistant host (added
+ * 2026-11-23). Home Assistant serves it as HLS over its ordinary HTTP
+ * API, so unlike the RTSP port it travels through Nabu Casa: it is the
+ * front door's live view away from home. The Generic Camera setup names
+ * the entity after the stream's host, hence the id.
+ */
+const val FRONT_DOOR_RELAY_CAMERA_ID = "camera.127_0_0_1"
+
+/**
+ * The camera that relays ring-mqtt's live stream through Home Assistant,
+ * or null when there is none or it is down: the known id, else a camera
+ * whose name says ring-mqtt (so renaming it in Home Assistant to, say,
+ * "Front Door (ring-mqtt)" keeps it found).
+ */
+fun frontDoorRelayCamera(states: Map<String, HaEntity>): String? {
+    fun usable(e: HaEntity?) = e != null && e.state != "unavailable" && e.state != "unknown"
+    if (usable(states[FRONT_DOOR_RELAY_CAMERA_ID])) return FRONT_DOOR_RELAY_CAMERA_ID
+    return states.values.firstOrNull {
+        it.domain == "camera" && usable(it) &&
+            it.friendlyName.replace('-', ' ').contains("ring mqtt", ignoreCase = true)
+    }?.entityId
+}
+
+/**
  * Front-door source resolution (camera fallback round, 2026-11-04):
  * the panel and the hero quadrant share this one rule so they can
  * never disagree about which camera is the front door. The

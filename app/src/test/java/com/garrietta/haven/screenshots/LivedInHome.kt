@@ -10,7 +10,7 @@ import com.garrietta.haven.data.HaEntity
  * switch, a TV added by two integrations, a vacuum twice, cameras with
  * their settings switches, a garage door, a greenhouse with its heater,
  * fan and sprinklers, an alarm, a thermostat holding a range, and two
- * people home. The names are made up.
+ * people home, and two leftovers Home must leave out. The names are made up.
  */
 object LivedInHome {
     val areas = listOf(
@@ -54,6 +54,10 @@ object LivedInHome {
         e("device_tracker.alex_phone", "home", "Alex's Phone"),
         e("device_tracker.sam_phone", "home", "Sam’s Phone"),
         e("weather.forecast", "cloudy", "Forecast", "temperature" to 45.0, "temperature_unit" to "°F"),
+        // Leftovers Home leaves out: gone for weeks, or restored from a setup that no longer loads.
+        HaEntity("media_player.kitchen_display", "unavailable", mapOf("friendly_name" to "Kitchen Display"),
+            lastChanged = "2026-10-01T00:00:00+00:00"),
+        HaEntity("camera.old_doorbell", "unavailable", mapOf("friendly_name" to "Front Door 69A1", "restored" to true)),
     )
 
     val states: Map<String, HaEntity> = list.associateBy { it.entityId }
