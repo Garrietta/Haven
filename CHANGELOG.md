@@ -1,5 +1,22 @@
 # Haven Changelog
 
+## 3.0: Home, rebuilt around the house (2026-11-23)
+
+**What you will see**
+
+- Home opens on the house at a glance: the weather, and an initial for each person who is home.
+- Under it, a card for each kind of thing in the house: Climate, Security, Lights, the garage, the greenhouse, the vacuum, and TV and audio. Each says how it is in a word or two, and turns color only when something is running or wants a look (an open garage door turns red). Tap a card for its page: Climate and Security their tabs, the garage its control, the greenhouse and the vacuum their panels, lights and TV and audio a sheet of their tiles.
+- The cameras sit under the cards as a carousel of their pictures.
+- Then the places in the house, each with its devices as tiles. Devices with no room in Home Assistant are placed by their names, so the garage camera and garage door are in the Garage, the floodlight Outside, the heater, fan and sprinklers in the Greenhouse; what is left is the Whole home.
+- Tap a light or plug to switch it; the small arrow in its corner opens its controls. A garage door, a lock or the thermostat opens its control. Press and hold any tile for its color, icon and name.
+- The thermostat has a wide tile with the temperature inside in large type and − and + to change it, both ends of the range when it is holding heat and cool.
+- Settings switches, duplicate entries and indicator lights no longer show up as tiles: one lamp is one tile, one TV is one tile.
+- Unfolded, the cards and cameras are on the left and the places on the right.
+
+**Under it**
+
+- `data/HomeLayout.kt` decides the places, the tiles and the status deck as pure functions (`HomeLayoutTest`); `ui/home/HavenHome.kt` draws them. The device popups, the camera view, the panels and the tile options are the same ones as before. `HaClient.restoreCachedStates` can seed device info and settings entities, and `LivedInHome` is a screenshot home with half-filled areas, duplicates and a greenhouse. A room pinned as a tab still shows the older room view.
+
 ## 2.14: The things that are on are the color (2026-11-22)
 
 **What you will see**

@@ -95,7 +95,51 @@ class HavenScreenshotTest {
     // carrying the label (a Home card can share it, like "Energy").
     private fun tapTab(label: String) = compose.onAllNodesWithContentDescription(label).onLast().performClick()
 
-    private fun tapText(text: String) = compose.onNodeWithText(text).performClick()
+    private fun tapText(text: String) {
+        reveal(text)
+        compose.onAllNodesWithText(text).onFirst().performClick()
+    }
+
+    /** Opens a light, plug or fan's controls from the button in its tile's corner (a tap on the tile switches it). */
+    private fun openTile(name: String) {
+        reveal(name)
+        compose.onAllNodesWithContentDescription("Open $name").onFirst().performClick()
+    }
+
+    /**
+     * Brings a tile on Home into view when it is not already there: the
+     * list composes only what is on screen. Swipes rather than a semantic
+     * scroll, which would wait for an idle the always-animating app never
+     * reaches; the clock is advanced by hand after each swipe.
+     */
+    private fun reveal(text: String) {
+        repeat(8) {
+            if (compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()) return
+            compose.onAllNodes(isRoot()).onFirst().performTouchInput { swipeUp(startY = bottom * 0.8f, endY = bottom * 0.3f) }
+            compose.mainClock.advanceTimeBy(SETTLE_MS)
+        }
+    }
+
+    /** The app on [LivedInHome]: areas half filled in, duplicates, cameras, a greenhouse. */
+    private fun livedIn(dark: Boolean): HavenViewModel {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val vm = HavenViewModel(app)
+        vm.settingsStore.themeMode = if (dark) "dark" else "light"
+        vm.client.restoreCachedStates(
+            LivedInHome.states, LivedInHome.areas, LivedInHome.entityAreas, LivedInHome.entityDevices,
+            LivedInHome.deviceInfo, LivedInHome.auxiliary,
+        )
+        vm.loginWithToken("http://127.0.0.1:9", "screenshot-token")
+        return vm
+    }
+
+    @Test fun lived_in_folded_light() = shoot("lived_in_folded_light", FOLDED, livedIn(dark = false))
+
+    @Test fun lived_in_folded_dark() = shoot("lived_in_folded_dark", FOLDED, livedIn(dark = true))
+
+    @Test fun lived_in_unfolded_light() = shoot("lived_in_unfolded_light", UNFOLDED, livedIn(dark = false))
+
+    @Test fun lived_in_unfolded_dark() = shoot("lived_in_unfolded_dark", UNFOLDED, livedIn(dark = true))
 
     @Test fun login_folded_light() = shoot("login_folded_light", FOLDED, viewModel(signedIn = false, dark = false))
 
@@ -146,27 +190,27 @@ class HavenScreenshotTest {
     @Test fun light_popup_folded_light() {
         val vm = viewModel(signedIn = true, dark = false)
         vm.roomFilter = RoomFilter.Area("living_room")
-        shoot("light_popup_folded_light", FOLDED, vm) { tapText("Floor Lamp") }
+        shoot("light_popup_folded_light", FOLDED, vm) { openTile("Floor Lamp") }
     }
 
     @Test fun light_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
         vm.roomFilter = RoomFilter.Area("living_room")
-        shoot("light_popup_folded_dark", FOLDED, vm) { tapText("Floor Lamp") }
+        shoot("light_popup_folded_dark", FOLDED, vm) { openTile("Floor Lamp") }
     }
 
     /** A switch's pop-up: the power slab, empty while it is off. */
     @Test fun switch_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
         vm.roomFilter = RoomFilter.Area("kitchen")
-        shoot("switch_popup_folded_dark", FOLDED, vm) { tapText("Coffee Maker") }
+        shoot("switch_popup_folded_dark", FOLDED, vm) { openTile("Coffee Maker") }
     }
 
     /** A fan's pop-up: the slab filled to its speed. */
     @Test fun fan_popup_folded_light() {
         val vm = viewModel(signedIn = true, dark = false)
         vm.roomFilter = RoomFilter.Area("bedroom")
-        shoot("fan_popup_folded_light", FOLDED, vm) { tapText("Ceiling Fan") }
+        shoot("fan_popup_folded_light", FOLDED, vm) { openTile("Ceiling Fan") }
     }
 
     /**
@@ -174,6 +218,7 @@ class HavenScreenshotTest {
      * they are tapped, with Arrange beside them.
      */
     private fun holdTile(name: String) {
+        reveal(name)
         // The tile is the first node with the name (the room's line and the bar repeat it).
         compose.onAllNodesWithText(name).onFirst().performTouchInput { down(center) }
         compose.mainClock.advanceTimeBy(800)

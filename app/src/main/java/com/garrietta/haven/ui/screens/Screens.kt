@@ -2227,6 +2227,18 @@ private fun GreetingBlock(
             )
         }
     }
+    ConnectionLine(connection, hasCachedContent, onReconnectTap)
+    Spacer(Modifier.height(16.dp))
+}
+
+/**
+ * The line that says the home is not connected: "Reconnecting…" with a
+ * spinner while it tries, "Sign-in expired — tap to reconnect" when it
+ * cannot, nothing while connected. Home shows it under its header.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun ConnectionLine(connection: ConnectionState, hasCachedContent: Boolean, onReconnectTap: (() -> Unit)?) {
     if (!connection.isLive()) {
         Spacer(Modifier.height(6.dp))
         val waiting = connection is ConnectionState.Connecting ||
@@ -2267,7 +2279,6 @@ private fun GreetingBlock(
             )
         }
     }
-    Spacer(Modifier.height(16.dp))
 }
 
 /**

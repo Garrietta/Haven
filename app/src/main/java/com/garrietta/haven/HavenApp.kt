@@ -2172,7 +2172,9 @@ private fun ScreenContent(
     onSignOut: () -> Unit,
 ) {
     when (screen) {
-        Screen.Today -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() }, openTab = goTop)
+        // Home (the 2026-11 redesign): the house at a glance, its status,
+        // the cameras and its places, in ui/home/HavenHome.kt.
+        Screen.Today -> com.garrietta.haven.ui.home.HavenHome(vm, navigate, openTab = goTop)
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
         Screen.Areas -> AreasScreen(vm, navigate)
         Screen.Search -> SearchScreen(vm, navigate)
