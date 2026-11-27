@@ -104,3 +104,42 @@ class ChoicesAndReadingsTest {
         assertEquals("on", formatReading("on", null, null))
     }
 }
+
+/** The order tiles are dragged into on Home. */
+class TileOrderTest {
+    @Test
+    fun theDraggedOrderComesFirstAndNewTilesFollow() {
+        assertEquals(listOf("c", "a", "b", "d"), orderedTiles(listOf("a", "b", "c", "d"), listOf("c", "a", "b")))
+        assertEquals(listOf("b", "a"), orderedTiles(listOf("a", "b"), listOf("gone", "b")))
+        assertEquals(listOf("a", "b"), orderedTiles(listOf("a", "b"), emptyList()))
+    }
+
+    @Test
+    fun aDropTakesTheTargetsPlace() {
+        assertEquals(listOf("b", "c", "a", "d"), movedOnto(listOf("a", "b", "c", "d"), "a", "c"))
+        assertEquals(listOf("d", "a", "b", "c"), movedOnto(listOf("a", "b", "c", "d"), "d", "a"))
+        assertEquals(listOf("a", "b"), movedOnto(listOf("a", "b"), "a", "a"))
+    }
+}
+
+/** One camera per camera, and detection rows in plain words. */
+class SecurityCamerasTest {
+    @Test
+    fun aSecondStreamOrIntegrationOfTheSameCameraIsLeftOut() {
+        val ids = listOf("camera.front_door_live_view", "camera.outdoor_hd", "camera.front_door_snapshot", "camera.outdoor_sd", "camera.garage")
+        val entityDevices = mapOf(
+            "camera.front_door_live_view" to "d_mqtt", "camera.front_door_snapshot" to "d_ring",
+            "camera.outdoor_hd" to "d_out", "camera.outdoor_sd" to "d_out", "camera.garage" to "d_garage",
+        )
+        val names = mapOf("d_mqtt" to "Front Door", "d_ring" to "Front Door", "d_out" to "Outdoor camera", "d_garage" to "Garage Camera")
+        assertEquals(listOf("camera.front_door_live_view", "camera.outdoor_hd", "camera.garage"), onePerCamera(ids, entityDevices, names))
+    }
+
+    @Test
+    fun detectionRowsReadAsAPersonSaysThem() {
+        fun sw(name: String) = HaEntity("switch.x", "on", mapOf("friendly_name" to name))
+        assertEquals("Alarm on motion", detectionLabel(sw("Outdoor camera Trigger alarm on motion_detection"), "Outdoor camera"))
+        assertEquals("Motion detection", detectionLabel(sw("Garage Camera Motion detection"), "Garage Camera"))
+        assertEquals("Front Door Motion Warning", detectionLabel(sw("Front Door Motion Warning"), "Garage Camera"))
+    }
+}

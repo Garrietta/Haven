@@ -68,8 +68,22 @@ fun climateReadings(
     skip: Set<String> = emptySet(),
     /** Area names, for a sensor whose own name says only what it measures ("Temperature"). */
     areaNames: Map<String, String> = emptyMap(),
+    /** Devices the registry marks as services (System Monitor's CPU temperature is not a room). */
+    serviceDevices: Set<String> = emptySet(),
 ): List<ClimateReading> {
-    val sensors = states.values.filter { it.entityId !in skip && (isTemperatureSensor(it) || isHumiditySensor(it)) }
+    // Like Home, only readings that belong to real hardware and answer:
+    // not a template sensor, not a service's, not a thermometer that has
+    // gone quiet, and not the thermostat's own, which its card shows. Until the registry has arrived, device or not cannot be
+    // told, so none are left out for it.
+    val registryKnown = entityDevices.isNotEmpty()
+    // A thermostat's own readings are on its card already.
+    val thermostatDevices = states.values.filter { it.domain == "climate" }.mapNotNull { entityDevices[it.entityId] }.toSet()
+    val sensors = states.values.filter {
+        entityDevices[it.entityId]?.let { d -> d in thermostatDevices } != true &&
+        it.entityId !in skip && (isTemperatureSensor(it) || isHumiditySensor(it)) &&
+            it.state.toDoubleOrNull() != null &&
+            (!registryKnown || entityDevices[it.entityId]?.let { d -> d !in serviceDevices } == true)
+    }
     return sensors.groupBy { entityDevices[it.entityId] ?: it.entityId }.map { (key, group) ->
         val temperature = group.filter(::isTemperatureSensor).minByOrNull { it.entityId.length }
         val humidity = group.filter(::isHumiditySensor).minByOrNull { it.entityId.length }

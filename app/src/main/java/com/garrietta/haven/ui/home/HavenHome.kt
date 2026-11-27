@@ -1,5 +1,13 @@
 package com.garrietta.haven.ui.home
 
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.border
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -146,13 +154,15 @@ fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) 
     // Home goes by the devices alone (not Home Assistant's areas), and
     // leaves out leftovers: what has not answered for a week.
     val now = System.currentTimeMillis()
-    val places = remember(states, entityDevices, deviceInfo, auxiliary, lightOverrides) {
+    val tileOrder = vm.settingsStore.homeTileOrder()
+    val places = remember(states, entityDevices, deviceInfo, auxiliary, lightOverrides, tileOrder) {
         homeGroups(
             states, entityDevices,
             deviceInfo.mapValues { (_, d) -> DeviceFacts(d.name, d.model, d.service) },
             auxiliary,
             nowMillis = now,
             shownOnHome = { com.garrietta.haven.data.isShownOnHome(it, lightOverrides) },
+            tileOrder = tileOrder,
         )
     }
     val nameOf = com.garrietta.haven.ui.screens.rememberEntityNamer(vm)
@@ -178,7 +188,8 @@ fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) 
             StatusKind.Lights, StatusKind.Media -> sheet = card.kind
         }
     }
-    val actions = TileActions(vm, navigate, nameOf)
+    val carry = remember { TileCarry() }
+    val actions = TileActions(vm, navigate, nameOf, carry)
 
     if (LocalWideLayout.current) {
         Row(Modifier.fillMaxSize().statusBarsPadding().padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
@@ -242,7 +253,28 @@ fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) 
 }
 
 /** What a tile does when tapped, held, or nudged. */
-private class TileActions(val vm: HavenViewModel, val navigate: (Screen) -> Unit, val nameOf: (HaEntity) -> String) {
+private class TileActions(
+    val vm: HavenViewModel,
+    val navigate: (Screen) -> Unit,
+    val nameOf: (HaEntity) -> String,
+    val carry: TileCarry = TileCarry(),
+) {
+    /** Puts a carried tile down where it was dropped and keeps the group's new order. */
+    fun drop(place: HomePlace) {
+        val (moved, target) = carry.drop() ?: return
+        vm.settingsStore.setHomeTileOrder(place.id, com.garrietta.haven.data.movedOnto(place.entityIds, moved, target))
+        vm.bumpCardCustom()
+    }
+
+    /** Sets a light's brightness or a fan's speed to [percent], or turns it off at 0. */
+    fun setLevel(entity: HaEntity, percent: Int) {
+        val id = entity.entityId
+        when (entity.domain) {
+            "light" -> if (percent <= 0) vm.turnOff(id) else vm.callService("light", "turn_on", id, JSONObject().put("brightness_pct", percent))
+            "fan" -> if (percent <= 0) vm.turnOff(id) else vm.callService("fan", "set_percentage", id, JSONObject().put("percentage", percent))
+        }
+    }
+
     fun tap(entity: HaEntity) = when {
         tapToggles(entity) -> vm.toggle(entity.entityId)
         entity.domain == "vacuum" -> navigate(Screen.VacuumPanel)
@@ -452,7 +484,8 @@ private fun LazyListScope.places(
                 // A row takes its tallest tile's height, so a name on two
                 // lines grows the row instead of pushing the state off the tile.
                 Row(
-                    Modifier.padding(horizontal = horizontal).padding(bottom = 8.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min),
+                    Modifier.zIndex(if (actions.carry.carried in row) 1f else 0f)
+                        .padding(horizontal = horizontal).padding(bottom = 8.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     for ((c, id) in row.withIndex()) {
@@ -523,37 +556,99 @@ private fun DeviceTile(entity: HaEntity, place: HomePlace, actions: TileActions,
     val ink = if (active) colors.onContainer else scheme.onSurface
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, pressBounce(), label = "tilePress")
+    val carry = actions.carry
+    val carried = carry.carried == entity.entityId
+    val under = carry.over == entity.entityId
+    val scale by animateFloatAsState(
+        when {
+            carried -> 1.06f
+            pressed || under -> 0.94f
+            else -> 1f
+        },
+        pressBounce(), label = "tilePress",
+    )
     val name = custom.titles[entity.entityId]?.takeIf { it.isNotBlank() } ?: shortName(actions.nameOf(entity), place.name)
     val accent = accentFor(entity.entityId)
     val badge = com.garrietta.haven.ui.components.tileBadgePair(custom.tilePresets, custom.domainTilePresets, entity, isDark, scheme, accent)
+    // A level slid across the tile, shown while the finger is down and sent on release.
+    var sliding by remember { mutableStateOf<Float?>(null) }
+    val startLevel = slideLevel(entity)
+    val canCarry = place.id != SHEET_PLACE
+    val shape = leafCard(index)
     Box(
         modifier
             .heightIn(min = 124.dp).fillMaxHeight()
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(leafCard(index))
+            .onGloballyPositioned { if (canCarry) carry.place(entity.entityId, place.id, it.boundsInRoot()) }
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                if (carried) {
+                    translationX = carry.offset.x
+                    translationY = carry.offset.y
+                    shadowElevation = 16.dp.toPx()
+                    this.shape = shape
+                    clip = true
+                }
+            }
+            .clip(shape)
             .background(container)
-            .combinedClickable(
-                interactionSource = interaction,
-                indication = androidx.compose.material3.ripple(),
-                role = Role.Button,
-                onClickLabel = name,
-                onLongClickLabel = "Options for $name",
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    actions.options(entity)
-                },
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    actions.tap(entity)
-                },
-            ),
+            .then(if (under) Modifier.border(3.dp, com.garrietta.haven.ui.theme.HavenChrome.capsule, shape) else Modifier)
+            .indication(interaction, androidx.compose.material3.ripple())
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                onClick(label = name) { actions.tap(entity); true }
+                onLongClick(label = "Options for $name") { actions.options(entity); true }
+            }
+            .tileGestures(entity.entityId, interaction) {
+                TileHand(
+                    tap = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        actions.tap(entity)
+                    },
+                    hold = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        actions.options(entity)
+                    },
+                    slide = startLevel?.let { level ->
+                        TileSlide(
+                            start = { sliding = level.toFloat() },
+                            by = { fraction ->
+                                val before = sliding ?: level.toFloat()
+                                val next = (before + fraction * 100f).coerceIn(0f, 100f)
+                                if ((before / 10).toInt() != (next / 10).toInt()) haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                                sliding = next
+                            },
+                            end = {
+                                sliding?.let { actions.setLevel(entity, Math.round(it)) }
+                                sliding = null
+                            },
+                        )
+                    },
+                    pickUp = {
+                        if (canCarry) {
+                            haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                            carry.pickUp(entity.entityId, place.id)
+                        }
+                    },
+                    move = { if (canCarry) carry.move(it) },
+                    drop = { if (canCarry) actions.drop(place) },
+                )
+            },
     ) {
+        // The level being slid: a fill from the left in the family's accent.
+        sliding?.let { level ->
+            Box(Modifier.matchParentSize()) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(level / 100f).background(StateFamily.Light.colors(isDark).accent.copy(alpha = 0.35f)))
+            }
+        }
         Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
             DomainBadge(entity, entityIcon(custom.iconKeys, entity), accent, Modifier.size(42.dp), badgeOverride = badge)
             Column {
                 Text(name, style = MaterialTheme.typography.titleSmall, color = ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(tileState(entity), style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    sliding?.let { if (it < 0.5f) "Off" else "${Math.round(it)}%" } ?: tileState(entity),
+                    style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         if (tapToggles(entity)) {
@@ -592,12 +687,33 @@ private fun ThermostatTile(entity: HaEntity, actions: TileActions, modifier: Mod
     val inside = entity.attrDouble("current_temperature")?.let { "${Math.round(it)}°" } ?: "—"
     val humidity = entity.attrDouble("current_humidity")?.let { " · ${Math.round(it)}%" }.orEmpty()
     val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val name = actions.nameOf(entity)
     Row(
         modifier
             .height(124.dp)
             .clip(leafCard(index))
             .background(container)
-            .clickable(onClickLabel = "Open ${actions.nameOf(entity)}", role = Role.Button) { actions.open(entity) }
+            .indication(interaction, androidx.compose.material3.ripple())
+            .semantics(mergeDescendants = false) {
+                role = Role.Button
+                onClick(label = "Open $name") { actions.open(entity); true }
+                onLongClick(label = "Options for $name") { actions.options(entity); true }
+            }
+            // A tap opens the thermostat; press and hold for the tile's options.
+            .tileGestures(entity.entityId, interaction) {
+                TileHand(
+                    tap = { actions.open(entity) },
+                    hold = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        actions.options(entity)
+                    },
+                    slide = null,
+                    pickUp = {},
+                    move = {},
+                    drop = {},
+                )
+            }
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -647,11 +763,28 @@ private fun CategorySheet(
             for ((r, row) in members.chunked(2).withIndex()) {
                 Row(Modifier.padding(bottom = 8.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((c, entity) in row.withIndex()) {
-                        DeviceTile(entity, HomePlace("sheet", "", null, emptyList()), actions, Modifier.weight(1f), r * 2 + c)
+                        DeviceTile(entity, HomePlace(SHEET_PLACE, "", null, emptyList()), actions, Modifier.weight(1f), r * 2 + c)
                     }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
     }
+}
+
+/** The place a status card's sheet gives its tiles: they cannot be carried there. */
+private const val SHEET_PLACE = "sheet"
+
+/**
+ * The level a finger slides across a tile: a dimmable light's brightness
+ * or a fan's speed, in percent (0 when it is off). Null for a tile with
+ * no level, which a sideways slide leaves alone.
+ */
+internal fun slideLevel(entity: HaEntity): Int? = when (entity.domain) {
+    "light" -> {
+        val dimmable = entity.attrList("supported_color_modes")?.any { it != "onoff" } == true || entity.attrInt("brightness") != null
+        if (!dimmable) null else if (entity.state == "on") ((entity.attrInt("brightness") ?: 255) * 100 + 127) / 255 else 0
+    }
+    "fan" -> entity.attrInt("percentage")?.let { if (entity.state == "on") it else 0 }
+    else -> null
 }

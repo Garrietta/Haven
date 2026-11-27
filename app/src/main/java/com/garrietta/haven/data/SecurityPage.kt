@@ -35,13 +35,30 @@ fun securityCameras(
     cameraIds: List<String>,
     states: Map<String, HaEntity>,
     entityDevices: Map<String, String>,
+    nameOf: (HaEntity) -> String = { it.friendlyName },
+    deviceNames: Map<String, String> = emptyMap(),
 ): List<CameraSecurity> = cameraIds.mapNotNull { id ->
     val camera = states[id] ?: return@mapNotNull null
     val device = entityDevices[id]
     val switches = if (device == null) emptyList() else states.values
-        .filter { isDetectionSwitch(it) && entityDevices[it.entityId] == device }
+        .filter { isDetectionSwitch(it) && sameCamera(entityDevices[it.entityId], device, deviceNames) }
         .sortedBy { it.friendlyName.lowercase() }
-    CameraSecurity(id, camera.friendlyName, motionSensorForCamera(id, states, entityDevices), switches)
+    CameraSecurity(id, nameOf(camera), motionSensorForCamera(id, states, entityDevices), switches)
+}
+
+/**
+ * One camera per physical camera: the first of [ids] for each device,
+ * and for each device name, since one doorbell added by two integrations
+ * is two devices with one name, and one camera's HD and SD streams are
+ * two entities on one device.
+ */
+fun onePerCamera(ids: List<String>, entityDevices: Map<String, String>, deviceNames: Map<String, String>): List<String> {
+    val seen = mutableSetOf<String>()
+    return ids.filter { id ->
+        val device = entityDevices[id] ?: return@filter true
+        val keys = listOfNotNull("id:$device", deviceNames[device]?.trim()?.lowercase()?.let { "name:$it" })
+        if (keys.any { it in seen }) false else { seen += keys; true }
+    }
 }
 
 /** Detection switches on no listed camera's device, by name. */
@@ -49,11 +66,24 @@ fun looseDetectionSwitches(
     cameraIds: List<String>,
     states: Map<String, HaEntity>,
     entityDevices: Map<String, String>,
+    deviceNames: Map<String, String> = emptyMap(),
 ): List<HaEntity> {
-    val cameraDevices = cameraIds.mapNotNull { entityDevices[it] }.toSet()
+    val cameraDevices = cameraIds.mapNotNull { entityDevices[it] }
     return states.values
-        .filter { isDetectionSwitch(it) && entityDevices[it.entityId] !in cameraDevices }
+        .filter { isDetectionSwitch(it) && cameraDevices.none { d -> sameCamera(entityDevices[it.entityId], d, deviceNames) } }
         .sortedBy { it.friendlyName.lowercase() }
+}
+
+/**
+ * Whether [device] is the camera [cameraDevice]: the same registry
+ * device, or one of the same name (one doorbell added by two
+ * integrations is two devices called "Front Door").
+ */
+private fun sameCamera(device: String?, cameraDevice: String, deviceNames: Map<String, String>): Boolean {
+    if (device == null) return false
+    if (device == cameraDevice) return true
+    val a = deviceNames[device]?.trim()?.lowercase()
+    return a != null && a == deviceNames[cameraDevice]?.trim()?.lowercase()
 }
 
 /**
@@ -63,9 +93,16 @@ fun looseDetectionSwitches(
  */
 fun detectionLabel(switch: HaEntity, cameraName: String): String {
     val name = switch.friendlyName.trim()
-    if (cameraName.isBlank() || !name.startsWith(cameraName, ignoreCase = true)) return name
-    val rest = name.substring(cameraName.length).trim(' ', '-', ':', '·')
-    return if (rest.isEmpty()) name else rest.replaceFirstChar { it.uppercase() }
+    val rest = if (cameraName.isNotBlank() && name.startsWith(cameraName, ignoreCase = true)) {
+        name.substring(cameraName.length).trim(' ', '-', ':', '·').ifEmpty { name }
+    } else {
+        name
+    }
+    // Integrations write these in their own words ("Trigger alarm on
+    // motion_detection"): read them the way a person says them.
+    val plain = rest.replace('_', ' ').replace(Regex("\\s+"), " ")
+        .replace(Regex("(?i)^trigger alarm on (\\w+) detection$"), "Alarm on $1")
+    return plain.replaceFirstChar { it.uppercase() }
 }
 
 /** The Security tab's opening line, and whether it is the calm one. */
@@ -79,7 +116,7 @@ private val OPENING_CLASSES = setOf("door", "window", "garage_door", "opening")
  * and locks that are not locked. Unavailable things are left out, not
  * counted as shut or open, as everywhere else.
  */
-fun securitySummary(states: Map<String, HaEntity>): SecuritySummary {
+fun securitySummary(states: Map<String, HaEntity>, nameOf: (HaEntity) -> String = { it.friendlyName }): SecuritySummary {
     val open = states.values.filter { entity ->
         when (entity.domain) {
             "binary_sensor" -> entity.state == "on" && entity.attrString("device_class") in OPENING_CLASSES
@@ -87,10 +124,10 @@ fun securitySummary(states: Map<String, HaEntity>): SecuritySummary {
                 entity.attrString("device_class") in setOf("garage", "door", "gate")
             else -> false
         }
-    }.map { it.friendlyName }.sorted()
+    }.map(nameOf).sorted()
     val unlocked = states.values
         .filter { it.domain == "lock" && it.state in setOf("unlocked", "unlocking", "open", "opening", "jammed") }
-        .map { it.friendlyName }.sorted()
+        .map(nameOf).sorted()
     if (open.isEmpty() && unlocked.isEmpty()) {
         val anything = states.values.any { it.domain == "lock" || it.domain == "cover" || it.attrString("device_class") in OPENING_CLASSES }
         return SecuritySummary(if (anything) "Everything is shut and locked." else "Nothing to watch yet.", calm = true)

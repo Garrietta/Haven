@@ -89,19 +89,22 @@ import com.garrietta.haven.ui.theme.colors
 @Composable
 fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
+    val nameOf = rememberEntityNamer(vm)
     val entityDevices by vm.entityDevices.collectAsState()
     // Each section shows what Home Assistant has, arranged by hand
     // (PageCuration): taken off, added to and put in order in Edit.
     val exists: (String) -> Boolean = { states[it] != null }
     val cameraDefaults = vm.securityCameraIds(states)
     val cameraIds = curated(cameraDefaults, vm.curation(SECURITY_CAMERAS), exists)
-    val cameras = securityCameras(cameraIds, states, entityDevices)
-    val loose = looseDetectionSwitches(cameraIds, states, entityDevices)
+    val deviceInfo by vm.deviceInfo.collectAsState()
+    val deviceNames = deviceInfo.mapValues { it.value.name }
+    val cameras = securityCameras(cameraIds, states, entityDevices, nameOf, deviceNames)
+    val loose = looseDetectionSwitches(cameraIds, states, entityDevices, deviceNames)
     val detectionDefaults = (cameras.flatMap { it.switches } + loose).map { it.entityId }.distinct()
     val detectionIds = curated(detectionDefaults, vm.curation(SECURITY_DETECTION), exists)
     val doorDefaults = securityDoorIds(states)
     val doorIds = curated(doorDefaults, vm.curation(SECURITY_DOORS), exists)
-    val summary = securitySummary(states)
+    val summary = securitySummary(states, nameOf)
     val alarm = securityAlarm(states)
     val columns = if (LocalWideLayout.current) 3 else 2
     var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
@@ -123,8 +126,8 @@ fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         if (editing) {
             fun section(key: String, title: String, defaults: List<String>, shown: List<String>) = EditorSection(
                 key, title,
-                shown.map { editorItem(states[it], it) },
-                takenOff(defaults, vm.curation(key)).map { editorItem(states[it], it) },
+                shown.map { editorItem(states[it], it, states[it]?.let(nameOf)) },
+                takenOff(defaults, vm.curation(key)).map { editorItem(states[it], it, states[it]?.let(nameOf)) },
             )
             pageEditor(
                 vm,
@@ -188,7 +191,7 @@ fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             Spacer(Modifier.height(20.dp))
         }
         item(key = "doors") {
-            DoorsAndLocks(states, doorIds, navigate)
+            DoorsAndLocks(states, doorIds, navigate, nameOf)
         }
         if (states[SIREN_ID] != null) {
             item(key = "siren") {
@@ -330,7 +333,7 @@ private fun securityDoorIds(states: Map<String, HaEntity>): List<String> {
 
 /** Locks, garage doors and the door, window and motion sensors, in [ids]' order, each opening its own popup. */
 @Composable
-private fun DoorsAndLocks(states: Map<String, HaEntity>, ids: List<String>, navigate: (Screen) -> Unit) {
+private fun DoorsAndLocks(states: Map<String, HaEntity>, ids: List<String>, navigate: (Screen) -> Unit, nameOf: (HaEntity) -> String) {
     if (ids.isEmpty()) return
     val checks = securityChecklist(states.values.filter { it.domain == "binary_sensor" }).associateBy { it.entityId }
     SectionTitle("Doors & locks")
@@ -344,8 +347,8 @@ private fun DoorsAndLocks(states: Map<String, HaEntity>, ids: List<String>, navi
                 badgeKey = id,
                 badgeKind = shapeForDomain(entity.domain),
                 icon = domainIcon(entity),
-                title = check?.name ?: entity.friendlyName,
-                subtitle = check?.statusText ?: entity.stateText(),
+                title = check?.name ?: nameOf(entity),
+                subtitle = check?.statusText ?: com.garrietta.haven.data.tileState(entity),
                 onClick = { navigate(Screen.EntityDetail(id)) },
                 flat = true,
             )

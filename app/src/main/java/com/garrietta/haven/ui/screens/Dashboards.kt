@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import com.garrietta.haven.ui.components.holdToReorder
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -438,7 +439,8 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
         SectionTitle("Cards in this view")
         Spacer(Modifier.height(8.dp))
         val cards = views[safeSelected].optJSONArray("cards") ?: JSONArray()
-        // Cards move by their grips; the order is written when the finger lifts.
+        // Hold a card anywhere (or take it by its grip) and drag it; the
+        // order is written when the finger lifts.
         val cardReorder = com.garrietta.haven.ui.components.rememberColumnReorder(cards.length()) { from, to ->
             vm.moveCard(safeSelected, from, to)
         }
@@ -454,6 +456,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
                         modifier = Modifier
                             .columnReorderRow(cardReorder, i)
                             .background(MaterialTheme.colorScheme.background)
+                            .holdToReorder(cardReorder, i)
                             .padding(vertical = 2.dp),
                     ) {
                         com.garrietta.haven.ui.components.ColumnReorderHandle(

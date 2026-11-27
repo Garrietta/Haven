@@ -388,9 +388,14 @@ fun rememberEntityNamer(vm: HavenViewModel): (com.garrietta.haven.data.HaEntity)
     val deviceInfo by vm.deviceInfo.collectAsState()
     return remember(custom, entityDevices, deviceInfo) {
         { entity ->
-            custom.titles[entity.entityId]?.trim()?.takeIf { it.isNotEmpty() } ?: run {
-                val base = if (entity.domain == "camera") com.garrietta.haven.data.displayCameraName(entity) else entity.friendlyName
-                com.garrietta.haven.data.deviceDisplayName(base, deviceInfo[entityDevices[entity.entityId]]?.name)
+            custom.titles[entity.entityId]?.trim()?.takeIf { it.isNotEmpty() } ?: when (entity.domain) {
+                // A reading is named for its device and what it reads
+                // ("Front Door Motion"): its part alone would say nothing.
+                "sensor", "binary_sensor", "event", "button" -> entity.friendlyName
+                else -> {
+                    val base = if (entity.domain == "camera") com.garrietta.haven.data.displayCameraName(entity) else entity.friendlyName
+                    com.garrietta.haven.data.deviceDisplayName(base, deviceInfo[entityDevices[entity.entityId]]?.name)
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.components
 
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -97,171 +98,6 @@ fun edgeScrollSpeed(rowTop: Float, rowBottom: Float, viewStart: Int, viewEnd: In
 }
 
 /**
- * The drag state of one LazyColumn's reorderable rows. [canSwap] says
- * which keys the dragged row may trade places with (rooms only with
- * rooms); [onMove] moves the row in the caller's working order as it
- * goes; [onDrop] commits that order when the finger lifts.
- */
-class LazyListReorder internal constructor(
-    val listState: LazyListState,
-    private val haptics: HapticFeedback,
-) {
-    internal var canSwap: (Any, Any) -> Boolean = { _, _ -> false }
-    internal var onMove: (Any, Any) -> Unit = { _, _ -> }
-    internal var onDrop: () -> Unit = {}
-
-    /** The key of the row being dragged, or null. */
-    var draggingKey by mutableStateOf<Any?>(null)
-        private set
-    private var dragged by mutableFloatStateOf(0f)
-    private var startTop by mutableIntStateOf(0)
-
-    // The list lays out a move on the next frame. Until it has, its
-    // layout still shows the row in its old slot, and reading it would
-    // swap the row straight back; this holds that old index.
-    private var awaitingLayoutAt: Int? = null
-
-    private fun info(key: Any?) = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
-
-    /** How far the dragged row is drawn from where the list has laid it out. */
-    fun offsetOf(key: Any): Float {
-        if (key != draggingKey) return 0f
-        val item = info(key) ?: return 0f
-        return startTop + dragged - item.offset
-    }
-
-    internal fun start(key: Any) {
-        val item = info(key) ?: return
-        draggingKey = key
-        startTop = item.offset
-        dragged = 0f
-        awaitingLayoutAt = null
-        haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-    }
-
-    internal fun drag(dy: Float) {
-        dragged += dy
-        swapIfCrossed()
-    }
-
-    /** Scrolls by the edge speed for this frame; true while there is somewhere to go. */
-    internal suspend fun edgeScroll(): Boolean {
-        val key = draggingKey ?: return false
-        val item = info(key) ?: return false
-        val top = item.offset + offsetOf(key)
-        val layout = listState.layoutInfo
-        val speed = edgeScrollSpeed(top, top + item.size, layout.viewportStartOffset, layout.viewportEndOffset, 24f)
-        if (speed == 0f) return false
-        // The row is drawn at its start plus the drag, in the list's
-        // window, so it stays under a still finger while the rows scroll
-        // past it and it takes their places as its middle crosses them.
-        val moved = listState.scrollBy(speed)
-        swapIfCrossed()
-        return moved != 0f
-    }
-
-    private fun swapIfCrossed() {
-        val key = draggingKey ?: return
-        val item = info(key) ?: return
-        if (awaitingLayoutAt == item.index) return
-        awaitingLayoutAt = null
-        val spans = listState.layoutInfo.visibleItemsInfo
-            .filter { it.key == key || canSwap(key, it.key) }
-            .map { RowSpan(it.key, it.offset, it.size) }
-        val target = reorderTarget(key, item.offset + offsetOf(key), item.size, spans) ?: return
-        awaitingLayoutAt = item.index
-        onMove(key, target)
-        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-    }
-
-    internal fun end() {
-        if (draggingKey == null) return
-        draggingKey = null
-        dragged = 0f
-        onDrop()
-    }
-}
-
-@Composable
-fun rememberLazyListReorder(
-    listState: LazyListState,
-    canSwap: (Any, Any) -> Boolean,
-    onMove: (Any, Any) -> Unit,
-    onDrop: () -> Unit,
-): LazyListReorder {
-    val haptics = LocalHapticFeedback.current
-    val reorder = remember(listState) { LazyListReorder(listState, haptics) }
-    reorder.canSwap = canSwap
-    reorder.onMove = onMove
-    reorder.onDrop = onDrop
-    // While a row is held near an edge the list keeps scrolling, a frame
-    // at a time, without waiting for the finger to move.
-    LaunchedEffect(reorder.draggingKey) {
-        if (reorder.draggingKey == null) return@LaunchedEffect
-        while (true) {
-            withFrameNanos { }
-            reorder.edgeScroll()
-        }
-    }
-    return reorder
-}
-
-/**
- * The row being reordered: lifted and drawn under the finger while it
- * is dragged. The caller adds `animateItem()` for rows that are not
- * being dragged, so they step aside on the list's own placement motion.
- */
-fun Modifier.reorderRow(reorder: LazyListReorder, key: Any): Modifier {
-    val dragging = reorder.draggingKey == key
-    return this
-        .zIndex(if (dragging) 10f else 0f)
-        .graphicsLayer {
-            translationY = reorder.offsetOf(key)
-            val lift = if (dragging) 1.02f else 1f
-            scaleX = lift
-            scaleY = lift
-            shadowElevation = if (dragging) 12.dp.toPx() else 0f
-        }
-}
-
-/**
- * The grip a row is dragged by. [label] names the row for TalkBack,
- * which gets Move up and Move down actions in place of the drag.
- */
-@Composable
-fun ReorderHandle(
-    reorder: LazyListReorder,
-    key: Any,
-    label: String,
-    onStep: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val latestKey by rememberUpdatedState(key)
-    Icon(
-        Icons.Filled.DragIndicator,
-        contentDescription = "Reorder $label",
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier
-            .pointerInput(reorder) {
-                detectVerticalDragGestures(
-                    onDragStart = { reorder.start(latestKey) },
-                    onDragEnd = { reorder.end() },
-                    onDragCancel = { reorder.end() },
-                ) { change, dy ->
-                    change.consume()
-                    reorder.drag(dy)
-                }
-            }
-            .semantics {
-                customActions = listOf(
-                    CustomAccessibilityAction("Move up") { onStep(-1); true },
-                    CustomAccessibilityAction("Move down") { onStep(1); true },
-                )
-            },
-    )
-}
-
-/**
  * Reordering for rows of equal height laid out in a plain Column: the
  * row index changes by one each time the finger crosses half a row,
  * and [onDrop] receives the from and to indices when it lifts.
@@ -335,6 +171,25 @@ fun rememberColumnReorder(count: Int, onDrop: (Int, Int) -> Unit): ColumnReorder
     return reorder
 }
 
+/**
+ * Lets a whole row be picked up: press and hold it anywhere, then drag.
+ * The grip beside it is a hint, not the only place to take hold.
+ */
+@Composable
+fun Modifier.holdToReorder(reorder: ColumnReorder, index: Int): Modifier {
+    val latestIndex by rememberUpdatedState(index)
+    return pointerInput(reorder) {
+        detectDragGesturesAfterLongPress(
+            onDragStart = { reorder.start(latestIndex) },
+            onDragEnd = { reorder.end() },
+            onDragCancel = { reorder.end() },
+        ) { change, drag ->
+            change.consume()
+            reorder.drag(drag.y)
+        }
+    }
+}
+
 /** A row of a [ColumnReorder]: measured, lifted while dragged, stepping aside while passed. */
 @Composable
 fun Modifier.columnReorderRow(reorder: ColumnReorder, index: Int): Modifier {
@@ -350,6 +205,9 @@ fun Modifier.columnReorderRow(reorder: ColumnReorder, index: Int): Modifier {
         .zIndex(if (dragging) 10f else 0f)
         .graphicsLayer {
             translationY = if (dragging) reorder.offsetOf(index) else glide
+            val lift = if (dragging) 1.03f else 1f
+            scaleX = lift
+            scaleY = lift
             shadowElevation = if (dragging) 8.dp.toPx() else 0f
         }
 }

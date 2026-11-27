@@ -26,7 +26,7 @@ class ClimateTest {
         ).associateBy { it.entityId }
         val readings = climateReadings(
             states,
-            entityDevices = mapOf("sensor.bedroom_temperature" to "d1", "sensor.bedroom_humidity" to "d1"),
+            entityDevices = mapOf("sensor.bedroom_temperature" to "d1", "sensor.bedroom_humidity" to "d1", "sensor.attic_temperature" to "d2"),
             deviceNames = mapOf("d1" to "Bedroom sensor"),
             entityAreas = mapOf("sensor.bedroom_temperature" to "bedroom"),
         )
@@ -36,6 +36,29 @@ class ClimateTest {
         assertEquals(44.0, bedroom.humidityValue!!, 0.0)
         assertEquals("bedroom", bedroom.areaId)
         assertNull(readings[0].humidity)
+    }
+
+    @Test
+    fun onlyRealThermometersThatAnswerAreRooms() {
+        val states = listOf(
+            temp("sensor.bedroom_temperature", "66", "Bedroom Temperature"),
+            temp("sensor.greenhouse_predicted_temp", "0.0", "Greenhouse predicted temp"),
+            temp("sensor.system_monitor_processor_temperature", "121.5", "System Monitor Processor temperature"),
+            temp("sensor.5179_2551_temperature", "unavailable", "5179 2551 Temperature"),
+            temp("sensor.thermostat_current_temperature", "66.4", "Thermostat Current Temperature"),
+            com.garrietta.haven.data.HaEntity("climate.thermostat", "heat", mapOf("friendly_name" to "Thermostat")),
+        ).associateBy { it.entityId }
+        val readings = climateReadings(
+            states,
+            entityDevices = mapOf(
+                "sensor.bedroom_temperature" to "d_bed", "sensor.system_monitor_processor_temperature" to "d_sys",
+                "sensor.5179_2551_temperature" to "d_old", "sensor.thermostat_current_temperature" to "d_eco", "climate.thermostat" to "d_eco",
+            ),
+            deviceNames = mapOf("d_bed" to "Bedroom sensor"),
+            entityAreas = emptyMap(),
+            serviceDevices = setOf("d_sys"),
+        )
+        assertEquals(listOf("Bedroom sensor"), readings.map { it.name })
     }
 
     @Test

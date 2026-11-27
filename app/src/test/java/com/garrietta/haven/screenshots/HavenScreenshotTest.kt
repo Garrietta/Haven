@@ -290,6 +290,29 @@ class HavenScreenshotTest {
     @Test fun settings_hub_folded_dark() =
         shoot("settings_hub_folded_dark", FOLDED, viewModel(signedIn = true, dark = true)) { tapTab("Settings") }
 
+    /** A finger sliding across a lamp's tile: the tile fills to the level being set. */
+    @Test fun tile_slide_folded_light() =
+        shoot("tile_slide_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) {
+            reveal("Floor Lamp")
+            compose.onAllNodesWithText("Floor Lamp").onFirst().performTouchInput {
+                down(Offset(width * 0.7f, height / 2f))
+                repeat(6) { moveBy(Offset(-25f, 0f)); advanceEventTime(16) }
+            }
+            frame()
+        }
+
+    /** A tile held and carried toward another place in its group. */
+    @Test fun tile_carry_folded_light() =
+        shoot("tile_carry_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) {
+            reveal("Floor Lamp")
+            compose.onAllNodesWithText("Floor Lamp").onFirst().performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(700)
+            compose.onAllNodesWithText("Floor Lamp").onFirst().performTouchInput {
+                repeat(8) { moveBy(Offset(30f, -6f)); advanceEventTime(16) }
+            }
+            frame()
+        }
+
     /** Appearance: light or dark, the color styles as pictures, motion. */
     @Test fun appearance_folded_light() =
         shootSettingsPage("appearance_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "appearance")

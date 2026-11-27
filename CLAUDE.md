@@ -43,6 +43,7 @@ MVVM without a DI framework: one `HavenViewModel` owns the `HaClient` and the st
 
 - Needs JDK 17+, Android SDK platform `android-37.0` and build-tools 36. In a cloud session the SDK is not preinstalled and both it and Google's Maven live on `dl.google.com`, which the environment must allow.
 - **Look at what you changed.** `HavenScreenshotTest` renders the real app on the JVM with a demo home (`DemoHome`), folded and unfolded, light and dark. For any visual change, record before and after and read the PNGs. Add a test there when you touch a screen it does not cover.
+- **And on the real home.** `RealHomeScreenshotTest` draws whole pages from a snapshot of the household's Home Assistant in `app/build/real-home/` (`states.json` from `/api/states`; `registry.json` from a `/api/template` call over `device_id` / `device_attr`, with `auxiliary` marked by name, since templates cannot see entity categories). It skips without one. The snapshot is personal: it lives in the build directory and is never committed.
 - The JVM cannot judge motion, haptics, camera streams or real insets. Say so in the handoff; those are checked on the phone.
 - Pure logic lives in `data/` and in small pure functions beside the UI, each with a unit test. Keep it that way: a rule that can be a pure function should be one.
 
@@ -60,7 +61,8 @@ Breaking one is a bug even when it compiles. Reasons are in `DESIGN.md`.
 8. **Design is not a setting.** Shapes and corners are fixed by kind; color is the one choice, a whole-app style. Do not add per-tile or per-type look options.
 9. **One popup per device.** Everything that shows a device opens `Screen.EntityDetail`; the popup ends with `EntityPopupMenuRows`. A kind of device has one control design, used wherever that kind is controlled (the thermostat's is `ThermostatControl`).
 10. **The bar is fixed**: Home, Security, Climate, Settings (`barItems`).
-11. **The logo is generated** (`tools/logo.py`). Change the geometry there, never the XML or `BrandGeometry.kt`. Haven's own icon glyphs are generated the same way (`tools/glyphs.py` writes `HavenGlyphs.kt`).
+11. **Gestures, not buttons.** Reorder by holding the item itself and dragging (`holdToReorder`, `tileGestures`), remove from a list by swiping it away, set a level by sliding across the tile. Never arrows to step an item, never a mode to enter first; every gesture also has a TalkBack action.
+12. **The logo is generated** (`tools/logo.py`). Change the geometry there, never the XML or `BrandGeometry.kt`. Haven's own icon glyphs are generated the same way (`tools/glyphs.py` writes `HavenGlyphs.kt`).
 
 ## Frozen: stored in users' settings
 

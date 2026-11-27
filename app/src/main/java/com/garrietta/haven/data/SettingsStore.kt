@@ -166,6 +166,31 @@ class SettingsStore(context: Context) {
         }
         set(value) = prefs.edit().putStringSet("home_hidden_sections", value.toSet()).apply()
 
+    /**
+     * The order the owner dragged each group's tiles into on Home, as one
+     * JSON object of group id to entity ids. Tiles not in it follow,
+     * in Home's own order.
+     */
+    fun homeTileOrder(): Map<String, List<String>> {
+        val raw = prefs.getString("home_tile_order_json", null) ?: return emptyMap()
+        return try {
+            val obj = org.json.JSONObject(raw)
+            obj.keys().asSequence().associateWith { key ->
+                val array = obj.optJSONArray(key) ?: org.json.JSONArray()
+                (0 until array.length()).mapNotNull { array.optString(it).takeIf { id -> id.isNotEmpty() } }
+            }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun setHomeTileOrder(groupId: String, entityIds: List<String>) {
+        val obj = org.json.JSONObject()
+        for ((id, ids) in homeTileOrder()) obj.put(id, org.json.JSONArray(ids))
+        obj.put(groupId, org.json.JSONArray(entityIds))
+        prefs.edit().putString("home_tile_order_json", obj.toString()).apply()
+    }
+
     /** Explicit per-light Home visibility choices (entity id -> shown), as one JSON object string. */
     fun homeLightOverrides(): Map<String, Boolean> {
         val raw = prefs.getString("home_light_overrides_json", null) ?: return emptyMap()

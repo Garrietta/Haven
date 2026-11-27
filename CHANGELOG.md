@@ -1,5 +1,20 @@
 # Haven Changelog
 
+## 3.4: Move things with your hand; your real home, cleaned up (2026-11-27)
+
+**What you will see**
+
+- Slide across a light's tile to dim it, or a fan's to set its speed. The tile fills to the level as you slide.
+- Press and hold a tile and move it to carry it to another place in its group; Haven keeps the order. Press, hold and let go still opens its options.
+- In the Security and Climate editors, hold any row and drag it to move it, and swipe a row away to take it off. No grips to aim for, no crosses.
+- Security says "Garage Door is open", shows each camera once (not the outdoor camera's two streams, not the doorbell twice), and reads plainly ("Outdoor camera · Alarm on motion"). The doorbell's detection switches sit under Front Door.
+- Climate's rooms are real thermometers that answer: the Home Assistant machine's processor temperature, the stuck greenhouse sensor and a dead thermometer are gone, and the thermostat's own reading stays on its card.
+
+**Under it**
+
+- `tileGestures` / `TileCarry` (one detector for tap, slide, hold and carry), `holdToReorder`, swipe-to-take-off in `pageEditor`; `orderedTiles` / `movedOnto` and `home_tile_order_json`. `onePerCamera`, plain `detectionLabel`, `climateReadings` takes service devices and leaves out device-less, silent and thermostat readings. Sensors keep their full names. The unused LazyColumn reorder code is gone.
+- `RealHomeScreenshotTest` renders whole pages from a snapshot of a real home kept in the build directory. Tests: `TileOrderTest`, `SecurityCamerasTest`, and Climate's new rule.
+
 ## 3.3: Taken apart and rebuilt: one way for every menu, color styles (2026-11-27)
 
 **What you will see**

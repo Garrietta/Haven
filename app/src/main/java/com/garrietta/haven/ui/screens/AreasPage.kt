@@ -65,14 +65,10 @@ import com.garrietta.haven.data.deviceCountLabel
 import com.garrietta.haven.data.isHomeRoomEntity
 import com.garrietta.haven.data.resolveOrder
 import com.garrietta.haven.data.tabPlacementFor
-import com.garrietta.haven.ui.components.LazyListReorder
 import com.garrietta.haven.ui.components.NavStyle
-import com.garrietta.haven.ui.components.ReorderHandle
 import com.garrietta.haven.ui.components.SectionTitle
 import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
 import com.garrietta.haven.ui.components.moveKeyed
-import com.garrietta.haven.ui.components.rememberLazyListReorder
-import com.garrietta.haven.ui.components.reorderRow
 import com.garrietta.haven.ui.components.tabIconPairForKey
 import com.garrietta.haven.ui.theme.settleSpring
 

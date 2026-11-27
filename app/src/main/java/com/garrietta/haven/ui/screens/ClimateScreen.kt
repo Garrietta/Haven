@@ -105,6 +105,7 @@ import com.garrietta.haven.ui.theme.leafCard
 @Composable
 fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
+    val nameOf = rememberEntityNamer(vm)
     val entityDevices by vm.entityDevices.collectAsState()
     val deviceInfo by vm.deviceInfo.collectAsState()
     val entityAreas by vm.entityAreas.collectAsState()
@@ -116,7 +117,10 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val exists: (String) -> Boolean = { states[it] != null }
     val thermostatDefaults = climateThermostats(states).map { it.entityId }
     val thermostats = curated(thermostatDefaults, vm.curation(CLIMATE_THERMOSTATS), exists).mapNotNull(states::get)
-    val found = climateReadings(states, entityDevices, deviceInfo.mapValues { it.value.name }, entityAreas, auxiliary, areaNames)
+    val found = climateReadings(
+        states, entityDevices, deviceInfo.mapValues { it.value.name }, entityAreas, auxiliary, areaNames,
+        serviceDevices = deviceInfo.filterValues { it.service }.keys,
+    )
     val readingCuration = vm.curation(CLIMATE_READINGS)
     val covered = found.flatMap { listOfNotNull(it.temperature?.entityId, it.humidity?.entityId) }.toSet()
     val byKey = found.associateBy { it.key } +
@@ -147,8 +151,8 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
                 sections = listOf(
                     EditorSection(
                         CLIMATE_THERMOSTATS, "Thermostats",
-                        thermostats.map { editorItem(it, it.entityId) },
-                        takenOff(thermostatDefaults, vm.curation(CLIMATE_THERMOSTATS)).map { editorItem(states[it], it) },
+                        thermostats.map { editorItem(it, it.entityId, nameOf(it)) },
+                        takenOff(thermostatDefaults, vm.curation(CLIMATE_THERMOSTATS)).map { editorItem(states[it], it, states[it]?.let(nameOf)) },
                     ),
                     EditorSection(
                         CLIMATE_READINGS, "Readings",

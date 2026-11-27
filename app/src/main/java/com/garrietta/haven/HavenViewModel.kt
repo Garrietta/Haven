@@ -831,11 +831,13 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun securityCameraIds(states: Map<String, com.garrietta.haven.data.HaEntity>): List<String> {
         val curated = curatedCameras(states)
+        val now = System.currentTimeMillis()
         val rest = states.values
-            .filter { it.domain == "camera" && it.entityId !in excludedCameras && it.entityId !in curated }
+            .filter { it.domain == "camera" && it.entityId !in excludedCameras && it.entityId !in curated && !com.garrietta.haven.data.isLeftover(it, now) }
             .sortedBy { it.friendlyName.lowercase() }
             .map { it.entityId }
-        return curated + rest
+        // A camera's second stream, or the same doorbell from a second integration, is the same camera.
+        return com.garrietta.haven.data.onePerCamera(curated + rest, client.entityDevices.value, client.deviceInfo.value.mapValues { it.value.name })
     }
 
     /**

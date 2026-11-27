@@ -124,6 +124,7 @@ fun homeGroups(
     auxiliary: Set<String>,
     nowMillis: Long,
     shownOnHome: (HaEntity) -> Boolean = { isShownOnHome(it, emptyMap()) },
+    tileOrder: Map<String, List<String>> = emptyMap(),
 ): List<HomePlace> {
     // A physical device can be in the registry twice (a TV added by two
     // integrations): the same name and model are taken to be one device.
@@ -187,14 +188,35 @@ fun homeGroups(
     }.sortedBy { it.attrString("device_class") != "temperature" }.map { it.entityId }
 
     return grouped.map { (name, members) ->
+        val id = "group:" + name!!.lowercase().replace(' ', '_')
         HomePlace(
-            id = "group:" + name!!.lowercase().replace(' ', '_'),
+            id = id,
             name = name,
             areaId = null,
-            entityIds = members.sortedWith(compareBy({ tileRank(it) }, { it.friendlyName.lowercase() })).map { it.entityId },
+            entityIds = orderedTiles(members.sortedWith(compareBy({ tileRank(it) }, { it.friendlyName.lowercase() })).map { it.entityId }, tileOrder[id].orEmpty()),
             readingIds = if (name == GROUP_GREENHOUSE) greenhouseReadings else emptyList(),
         )
     }.sortedBy { GROUP_ORDER.indexOf(it.name) }
+}
+
+/**
+ * A group's tiles in the order the owner dragged them into ([stored]),
+ * then any it does not mention (new devices) in Home's own order. Ids in
+ * [stored] that are no longer tiles are skipped.
+ */
+fun orderedTiles(natural: List<String>, stored: List<String>): List<String> {
+    if (stored.isEmpty()) return natural
+    val present = natural.toSet()
+    val first = stored.filter { it in present }.distinct()
+    return first + natural.filter { it !in first }
+}
+
+/** [ids] with [moved] put where [target] is, the rest keeping their order: a drop onto another tile. */
+fun movedOnto(ids: List<String>, moved: String, target: String): List<String> {
+    val from = ids.indexOf(moved)
+    val to = ids.indexOf(target)
+    if (from < 0 || to < 0 || from == to) return ids
+    return ids.toMutableList().apply { add(to, removeAt(from)) }
 }
 
 /** Within a group: the thermostat, then entrances, lights, the rest. */

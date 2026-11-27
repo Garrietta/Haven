@@ -247,7 +247,8 @@ These numbers were tuned on the phone, a round at a time. Do not change one with
 | `choiceChipColors()` | Colors for the few chips left that are one of a set: the chosen one is the capsule. New choices use `ChoiceRow`. |
 | `DomainBadge` | The polygon badge that blooms with state. |
 | `ControlSlab` | A device popup's main control: a large slab that fills from the bottom in its family's accent. Tap switches the device; where it has a level (brightness, fan speed) a vertical drag sets it, committed on release. Lamps, switches, fans and locks lead with one (`BrightnessSlab`, `PowerSlab`, `FanSlab`, `LockSlab`). |
-| `ReorderHandle`, `ColumnReorderHandle` | The grip a row is dragged by to reorder a list (`ReorderList.kt`). The row lifts, the rows it passes step aside, and the order is written once, on release. TalkBack gets Move up and Move down. Never arrow buttons. |
+| `holdToReorder`, `columnReorderRow` | A reorderable row (`ReorderList.kt`): hold it anywhere and drag. It lifts, the rows it passes step aside, and the order is written once, on release. TalkBack gets Move up and Move down. Never arrow buttons. |
+| `tileGestures`, `TileCarry` | The touch on a Home tile: tap, slide, hold, or hold and carry (`TileGestures.kt`). |
 | `ColorTempTrack` | Warm to cool, painted in the light it gives, with a handle where the lamp sits. |
 | Tiles (`DeviceTile` in `HavenHome.kt`) | A leaf card in its family's container, badge top-left, the corner arrow top-right where a tap switches it, name and state below. A row of tiles takes its tallest tile's height, so a name on two lines grows the row instead of clipping the state. |
 
@@ -294,7 +295,24 @@ A detection switch belongs to a camera only when the entity registry puts it on 
 
 **One popup per device.** Every tile, card, list and widget opens the device's popup (`Screen.EntityDetail`), which grows out of what was tapped and drags down to close; unfolded it is a centered card. It has the same parts in the same order: the header (badge, name, what it is doing), the kind's one control, its secondary controls as rows, its last 24 hours if it is a reading, then `EntityPopupMenuRows`. A camera opens its live view in the same kind of window. The vacuum, a TV, the alarm's keypad and the greenhouse are systems with panels of their own, opened the same way.
 
-**Gestures mean one thing.** A tap does the obvious thing: it switches a light, a plug or a fan, and opens anything else. The arrow in a switchable tile's corner opens its popup. Press and hold any tile, anywhere, for its options. A status card opens where its things live: Climate and Security their tabs, Lights and TV & audio a sheet of their tiles, the garage and the vacuum their popup or panel, the greenhouse its panel.
+**The hand, not buttons.** Things move the way a finger moves them; there are no arrows to step an item up or down, and no edit mode to enter first.
+
+| On a tile | Does |
+|---|---|
+| Tap | The obvious thing: switches a light, a plug or a fan; opens anything else |
+| Slide across it | Sets a light's brightness or a fan's speed; the tile fills to the level as you slide, and it is sent when you let go |
+| Press, hold, let go | The tile's options |
+| Press, hold, then move | Picks the tile up; drop it on another tile in its group to take that place. The order is kept (`home_tile_order_json`) |
+| The arrow in a switchable tile's corner | Opens its popup |
+
+| In a list | Does |
+|---|---|
+| Hold a row anywhere, then drag | Moves it (`holdToReorder`); the grip beside it is a hint, not the only handle |
+| Swipe a row away | Takes it off (the Security and Climate editors) |
+
+A popup or a sheet drags down to close. A touch that moves up or down before the hold is the page's scroll, so none of this gets in the way of scrolling. Every gesture has a TalkBack action beside it (Options, Move up, Move down, Take off). One detector reads a whole touch on a tile and decides which it was (`tileGestures` in `TileGestures.kt`).
+
+A status card opens where its things live: Climate and Security their tabs, Lights and TV & audio a sheet of their tiles, the garage and the vacuum their popup or panel, the greenhouse its panel.
 
 | Device | Tap | Its popup's control |
 |---|---|---|
@@ -319,6 +337,8 @@ A visual change is judged on rendered pixels:
 ```
 
 `HavenScreenshotTest` renders the real app on the JVM with a seeded demo home: sign-in, Home, Security, Climate, Settings and its pages, the device popups and the tile sheet, folded and unfolded, light and dark, and Home in each color style. The same tests run in `testDebugUnitTest` without writing files, so a crash on first frame fails the build.
+
+`RealHomeScreenshotTest` draws the same app from a snapshot of a real home (`app/build/real-home/states.json` and `registry.json`, inside the build directory so it is never committed) in windows as tall as a page; it skips itself when there is no snapshot. Judge a change on the devices it will really show.
 
 The JVM cannot judge motion, haptics, camera streams or real insets. Those need the phone.
 
