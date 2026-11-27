@@ -34,8 +34,6 @@ import com.garrietta.haven.ui.components.fallbackFromRect
 import com.garrietta.haven.ui.components.shapeLabel
 import com.garrietta.haven.ui.components.formatCondition
 import com.garrietta.haven.data.alertDotColor
-import com.garrietta.haven.data.ControlDeepLinkTarget
-import com.garrietta.haven.data.controlDeepLinkTarget
 import com.garrietta.haven.data.hasImportantAlert
 import com.garrietta.haven.data.isWideLayout
 import com.garrietta.haven.ui.components.NavItem
@@ -282,7 +280,6 @@ import com.garrietta.haven.ui.screens.SettingsPageHost
 import com.garrietta.haven.ui.screens.SettingsScreen
 import com.garrietta.haven.ui.screens.CardSettingsSheet
 import com.garrietta.haven.ui.screens.rememberCardCustom
-import com.garrietta.haven.ui.screens.ThermostatPopout
 import com.garrietta.haven.ui.screens.GreenhousePanelScreen
 import com.garrietta.haven.ui.screens.MediaPanelScreen
 import com.garrietta.haven.ui.screens.SecurityPanelScreen
@@ -330,8 +327,6 @@ private class DetailAnim(val screen: Screen, val entityId: String, val source: R
  * the detail block's open-captured rect. */
 private class PanelDetailAnim(val entityId: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
 
-/** Open thermostat pop-out morph: the climate entity plus its source card rect (same fallback rule as sheets). */
-private class PopoutAnim(val id: String, val source: Rect?, val sourceColor: Color? = null, val sourceShape: androidx.compose.ui.graphics.Shape? = null)
 
 @Composable
 fun HavenApp(vm: HavenViewModel) {
@@ -440,7 +435,6 @@ fun HavenApp(vm: HavenViewModel) {
         var panelDetailAnim by remember { mutableStateOf<PanelDetailAnim?>(null) }
         val panelDetailProgress = remember { Animatable(0f) }
         val detailProgress = remember { Animatable(0f) }
-        var popoutAnim by remember { mutableStateOf<PopoutAnim?>(null) }
         // Feedback round 2, item 7: the last ON-TAB rail
         // destination, remembered so the rail's selected
         // indicator survives popups (updated at the rail call
@@ -458,14 +452,12 @@ fun HavenApp(vm: HavenViewModel) {
         // was a popup/detail/sub-screen (the 2026-11-05
         // runs showed no capsule on any icon).
         var lastRailTabScreen by remember { mutableStateOf<Screen>(Screen.Today) }
-        val popoutProgress = remember { Animatable(0f) }
         // Feedback round 7: per-surface drag state for the Koda
         // now-playing morph port (see MorphOverlay.PopupDragState).
         // Declared here, next to the progress animatables, so the
         // dismiss functions below can reference them.
         val detailDrag = remember { PopupDragState() }
         val panelDetailDrag = remember { PopupDragState() }
-        val popoutDrag = remember { PopupDragState() }
         val cameraDrag = remember { PopupDragState() }
         // Morph generation + exiting flags (restored from #52, for
         // the animated exit below): an exit animation is async
@@ -481,7 +473,6 @@ fun HavenApp(vm: HavenViewModel) {
         var morphGeneration by remember { mutableIntStateOf(0) }
         var detailExiting by remember { mutableStateOf(false) }
         var panelDetailExiting by remember { mutableStateOf(false) }
-        var popoutExiting by remember { mutableStateOf(false) }
         // Scroll-away state lives here, above goTop, so a tab switch
         // can reset it: it used to persist across tabs (remembered on
         // density only), so a pill hidden by scrolling on one tab
@@ -509,16 +500,13 @@ fun HavenApp(vm: HavenViewModel) {
             vm.pageOrigin = null
             detailAnim = null
             panelDetailAnim = null
-            popoutAnim = null
             // Feedback round 7: instant navigation clears any
             // in-flight drag state alongside the anims.
             detailDrag.reset()
             panelDetailDrag.reset()
-            popoutDrag.reset()
             cameraDrag.reset()
             heroTarget = null
             arcTarget = null
-            vm.closeClimatePopout()
             vm.closeCameraDialog()
             vm.clearAllTravelSnapshots()
             scrollVisibility.reset()
@@ -585,16 +573,6 @@ fun HavenApp(vm: HavenViewModel) {
             heroTarget = null
             arcTarget = null
         }
-        fun dismissPopoutInstant() {
-            val anim = popoutAnim ?: return
-            if (vm.climatePopoutId == anim.id) vm.closeClimatePopout()
-            if (popoutAnim?.id == anim.id) popoutAnim = null
-            // Feedback round 7: instant clears drop drag state too.
-            popoutDrag.reset()
-            vm.clearTravelSnapshot(anim.id)
-            heroTarget = null
-            arcTarget = null
-        }
         // Animated dismisses: Back, the back arrow, and Close all use
         // these. The progress animates 1 -> 0 on the popup morph
         // spring (round 24, item 3: popupMorphSpring 500/0.85, the
@@ -643,34 +621,6 @@ fun HavenApp(vm: HavenViewModel) {
                     detailDrag.settling = false
                     if (gen == morphGeneration && detailAnim?.screen == anim.screen) {
                         dismissDetailInstant()
-                    }
-                }
-            }
-        }
-        fun dismissPopout() {
-            val anim = popoutAnim ?: return
-            if (popoutExiting) return
-            val fromDrag = popoutDrag.isDragging
-            if (fromDrag) popoutDrag.settling = true
-            popoutExiting = true
-            vm.captureTravelSnapshot(anim.id)
-            val gen = morphGeneration
-            scope.launch {
-                try {
-                    if (fromDrag) {
-                        // Round 18, item 5: snap onto the released
-                        // drag progress BEFORE clearing isDragging.
-                        popoutProgress.snapTo(popoutDrag.dragProgress)
-                        popoutDrag.isDragging = false
-                        popoutDrag.pulling = false
-                    }
-                    if (reduceMotion) popoutProgress.snapTo(0f)
-                    else popoutProgress.animateTo(0f, popupMorphSpring())
-                } finally {
-                    popoutExiting = false
-                    popoutDrag.settling = false
-                    if (gen == morphGeneration && popoutAnim?.id == anim.id) {
-                        dismissPopoutInstant()
                     }
                 }
             }
@@ -842,7 +792,6 @@ fun HavenApp(vm: HavenViewModel) {
         val goBack: () -> Unit = {
             if (panelDetailAnim != null) dismissPanelDetail()
             else if (detailAnim != null) dismissDetail()
-            else if (popoutAnim != null) dismissPopout()
             else if (backstack.size > 1) {
                 navDirection = -1
                 backstack.removeAt(backstack.lastIndex)
@@ -858,15 +807,12 @@ fun HavenApp(vm: HavenViewModel) {
             vm.pageOrigin = null
             detailAnim = null
             panelDetailAnim = null
-            popoutAnim = null
             // Feedback round 7: same instant drag-state clear as goTop.
             detailDrag.reset()
             panelDetailDrag.reset()
-            popoutDrag.reset()
             cameraDrag.reset()
             heroTarget = null
             arcTarget = null
-            vm.closeClimatePopout()
             vm.closeCameraDialog()
             vm.clearAllTravelSnapshots()
             vm.signOut()
@@ -940,30 +886,6 @@ fun HavenApp(vm: HavenViewModel) {
                 arcTarget = null
             }
         }
-        // Thermostat pop-out open effect (mirrors the sheet effect):
-        // capture synchronously, animate progress 0 -> 1 on the bounds
-        // spring (snapped under reduce-motion).
-        if (vm.climatePopoutId != null && popoutAnim?.id != vm.climatePopoutId) {
-            popoutAnim = PopoutAnim(vm.climatePopoutId!!, cardBounds[vm.climatePopoutId!!], cardColors[vm.climatePopoutId!!], cardShapes[vm.climatePopoutId!!])
-        }
-        LaunchedEffect(vm.climatePopoutId) {
-            val id = vm.climatePopoutId
-            val anim = popoutAnim
-            if (id != null && anim?.id == id) {
-                vm.captureTravelSnapshot(id)
-                // Feedback round 7: open resets the drag state.
-                popoutDrag.reset()
-                if (!reduceMotion) {
-                    popoutProgress.snapTo(0f)
-                    popoutProgress.animateTo(1f, popupMorphSpring())
-                } else popoutProgress.snapTo(1f)
-            } else if (id == null && anim != null) {
-                popoutAnim = null
-                heroTarget = null
-                arcTarget = null
-                vm.clearTravelSnapshot(anim.id)
-            }
-        }
         // Feedback round 22, item 5: the bottom pill bar must never
         // get stuck hidden. A fresh screen always starts with the
         // bar visible, so any popup/panel open or close and any
@@ -974,7 +896,7 @@ fun HavenApp(vm: HavenViewModel) {
         // bring it back. Tab switches already reset via goTop;
         // this covers the modal and room-filter changes goTop
         // never sees.
-        val anyModalOpen = detailAnim != null || panelDetailAnim != null || popoutAnim != null || vm.cameraDialogId != null
+        val anyModalOpen = detailAnim != null || panelDetailAnim != null || vm.cameraDialogId != null
         LaunchedEffect(anyModalOpen) { scrollVisibility.reset() }
         // Camera overlay transitions share the same language:
         // view rises as a bottom sheet out of the tapped camera tile and
@@ -1126,7 +1048,7 @@ fun HavenApp(vm: HavenViewModel) {
             // GONE: the pill now exits the viewport during panels (see
             // the pill-exit below), which replaces the blur as the answer
             // to the panel problem, and the panel itself covers the page.
-            val modalActive = detailAnim != null || panelDetailAnim != null || popoutAnim != null
+            val modalActive = detailAnim != null || panelDetailAnim != null
             // Scroll-away (production-upgrade round): the pill slides
             // out of view on a downward scroll past 8dp and returns on
             // an upward scroll past 8dp (the spec sample's thresholds,
@@ -1167,7 +1089,6 @@ fun HavenApp(vm: HavenViewModel) {
                 topMorphProgress(
                     panelDetailAnim?.let { dragProgressFor(panelDetailProgress, panelDetailDrag)() },
                     detailAnim?.let { dragProgressFor(detailProgress, detailDrag)() },
-                    popoutAnim?.let { dragProgressFor(popoutProgress, popoutDrag)() },
                 )
             }
             // Round 21, item 8: the id of the card currently hidden
@@ -1179,13 +1100,13 @@ fun HavenApp(vm: HavenViewModel) {
             // the hide is invisible, but the tile must never show
             // through a gap on return).
             val hiddenMorphSourceId: String? = topMorphSourceId(
-                panelDetailAnim?.entityId, detailAnim?.entityId, popoutAnim?.id, vm.cameraDialogId,
+                panelDetailAnim?.entityId, detailAnim?.entityId, vm.cameraDialogId,
             )
             // Feedback round 23, item 1: the topmost morph's closing
             // flag, shared by LocalMorphClosing and the
             // LocalMorphCardAlpha curve below (morphTileAlpha) so the
             // two can never disagree about direction.
-            val morphClosing = detailExiting || panelDetailExiting || popoutExiting
+            val morphClosing = detailExiting || panelDetailExiting
             CompositionLocalProvider(
                 // Feedback round 17, item 6: dashboard chrome
                 // hides competing affordances (the Favorites
@@ -1917,61 +1838,6 @@ fun HavenApp(vm: HavenViewModel) {
                 }
                 } // else: folded full-screen morph (mirrors the detail block)
             }
-            // Thermostat pop-out panel (Round 4: the ONLY
-            // thermostat panel — tap and long-press on the Ecobee
-            // card both land here; the old pop-out -> Details page
-            // handoff is deleted with Screen.Thermostat): a panel
-            // morphing from the climate card rect to full-screen,
-            // so the dial gets full touch targets on narrow cover
-            // screens.
-            if (popoutAnim != null) {
-                val anim = popoutAnim!!
-                BackHandler { dismissPopout() }
-                // Feedback round 7: drag handle for this surface.
-                val popoutHandle = popupDragHandle(popoutDrag, popoutProgress, { popoutExiting }, { vm.captureTravelSnapshot(anim.id) }, { dismissPopout() })
-                // Feedback round, item 3: unfolded gets the
-                // centered popup; folded keeps the full-screen
-                // morph + traveler below, byte for byte.
-                if (LocalWideLayout.current) {
-                    CenteredPopup(
-                        progress = dragProgressFor(popoutProgress, popoutDrag),
-                        source = anim.source ?: cardBounds[anim.id],
-                        overlayOrigin = overlayOrigin,
-                        fromBackground = anim.sourceColor,
-                        onDismiss = { dismissPopout() },
-                        dragHandle = popoutHandle,
-                        isClosing = popoutExiting && !popoutDrag.settling,
-                        landingShape = anim.sourceShape ?: cardShapes[anim.id],
-                        ghost = { morphGhosts[anim.id] },
-                    ) {
-                        ThermostatPopoutContent(
-                            vm, anim.id,
-                            onClose = { dismissPopout() },
-                        )
-                    }
-                } else {
-                // Round 6: no measurement frame here either (see
-                // the sheet block); progress is a lambda.
-                PanelOverlay(
-                    progress = dragProgressFor(popoutProgress, popoutDrag),
-                    source = anim.source ?: cardBounds[anim.id],
-                    overlayOrigin = overlayOrigin,
-                    panelBackground = MaterialTheme.colorScheme.background,
-                    sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
-                    isClosing = popoutExiting && !popoutDrag.settling,
-                    dragHandle = popoutHandle,
-                    heroTargetReporter = { r -> heroTarget = anim.id to r },
-                    arcTargetReporter = { r -> arcTarget = anim.id to r },
-                    landingShape = anim.sourceShape ?: cardShapes[anim.id],
-                    ghost = { morphGhosts[anim.id] },
-                ) {
-                    ThermostatPopoutContent(
-                        vm, anim.id,
-                        onClose = { dismissPopout() },
-                    )
-                }
-                } // else: folded full-screen morph (feedback item 3)
-            }
             // Camera live-feed panel (2026-11-01 panels round): the
             // Home quadrant hero's tap target, formerly a centered
             // 16:9 dialog — now a full-screen panel like every other
@@ -2161,27 +2027,6 @@ private fun ScreenContent(
     }
 }
 
-/** Thermostat pop-out content: looks the entity up (so setpoint/mode
- * changes recompose the open pop-out) and renders the pop-out, or a
- * fallback if the entity vanished while open. */
-@Composable
-private fun ThermostatPopoutContent(
-    vm: HavenViewModel,
-    entityId: String,
-    onClose: () -> Unit,
-) {
-    val states by vm.states.collectAsState()
-    val entity = states[entityId]
-    if (entity == null) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("This entity is no longer available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = onClose) { Text("Close") }
-        }
-    } else {
-        ThermostatPopout(entity, vm, onClose)
-    }
-}
 
 /**
  * The full-screen panel overlay, Round 6 (120Hz pipeline +
@@ -4123,11 +3968,7 @@ fun RecordingFullscreen(vm: HavenViewModel, recordingEntityId: String, onClose: 
  * This router consumes it once the entity's state has loaded —
  * cold start: states arrive after connect, so the effect re-runs
  * per emission until the entity appears — then jumps to that
- * entity's surface and clears the slot:
- * - climate → the thermostat popout/page (vm.openClimatePopout,
- *   the same machinery a thermostat card tap uses);
- * - everything else → EntityDetail, exactly as a home-page card
- *   tap does (popup on unfolded, detail as home cards do).
+ * entity's popup, exactly as a tile tap does, and clears the slot.
  * Unknown ids (the sign-in control's "haven_open_app", deleted
  * entities) clear without routing once states are non-empty, so a
  * stale link never hangs the slot. A duplicate detail — already
@@ -4145,13 +3986,9 @@ private fun ControlDeepLinkRouter(vm: HavenViewModel, current: Screen, navigate:
             if (deepLinkStates.isNotEmpty()) vm.clearControlDeepLink()
             return@LaunchedEffect
         }
-        when (controlDeepLinkTarget(id, entity.domain)) {
-            is ControlDeepLinkTarget.ThermostatPopout -> vm.openClimatePopout(id)
-            is ControlDeepLinkTarget.Detail -> {
-                if (current !is Screen.EntityDetail || current.entityId != id) {
-                    navigate(Screen.EntityDetail(id))
-                }
-            }
+        // Every device, a thermostat included, opens its one popup.
+        if (current !is Screen.EntityDetail || current.entityId != id) {
+            navigate(Screen.EntityDetail(id))
         }
         vm.clearControlDeepLink()
     }

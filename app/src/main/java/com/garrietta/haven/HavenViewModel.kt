@@ -589,18 +589,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun closeCameraFullscreen() { fullscreenCameraId = null }
 
-    /**
-     * The centered expressive thermostat pop-out (scalloped container,
-     * radial dial, fan/mode underneath). One climate entity at a
-     * time, closed by scrim tap, X, back, or the Details route
-     * (which closes the pop-out and navigates to the full
-     * thermostat page).
-     */
-    var climatePopoutId by mutableStateOf<String?>(null)
-        private set
-
-    fun openClimatePopout(entityId: String) { climatePopoutId = entityId }
-    fun closeClimatePopout() { climatePopoutId = null }
 
     /**
      * Feedback round 3, item 6: the entity id from a Samsung

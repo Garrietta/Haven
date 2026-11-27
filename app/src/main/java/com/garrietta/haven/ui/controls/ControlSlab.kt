@@ -223,18 +223,25 @@ fun ControlSlab(
     }
 }
 
+/**
+ * The slab's words, drawn twice (in the track's ink and in the fill's)
+ * and cut at the fill line. They sit at the bottom, where the fill rises
+ * from, so at any everyday level they are wholly inside the fill and read
+ * as one color; only near the bottom of the range does the line cross
+ * them, which is where the level is the thing to see.
+ */
 @Composable
 private fun BoxScope.SlabLabel(text: String, caption: String, icon: ImageVector, ink: Color) {
-    Column(Modifier.align(Alignment.TopStart).padding(20.dp)) {
-        Text(text, style = MaterialTheme.typography.displayMedium, color = ink)
-        Text(caption, style = MaterialTheme.typography.titleSmall, color = ink)
-    }
     Icon(
         icon,
         contentDescription = null,
         tint = ink,
-        modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).size(32.dp),
+        modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).size(32.dp),
     )
+    Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
+        Text(text, style = MaterialTheme.typography.displayMedium, color = ink)
+        Text(caption, style = MaterialTheme.typography.titleSmall, color = ink)
+    }
 }
 
 /** A lamp: the fill is the brightness, in the lamp's yellow. */

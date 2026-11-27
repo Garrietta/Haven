@@ -1021,7 +1021,7 @@ fun VacuumPanelScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen)
         // is not the generic detail page, so it opens it.
         Spacer(Modifier.height(24.dp))
         EntityPopupMenuRows(
-            vm, vacuum,
+            vm, vacuum, onClose = onBack, navigate = navigate,
             onDetails = { navigate(Screen.EntityDetail(VACUUM_ID)) },
         )
         Spacer(Modifier.height(16.dp))

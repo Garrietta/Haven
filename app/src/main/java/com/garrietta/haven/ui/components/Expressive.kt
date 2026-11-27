@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.graphics.shapes.Morph
 import androidx.compose.ui.graphics.StrokeCap
@@ -803,45 +804,49 @@ fun Dial(
 }
 
 /**
- * Smoothed cubic-bezier sparkline with a gradient alpha area fill under
- * the curve (spec item 7). The smoothing math lives in SparklineMath so
- * it is unit-testable; this composable only draws what it returns.
- *
- * The drawn series is bucket-resampled first (see resampleHistory): raw
- * 24-hour state-change history is dense and jittery, and the plain
- * midpoint curve tracked every sample, which read as a thin jagged
- * low-contrast line on detail pages. Resampling de-noises the line;
- * Min/Current/Max labels still come from the raw series. The line itself
- * is drawn heavier than before — a soft under-glow beneath a 4dp core —
- * with a stronger gradient fill, so it holds contrast on light
- * backgrounds without changing its accent hue.
+ * A reading's history as a line over a soft fill, drawn to the size it
+ * is given. The line's weight, the inset that keeps it inside its card
+ * and the dot on the latest value all follow the chart's height, so the
+ * same chart reads as well as a small sparkline in a room's card as it
+ * does across a popup. Large charts get a faint midline to read against.
  */
 @Composable
 fun Sparkline(points: List<HistoryPoint>, color: Color, modifier: Modifier = Modifier) {
+    val grid = MaterialTheme.colorScheme.outlineVariant
     Canvas(modifier) {
-        val segments = sparklineSegments(resampleHistory(points), size.width, size.height)
+        val stroke = sparklineStrokeWidth(size.height / density).dp.toPx()
+        val inset = stroke * 2f
+        val w = size.width - inset * 2
+        val h = size.height - inset * 2
+        if (w <= 0f || h <= 0f) return@Canvas
+        val segments = sparklineSegments(resampleHistory(points), w, h)
         if (segments.isEmpty()) return@Canvas
-        val line = Path().apply {
-            moveTo(segments.first().x0, segments.first().y0)
-            segments.forEach { cubicTo(it.c1x, it.c1y, it.c2x, it.c2y, it.x1, it.y1) }
+        if (size.height >= 100.dp.toPx()) {
+            drawLine(grid.copy(alpha = 0.6f), Offset(inset, inset + h / 2), Offset(inset + w, inset + h / 2), strokeWidth = 1.dp.toPx())
         }
-        val fill = Path().apply {
-            addPath(line)
-            lineTo(segments.last().x1, size.height)
-            lineTo(segments.first().x0, size.height)
-            close()
+        translate(inset, inset) {
+            val line = Path().apply {
+                moveTo(segments.first().x0, segments.first().y0)
+                segments.forEach { cubicTo(it.c1x, it.c1y, it.c2x, it.c2y, it.x1, it.y1) }
+            }
+            val fill = Path().apply {
+                addPath(line)
+                lineTo(segments.last().x1, h + inset)
+                lineTo(segments.first().x0, h + inset)
+                close()
+            }
+            drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = 0.28f), color.copy(alpha = 0f)), startY = 0f, endY = h + inset))
+            drawPath(line, color, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawCircle(color, radius = stroke * 1.8f, center = Offset(segments.last().x1, segments.last().y1))
         }
-        drawPath(
-            fill,
-            Brush.verticalGradient(
-                listOf(color.copy(alpha = 0.45f), color.copy(alpha = 0f)),
-            ),
-        )
-        // Under-glow first, then the core: presence without a hue change.
-        drawPath(line, color.copy(alpha = 0.15f), style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(line, color, style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
+
+/** A chart's line weight in dp for its height in dp: fine on a small card, never heavy on a large one. */
+fun sparklineStrokeWidth(heightDp: Float): Float = (heightDp * 0.02f).coerceIn(1.5f, 2.5f)
+
+/** A history chart's height for the width it gets: about 2.6 wide to 1 tall, between 120 and 260dp. */
+fun historyChartHeight(width: Dp): Dp = (width / 2.6f).coerceIn(120.dp, 260.dp)
 
 /**
  * Knob-travel geometry for the pill toggles, as pure functions so

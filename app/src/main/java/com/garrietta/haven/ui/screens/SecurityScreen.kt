@@ -236,22 +236,13 @@ private fun AlarmChoices(vm: HavenViewModel, alarm: HaEntity, onNeedsCode: () ->
         Text(alarm.stateText(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     Spacer(Modifier.height(8.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (mode in ALARM_ARM_MODES + "disarmed") {
-            FilterChip(
-                selected = current == mode,
-                onClick = {
-                    if (needsCode) {
-                        onNeedsCode()
-                    } else {
-                        vm.callService("alarm_control_panel", alarmArmService(mode), alarm.entityId)
-                    }
-                },
-                label = { Text(if (mode == "disarmed") "Off" else alarmModeLabel(mode)) },
-                colors = choiceChipColors(),
-            )
-        }
-    }
+    com.garrietta.haven.ui.components.ChoiceRow(
+        options = (ALARM_ARM_MODES + "disarmed").map { mode -> mode to if (mode == "disarmed") "Off" else alarmModeLabel(mode) },
+        selected = current,
+        onSelect = { mode ->
+            if (needsCode) onNeedsCode() else vm.callService("alarm_control_panel", alarmArmService(mode), alarm.entityId)
+        },
+    )
 }
 
 /**

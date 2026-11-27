@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.alpha
 import com.garrietta.haven.ui.theme.FloatingCorner
@@ -189,7 +191,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, n
     // EntityDetail for climate renders the primary dial panel
     // directly — the secondary thermostat page is deleted.
     if (entity.domain == "climate") {
-        ThermostatPopout(entity, vm, onClose = onBack)
+        ThermostatPopout(entity, vm, onClose = onBack, navigate = navigate)
         return
     }
     // Weather's full page is an expressive page (condition hero +
@@ -237,12 +239,12 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, n
             // Open live view button above is this surface's
             // Details action.
             Spacer(Modifier.height(24.dp))
-            EntityPopupMenuRows(vm, entity, onDetails = null)
+            EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = navigate)
             Spacer(Modifier.height(16.dp))
         }
         return
     }
-    DetailPageContent(vm, entity, onBack, badgeOverride = detailBadge, pageAccent = detailAccent)
+    DetailPageContent(vm, entity, onBack, navigate, badgeOverride = detailBadge, pageAccent = detailAccent)
 }
 
 /**
@@ -290,7 +292,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         // Round 21, item 5: the settings rows at the very bottom,
         // for every tile. Details is omitted — this IS the full page.
         Spacer(Modifier.height(8.dp))
-        EntityPopupMenuRows(vm, entity, onDetails = null)
+        EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = null)
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -312,6 +314,7 @@ private fun DetailPageContent(
     vm: HavenViewModel,
     entity: HaEntity,
     onBack: () -> Unit,
+    navigate: (Screen) -> Unit,
     // Feedback round 4, item 2: the preset badge pair (or null),
     // resolved by DetailPageScreen from the same store maps the
     // card reads.
@@ -345,7 +348,10 @@ private fun DetailPageContent(
             "lock" -> LockSlab(entity, vm)
             // Detail keeps only the labeled strip (see history()):
             // SensorTile's own chart would duplicate it (2026-10-30).
-            "sensor", "binary_sensor" -> SensorTile(entity, vm, showHeader = false, showChart = false)
+            // A reading's popup is its header and its chart; the chart
+            // below takes the full width rather than half of it.
+            "sensor" -> Unit
+            "binary_sensor" -> SensorTile(entity, vm, showHeader = false, showChart = false)
             "media_player" -> MediaPageControl(entity, vm, pageAccent, badgeOverride)
             "vacuum" -> VacuumControl(entity, vm, pageAccent, badgeOverride)
             "fan" -> Column(Modifier.fillMaxWidth()) {
@@ -404,7 +410,7 @@ private fun DetailPageContent(
             // for ALL domains: DetailPopupHeader already shows
             // icon, title, and state (the Garage Door / TV
             // duplicate is fixed by removal, not by gating).
-            if (useDetailTwoColumnLayout(entity.state)) {
+            if (useDetailTwoColumnLayout(entity.state) && entity.domain != "sensor") {
                 Row(Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f).padding(end = 8.dp)) {
                         control()
@@ -421,7 +427,7 @@ private fun DetailPageContent(
             // bottom of the popup, for every tile. Details is
             // omitted here — this IS the full page.
             Spacer(Modifier.height(24.dp))
-            EntityPopupMenuRows(vm, entity, onDetails = null)
+            EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = navigate)
             Spacer(Modifier.height(16.dp))
         }
     } else {
@@ -433,7 +439,7 @@ private fun DetailPageContent(
             // bottom of the popup, for every tile. Details is
             // omitted here — this IS the full page.
             Spacer(Modifier.height(24.dp))
-            EntityPopupMenuRows(vm, entity, onDetails = null)
+            EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = navigate)
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -627,38 +633,67 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
 @Composable
 internal fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Pair<String, androidx.compose.ui.graphics.vector.ImageVector> {
     val custom = rememberCardCustom(vm)
-    val base = if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity)
-    val title = customTitleFor(custom.titles, entity.entityId, base)
+    val nameOf = rememberEntityNamer(vm)
+    // The popup's title is the name the tile shows.
+    val title = if (entity.domain == "sensor" && custom.titles[entity.entityId].isNullOrBlank()) sensorDisplayName(entity) else nameOf(entity)
     // Feedback round 11, item 3: the one icon path.
     val icon = entityIcon(custom.iconKeys, entity)
     return title to icon
 }
 
 /**
- * The row at the foot of a popup that leads to a fuller page, where
- * one exists ([onDetails], the vacuum panel's generic page). How a
- * device looks is not set here: that is Settings, Device styles, for
- * its whole type, or the device's own page under Devices & services.
+ * The rows every device popup ends with, in the same order: Tile (the
+ * tile's name, icon, color and whether it shows on Home, the same sheet
+ * holding the tile opens) and In Home Assistant (the entity's own
+ * settings there). A system's panel adds Details first, for the plain
+ * popup behind it. [navigate] is null where a popup cannot leave for a
+ * Settings page; In Home Assistant is then left out.
  */
 @Composable
 internal fun EntityPopupMenuRows(
     vm: HavenViewModel,
     entity: HaEntity,
-    onDetails: (() -> Unit)?,
+    onClose: () -> Unit,
+    navigate: ((Screen) -> Unit)?,
     modifier: Modifier = Modifier,
+    onDetails: (() -> Unit)? = null,
 ) {
-    Column(modifier) {
+    MenuGroup(modifier) {
         if (onDetails != null) {
             MenuRow(
-                badgeKey = entity.entityId,
+                badgeKey = "details-" + entity.entityId,
                 badgeKind = shapeForDomain(entity.domain),
                 icon = domainIcon(entity),
                 title = "Details",
-                subtitle = "Open the full page",
+                subtitle = "Every control it has",
                 onClick = onDetails,
-                modifier = Modifier.fillMaxWidth(),
+                flat = true,
             )
-            Spacer(Modifier.height(8.dp))
+            MenuDivider()
+        }
+        MenuRow(
+            badgeKey = "popup-tile",
+            badgeKind = com.garrietta.haven.ui.theme.ExpressiveKind.SUNNY,
+            icon = Icons.Filled.Tune,
+            title = "Tile",
+            subtitle = "Name, icon, color and whether it shows on Home",
+            onClick = { vm.openCardSettings(entity.entityId) },
+            flat = true,
+        )
+        if (navigate != null) {
+            MenuDivider()
+            MenuRow(
+                badgeKey = "popup-home-assistant",
+                badgeKind = com.garrietta.haven.ui.theme.ExpressiveKind.BUN,
+                icon = Icons.Filled.Settings,
+                title = "In Home Assistant",
+                subtitle = "Its name, area and settings there",
+                onClick = {
+                    onClose()
+                    navigate(Screen.SettingsPage(SettingsRoute.entity(entity.entityId)))
+                },
+                flat = true,
+            )
         }
     }
 }
@@ -777,12 +812,16 @@ private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
     LaunchedEffect(entity.entityId) {
         vm.refreshHistory(entity.entityId)
     }
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+    // The chart takes the width it is given and a height to match it.
+    val chartHeight = com.garrietta.haven.ui.components.historyChartHeight(maxWidth)
     if (cached == null) {
-        ShimmerBox(Modifier.fillMaxWidth().height(120.dp))
+        ShimmerBox(Modifier.fillMaxWidth().height(chartHeight))
     } else if (cached.size >= 2) {
         val points = cached
         val mm = sparklineMinCurrentMax(points)
         val unit = entity.attrString("unit_of_measurement")
+        val deviceClass = entity.attrString("device_class")
         // Smooth reveal (2026-10-30 verdict: never an empty box
         // snapping to a full chart): the shimmer above covers the
         // load, and the path fades in once data lands. The branch
@@ -796,26 +835,30 @@ private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
             label = "historyStripReveal",
         )
         Column(Modifier.alpha(stripAlpha)) {
-            Sparkline(points, chartLineColor(sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(120.dp))
+            Sparkline(points, chartLineColor(sensorKind(entity.entityId, deviceClass, entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(chartHeight))
             Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Text("24 hours ago", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text("Now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (mm != null) {
-                Text(
-                    "Min ${fmtDetailHistory(mm.first, unit)} · Current ${fmtDetailHistory(mm.second, unit)} · Max ${fmtDetailHistory(mm.third, unit)}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    for ((label, value) in listOf("Low" to mm.first, "High" to mm.third)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(com.garrietta.haven.data.formatReading(value.toString(), unit, deviceClass), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
             }
         }
     } else {
-        Text("No history yet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("No history yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
     }
 }
 
-/** Whole numbers print whole; the rest get one decimal; unit suffix when present. */
-private fun fmtDetailHistory(v: Double, unit: String?): String {
-    val num = if (v == v.toInt().toDouble()) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
-    return if (unit != null) "$num $unit" else num
-}
 
 /**
  * Scrollable recorded-clips timeline for a camera (long-press on its

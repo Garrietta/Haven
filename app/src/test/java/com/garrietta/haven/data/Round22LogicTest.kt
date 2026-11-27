@@ -71,12 +71,11 @@ class Round22LogicTest {
     // Item 3: the camera dialog is the last morph-source fallback.
     @Test
     fun topMorphSourceIdCameraFallback() {
-        assertEquals("camera.x", topMorphSourceId(null, null, null, "camera.x"))
-        assertEquals("panel", topMorphSourceId("panel", null, null, "camera.x"))
-        assertEquals("detail", topMorphSourceId(null, "detail", null, "camera.x"))
-        assertEquals("popout", topMorphSourceId(null, null, "popout", "camera.x"))
-        assertNull(topMorphSourceId(null, null, null, null))
+        assertEquals("camera.x", topMorphSourceId(null, null, "camera.x"))
+        assertEquals("panel", topMorphSourceId("panel", null, "camera.x"))
+        assertEquals("detail", topMorphSourceId(null, "detail", "camera.x"))
         assertNull(topMorphSourceId(null, null, null))
+        assertNull(topMorphSourceId(null, null))
     }
 
     // Item 5: the at-top leftover (onPostScroll) follows the same

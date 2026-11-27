@@ -182,20 +182,18 @@ class Round21LogicTest {
     // stacked over a detail panel hides its own source card.
     @Test
     fun topMorphSourceIdPriority() {
-        assertEquals("panel", topMorphSourceId("panel", "detail", "popout"))
-        assertEquals("detail", topMorphSourceId(null, "detail", "popout"))
-        assertEquals("popout", topMorphSourceId(null, null, "popout"))
-        assertEquals("panel", topMorphSourceId("panel", null, null))
-        assertNull(topMorphSourceId(null, null, null))
+        assertEquals("panel", topMorphSourceId("panel", "detail"))
+        assertEquals("detail", topMorphSourceId(null, "detail"))
+        assertEquals("panel", topMorphSourceId("panel", null))
+        assertNull(topMorphSourceId(null, null))
     }
 
     // Item 8: same priority for the progress the tile fades on;
     // no morph at all reads rest (1f — fully visible).
     @Test
     fun topMorphProgressPriority() {
-        assertEquals(0.3f, topMorphProgress(0.3f, 0.6f, 0.9f), 0.001f)
-        assertEquals(0.6f, topMorphProgress(null, 0.6f, 0.9f), 0.001f)
-        assertEquals(0.9f, topMorphProgress(null, null, 0.9f), 0.001f)
-        assertEquals(1f, topMorphProgress(null, null, null), 0.001f)
+        assertEquals(0.3f, topMorphProgress(0.3f, 0.6f), 0.001f)
+        assertEquals(0.6f, topMorphProgress(null, 0.6f), 0.001f)
+        assertEquals(1f, topMorphProgress(null, null), 0.001f)
     }
 }

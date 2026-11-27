@@ -80,3 +80,26 @@ class DeviceNamesTest {
         assertEquals("Garage open", security.value)
     }
 }
+
+/** How choices wrap, and how readings are written. */
+class ChoicesAndReadingsTest {
+    @Test
+    fun choicesShareARowWhenTheyFitAndSplitEvenlyWhenNot() {
+        assertEquals(4, com.garrietta.haven.ui.components.choicesPerRow(4, 400f))
+        assertEquals(2, com.garrietta.haven.ui.components.choicesPerRow(4, 300f))
+        assertEquals(3, com.garrietta.haven.ui.components.choicesPerRow(6, 300f))
+        assertEquals(1, com.garrietta.haven.ui.components.choicesPerRow(2, 120f))
+        assertEquals(2, com.garrietta.haven.ui.components.choicesPerRow(2, 200f))
+        assertEquals(1, com.garrietta.haven.ui.components.choicesPerRow(1, 50f))
+    }
+
+    @Test
+    fun readingsAreRoundedTheWayTheyAreRead() {
+        assertEquals("66.4 °F", formatReading("66.38", "°F", "temperature"))
+        assertEquals("66 °F", formatReading("66.0", "°F", "temperature"))
+        assertEquals("54%", formatReading("54.2", "%", "humidity"))
+        assertEquals("742 W", formatReading("742.4", "W", "power"))
+        assertEquals("3.14 kWh", formatReading("3.1415", "kWh", "energy"))
+        assertEquals("on", formatReading("on", null, null))
+    }
+}

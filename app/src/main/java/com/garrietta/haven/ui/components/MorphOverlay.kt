@@ -1488,20 +1488,19 @@ fun morphCardAlpha(progress: Float): Float =
 /**
  * Round 21, item 8: which morph source card hides — the TOPMOST
  * surface wins. A panel detail stacked over a detail panel hides
- * its own source card, not the underlying panel's; a detail panel
- * beats the thermostat popout. Pure, so the priority is
+ * its own source card, not the underlying panel's. Pure, so the priority is
  * unit-tested (see Round21LogicTest).
  */
-fun topMorphSourceId(panelDetailId: String?, detailId: String?, popoutId: String?, cameraDialogId: String? = null): String? =
-    panelDetailId ?: detailId ?: popoutId ?: cameraDialogId
+fun topMorphSourceId(panelDetailId: String?, detailId: String?, cameraDialogId: String? = null): String? =
+    panelDetailId ?: detailId ?: cameraDialogId
 
 /**
  * Round 21, item 8: the topmost morph's progress, same priority
  * as [topMorphSourceId]. Nulls are "that surface is not open";
  * 1f is rest (no morph — the card reads fully visible).
  */
-fun topMorphProgress(panelDetail: Float?, detail: Float?, popout: Float?): Float =
-    panelDetail ?: detail ?: popout ?: 1f
+fun topMorphProgress(panelDetail: Float?, detail: Float?): Float =
+    panelDetail ?: detail ?: 1f
 
 /**
  * Content alpha for a morphing surface CLOSE at [progress] (1 = panel

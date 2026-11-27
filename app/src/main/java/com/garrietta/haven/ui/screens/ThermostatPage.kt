@@ -1,4 +1,5 @@
 package com.garrietta.haven.ui.screens
+import com.garrietta.haven.Screen
 import com.garrietta.haven.data.detailBadgeOverride
 import com.garrietta.haven.data.detailPageAccent
 import com.garrietta.haven.ui.components.compositeOver
@@ -100,237 +101,25 @@ import androidx.compose.foundation.text.TextAutoSize
 
 
 /**
- * The centered expressive thermostat pop-out (Round 4: the
- * PRIMARY and only thermostat panel — tap and long-press on the
- * Ecobee card both land here; the old secondary Details page
- * is deleted): the radial dial on a mode-colored scallop disc
- * up top, Mode/Fan pills underneath, then 24-hour
- * temperature/humidity history charts. Back and the panel's back
- * arrow dismiss; there is no Details route anymore. The
- * thermostat's shape IS its control surface (the dial changes
- * temp, the pills change mode/fan); there is no single binary
- * actuation for it, so the shape-tap = actuate rule applies to
- * its inner controls, not to the card shape as a whole. The dial
- * keeps every standing rule (1° snap, handle-grab-only 32dp
- * nearest-wins, inside-tap toggle, clamps, gap-proofing,
- * widen-on-grab, pulsing bloom, dual numbers) — the redesign is
- * shapes/spacing/layout, not interaction. The disc is a square
- * box, so the min-dimension polygon scale fits exactly: content
- * fills the mask, never inset, no white crescents.
- */
-
-/**
- * Round 24, item 5: the thermostat dial-range rows, moved here
- * from SettingsScreen (they belong to the thermostat, in the
- * popout's bottom settings section alongside Badge shape / Card
- * shape / Card settings). Same four rows, same store writes —
- * Dial range status, Display minimum, Display maximum, Reset to
- * Automatic — and the same Automatic formula text (the dial axis
- * normally follows the decade formula in
- * thermostatDisplayRange; the two override values, when BOTH
- * set, pin the axis instead on the popout, the sheet dial, and
- * detail). Display-range only: live setpoints are never touched.
- * State is kept locally here and written straight to
- * vm.settingsStore.
+ * A thermostat's popup: the same header every device popup has, then
+ * [ThermostatControl], its last 24 hours and the rows every popup ends
+ * with. The Climate tab shows the same control, so a thermostat looks
+ * and works the same wherever it is opened.
  */
 @Composable
-internal fun ThermostatDisplayRangeRows(vm: HavenViewModel, states: Map<String, HaEntity>) {
-    var thermoMin by remember { mutableStateOf(vm.settingsStore.thermostatDisplayMin) }
-    var thermoMax by remember { mutableStateOf(vm.settingsStore.thermostatDisplayMax) }
-    val thermoClampedMin = thermoMin?.coerceIn(40f, 100f)
-    val thermoClampedMax = thermoMax?.coerceIn(40f, 100f)
-    val thermoOverrideText = if (thermoClampedMin != null && thermoClampedMax != null && thermoClampedMin < thermoClampedMax) {
-        "${thermoClampedMin.toInt()}–${thermoClampedMax.toInt()}°"
-    } else {
-        null
-    }
-    // The Automatic range, when exactly one climate entity is
-    // present, so the status line can name the effective window;
-    // with zero or several climates the status stays generic
-    // rather than guessing which thermostat it means.
-    val thermoFormulaText: String? = run {
-        val climates = states.values.filter { it.domain == "climate" }
-        if (climates.size != 1) return@run null
-        val climate = climates.first()
-        val cMin = climate.attrDouble("min_temp")?.toFloat() ?: 10f
-        val cMax = climate.attrDouble("max_temp")?.toFloat() ?: 30f
-        val low = climate.attrDouble("target_temp_low")?.toFloat()
-        val high = climate.attrDouble("target_temp_high")?.toFloat()
-        val setpoints = if (low != null && high != null) {
-            listOf(low, high)
-        } else {
-            listOfNotNull(climate.attrDouble("temperature")?.toFloat())
-        }
-        val r = thermostatDisplayRange(cMin, cMax, setpoints)
-        "${r.start.toInt()}–${r.endInclusive.toInt()}°"
-    }
-    val thermoStatus = when {
-        thermoOverrideText != null ->
-            "Override ($thermoOverrideText) — pinned on the thermostat dial, sheet, and detail, whatever the setpoints are."
-        thermoMin != null && thermoMax != null ->
-            "Override values do not form a valid range (minimum must be below maximum) — using Automatic" +
-                (thermoFormulaText?.let { " ($it from setpoints)" } ?: "") + "."
-        thermoMin != null || thermoMax != null ->
-            "Only one override value is set — Automatic governs until both minimum and maximum are set" +
-                (thermoFormulaText?.let { " ($it from setpoints)" } ?: "") + "."
-        thermoFormulaText != null ->
-            "Automatic ($thermoFormulaText from setpoints) — the dial range follows your setpoints."
-        else ->
-            "Automatic — the dial range follows your setpoints."
-    }
-    MenuSection("Thermostat")
-    MenuGroup {
-        MenuRow(
-            badgeKey = "thermostat-range",
-            badgeKind = ExpressiveKind.SUNNY,
-            icon = Icons.Filled.Thermostat,
-            title = "Dial range",
-            subtitle = thermoStatus,
-            onClick = null,
-            flat = true,
-        )
-        MenuDivider()
-        MenuRow(
-            badgeKey = "thermostat-min",
-            badgeKind = ExpressiveKind.BUN,
-            icon = Icons.Filled.Thermostat,
-            title = "Display minimum",
-            subtitle = "Low end of the dial axis. Tap −/+ to set an override (starts at 50°); 1° steps, clamped to 40–100°.",
-            onClick = null,
-            trailing = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
-                        val base = thermoMin
-                        val next = if (base == null) 50f else (base - 1f).coerceIn(40f, 100f)
-                        thermoMin = next
-                        vm.settingsStore.thermostatDisplayMin = next
-                    }) { Text("−") }
-                    Text(
-                        thermoMin?.let { "${it.toInt()}°" } ?: "Automatic",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    TextButton(onClick = {
-                        val base = thermoMin
-                        val next = if (base == null) 50f else (base + 1f).coerceIn(40f, 100f)
-                        thermoMin = next
-                        vm.settingsStore.thermostatDisplayMin = next
-                    }) { Text("+") }
-                }
-            },
-            flat = true,
-        )
-        MenuDivider()
-        MenuRow(
-            badgeKey = "thermostat-max",
-            badgeKind = ExpressiveKind.WAVE,
-            icon = Icons.Filled.Thermostat,
-            title = "Display maximum",
-            subtitle = "High end of the dial axis. Tap −/+ to set an override (starts at 80°); 1° steps, clamped to 40–100°.",
-            onClick = null,
-            trailing = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
-                        val base = thermoMax
-                        val next = if (base == null) 80f else (base - 1f).coerceIn(40f, 100f)
-                        thermoMax = next
-                        vm.settingsStore.thermostatDisplayMax = next
-                    }) { Text("−") }
-                    Text(
-                        thermoMax?.let { "${it.toInt()}°" } ?: "Automatic",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    TextButton(onClick = {
-                        val base = thermoMax
-                        val next = if (base == null) 80f else (base + 1f).coerceIn(40f, 100f)
-                        thermoMax = next
-                        vm.settingsStore.thermostatDisplayMax = next
-                    }) { Text("+") }
-                }
-            },
-            flat = true,
-        )
-        MenuDivider()
-        MenuRow(
-            badgeKey = "thermostat-reset",
-            badgeKind = ExpressiveKind.CLOUD,
-            icon = Icons.Filled.Thermostat,
-            title = "Reset to Automatic",
-            subtitle = "Clear the minimum/maximum override; the dial range follows your setpoints again.",
-            onClick = {
-                thermoMin = null
-                thermoMax = null
-                vm.settingsStore.thermostatDisplayMin = null
-                vm.settingsStore.thermostatDisplayMax = null
-            },
-            flat = true,
-        )
-    }
-}
-
-@Composable
-fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) {
-    // Feedback round 4, item 2: the header badge carries the
-    // card's pair, like every other detail header. Feedback
-    // round 17, item 1: the tile pair, not the preset-only
-    // override (see DetailPages.kt — the null fallback sent
-    // headers to the hash accent).
-    val popoutCustom = rememberCardCustom(vm)
-    val popoutBadge = tileBadgePair(
-        popoutCustom.tilePresets, popoutCustom.domainTilePresets, entity,
+fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit, navigate: ((Screen) -> Unit)? = null) {
+    val custom = rememberCardCustom(vm)
+    val nameOf = rememberEntityNamer(vm)
+    val badge = tileBadgePair(
+        custom.tilePresets, custom.domainTilePresets, entity,
         isDarkBackdrop(MaterialTheme.colorScheme.background),
         MaterialTheme.colorScheme, accentFor(entity.entityId),
     )
-    // Feedback round 5, item 4: the tile preset accent tints the
-    // stepper pills below the disc, like the other popup elements.
-    val popoutAccent = detailPageAccent(
-        popoutCustom.tilePresets, entity,
-        isDarkBackdrop(MaterialTheme.colorScheme.background),
-        popoutCustom.domainTilePresets,
-    )
-    // Feedback round 18, item 5: header drag-to-dismiss (see
-    // LocalPopupDragHandle); null outside popups.
-    val popoutDragHandle = LocalPopupDragHandle.current
-    val popoutDragRangePx = LocalPopupDragRangePx.current
-    val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
-    val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
-    val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
-    // Round 6: the dial range is computed HERE, in the popout,
-    // through the ONE shared resolver (see
-    // resolveThermostatDisplayRange): the decade formula around
-    // the current setpoints (66/67° → 50–80°) unless Settings
-    // pins both override values, in which case the override wins
-    // on this surface exactly as on the sheet and detail. Values
-    // themselves are never rewritten; out-of-range thumbs clamp
-    // to the arc end and the Hero flags it. The Hero takes this
-    // range as a parameter, so the popout surface cannot silently
-    // fall back to a different range.
-    val lowAttr = entity.attrDouble("target_temp_low")?.toFloat()
-    val highAttr = entity.attrDouble("target_temp_high")?.toFloat()
-    val singleAttr = entity.attrDouble("temperature")?.toFloat()
-    val displaySetpoints = if (lowAttr != null && highAttr != null) {
-        listOf(lowAttr, highAttr)
-    } else {
-        listOfNotNull(singleAttr)
-    }
-    val displayRange = resolveThermostatDisplayRange(
-        min, max, displaySetpoints,
-        vm.settingsStore.thermostatDisplayMin,
-        vm.settingsStore.thermostatDisplayMax,
-    )
-    // UI rewrite round §6: the dial state is hoisted here so the
-    // popout renders the dial INSIDE the scallop disc and the
-    // Heat/Cool bar BELOW it (see rememberThermostatDialState).
-    val dialState = rememberThermostatDialState(entity, vm, min, max, displayRange)
-    // Traveling header target (2026-10-29 pop-up round): the title
-    // row reports its root rect into the measurement frame's hero
-    // target, so the overlay's traveling header lands exactly here.
-    // Read during composition (never inside the layout callback).
+    // Dragging the header pulls the popup down to close it; null outside popups.
+    val dragHandle = LocalPopupDragHandle.current
+    val dragRangePx = LocalPopupDragRangePx.current
+    // The header reports where it lands so the badge travelling from the tile lands on it.
     val heroTarget = LocalHeroTarget.current
-    // The dialog panel scrolls: no own verticalScroll here.
     Column(
         Modifier.fillMaxWidth().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -339,11 +128,11 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
             Modifier.fillMaxWidth()
                 .onGloballyPositioned { heroTarget?.invoke(it.boundsInRoot()) }
                 .then(
-                    if (popoutDragHandle != null) {
+                    if (dragHandle != null) {
                         Modifier.popupDragDetector(
-                            popoutDragHandle.state,
-                            { dy -> popoutDragHandle.onDelta(dy, popoutDragRangePx()) },
-                            { v -> popoutDragHandle.onRelease(v, popoutDragRangePx()) },
+                            dragHandle.state,
+                            { dy -> dragHandle.onDelta(dy, dragRangePx()) },
+                            { v -> dragHandle.onRelease(v, dragRangePx()) },
                         )
                     } else {
                         Modifier
@@ -351,197 +140,105 @@ fun ThermostatPopout(entity: HaEntity, vm: HavenViewModel, onClose: () -> Unit) 
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Badge by EVERY pop-up (2026-10-29 verdict overrules
-            // #68's deliberate pop-out exception): the badge
-            // dissolves into this 48dp header badge exactly
-            // like every other pop-up header, and tapping it
-            // dismisses. Feedback round 18, item 4: no traveler —
-            // the badge renders in place and fades with the
-            // content curves (see morphHeaderBadgeAlpha). No
-            // top-right X (2026-11-01 round 1 panel chrome): the
-            // panel's back arrow + BackHandler are the dismiss
-            // paths.
             DomainBadge(
                 entity,
-                // Feedback round 11, item 3: the one icon path.
-                entityIcon(popoutCustom.iconKeys, entity),
+                entityIcon(custom.iconKeys, entity),
                 accentFor(entity.entityId),
                 modifier = Modifier.size(48.dp).morphHeaderBadgeAlpha().clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) { onClose() },
-                badgeOverride = popoutBadge,
+                badgeOverride = badge,
             )
             Spacer(Modifier.width(12.dp))
-            // Standard dialog header (2026-10-30): name + state
-            // below it, exactly like every sheet/detail header.
             Column(Modifier.weight(1f)) {
-                DialogTitleText(entity.friendlyName, Modifier.fillMaxWidth())
-                Text(entity.dialogHeaderState(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                DialogTitleText(nameOf(entity), Modifier.fillMaxWidth())
+                Text(entity.dialogHeaderState(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Spacer(Modifier.height(8.dp))
-        // Scalloped disc + radial dial: the disc is the pop-out's
-        // expressive shape, mode-colored; the dial sits centered on
-        // it, and the Heat/Cool bar sits BELOW it (never inside it).
-        // UI rewrite round §6 geometry (CORRECTING the old comment,
-        // which compared the bloom against the 160dp disc radius
-        // instead of the scallop valley): SCALLOP12's valleys sit at
-        // 0.72 x radius = 115.2dp, but the 240dp dial's outer bloom
-        // reaches 134dp — so bloom crossed the border at the top,
-        // where 67/69 thumbs sit near the valleys. THERMOSTAT_SCALLOP
-        // valleys sit at 0.88 x radius = 140.8dp. Round 6 moves the
-        // track inset 20dp -> 16dp and the sweep 240° -> 270° (see
-        // ThermostatDial). Round 8 moves the inset 16dp -> 12dp and
-        // the thumbs from 30x20 ovals to 20dp circles, so with the
-        // 240dp dial the hard-edged elements still clear the
-        // valley: track outer 119dp grabbed (21.8 margin), thumb
-        // outer 130dp (10.8, full stagger + circle radius), track
-        // inner edge 100dp idle (was 96dp), so the dual-number row
-        // GAINS clearance: its inner width is now 200dp (was
-        // 192dp) against a ~184dp row. The
-        // bloom is a soft alpha fade, unchanged in kind from round
-        // 5; its peak-pulse extent past the valley is a fade, never
-        // a hard edge, and the scallop itself is untouched (the
-        // user likes it). Thumb grab targets are untouched — only
-        // the visual thumb shape changed.
-        Box(
-            Modifier.size(320.dp).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.THERMOSTAT_SCALLOP)),
-            contentAlignment = Alignment.Center,
-        ) {
-            ThermostatDialBlock(
-                dialState, entity, vm, displayRange, diameter = 240.dp,
-                // Numbers sit on the scallop disc: floor them against
-                // the disc color itself (2026-10-30 dial-clash fix).
-                numberBackdrop = compositeOver(
-                    modeColor.copy(alpha = 0.20f),
-                    MaterialTheme.colorScheme.surfaceContainerHigh,
-                ),
-            )
-        }
-        // Feedback round 5, item 6: the - / + steppers live HERE,
-        // below the scallop disc with 16dp of daylight — never
-        // inside the dial face, never on the radial. The scallop
-        // itself is untouched (the user likes it).
-        Spacer(Modifier.height(16.dp))
-        ThermostatSteppers(dialState, popoutAccent, outlineColor = MaterialTheme.colorScheme.outlineVariant)
-        // The Heat/Cool bar + out-of-range note live BELOW the disc
-        // with 28dp of daylight (the bar used to live inside the
-        // disc, where its square corners crossed the scallop's
-        // curved bottom edge — the flagged overlap).
-        ThermostatBelowDial(dialState)
-        Spacer(Modifier.height(12.dp))
-        // Mode + Fan as M3 segmented pill bars (2026-11-01 round 1):
-        // the dropdown pills are gone — every option is visible at
-        // once, in the brief's order, filtered to what HA reports.
-        val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
-        if (modes.isNotEmpty()) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-                Text("Mode", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                FilledOptionRow(
-                    options = orderedHvacModes(modes).map { it to formatHvacMode(it) },
-                    selected = entity.state,
-                    onSelect = { vm.setClimateHvacMode(entity.entityId, it) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-        val fanModes = entity.attrList("fan_modes")?.mapNotNull { it as? String } ?: emptyList()
-        if (fanModes.isNotEmpty()) {
-            val fanMode = entity.attrString("fan_mode")
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-                Text("Fan", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                FilledOptionRow(
-                    options = orderedFanModes(fanModes).map {
-                        it to it.replace('_', ' ').replaceFirstChar { c -> c.uppercase() }
-                    },
-                    selected = fanMode,
-                    onSelect = { vm.setClimateFanMode(entity.entityId, it) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-        // No bottom action (Round 4): the old Details button
-        // routed to the deleted secondary page — the panel's back
-        // arrow + BackHandler are the dismiss paths, and the
-        // history charts below carry what Details used to hold.
+        ThermostatControl(entity, vm)
         val states by vm.states.collectAsState()
         ThermostatHistorySection(entity, vm, states)
-        // Round 21, item 5: the settings rows at the very bottom,
-        // for every tile. Details is omitted — the popout IS the
-        // thermostat's full surface (the secondary page was
-        // deleted in round 4).
-        // Round 24, item 5: the dial-range rows live here now,
-        // above the menu rows (moved from Settings).
-        Spacer(Modifier.height(24.dp))
-        ThermostatDisplayRangeRows(vm, states)
         Spacer(Modifier.height(16.dp))
-        EntityPopupMenuRows(vm, entity, onDetails = null, modifier = Modifier.fillMaxWidth())
+        EntityPopupMenuRows(vm, entity, onClose = onClose, navigate = navigate, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(16.dp))
     }
 }
 
 /**
- * Round 25, item 4: the wireframe SegmentedOptionBar is gone —
- * Mode / Fan / Heat-Cool are solid Material 3 Expressive filled
- * pill buttons (PressablePillButton, like PanelPill):
- * secondaryContainer unselected, primaryContainer — or the
- * caller's domain-tinted pair via [activeColors] — selected,
- * 8dp spacing, zero thin wireframe borders. The service calls are
- * the caller's; only the styling moves. [options] are (value,
- * label) pairs in display order; [selected] is the current value;
- * [activeColors] optionally tints a selected option's container /
- * content (the Heat/Cool bar passes the heat/cool setpoint tokens
- * so each side reads in its own color — otherwise the scheme
- * defaults apply). Options the thermostat does not report never
- * render: callers filter to the entity's hvac_modes / fan_modes
- * first, so a button can never send a mode HA would reject.
+ * A thermostat, controlled: the dial in its scalloped disc in the color
+ * of what it is doing, − and + under it, then Mode, Fan and Comfort in
+ * the app's one choice row, each only where the thermostat reports it.
+ * The disc takes the width it is given, up to 320dp. Its popup and the
+ * Climate tab both draw this, so there is one thermostat design.
  */
 @Composable
-private fun FilledOptionRow(
-    options: List<Pair<String, String>>,
-    selected: String?,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    activeColors: ((String) -> Pair<Color, Color>?)? = null,
-) {
-    if (options.isEmpty()) return
-    val scheme = MaterialTheme.colorScheme
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for ((value, label) in options) {
-            val isSelected = selected == value
-            val active = if (isSelected) activeColors?.invoke(value) else null
-            PressablePillButton(
-                onClick = { onSelect(value) },
-                modifier = Modifier.weight(1f),
-                height = 48.dp,
-                // Selected is the lime capsule, like every other
-                // choice in the app, unless the caller tints it.
-                containerColor = active?.first
-                    ?: if (isSelected) HavenChrome.capsule else scheme.surfaceContainerHigh,
-                contentColor = active?.second
-                    ?: if (isSelected) HavenChrome.onCapsule else scheme.onSurfaceVariant,
-                contentPadding = PaddingValues(horizontal = 8.dp),
+fun ThermostatControl(entity: HaEntity, vm: HavenViewModel, modifier: Modifier = Modifier) {
+    val custom = rememberCardCustom(vm)
+    val accent = detailPageAccent(
+        custom.tilePresets, entity,
+        isDarkBackdrop(MaterialTheme.colorScheme.background),
+        custom.domainTilePresets,
+    )
+    val modeColor = climateModeColor(entity.state, entity.attrString("hvac_action"))
+    val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
+    val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
+    // The dial's range follows the set points (a span of about 30
+    // degrees around them); out-of-range thumbs clamp to the arc end
+    // and the note under the dial says so.
+    val lowAttr = entity.attrDouble("target_temp_low")?.toFloat()
+    val highAttr = entity.attrDouble("target_temp_high")?.toFloat()
+    val singleAttr = entity.attrDouble("temperature")?.toFloat()
+    val setpoints = if (lowAttr != null && highAttr != null) listOf(lowAttr, highAttr) else listOfNotNull(singleAttr)
+    val displayRange = resolveThermostatDisplayRange(min, max, setpoints, null, null)
+    val dialState = rememberThermostatDialState(entity, vm, min, max, displayRange)
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxWidth()) {
+        val disc = minOf(maxWidth, 320.dp)
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(disc).background(modeColor.copy(alpha = 0.20f), stateShape(StateShape.THERMOSTAT_SCALLOP)),
+                contentAlignment = Alignment.Center,
             ) {
-                // Four modes share a cover-screen row, and the longest
-                // label ("Heat • Cool") does not fit at full size: step
-                // it down before cutting it off.
-                Text(
-                    label,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = 14.sp, stepSize = 0.5.sp),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                ThermostatDialBlock(
+                    dialState, entity, vm, displayRange, diameter = disc * 0.75f,
+                    numberBackdrop = compositeOver(modeColor.copy(alpha = 0.20f), MaterialTheme.colorScheme.surfaceContainerHigh),
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            ThermostatSteppers(dialState, accent, outlineColor = MaterialTheme.colorScheme.outlineVariant)
+            ThermostatBelowDial(dialState)
+            val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String }.orEmpty()
+            if (modes.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                com.garrietta.haven.ui.components.LabeledChoiceRow(
+                    "Mode", orderedHvacModes(modes).map { it to formatHvacMode(it) }, entity.state,
+                    { vm.setClimateHvacMode(entity.entityId, it) },
+                )
+            }
+            val fanModes = entity.attrList("fan_modes")?.mapNotNull { it as? String }.orEmpty()
+            if (fanModes.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                com.garrietta.haven.ui.components.LabeledChoiceRow(
+                    "Fan", orderedFanModes(fanModes).map { it to choiceLabel(it) }, entity.attrString("fan_mode"),
+                    { vm.setClimateFanMode(entity.entityId, it) },
+                )
+            }
+            val presets = entity.attrList("preset_modes")?.mapNotNull { it as? String }.orEmpty()
+            if (presets.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                com.garrietta.haven.ui.components.LabeledChoiceRow(
+                    "Comfort", presets.map { it to choiceLabel(it) }, entity.attrString("preset_mode"),
+                    { vm.setClimatePresetMode(entity.entityId, it) },
                 )
             }
         }
     }
 }
+
+/** "fan_only" reads "Fan only", "home" reads "Home". */
+private fun choiceLabel(value: String): String = value.replace('_', ' ').replaceFirstChar { it.uppercase() }
+
 
 /** Canonical mode order for the segmented Mode bar: Off / Heat /
  * Cool / Heat·Cool first (the brief's order), then any further
@@ -911,7 +608,7 @@ private fun ThermostatBelowDial(state: ThermostatDialState) {
     if (state.heatCool) {
         Spacer(Modifier.height(28.dp))
         val scheme = MaterialTheme.colorScheme
-        FilledOptionRow(
+        com.garrietta.haven.ui.components.ChoiceRow(
             options = listOf(
                 SetpointSelector.HEATING.name to "Heat ${state.heat.value.toDouble().formatTemp()}",
                 SetpointSelector.COOLING.name to "Cool ${state.cool.value.toDouble().formatTemp()}",
@@ -1020,28 +717,30 @@ private fun ThermostatSensorHistory(sensor: HaEntity, vm: HavenViewModel) {
         Text(sensorDisplayName(sensor), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
         Text(sensor.stateText(), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
-        if (cached == null) {
-            ShimmerBox(Modifier.fillMaxWidth().height(120.dp))
-        } else if (cached.size >= 2) {
-            Sparkline(cached, chartLineColor(sensorKind(sensor.entityId, sensor.attrString("device_class"), sensor.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(120.dp))
-            val mm = sparklineMinCurrentMax(cached)
-            if (mm != null) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Min ${fmtThermostatHistory(mm.first, unit)} · Current ${fmtThermostatHistory(mm.second, unit)} · Max ${fmtThermostatHistory(mm.third, unit)}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val chartHeight = com.garrietta.haven.ui.components.historyChartHeight(maxWidth) * 0.7f
+            if (cached == null) {
+                ShimmerBox(Modifier.fillMaxWidth().height(chartHeight))
+            } else if (cached.size >= 2) {
+                Column {
+                    Sparkline(cached, chartLineColor(sensorKind(sensor.entityId, sensor.attrString("device_class"), sensor.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(chartHeight))
+                    val mm = sparklineMinCurrentMax(cached)
+                    if (mm != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Low ${fmtThermostatHistory(mm.first, unit)} · High ${fmtThermostatHistory(mm.third, unit)} over 24 hours",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
-        } else {
+        }
+        if (cached != null && cached.size < 2) {
             Text("No history yet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(16.dp))
     }
 }
 
-/** Whole numbers print whole; the rest get one decimal; unit suffix when present. */
-private fun fmtThermostatHistory(v: Double, unit: String?): String {
-    val num = if (v == v.toInt().toDouble()) v.toInt().toString() else String.format(java.util.Locale.US, "%.1f", v)
-    return if (unit != null) "$num $unit" else num
-}
+private fun fmtThermostatHistory(v: Double, unit: String?): String = com.garrietta.haven.data.formatReading(v.toString(), unit, null)

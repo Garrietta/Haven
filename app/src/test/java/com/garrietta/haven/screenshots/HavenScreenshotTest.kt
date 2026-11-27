@@ -398,6 +398,28 @@ class HavenScreenshotTest {
     @Test fun climate_unfolded_light() =
         shoot("climate_unfolded_light", UNFOLDED, withClimate(viewModel(signedIn = true, dark = false))) { tapTab("Climate") }
 
+    /** A reading's popup unfolded: the chart across the whole popup, sized to it. */
+    @Test fun reading_popup_unfolded_light() {
+        val vm = withClimate(viewModel(signedIn = true, dark = false))
+        vm.historyCache["sensor.bedroom_temperature"] = demoHistory(63.8, 66.9)
+        shoot("reading_popup_unfolded_light", UNFOLDED, vm) {
+            tapTab("Climate")
+            frame()
+            tapText("Bedroom")
+        }
+    }
+
+    /** A day of readings between [low] and [high]: a slow swing, a dip and a step up late in the day. */
+    private fun demoHistory(low: Double, high: Double): List<com.garrietta.haven.data.HistoryPoint> {
+        val now = 1_764_000_000_000L
+        return (0..96).map { i ->
+            val t = i / 96.0
+            val swing = (kotlin.math.sin(t * 6.0) + 1) / 2 * 0.35
+            val step = if (t > 0.82) 0.55 else 0.0
+            com.garrietta.haven.data.HistoryPoint(now - (96 - i) * 15 * 60_000L, low + (high - low) * (swing + step).coerceAtMost(1.0))
+        }
+    }
+
     @Test fun thermostat_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
         shoot("thermostat_popup_folded_dark", FOLDED, vm) { tapText("Thermostat") }

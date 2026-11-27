@@ -1,4 +1,5 @@
 package com.garrietta.haven.ui.controls
+import androidx.compose.material.icons.filled.Sync
 import com.garrietta.haven.ui.components.suggestedIconKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.ui.components.cardIconForKey
@@ -159,7 +160,7 @@ fun HaEntity.stateText(): String {
     if (state.equals("unknown", ignoreCase = true)) return "Unknown"
     val unit = attrString("unit_of_measurement")
     return when (domain) {
-        "sensor" -> if (unit != null) "$state $unit" else state
+        "sensor" -> com.garrietta.haven.data.formatReading(state, unit, attrString("device_class"))
         // Weather conditions go through the display formatter:
         // HA reports "partlycloudy" glued, which must read
         // "Partly Cloudy" everywhere (2026-10-30 verdict). Other
@@ -526,15 +527,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 // a shape action the whole header is one detail target,
                 // exactly as before.
                 val shapeAction = if (headerClickable) shapeTapAction(vm, entity) else null
-                // Climate cards route to the primary scalloped
-                // dial panel (Round 4), never the sheet: tap or
-                // long-press on the Ecobee card opens the pop-out.
-                // Every other domain keeps the caller's detail
-                // routing (sheet on Boards/Areas/Search).
-                val detailAction: () -> Unit = {
-                    if (entity.domain == "climate") vm.openClimatePopout(entity.entityId)
-                    else onDetail(entity.entityId)
-                }
+                val detailAction: () -> Unit = { onDetail(entity.entityId) }
                 val badgeClick = when {
                     shapeAction != null -> Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -1161,31 +1154,29 @@ fun FanControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null, 
             pageAccent ?: accentFor(entity.entityId),
         )
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        PillToggle(
-            oscillating,
-            { vm.callService("fan", "oscillate", entity.entityId, JSONObject().put("oscillating", !oscillating)) },
-            pageAccent ?: accentFor(entity.entityId),
-        )
-        Spacer(Modifier.width(12.dp))
-        Text("Oscillate", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // Oscillate is a row like any other secondary control: what it is on
+    // the left, its switch on the right. Only for fans that can.
+    if (entity.attrBool("oscillating") != null) {
+        com.garrietta.haven.ui.components.MenuGroup {
+            com.garrietta.haven.ui.components.MenuRow(
+                "osc-${entity.entityId}", com.garrietta.haven.ui.theme.ExpressiveKind.WAVE, androidx.compose.material.icons.Icons.Filled.Sync,
+                "Oscillate", if (oscillating) "Turning side to side" else "Facing one way",
+                onClick = null,
+                trailing = {
+                    androidx.compose.material3.Switch(checked = oscillating, onCheckedChange = {
+                        vm.callService("fan", "oscillate", entity.entityId, JSONObject().put("oscillating", it))
+                    })
+                },
+                flat = true,
+            )
+        }
     }
     if (presets.isNotEmpty()) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            for (preset in presets) {
-                FilterChip(
-                    colors = choiceChipColors(),
-                    selected = entity.attrString("preset_mode") == preset,
-                    onClick = {
-                        vm.callService("fan", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", preset))
-                    },
-                    label = { Text(preset) },
-                )
-            }
-        }
+        Spacer(Modifier.height(12.dp))
+        com.garrietta.haven.ui.components.LabeledChoiceRow(
+            "Mode", presets.map { it to it.replace('_', ' ').replaceFirstChar { c -> c.uppercase() } }, entity.attrString("preset_mode"),
+            { vm.callService("fan", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", it)) },
+        )
     }
 }
 

@@ -183,7 +183,9 @@ fun SensorTile(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean = true,
         if (chartReady) {
             Column(Modifier.alpha(chartAlpha)) {
                 Spacer(Modifier.height(12.dp))
-                Sparkline(history, chartLineColor(sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(64.dp))
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    Sparkline(history, chartLineColor(sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height((maxWidth / 4f).coerceIn(48.dp, 120.dp)))
+                }
                 val mm = sparklineMinCurrentMax(history)
                 if (mm != null) {
                     Spacer(Modifier.height(8.dp))

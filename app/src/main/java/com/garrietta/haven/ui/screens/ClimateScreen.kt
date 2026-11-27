@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.foundation.combinedClickable
 import com.garrietta.haven.ui.theme.glow
 import com.garrietta.haven.ui.theme.grainGlow
 import androidx.compose.foundation.Canvas
@@ -178,7 +179,7 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             if (wide && first != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HouseCard(summary, first, dark, Modifier.weight(1f))
-                    ThermostatCard(first, vm, dark, 0, onOpen = { navigate(Screen.EntityDetail(first.entityId)) }, Modifier.weight(1.3f))
+                    ThermostatSection(first, vm, 0, Modifier.weight(1.3f))
                 }
             } else {
                 HouseCard(summary, first, dark)
@@ -197,7 +198,7 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         thermostats.forEachIndexed { index, thermostat ->
             if (wide && index == 0) return@forEachIndexed
             item(key = "thermostat-" + thermostat.entityId) {
-                ThermostatCard(thermostat, vm, dark, index, onOpen = { navigate(Screen.EntityDetail(thermostat.entityId)) })
+                ThermostatSection(thermostat, vm, index)
                 Spacer(Modifier.height(12.dp))
             }
         }
@@ -252,7 +253,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.readingRows(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                repeat(columns - group.size) { Spacer(Modifier.weight(1f)) }
+                // A card alone in its row takes the row rather than
+                // sitting beside empty space.
+                if (group.size > 1) repeat(columns - group.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -309,39 +312,34 @@ private fun HouseCard(summary: ClimateSummary, thermostat: HaEntity?, dark: Bool
 }
 
 /**
- * One thermostat: what it reads and what it is doing, its set point (or
- * its heat and cool pair) with − and + beside it, and its modes, comfort
- * settings and fan as choices. The dial and its history are a tap away.
+ * A thermostat on the Climate tab: its name and what it is doing, then
+ * the same [ThermostatControl] its popup shows, so it looks and works the
+ * same in both places. Press and hold the name for the tile's options,
+ * as anywhere else.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ThermostatCard(t: HaEntity, vm: HavenViewModel, dark: Boolean, index: Int, onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    val family = thermostatFamily(t)
-    val fam = family.colors(dark)
-    val step = setpointStep(t)
-    val current = t.attrDouble("current_temperature")
+private fun ThermostatSection(t: HaEntity, vm: HavenViewModel, index: Int, modifier: Modifier = Modifier) {
+    val nameOf = rememberEntityNamer(vm)
     val humidity = t.attrDouble("current_humidity")
-    // A thermostat heating or cooling is the tab's moment: an ember or a
-    // frost glowing from its reading, with grain over it. At rest it is flat.
-    val working = t.attrString("hvac_action") in setOf("heating", "cooling")
-    val shape = leafCard(index + 1)
     Surface(
-        color = if (working) androidx.compose.ui.graphics.Color.Transparent else fam.container,
-        contentColor = fam.onContainer,
-        shape = shape,
-        modifier = modifier.fillMaxWidth().then(
-            if (working) {
-                Modifier.clip(shape).grainGlow(hot = family.glow(dark), ground = fam.container, from = Offset(0.88f, 0.12f), reach = 1.2f)
-            } else {
-                Modifier
-            },
-        ),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = leafCard(index + 1),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(20.dp)) {
-            Row(Modifier.fillMaxWidth().clickable(onClick = onOpen), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().combinedClickable(
+                    onClickLabel = null,
+                    onLongClickLabel = "Options for ${nameOf(t)}",
+                    onLongClick = { vm.openCardSettings(t.entityId) },
+                    onClick = {},
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Column(Modifier.weight(1f)) {
-                    Text(t.friendlyName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(thermostatActivity(t), style = MaterialTheme.typography.bodyMedium)
+                    Text(nameOf(t), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(thermostatActivity(t), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (humidity != null) {
                     Icon(Icons.Filled.WaterDrop, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -349,91 +347,13 @@ private fun ThermostatCard(t: HaEntity, vm: HavenViewModel, dark: Boolean, index
                     Text("${Math.round(humidity)}%", style = MaterialTheme.typography.titleSmall)
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    current?.let { "${fmtDegrees(it)}°" } ?: "—",
-                    style = MaterialTheme.typography.displayMedium,
-                    modifier = Modifier.clickable(onClick = onOpen),
-                )
-                Spacer(Modifier.weight(1f))
-                val low = t.attrDouble("target_temp_low")
-                val high = t.attrDouble("target_temp_high")
-                val target = t.attrDouble("temperature")
-                when {
-                    t.state == "off" -> Unit
-                    target != null -> SetpointStepper("Set to", target, step, fam) { vm.setClimateTemperature(t.entityId, it) }
-                    low != null && high != null -> Column(horizontalAlignment = Alignment.End) {
-                        SetpointStepper("Heat to", low, step, fam) { vm.setClimateTemperatureRange(t.entityId, it.coerceAtMost(high - step), high) }
-                        Spacer(Modifier.height(6.dp))
-                        SetpointStepper("Cool to", high, step, fam) { vm.setClimateTemperatureRange(t.entityId, low, it.coerceAtLeast(low + step)) }
-                    }
-                }
-            }
-            ChoiceRow(
-                label = "Mode",
-                options = t.attrList("hvac_modes").orEmpty().mapNotNull { it as? String },
-                selected = t.state,
-                labelOf = ::hvacModeLabel,
-            ) { vm.setClimateHvacMode(t.entityId, it) }
-            ChoiceRow(
-                label = "Comfort",
-                options = t.attrList("preset_modes").orEmpty().mapNotNull { it as? String },
-                selected = t.attrString("preset_mode"),
-                labelOf = ::presetLabel,
-            ) { vm.setClimatePresetMode(t.entityId, it) }
-            ChoiceRow(
-                label = "Fan",
-                options = t.attrList("fan_modes").orEmpty().mapNotNull { it as? String },
-                selected = t.attrString("fan_mode"),
-                labelOf = ::presetLabel,
-            ) { vm.setClimateFanMode(t.entityId, it) }
-            TextButton(onClick = onOpen, modifier = Modifier.padding(top = 4.dp)) { Text("Dial and history") }
+            Spacer(Modifier.height(12.dp))
+            ThermostatControl(t, vm)
         }
     }
 }
 
-/**
- * A set point with − and + beside it. Each tap moves it one step at
- * once on screen and sends it; the number Home Assistant reports back
- * replaces it.
- */
-@Composable
-private fun SetpointStepper(label: String, value: Double, step: Double, fam: FamilyColors, onChange: (Double) -> Unit) {
-    var shown by remember(value) { mutableStateOf(value) }
-    val colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = fam.accent, contentColor = fam.onAccent)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        FilledTonalIconButton(onClick = { shown -= step; onChange(shown) }, colors = colors) {
-            Icon(Icons.Filled.Remove, contentDescription = "$label lower")
-        }
-        Column(Modifier.padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = MaterialTheme.typography.labelSmall)
-            Text("${fmtDegrees(shown)}°", style = MaterialTheme.typography.titleLarge)
-        }
-        FilledTonalIconButton(onClick = { shown += step; onChange(shown) }, colors = colors) {
-            Icon(Icons.Filled.Add, contentDescription = "$label higher")
-        }
-    }
-}
 
-/** One of a thermostat's sets of choices, as chips, the chosen one the lime capsule. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ChoiceRow(label: String, options: List<String>, selected: String?, labelOf: (String) -> String, onPick: (String) -> Unit) {
-    if (options.isEmpty()) return
-    Spacer(Modifier.height(10.dp))
-    Text(label, style = MaterialTheme.typography.labelLarge)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (option in options) {
-            FilterChip(
-                selected = option == selected,
-                onClick = { onPick(option) },
-                label = { Text(labelOf(option)) },
-                colors = choiceChipColors(),
-            )
-        }
-    }
-}
 
 /**
  * One place's air: its name and room, the temperature large with the
@@ -491,14 +411,18 @@ private fun ReadingCard(
                 LaunchedEffect(sensor.entityId) { vm.refreshHistory(sensor.entityId) }
                 val history = vm.historyFor(sensor.entityId)
                 Spacer(Modifier.height(8.dp))
-                when {
-                    history == null -> ShimmerBox(Modifier.fillMaxWidth().height(36.dp))
-                    history.size >= 2 -> Sparkline(
-                        history,
-                        chartLineColor(if (reading.temperature != null) SensorKind.TEMPERATURE else SensorKind.HUMIDITY, dark),
-                        Modifier.fillMaxWidth().height(36.dp),
-                    )
-                    else -> Spacer(Modifier.height(36.dp))
+                // The sparkline grows with the card: a wider card gets a taller line.
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val sparkHeight = (maxWidth / 4.5f).coerceIn(36.dp, 80.dp)
+                    when {
+                        history == null -> ShimmerBox(Modifier.fillMaxWidth().height(sparkHeight))
+                        history.size >= 2 -> Sparkline(
+                            history,
+                            chartLineColor(if (reading.temperature != null) SensorKind.TEMPERATURE else SensorKind.HUMIDITY, dark),
+                            Modifier.fillMaxWidth().height(sparkHeight),
+                        )
+                        else -> Spacer(Modifier.height(sparkHeight))
+                    }
                 }
             }
         }
