@@ -1,5 +1,6 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.ui.layout.layout
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.layout.onSizeChanged
@@ -254,7 +255,26 @@ import com.garrietta.haven.ui.components.ScreenTitle
 import com.garrietta.haven.ui.components.choiceChipColors
 
 @Composable
-internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier, corners: RoundedCornerShape = RoundedCornerShape(0.dp)) {
+internal fun CameraQuadrant(
+    vm: HavenViewModel,
+    cameraId: String?,
+    modifier: Modifier = Modifier,
+    corners: RoundedCornerShape = RoundedCornerShape(0.dp),
+    /**
+     * The part of the tile that is showing, in its own pixels, when a
+     * carousel masks it down: the name and the Live label move into it
+     * and fade as it narrows, so they are never cut at the edge.
+     */
+    visibleWindow: (() -> androidx.compose.ui.geometry.Rect)? = null,
+) {
+    val labelLayer: Modifier = if (visibleWindow == null) Modifier else Modifier.layout { measurable, constraints ->
+        val window = visibleWindow()
+        val maxWidth = window.width.toInt().coerceIn(0, constraints.maxWidth)
+        val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = maxWidth))
+        layout(placeable.width, placeable.height) {
+            placeable.placeRelativeWithLayer(window.left.toInt(), 0) { alpha = cameraLabelAlpha(window.width / density) }
+        }
+    }
     var slotWidthPx by remember { mutableIntStateOf(0) }
     Box(
         modifier.padding(1.dp).clip(corners)
@@ -422,7 +442,7 @@ internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Mod
                     // child (its Spacer did nothing in a Box), so it painted
                     // straight over the LIVE / Recording pill.
                     Row(
-                        Modifier.align(Alignment.TopStart).padding(8.dp),
+                        Modifier.align(Alignment.TopStart).then(labelLayer).padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                     Row(
@@ -471,10 +491,13 @@ internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Mod
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.align(Alignment.BottomStart).padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                        modifier = Modifier.align(Alignment.BottomStart).then(labelLayer).padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                     )
                 }
             }
         }
     }
 }
+
+/** A camera label's opacity for a visible width in dp: whole from 140dp, gone below 90dp. */
+fun cameraLabelAlpha(widthDp: Float): Float = ((widthDp - 90f) / 50f).coerceIn(0f, 1f)

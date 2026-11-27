@@ -296,6 +296,11 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     var cardSettingsTarget by mutableStateOf<String?>(null)
         private set
 
+    /** Redraws the home screen widgets, after something they show or wear has changed. */
+    fun refreshWidgets() {
+        viewModelScope.launch { com.garrietta.haven.widget.HavenWidgets.updateAll(getApplication()) }
+    }
+
     fun openCardSettings(entityId: String) {
         cardSettingsTarget = entityId
     }

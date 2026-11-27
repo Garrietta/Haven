@@ -332,12 +332,10 @@ private class PanelDetailAnim(val entityId: String, val source: Rect?, val sourc
 fun HavenApp(vm: HavenViewModel) {
     var themeMode by remember { mutableStateOf(vm.settingsStore.themeMode) }
     var reduceMotion by remember { mutableStateOf(vm.settingsStore.reduceMotion) }
-    // Stage B: dynamic (wallpaper) color, off by default. The fixed
-    // Haven palettes are the identity; this only ever applies when
-    // the user explicitly enables it in Settings → Appearance.
-    var dynamicColor by remember { mutableStateOf(vm.settingsStore.dynamicColor) }
+    // The color style chosen in Settings, Appearance; Haven's own by default.
+    var colorStyle by remember { mutableStateOf(com.garrietta.haven.ui.theme.ColorStyle.fromKey(vm.settingsStore.colorStyleKey)) }
     val darkTheme = resolveHavenIsDark(themeMode, isSystemInDarkTheme())
-    HavenTheme(darkTheme = darkTheme, dynamicColor = dynamicColor) {
+    HavenTheme(darkTheme = darkTheme, style = colorStyle) {
         // Status-bar/navigation-bar icon colors follow the background's
         // luminance (Koda's approach): light background -> dark icons, dark
         // background -> light icons. The old theme hardcoded dark icons, which
@@ -1035,10 +1033,12 @@ fun HavenApp(vm: HavenViewModel) {
                         reduceMotion = it
                         vm.settingsStore.reduceMotion = it
                     },
-                    dynamicColor = dynamicColor,
-                    onDynamicColor = {
-                        dynamicColor = it
-                        vm.settingsStore.dynamicColor = it
+                    colorStyle = colorStyle,
+                    onColorStyle = {
+                        colorStyle = it
+                        vm.settingsStore.colorStyleKey = it.key
+                        // The widgets wear the same style: redraw them in it.
+                        vm.refreshWidgets()
                     },
                     onSignOut = signOut,
                 )
@@ -1979,8 +1979,8 @@ private fun ScreenContent(
     reduceMotion: Boolean,
     onThemeMode: (String) -> Unit,
     onReduceMotion: (Boolean) -> Unit,
-    dynamicColor: Boolean,
-    onDynamicColor: (Boolean) -> Unit,
+    colorStyle: com.garrietta.haven.ui.theme.ColorStyle,
+    onColorStyle: (com.garrietta.haven.ui.theme.ColorStyle) -> Unit,
     onSignOut: () -> Unit,
 ) {
     when (screen) {
@@ -1994,8 +1994,8 @@ private fun ScreenContent(
             reduceMotion = reduceMotion,
             onThemeMode = onThemeMode,
             onReduceMotion = onReduceMotion,
-            dynamicColor = dynamicColor,
-            onDynamicColor = onDynamicColor,
+            colorStyle = colorStyle,
+            onColorStyle = onColorStyle,
             onSignOut = onSignOut,
             navigate = navigate,
         )
@@ -2004,7 +2004,7 @@ private fun ScreenContent(
         Screen.Climate -> ClimateScreen(vm, navigate)
         is Screen.SettingsPage -> SettingsPageHost(
             vm, screen.route, goBack, navigate,
-            AppearanceControls(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor, onSignOut),
+            AppearanceControls(themeMode, reduceMotion, onThemeMode, onReduceMotion, colorStyle, onColorStyle, onSignOut),
         )
         // Detail pages replaced the old generic detail screen: per-domain
         // pages (climate still routes to its thermostat page inside).

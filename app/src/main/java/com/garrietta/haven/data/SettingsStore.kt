@@ -23,6 +23,14 @@ class SettingsStore(context: Context) {
         set(value) = prefs.edit().putBoolean("dynamic_color", value).apply()
 
     /**
+     * The color style's key (ColorStyle.key). Unset reads as Haven, or as
+     * Wallpaper for someone who had turned the old wallpaper-color switch on.
+     */
+    var colorStyleKey: String
+        get() = prefs.getString("color_style", null) ?: if (dynamicColor) "wallpaper" else "haven"
+        set(value) = prefs.edit().putString("color_style", value).apply()
+
+    /**
      * Stage C: folded pill presentation style — "floating" (the current
      * 64dp bar) or "compact" (a tighter 56dp bar). Unknown values read
      * as floating (see navStyleFromKey); the key is stored verbatim.

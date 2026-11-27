@@ -490,10 +490,10 @@ fun legibleSecondary(scheme: ColorScheme): Color =
  * The scheme and isDark parameters are kept so call sites read like any
  * other color lookup; they do not change the answer.
  */
-val PillBarContainer = HavenChrome.bar
-val PillBarActiveCapsule = HavenChrome.capsule
-val PillBarActiveGlyph = HavenChrome.onCapsule
-val PillBarUnselectedGlyph = HavenChrome.idleGlyph
+val PillBarContainer: androidx.compose.ui.graphics.Color get() = HavenChrome.bar
+val PillBarActiveCapsule: androidx.compose.ui.graphics.Color get() = HavenChrome.capsule
+val PillBarActiveGlyph: androidx.compose.ui.graphics.Color get() = HavenChrome.onCapsule
+val PillBarUnselectedGlyph: androidx.compose.ui.graphics.Color get() = HavenChrome.idleGlyph
 
 @Suppress("UNUSED_PARAMETER")
 fun selectedPillFill(scheme: ColorScheme, isDark: Boolean): Color = PillBarActiveCapsule

@@ -58,7 +58,7 @@ class Round22LogicTest {
             "sensor.5179_2551_temperature", "56.48",
             mapOf("unit_of_measurement" to "°F"),
         )
-        assertEquals("56.48 °F", sensor.stateText())
+        assertEquals("56.5 °F", sensor.stateText())
     }
 
     @Test

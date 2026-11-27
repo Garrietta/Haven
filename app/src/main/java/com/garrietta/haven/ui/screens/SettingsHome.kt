@@ -93,8 +93,8 @@ data class AppearanceControls(
     val reduceMotion: Boolean,
     val onThemeMode: (String) -> Unit,
     val onReduceMotion: (Boolean) -> Unit,
-    val dynamicColor: Boolean,
-    val onDynamicColor: (Boolean) -> Unit,
+    val colorStyle: com.garrietta.haven.ui.theme.ColorStyle,
+    val onColorStyle: (com.garrietta.haven.ui.theme.ColorStyle) -> Unit,
     val onSignOut: () -> Unit,
 )
 
@@ -105,8 +105,8 @@ fun SettingsScreen(
     reduceMotion: Boolean,
     onThemeMode: (String) -> Unit,
     onReduceMotion: (Boolean) -> Unit,
-    dynamicColor: Boolean,
-    onDynamicColor: (Boolean) -> Unit,
+    colorStyle: com.garrietta.haven.ui.theme.ColorStyle,
+    onColorStyle: (com.garrietta.haven.ui.theme.ColorStyle) -> Unit,
     onSignOut: () -> Unit,
     navigate: (Screen) -> Unit,
 ) {

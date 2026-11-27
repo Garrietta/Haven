@@ -14,12 +14,16 @@ MVVM without a DI framework: one `HavenViewModel` owns the `HaClient` and the st
 | App state, every action | `HavenViewModel.kt` |
 | Root, navigation, bar and rail, popups | `HavenApp.kt` |
 | Colors, type, shape, motion | `ui/theme/` (`DESIGN.md`) |
+| Color styles (Haven, Home Assistant, Wallpaper, Tide, Orchid, Graphite) | `ui/theme/ColorStyles.kt`, ramps in `tools/palette.py`, chosen in `AppearancePage` |
 | Which color a state gets | `data/SemanticColors.kt`, `ui/components/DesignTokens.kt` |
 | Home: the status deck, places and tiles | `data/HomeLayout.kt`, drawn by `ui/home/HavenHome.kt` |
-| A pinned room's tab (the older Home, filtered to one room) | `data/RoomDigest.kt`, `ui/screens/RoomsHome.kt`, `TodayScreen` |
+| How every menu works (four places, three windows, one popup per device) | `DESIGN.md`, How every menu works |
+| A device's popup | `ui/screens/DetailPages.kt` (`DetailPageScreen`, `EntityPopupMenuRows`); a thermostat's in `ThermostatPage.kt` (`ThermostatControl`, also drawn by the Climate tab) |
+| The names devices go by | `deviceDisplayName` in `data/HomeLayout.kt`, `rememberEntityNamer` in `CardSettings.kt` |
 | The Climate tab (thermostats, every temperature and humidity reading) | `data/Climate.kt`, drawn by `ui/screens/ClimateScreen.kt` |
 | Shared UI pieces | `ui/components/` |
-| A tile's options (color, icon, name), the icon catalog | `ui/screens/CardSettings.kt`, `ui/components/CardIcons.kt` |
+| A tile's options (name, Show on Home, color, icon), the icon catalog | `ui/screens/CardSettings.kt`, `ui/components/CardIcons.kt` |
+| Picking one of several | `ChoiceRow` in `ui/components/Choices.kt` |
 | A device's control | `ui/controls/` |
 | Screens | `ui/screens/` |
 | Stored settings | `data/SettingsStore.kt`, `TabsStore`, `CardSizeStore`, `TokenStore` |
@@ -48,12 +52,15 @@ Breaking one is a bug even when it compiles. Reasons are in `DESIGN.md`.
 
 1. **No color literals outside `ui/theme/Palette.kt`**, and that file is generated (`tools/palette.py`). Surfaces and text come from `MaterialTheme.colorScheme`; state comes from a `StateFamily`.
 2. **A state's color is its family's**, through `domainFamily` / `semanticFamily`. Do not give one device type its own color path.
-3. **Selected is the lime capsule** (`HavenChrome`, `choiceChipColors()`): tabs, rooms, any one-of-several choice.
+3. **Selected is the style's capsule** (`HavenChrome.capsule`; lime in Haven's style), and **picking one of several is `ChoiceRow`**, wherever it is.
 4. **Text takes a role from `MaterialTheme.typography`.** Inline `fontSize` is legacy; move it when you touch it. Keep line heights in em in `Type.kt`.
 5. **Corners come from `Corner` / `MaterialTheme.shapes`; cards default to `leafCard`.** A container is never a polygon and a badge is never a rectangle.
 6. **Motion uses the named springs in `Motion.kt`.** Never an inline `spring(...)`. Their numbers were tuned on the phone: do not change one without a device pass.
 7. **Headings and menus use the shared components**: `ScreenTitle`, `SectionTitle`, `MenuSection` / `MenuGroup` / `MenuRow`.
-8. **The logo is generated** (`tools/logo.py`). Change the geometry there, never the XML or `BrandGeometry.kt`. Haven's own icon glyphs are generated the same way (`tools/glyphs.py` writes `HavenGlyphs.kt`).
+8. **Design is not a setting.** Shapes and corners are fixed by kind; color is the one choice, a whole-app style. Do not add per-tile or per-type look options.
+9. **One popup per device.** Everything that shows a device opens `Screen.EntityDetail`; the popup ends with `EntityPopupMenuRows`. A kind of device has one control design, used wherever that kind is controlled (the thermostat's is `ThermostatControl`).
+10. **The bar is fixed**: Home, Security, Climate, Settings (`barItems`).
+11. **The logo is generated** (`tools/logo.py`). Change the geometry there, never the XML or `BrandGeometry.kt`. Haven's own icon glyphs are generated the same way (`tools/glyphs.py` writes `HavenGlyphs.kt`).
 
 ## Frozen: stored in users' settings
 
@@ -61,7 +68,8 @@ Renaming any of these silently resets or breaks a saved choice.
 
 - Tile preset keys (`lime`, `heating`, `cooling`, `lock`, `alert`, `media`, `amber`, `sage`).
 - Icon keys in `CARD_ICON_OPTIONS` (add new ones freely).
-- `corners_0` .. `corners_7`, and the keys in `SHAPE_OPTIONS`.
+- `corners_0` .. `corners_7`, and the keys in `SHAPE_OPTIONS` (no longer read).
+- Color style keys (`ColorStyle.key`) and the `color_style` preference.
 - Home section keys, including `round3-security`, `round3-vacuum`, `round3-media`, `round3-greenhouse`.
 - SharedPreferences file and key names in the stores.
 
@@ -72,14 +80,17 @@ Renaming any of these silently resets or breaks a saved choice.
 | Polygon morph progress outside 0..1 | Throws. A bouncy spring overshoots; clamp with `clampMorphProgress` first. |
 | The wide layout judged on width alone | Split-screen flips to the tablet layout. Use `isWideLayout` (600dp and at least as wide as tall). |
 | A wide control as a `MenuRow` trailing | Fine: the row drops it under the text. Do not work around it with a fixed width. |
-| A `FilterChip` with stock colors | Its selected state is not the lime capsule. Pass `choiceChipColors()`. |
+| A `FilterChip` for a choice | Not the app's choice style. Use `ChoiceRow`. |
+| A top-level `val` holding a theme or state color | Keeps the first color style it saw. Make it a getter (`val X: Color get() = ...`). |
+| A chart or graph at a fixed height | Wrong at every other width. Take the height from the width (`historyChartHeight`), and let `Sparkline` size its line. |
 | `targetSdk` bumped along with `compileSdk` | Changes runtime behaviour (predictive back, large-screen rules) that has not had a device pass. `compileSdk` moves freely; `targetSdk` is held at 35. |
 | Media3 bumped casually | The camera transports (HLS, RTSP) were tuned against 1.6.1. Bump it with a camera test pass. |
 | A screenshot test waiting for idle | Never returns: something is always animating. Drive `mainClock` by hand, as `shoot()` does. |
 
 ## Known debt
 
-- `HavenApp.kt` and `ui/screens/Screens.kt` are very large. Split by feature when a change gives a reason to; do not reorganise them in passing.
+- `HavenApp.kt` is very large. Split by feature when a change gives a reason to; do not reorganise it in passing.
+- Many comments narrate the feedback round that produced the code; rewrite them to say what the code does when you touch a file.
 - About 280 inline `fontSize` call sites.
 - The Home panels (vacuum, media, security, greenhouse) use fixed entity ids in `data/HomePanels.kt`.
 - Test files named `RoundNNLogicTest` are regression suites from individual feedback rounds and mix features; new tests go in a file named for the thing tested.

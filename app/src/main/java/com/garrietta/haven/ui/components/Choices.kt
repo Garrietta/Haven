@@ -76,12 +76,12 @@ fun ChoiceRow(
 
 /**
  * How many choices share a row in [widthDp]: all of them when each can
- * be at least 84dp wide, otherwise as few rows as fit, split evenly (four
+ * be at least 76dp wide, otherwise as few rows as fit, split evenly (four
  * that do not fit in one row become two and two, not three and one).
  */
 fun choicesPerRow(count: Int, widthDp: Float): Int {
     if (count <= 1) return count.coerceAtLeast(1)
-    val fit = ((widthDp + 8f) / (84f + 8f)).toInt().coerceAtLeast(1)
+    val fit = ((widthDp + 8f) / (76f + 8f)).toInt().coerceAtLeast(1)
     if (count <= fit) return count
     val rows = (count + fit - 1) / fit
     return (count + rows - 1) / rows

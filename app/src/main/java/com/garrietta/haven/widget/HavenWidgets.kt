@@ -59,8 +59,6 @@ import com.garrietta.haven.data.securitySummary
 import com.garrietta.haven.data.SettingsStore
 import com.garrietta.haven.ui.theme.StateFamily
 import com.garrietta.haven.ui.theme.colors
-import com.garrietta.haven.ui.theme.havenDarkColorScheme
-import com.garrietta.haven.ui.theme.havenLightColorScheme
 import org.json.JSONObject
 
 /*
@@ -72,8 +70,20 @@ import org.json.JSONObject
  * app's: its scheme, and the state families for what a thing is doing.
  */
 
-/** The app's scheme for both day and night, so the widgets wear Haven's colors, not the wallpaper's. */
-private fun havenWidgetColors() = ColorProviders(light = havenLightColorScheme(), dark = havenDarkColorScheme())
+/**
+ * The app's color style for both day and night, so the widgets wear the
+ * colors the app does. The style is published for the state families
+ * before anything is drawn; the wallpaper style's widgets keep Haven's
+ * scheme, since a widget cannot read the wallpaper's.
+ */
+private fun havenWidgetColors(context: Context): androidx.glance.color.ColorProviders {
+    val style = com.garrietta.haven.ui.theme.ColorStyle.fromKey(SettingsStore(context).colorStyleKey)
+    com.garrietta.haven.ui.theme.ActiveStyle.current = style
+    return ColorProviders(
+        light = com.garrietta.haven.ui.theme.styleColorScheme(style, dark = false),
+        dark = com.garrietta.haven.ui.theme.styleColorScheme(style, dark = true),
+    )
+}
 
 /** A state family as day and night colors: the container a card wears and the ink and badge on it. */
 private class FamilyProviders(family: StateFamily) {
@@ -128,7 +138,7 @@ class ClimateWidget : GlanceAppWidget() {
         val before = climateWidgetModel(WidgetHa.cachedStates(context))
         if (before != null) WidgetHa.refresh(context, listOf(before.entityId))
         val model = climateWidgetModel(WidgetHa.cachedStates(context))
-        provideContent { GlanceTheme(colors = havenWidgetColors()) { ClimateContent(model) } }
+        provideContent { GlanceTheme(colors = havenWidgetColors(context)) { ClimateContent(model) } }
     }
 }
 
@@ -223,7 +233,7 @@ class ControlsWidget : GlanceAppWidget() {
         val before = controlTiles(WidgetHa.cachedStates(context), favorites)
         WidgetHa.refresh(context, before.map { it.entityId })
         val tiles = controlTiles(WidgetHa.cachedStates(context), favorites)
-        provideContent { GlanceTheme(colors = havenWidgetColors()) { ControlsContent(tiles) } }
+        provideContent { GlanceTheme(colors = havenWidgetColors(context)) { ControlsContent(tiles) } }
     }
 }
 
@@ -293,7 +303,7 @@ class SecurityWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val states = WidgetHa.cachedStates(context)
-        provideContent { GlanceTheme(colors = havenWidgetColors()) { SecurityContent(states) } }
+        provideContent { GlanceTheme(colors = havenWidgetColors(context)) { SecurityContent(states) } }
     }
 }
 

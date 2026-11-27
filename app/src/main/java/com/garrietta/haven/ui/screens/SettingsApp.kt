@@ -1,5 +1,9 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.FilterChip
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -81,27 +86,34 @@ import com.garrietta.haven.ui.theme.polygonShape
 fun AppearancePage(vm: HavenViewModel, controls: AppearanceControls, onBack: () -> Unit) {
     SettingsPage("Appearance", onBack) {
         item(key = "theme") {
-            MenuSection("Theme")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for ((value, label) in listOf("system" to "System", "light" to "Light", "dark" to "Dark")) {
-                    FilterChip(
-                        colors = choiceChipColors(),
-                        selected = controls.themeMode == value,
-                        onClick = { controls.onThemeMode(value) },
-                        label = { Text(label) },
-                    )
+            MenuSection("Light or dark")
+            com.garrietta.haven.ui.components.ChoiceRow(
+                options = listOf("system" to "Like the phone", "light" to "Light", "dark" to "Dark"),
+                selected = controls.themeMode,
+                onSelect = controls.onThemeMode,
+            )
+        }
+        item(key = "style") {
+            MenuSection("Color")
+            Text(
+                "One style for the whole app, by day and by night. What a state means keeps its color family in every one.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            val styles = com.garrietta.haven.ui.theme.ColorStyle.entries
+            for (row in styles.chunked(2)) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (style in row) {
+                        ColorStyleCard(style, selected = style == controls.colorStyle, onClick = { controls.onColorStyle(style) }, modifier = Modifier.weight(1f))
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
-            Spacer(Modifier.height(12.dp))
+        }
+        item(key = "motion") {
+            MenuSection("Motion")
             MenuGroup {
-                MenuRow(
-                    "appearance-dynamic-color", ExpressiveKind.SUNNY, Icons.Filled.Palette, "Dynamic color",
-                    "Follow your wallpaper's colors instead of Haven's sage and lime.",
-                    onClick = null,
-                    trailing = { Switch(checked = controls.dynamicColor, onCheckedChange = controls.onDynamicColor) },
-                    flat = true,
-                )
-                MenuDivider()
                 MenuRow(
                     "appearance-motion", ExpressiveKind.BUN, Icons.Filled.Autorenew, "Reduce motion",
                     "Keep animations instant and minimal",
@@ -111,6 +123,81 @@ fun AppearancePage(vm: HavenViewModel, controls: AppearanceControls, onBack: () 
                 )
             }
         }
+    }
+}
+
+/**
+ * One color style as a small picture of the app in it: its page, a tile
+ * that is on, a tile at rest and the bar with its selected capsule, in
+ * the current light or dark. The chosen one has the selected capsule's
+ * color around it and a check.
+ */
+@Composable
+private fun ColorStyleCard(
+    style: com.garrietta.haven.ui.theme.ColorStyle,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isDark = isDarkBackdrop(MaterialTheme.colorScheme.background)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val wallpaper = if (style == com.garrietta.haven.ui.theme.ColorStyle.WALLPAPER) {
+        remember(isDark) {
+            runCatching {
+                if (isDark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+            }.getOrNull()
+        }
+    } else null
+    val scheme = wallpaper ?: com.garrietta.haven.ui.theme.styleColorScheme(style, isDark)
+    val chrome = com.garrietta.haven.ui.theme.styleChrome(style)
+    val capsule = wallpaper?.let { if (isDark) it.primary else it.primaryContainer } ?: chrome.capsule
+    // The tile that is on shows the style's own accent; Home Assistant's
+    // shows its plain card with an amber badge, the way it draws a light.
+    val on = if (style == com.garrietta.haven.ui.theme.ColorStyle.HOME_ASSISTANT) {
+        com.garrietta.haven.ui.theme.familyColorsIn(style, StateFamily.Light, isDark)
+    } else {
+        com.garrietta.haven.ui.theme.FamilyColors(scheme.primaryContainer, scheme.onPrimaryContainer, scheme.primary, scheme.onPrimary)
+    }
+    val rest = com.garrietta.haven.ui.theme.familyColorsIn(style, StateFamily.Quiet, isDark)
+    val ring = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+    Column(
+        modifier
+            .clip(RoundedCornerShape(24.dp))
+            .border(if (selected) 3.dp else 1.dp, ring, RoundedCornerShape(24.dp))
+            .clickable(role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(10.dp),
+    ) {
+        // The picture: the page, two tiles, the bar.
+        Column(
+            Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp)).background(scheme.background).padding(8.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp, 14.dp, 14.dp, 6.dp)).background(on.container).padding(6.dp)) {
+                    Box(Modifier.size(16.dp).background(on.accent, CircleShape))
+                }
+                Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp, 14.dp, 6.dp, 14.dp)).background(if (style == com.garrietta.haven.ui.theme.ColorStyle.HOME_ASSISTANT) rest.container else scheme.surfaceContainer).padding(6.dp)) {
+                    Box(Modifier.size(16.dp).background(rest.accent, CircleShape))
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(50)).background(chrome.bar).padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(40.dp).fillMaxHeight().clip(RoundedCornerShape(50)).background(capsule))
+                Spacer(Modifier.weight(1f))
+                repeat(3) {
+                    Box(Modifier.padding(horizontal = 5.dp).size(6.dp).background(chrome.idleGlyph, CircleShape))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(style.label, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+            if (selected) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        }
+        Text(style.blurb, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, minLines = 2, maxLines = 2)
     }
 }
 

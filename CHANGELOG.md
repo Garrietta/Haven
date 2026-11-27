@@ -1,5 +1,25 @@
 # Haven Changelog
 
+## 3.3: Taken apart and rebuilt: one way for every menu, color styles (2026-11-27)
+
+**What you will see**
+
+- Every device opens the same way, in the same popup, wherever you tap it. The thermostat looks and works the same on Home, on the Climate tab and in its popup: the dial, − and +, then Mode, Fan and Comfort.
+- Picking one of several looks the same everywhere: the thermostat's mode, the alarm, a fan's presets, light or dark.
+- Every popup ends with the same two rows: Tile (its name, icon, color and whether it shows on Home) and In Home Assistant.
+- Color styles in Settings, Appearance: Haven, Home Assistant (its blue, its amber for what is on, plain cards with colored icons), Wallpaper, Tide, Orchid and Graphite. The widgets follow the style.
+- Home shows only real devices: the "Material You" settings switches and the greenhouse's stuck 0° sensor are gone. Names are shorter and plainer: "Garage Door", "Outdoor camera", "Front Door".
+- A camera's name in the carousel stays inside the part you can see and fades out as the picture narrows.
+- Charts fit the space they are given. Unfolded, a reading's popup uses its full width, with the day's low and high under the chart. A room alone on the Climate tab takes the whole row. Readings are rounded the way you would say them.
+- Less to manage: the bar is always Home, Security, Climate and Settings. Badge and card shapes, device styles, the old Home page editor, your tabs, rooms as tabs and the thermostat's dial-range settings are gone. Settings opens on Haven's own pages, with Home Assistant's under them, and a new Hidden from Home page brings back tiles you took off Home.
+- A light's brightness number sits at the bottom of its slab, so the fill line no longer cuts through it.
+
+**Under it**
+
+- Deleted: the old room Home (`TodayScreen`, `RoomsHome`, `HomeDashboard`), user tabs, room tabs, the Scenes and Energy tabs, the Search and Areas browsers, the Home editor, the shape picker and Device styles, the separate thermostat overlay. `Screens.kt` is split into `Login.kt`, `ConnectionStatus.kt`, `CameraTile.kt` and `NotificationPermission.kt`. About 6,000 lines fewer.
+- `ColorStyle` / `ActiveStyle` (`ColorStyles.kt`), new ramps in `tools/palette.py` (Haven's are unchanged), `ChoiceRow`, `ThermostatControl`, `EntityPopupMenuRows`, `rememberEntityNamer` / `deviceDisplayName`, `formatReading`, `historyChartHeight`. The cold-start cache keeps the device registry, so Home sorts devices from its first frame.
+- Tests: `DeviceNamesTest`, `StateCacheTest`, `ChoicesAndReadingsTest`; screenshots for the reading popup unfolded, Appearance, Hidden from Home and Home in each style.
+
 ## 3.2: Steadier connection, faster cameras, home ⇄ away without a hitch (2026-11-26)
 
 **What you will see**

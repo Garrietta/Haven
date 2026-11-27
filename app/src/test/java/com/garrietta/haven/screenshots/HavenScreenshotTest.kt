@@ -255,7 +255,7 @@ class HavenScreenshotTest {
         RuntimeEnvironment.setQualifiers(FOLDED)
         compose.mainClock.autoAdvance = false
         compose.activityRule.scenario.recreate()
-        val controls = AppearanceControls(if (dark) "dark" else "light", false, {}, {}, false, {}, {})
+        val controls = AppearanceControls(if (dark) "dark" else "light", false, {}, {}, com.garrietta.haven.ui.theme.ColorStyle.HAVEN, {}, {})
         compose.setContent { HavenTheme(darkTheme = dark) { SettingsPageHost(vm, route, onBack = {}, navigate = {}, appearance = controls) } }
         compose.mainClock.advanceTimeBy(SETTLE_MS)
         if (then != null) {
@@ -289,6 +289,32 @@ class HavenScreenshotTest {
     /** Settings' hub: Home Assistant's sections, then Haven's. */
     @Test fun settings_hub_folded_dark() =
         shoot("settings_hub_folded_dark", FOLDED, viewModel(signedIn = true, dark = true)) { tapTab("Settings") }
+
+    /** Appearance: light or dark, the color styles as pictures, motion. */
+    @Test fun appearance_folded_light() =
+        shootSettingsPage("appearance_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "appearance")
+
+    @Test fun appearance_folded_dark() =
+        shootSettingsPage("appearance_folded_dark", viewModel(signedIn = true, dark = true), dark = true, route = "appearance")
+
+    /** Home in each color style. */
+    private fun styled(style: String, dark: Boolean): HavenViewModel =
+        viewModel(signedIn = true, dark = dark).also { it.settingsStore.colorStyleKey = style }
+
+    @Test fun style_home_assistant_folded_light() = shoot("style_home_assistant_folded_light", FOLDED, styled("home_assistant", dark = false))
+
+    @Test fun style_home_assistant_folded_dark() = shoot("style_home_assistant_folded_dark", FOLDED, styled("home_assistant", dark = true))
+
+    @Test fun style_tide_folded_light() = shoot("style_tide_folded_light", FOLDED, styled("tide", dark = false))
+
+    @Test fun style_orchid_folded_dark() = shoot("style_orchid_folded_dark", FOLDED, styled("orchid", dark = true))
+
+    @Test fun style_graphite_folded_light() = shoot("style_graphite_folded_light", FOLDED, styled("graphite", dark = false))
+
+    @Test fun style_home_assistant_thermostat_light() {
+        val vm = styled("home_assistant", dark = false)
+        shoot("style_home_assistant_thermostat_light", FOLDED, vm) { tapText("Thermostat") }
+    }
 
     /** Tiles taken off Home, each with Show to bring it back. */
     @Test fun hidden_from_home_folded_light() {

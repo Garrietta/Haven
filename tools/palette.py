@@ -38,6 +38,21 @@ RAMPS = {
     "Honey": (76, 62, "Motion, caution, sunlight."),
     "Rain": (237, 46, "Humidity, water."),
     "Cloud": (240, 12, "Overcast weather."),
+    # Color styles other than Haven (Settings, Appearance). Each is a
+    # primary and a neutral; Home Assistant's also has its state colors,
+    # taken from its frontend's defaults.
+    "Graphite": (0, 0, "Pure gray: Graphite's every surface, Home Assistant's neutrals."),
+    "Tide": (222, 40, "Tide: deep sea blue."),
+    "TideMist": (222, 6, "Tide's neutral."),
+    "Orchid": (305, 44, "Orchid: violet."),
+    "OrchidMist": (305, 6, "Orchid's neutral."),
+    "HaBlue": (242.5, 57, "Home Assistant's primary, #03A9F4."),
+    "HaAmber": (86, 60, "Home Assistant's lights and switches on, #FFC107."),
+    "HaOrange": (64, 62, "Home Assistant's heating, #FF9800."),
+    "HaCool": (254, 60, "Home Assistant's cooling, #2196F3."),
+    "HaGreen": (146, 61, "Home Assistant's locked and armed, #4CAF50."),
+    "HaRed": (26, 80, "Home Assistant's unlocked, open and triggered, #F44336."),
+    "HaCyan": (212, 50, "Home Assistant's water and fans, #00BCD4."),
 }
 
 TONES = [0, 4, 6, 8, 10, 12, 15, 17, 20, 22, 25, 30, 35, 40, 50, 60, 70, 80, 85, 87, 90, 92, 94, 95, 96, 98, 99, 100]

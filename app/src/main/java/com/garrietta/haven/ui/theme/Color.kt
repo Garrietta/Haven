@@ -192,7 +192,11 @@ private fun TonalRamp.family(isDark: Boolean): FamilyColors =
     if (isDark) FamilyColors(container = t25, onContainer = t92, accent = t85, onAccent = t12)
     else FamilyColors(container = t90, onContainer = t10, accent = t25, onAccent = t90)
 
-fun StateFamily.ramp(): TonalRamp = when (this) {
+/** The ramp this family is drawn from in the active color style. */
+fun StateFamily.ramp(): TonalRamp = familyRamp(ActiveStyle.current, this)
+
+/** Haven's own family ramps, which every style but Home Assistant's keeps. */
+internal fun havenFamilyRamp(family: StateFamily): TonalRamp = when (family) {
     StateFamily.On -> Palette.Leaf
     StateFamily.Light -> Palette.Volt
     StateFamily.Heat -> Palette.Ember
@@ -213,7 +217,8 @@ fun StateFamily.ramp(): TonalRamp = when (this) {
  * the color. Quiet rooms keep their own resting tone.
  */
 fun StateFamily.roomGround(isDark: Boolean): Color =
-    if (this == StateFamily.Quiet) colors(isDark).container else ramp().let { if (isDark) it.t17 else it.t95 }
+    if (this == StateFamily.Quiet || ActiveStyle.current == ColorStyle.HOME_ASSISTANT) colors(isDark).container
+    else ramp().let { if (isDark) it.t17 else it.t95 }
 
 /**
  * The hot centre of a moment's glow ([grainGlow]): a lit lamp's light,
@@ -228,32 +233,40 @@ fun StateFamily.glow(isDark: Boolean): Color = ramp().let {
     }
 }
 
-fun StateFamily.colors(isDark: Boolean): FamilyColors = when (this) {
+fun StateFamily.colors(isDark: Boolean): FamilyColors = familyColorsIn(ActiveStyle.current, this, isDark)
+
+/** A family's colors in [style], whichever style is active: for previews of a style not yet chosen. */
+fun familyColorsIn(style: ColorStyle, family: StateFamily, isDark: Boolean): FamilyColors =
+    if (style == ColorStyle.HOME_ASSISTANT) homeAssistantFamily(family, isDark) else family.havenFamilyColors(isDark, style)
+
+private fun StateFamily.havenFamilyColors(isDark: Boolean, style: ColorStyle): FamilyColors = when (this) {
     // Quiet is not a color, it is the absence of one, so it does not
-    // take the pastel recipe: it stays close to the page. By night its
-    // icon keeps a trace of green, so a resting device reads as asleep
-    // rather than dead.
-    StateFamily.Quiet ->
+    // take the pastel recipe: it stays close to the page, in the style's
+    // own neutral. In Haven's style its icon keeps a trace of green by
+    // night, so a resting device reads as asleep rather than dead.
+    StateFamily.Quiet -> {
+        val n = styleNeutral(style)
         if (isDark) FamilyColors(
-            container = Palette.Moss.t12,
-            onContainer = Palette.Moss.t80,
-            accent = Palette.Moss.t20,
-            onAccent = Palette.Leaf.t80,
+            container = n.t12,
+            onContainer = n.t80,
+            accent = n.t20,
+            onAccent = if (n === Palette.Moss) Palette.Leaf.t80 else n.t80,
         ) else FamilyColors(
-            container = Palette.Moss.t92,
-            onContainer = Palette.Moss.t30,
-            accent = Palette.Moss.t35,
-            onAccent = Palette.Moss.t92,
+            container = n.t92,
+            onContainer = n.t30,
+            accent = n.t35,
+            onAccent = n.t92,
         )
+    }
     // A lit lamp is a light source, so by day its badge is the bright
     // tone, not the deep one: it is the one thing drawn glowing. By
     // night every badge is already bright.
     StateFamily.Light ->
-        if (isDark) ramp().family(true)
+        if (isDark) havenFamilyRamp(this).family(true)
         else Palette.Volt.let {
             FamilyColors(container = it.t90, onContainer = it.t10, accent = it.t80, onAccent = it.t10)
         }
-    else -> ramp().family(isDark)
+    else -> havenFamilyRamp(this).family(isDark)
 }
 
 /**
@@ -268,16 +281,18 @@ fun StateFamily.signal(isDark: Boolean): Color = ramp().let { if (isDark) it.t80
 
 /**
  * The navigation bar is the one piece of Haven that looks the same by
- * day and by night: a near-black green bar carrying a lime capsule. It
- * is the brand in miniature, and the same two colors are the logo.
+ * day and by night: a near-black bar carrying the selected capsule. In
+ * Haven's own style it is the ink and the lime, the brand in miniature;
+ * the other color styles bring their own (ColorStyles.kt).
  */
 object HavenChrome {
-    val bar = Palette.Ink
+    val bar: Color get() = styleChrome(ActiveStyle.current).bar
     /** The bar on true black, where the ink would vanish: one step up. */
-    val barOnBlack = Palette.Moss.t15
-    val capsule = Palette.Lime
-    val onCapsule = Palette.Leaf.t10
-    val idleGlyph = Palette.Moss.t87
+    val barOnBlack: Color get() = styleChrome(ActiveStyle.current).barOnBlack
+    /** The selected capsule: lime in Haven's style, the style's own bright accent in the others. */
+    val capsule: Color get() = styleChrome(ActiveStyle.current).capsule
+    val onCapsule: Color get() = styleChrome(ActiveStyle.current).onCapsule
+    val idleGlyph: Color get() = styleChrome(ActiveStyle.current).idleGlyph
 }
 
 /** The dot that says "something needs attention". Red in both themes. */

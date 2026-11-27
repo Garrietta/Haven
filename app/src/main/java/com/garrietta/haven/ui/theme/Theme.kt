@@ -8,6 +8,7 @@ import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -26,38 +27,46 @@ fun resolveHavenIsDark(themeMode: String, isSystemDark: Boolean): Boolean =
  * Material 3 Expressive theme, which is where its four systems are
  * handed to every component at once:
  *
- *   color    Color.kt     the fixed light and dark schemes
- *   type     Type.kt      Google Sans Flex, one scale
- *   shape    Shape.kt     the corner scale
- *   motion   Motion.kt    Material's expressive scheme for stock
- *                         components, Haven's springs for its own
+ *   color    Color.kt, ColorStyles.kt   the schemes, the state families
+ *   type     Type.kt                    Google Sans Flex, one scale
+ *   shape    Shape.kt                   the corner scale
+ *   motion   Motion.kt                  Material's expressive scheme for
+ *                                       stock components, Haven's springs
+ *                                       for its own
  *
- * [dynamicColor] is the wallpaper-color option and is off unless the
- * user turns it on: the fixed palette is the identity, and the state
- * families never follow the wallpaper either way. When it is on, dark
- * still keeps Haven's true-black ground and container steps.
+ * [style] is the color style chosen in Appearance. It is published to
+ * [ActiveStyle] before the content composes, and the content is keyed on
+ * it, so a change recolors everything at once. The wallpaper style takes
+ * its accents from the wallpaper (where the phone offers them) and keeps
+ * Haven's true-black ground at night; its capsule is the wallpaper's
+ * bright accent.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun HavenTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false,
+    style: ColorStyle = ColorStyle.HAVEN,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val scheme: ColorScheme = when {
-        !dynamicColor -> if (darkTheme) havenDarkColorScheme() else havenLightColorScheme()
-        darkTheme -> runCatching { dynamicDarkColorScheme(context) }
-            .getOrElse { havenDarkColorScheme() }
-            .withHavenDarkSurfaces()
-        else -> runCatching { dynamicLightColorScheme(context) }
-            .getOrElse { havenLightColorScheme() }
+    val scheme: ColorScheme = if (style == ColorStyle.WALLPAPER) {
+        val dynamic = runCatching { if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context) }.getOrNull()
+        ActiveStyle.wallpaperCapsule = dynamic?.let { if (darkTheme) it.primary to it.onPrimary else it.primaryContainer to it.onPrimaryContainer }
+        when {
+            dynamic == null -> styleColorScheme(ColorStyle.HAVEN, darkTheme)
+            darkTheme -> dynamic.withHavenDarkSurfaces()
+            else -> dynamic
+        }
+    } else {
+        styleColorScheme(style, darkTheme)
     }
+    ActiveStyle.current = style
     MaterialExpressiveTheme(
         colorScheme = scheme,
         motionScheme = MotionScheme.expressive(),
         shapes = HavenShapes,
         typography = HavenTypography,
-        content = content,
-    )
+    ) {
+        key(style) { content() }
+    }
 }

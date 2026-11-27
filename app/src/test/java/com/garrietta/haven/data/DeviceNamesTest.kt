@@ -87,6 +87,7 @@ class ChoicesAndReadingsTest {
     fun choicesShareARowWhenTheyFitAndSplitEvenlyWhenNot() {
         assertEquals(4, com.garrietta.haven.ui.components.choicesPerRow(4, 400f))
         assertEquals(2, com.garrietta.haven.ui.components.choicesPerRow(4, 300f))
+        assertEquals(4, com.garrietta.haven.ui.components.choicesPerRow(4, 352f))
         assertEquals(3, com.garrietta.haven.ui.components.choicesPerRow(6, 300f))
         assertEquals(1, com.garrietta.haven.ui.components.choicesPerRow(2, 120f))
         assertEquals(2, com.garrietta.haven.ui.components.choicesPerRow(2, 200f))

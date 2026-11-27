@@ -288,14 +288,14 @@ private fun HomeHeader(weather: HaEntity?, people: List<String>, modifier: Modif
             // Who is home: an initial each, overlapping like a little group.
             Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
                 people.take(4).forEachIndexed { index, name ->
-                    val family = if (index % 2 == 0) StateFamily.On else StateFamily.Cool
-                    val colors = family.colors(isDarkBackdrop(scheme.background))
+                    // People are not a state: their initials take the color style's own accents.
+                    val (fill, ink) = if (index % 2 == 0) scheme.primary to scheme.onPrimary else scheme.tertiary to scheme.onTertiary
                     Box(
                         Modifier.size(34.dp).clip(CircleShape).background(scheme.background).padding(2.dp)
-                            .clip(CircleShape).background(colors.accent),
+                            .clip(CircleShape).background(fill),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(name.take(1), style = MaterialTheme.typography.labelLarge, color = colors.onAccent)
+                        Text(name.take(1), style = MaterialTheme.typography.labelLarge, color = ink)
                     }
                 }
             }
@@ -412,7 +412,10 @@ private fun CameraCarousel(vm: HavenViewModel, ids: List<String>) {
         contentPadding = PaddingValues(horizontal = 16.dp),
         modifier = Modifier.fillMaxWidth().height(170.dp),
     ) { index ->
-        CameraQuadrant(vm, ids[index], Modifier.fillMaxSize().maskClip(RoundedCornerShape(Corner.lg)))
+        CameraQuadrant(
+            vm, ids[index], Modifier.fillMaxSize().maskClip(RoundedCornerShape(Corner.lg)),
+            visibleWindow = { carouselItemDrawInfo.maskRect },
+        )
     }
 }
 
