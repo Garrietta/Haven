@@ -70,7 +70,7 @@ fun AutomationBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
             DetailTopBar("New automation", onBack)
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(16.dp))
-            Text("When this happens", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("When this happens", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = { triggerTypeExpanded = true }) { Text(triggerType) }
@@ -144,7 +144,7 @@ fun AutomationBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
                 OutlinedTextField(value = conditionState, onValueChange = { conditionState = it }, label = { Text("Is state") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
             Spacer(Modifier.height(16.dp))
-            Text("Then do this", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Then do this", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Row {
                 OutlinedTextField(value = actionDomain, onValueChange = { actionDomain = it }, label = { Text("Domain (e.g. light)") }, singleLine = true, modifier = Modifier.weight(1f))
@@ -281,7 +281,7 @@ fun ScriptBuilderScreen(vm: HavenViewModel, onBack: () -> Unit) {
             DetailTopBar("New script", onBack)
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Script name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(16.dp))
-            Text("Steps", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Steps", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
         }
         items(steps.size) { index ->

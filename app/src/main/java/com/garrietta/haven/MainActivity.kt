@@ -69,6 +69,16 @@ class MainActivity : ComponentActivity() {
         vm.onAppBackgrounded()
     }
 
+    // Reliability round: returning to the app re-reads the network,
+    // renews a token that expired in the background, and pings the
+    // session (a socket that slept through Doze can look connected
+    // with a dead TCP flow) — reconnecting at once when it is gone,
+    // instead of waiting out whatever backoff was left.
+    override fun onStart() {
+        super.onStart()
+        vm.onAppForegrounded()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

@@ -362,7 +362,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
             return@Column
         }
         val safeSelected = selected.coerceIn(views.indices)
-        Text("Views", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text("Views", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((i, view) in views.withIndex()) {
@@ -396,7 +396,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
             selected = 0
         }) { Text("Remove this view") }
         Spacer(Modifier.height(16.dp))
-        Text("Cards in this view", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text("Cards in this view", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
         val cards = views[safeSelected].optJSONArray("cards") ?: JSONArray()
         LazyColumn(
@@ -427,7 +427,7 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
             }
             item {
                 Spacer(Modifier.height(12.dp))
-                Text("Add a card", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Add a card", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box {

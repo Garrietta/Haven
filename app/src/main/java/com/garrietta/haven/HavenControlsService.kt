@@ -19,8 +19,15 @@ import com.garrietta.haven.data.ClimateMode
 import com.garrietta.haven.data.ControlKind
 import com.garrietta.haven.data.ControlSpec
 import com.garrietta.haven.data.HaClient
+import com.garrietta.haven.data.NetworkProfile
 import com.garrietta.haven.data.SettingsStore
+import com.garrietta.haven.data.TokenRefreshOutcome
 import com.garrietta.haven.data.TokenStore
+import com.garrietta.haven.data.connectionCandidates
+import com.garrietta.haven.data.connectionModeFromKey
+import com.garrietta.haven.data.isLocalAddress
+import com.garrietta.haven.data.refreshTokenVia
+import com.garrietta.haven.data.tokenNeedsRefresh
 import com.garrietta.haven.data.clampSetpoint
 import com.garrietta.haven.data.climateBooleanMode
 import com.garrietta.haven.data.climateModeFromHa
@@ -116,10 +123,70 @@ class HavenControlsService : ControlsProviderService() {
         )
     }
 
+    /**
+     * Reliability round: the panel used to connect to the legacy URL
+     * only — the LAN address — so away from home Device Controls never
+     * connected, and with OAuth its token died 30 minutes after the
+     * app's last refresh. It now uses the app's routing (same mode,
+     * same candidate order, cloud fallback) and renews an expired
+     * token before connecting, or once on auth_invalid.
+     */
+    private fun serviceEndpoints(): List<String> {
+        val legacy = tokenStore.instanceUrl
+        val local = legacy?.takeIf { isLocalAddress(it) }
+        val cloud = tokenStore.cloudInstanceUrl ?: legacy?.takeIf { !isLocalAddress(it) }
+        val mode = connectionModeFromKey(tokenStore.connectionModeKey)
+        return connectionCandidates(mode, local, cloud, readNetworkProfile())
+            .ifEmpty { listOfNotNull(legacy) }
+    }
+
+    private fun readNetworkProfile(): NetworkProfile {
+        return try {
+            val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                ?: return NetworkProfile.OFFLINE
+            val network = cm.activeNetwork ?: return NetworkProfile.OFFLINE
+            val caps = cm.getNetworkCapabilities(network) ?: return NetworkProfile.OFFLINE
+            NetworkProfile(
+                available = true,
+                wifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI),
+                ethernet = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET),
+                vpn = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN),
+                cellular = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR),
+            )
+        } catch (e: Exception) {
+            NetworkProfile.OFFLINE
+        }
+    }
+
+    /** One renewal per auth_invalid at most; a refusal leaves the panel on its sign-in state. */
+    private var renewing = false
+
+    /**
+     * [connectIfUnreachable]: when the token endpoint cannot be reached,
+     * connect with the stored token anyway (pre-emptive renewal: it may
+     * still be valid) — but never after auth_invalid, where that token
+     * is known bad and each retry would be a failed-login strike.
+     */
+    private fun renewAndReconnect(connectIfUnreachable: Boolean) {
+        if (renewing || tokenStore.refreshToken == null) return
+        renewing = true
+        serviceScope.launch {
+            val outcome = refreshTokenVia(serviceEndpoints(), tokenStore, HavenViewModel.OAUTH_CLIENT_ID)
+            renewing = false
+            val token = tokenStore.accessToken ?: return@launch
+            val connect = outcome == TokenRefreshOutcome.OK ||
+                (outcome == TokenRefreshOutcome.UNREACHABLE && connectIfUnreachable)
+            if (connect) {
+                startedToken = token
+                client.connect(serviceEndpoints(), token)
+            }
+        }
+    }
+
     private fun ensureStarted() {
-        val url = tokenStore.instanceUrl
+        val endpoints = serviceEndpoints()
         val token = tokenStore.accessToken
-        if (url.isNullOrBlank() || token.isNullOrBlank()) {
+        if (endpoints.isEmpty() || token.isNullOrBlank()) {
             // Signed out (or never signed in) after a previous
             // start: drop the stale connection so no controls keep
             // publishing for a signed-out session.
@@ -130,14 +197,27 @@ class HavenControlsService : ControlsProviderService() {
             }
             return
         }
-        if (startedUrl == url && startedToken == token) return
+        val key = endpoints.joinToString("|")
+        if (startedUrl == key && startedToken == token) {
+            // Same session: just make sure it is alive (the panel can
+            // sit bound for hours across network changes).
+            client.updateEndpoints(endpoints, token)
+            return
+        }
         // Token/URL changed since the last start (sign-out/in,
         // token rotation): the old one-shot `started` flag kept
         // the stale session forever. Reconnect on the new pair.
         if (startedUrl != null) client.disconnect()
-        startedUrl = url
+        startedUrl = key
         startedToken = token
-        client.connect(url, token)
+        client.onAuthInvalid = { serviceScope.launch { renewAndReconnect(connectIfUnreachable = false) } }
+        if (tokenStore.refreshToken != null &&
+            tokenNeedsRefresh(tokenStore.tokenExpiresAtMs, System.currentTimeMillis())
+        ) {
+            renewAndReconnect(connectIfUnreachable = true)
+        } else {
+            client.connect(endpoints, token)
+        }
     }
 
     private fun isLoggedIn(): Boolean =
@@ -418,6 +498,9 @@ class HavenControlsService : ControlsProviderService() {
     }
 
     override fun onDestroy() {
+        // Reliability round: close the socket with the service (it used
+        // to outlive the cancelled scope until process death).
+        client.disconnect()
         serviceScope.cancel()
         super.onDestroy()
     }

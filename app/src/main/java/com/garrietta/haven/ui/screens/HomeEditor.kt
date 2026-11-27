@@ -110,7 +110,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(16.dp))
-            Text("Welcome message", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Welcome message", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = welcome,
@@ -131,7 +131,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(24.dp))
-            Text("Sections", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Sections", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
         }
         item {
@@ -201,7 +201,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         }
         item {
             Spacer(Modifier.height(24.dp))
-            Text("Favorites", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Favorites", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text(
                 "Favorites live on Home in the order you arrange them. Manage them here even when the Favorites section itself is hidden above.",
@@ -218,7 +218,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         }
         item {
             Spacer(Modifier.height(24.dp))
-            Text("Home Status items", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Home Status items", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text(
                 "Which flagged conditions the Home Status section shows. Hiding a category hides only that row — the section itself is toggled above.",
@@ -257,7 +257,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         }
         item {
             Spacer(Modifier.height(24.dp))
-            Text("Lights", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Lights", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text(
                 "Which lights count on Home. Indicator lights are hidden by default — switch one on here to add it back. \"All off\" on Home touches only the lights shown here.",
@@ -314,7 +314,7 @@ fun HomeEditorScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
         }
         item {
             Spacer(Modifier.height(24.dp))
-            Text("Reset customization", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Reset customization", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Text(
                 "Restores the default Home layout, section order, room names and icons, navigation style, and badge settings. Your favorites and tabs are never deleted by a reset.",

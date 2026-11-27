@@ -216,7 +216,7 @@ fun EnergyScreen(vm: HavenViewModel) {
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Text("Devices drawing power", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Devices drawing power", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
             }
             for (sensor in power) {
@@ -233,7 +233,7 @@ fun EnergyScreen(vm: HavenViewModel) {
         }
         if (energy.isNotEmpty()) {
             item {
-                Text("Cumulative energy", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Cumulative energy", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
             }
             for (sensor in energy) {

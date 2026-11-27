@@ -406,7 +406,7 @@ internal fun TabEditorCard(
                 Spacer(Modifier.height(4.dp))
             }
             Spacer(Modifier.height(8.dp))
-            Text("Add a card", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Add a card", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {

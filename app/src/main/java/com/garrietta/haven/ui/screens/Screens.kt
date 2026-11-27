@@ -72,6 +72,15 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import kotlinx.coroutines.flow.collectLatest
+import com.garrietta.haven.data.cameraSnapshotWidthPx
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -84,6 +93,8 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import com.garrietta.haven.data.HOME_SECTION_ORDER_DEFAULT
 import com.garrietta.haven.data.ConnectionMode
+import com.garrietta.haven.data.connectionLabel
+import com.garrietta.haven.data.isLocalAddress
 import com.garrietta.haven.data.alertDotColor
 import com.garrietta.haven.data.domainCardColors
 import com.garrietta.haven.ui.components.PillSwitch
@@ -2245,7 +2256,12 @@ private fun SettingsConnectionSection(
         // it always shows the live target, not a stale
         // stored URL.
         val connTick = vm.connectionPrefsVersion
-        val (connLabel, connTarget) = remember(connTick) { vm.connectionDisplay() }
+        // Reliability round: keyed on the endpoint actually in use, so
+        // the row follows a fallback / switch-back as it happens.
+        val activeUrl by vm.activeUrl.collectAsState()
+        val (connLabel, connTarget) = remember(connTick, activeUrl) { vm.connectionDisplay() }
+        val preferredUrl = remember(connTick, activeUrl) { vm.connectionTarget() }
+        val onFallback = activeUrl != null && preferredUrl != null && activeUrl != preferredUrl
         KodaMenuRow(
             badgeKey = "connection-instance",
             badgeKind = ExpressiveKind.CLOUD,
@@ -2262,7 +2278,8 @@ private fun SettingsConnectionSection(
             icon = Icons.Filled.Wifi,
             title = "Status",
             subtitle = when (connection) {
-                is ConnectionState.Connected -> "Connected"
+                is ConnectionState.Connected -> "Connected · $connLabel" +
+                    if (onFallback) " (fallback — switches back when ${connectionLabel(preferredUrl)} answers)" else ""
                 is ConnectionState.Connecting -> "Connecting…"
                 is ConnectionState.Authenticating -> "Signing in…"
                 is ConnectionState.Error -> (connection as ConnectionState.Error).message
@@ -2668,25 +2685,28 @@ fun BuilderHubScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) 
 }
 
 /**
- * Feedback round 16, item 7: the connection switcher dialog.
- * Mode + cloud URL save through [HavenViewModel.switchConnection],
- * which reconnects with the existing token (Nabu Casa remote UI
- * forwards to the same instance, so no re-login). The cloud URL
- * is pasted by the user: HA's cloud integration does not expose
- * the remote-UI URL through any API the app uses, so nothing is
- * guessed or hardcoded. AUTO keys on Wi-Fi transport (no location
- * permission involved): local on Wi-Fi, cloud elsewhere.
+ * Feedback round 16, item 7 (reliability round): the connection
+ * switcher dialog. Mode + local URL + cloud URL save through
+ * [HavenViewModel.switchConnection], which reconnects with the
+ * existing token (Nabu Casa remote UI forwards to the same instance,
+ * so no re-login). Empty slots are filled from Home Assistant's own
+ * `network/url` (or `cloud/status`) once connected — nothing is
+ * guessed or hardcoded, and a typed URL is never overwritten. AUTO
+ * keys on the transport (no location permission involved).
  */
 @Composable
 private fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
     var mode by remember { mutableStateOf(vm.connectionMode) }
     var cloudUrl by remember { mutableStateOf(vm.connectionCloudUrl ?: "") }
+    var localUrl by remember { mutableStateOf(vm.connectionLocalUrl ?: "") }
     val (label, target) = vm.connectionDisplay()
+    val localInvalid = localUrl.isNotBlank() &&
+        !isLocalAddress(com.garrietta.haven.data.normalizeInstanceUrl(localUrl))
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Connection") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     "Current: $label" + (target?.let { " · $it" } ?: ""),
                     fontSize = 14.sp,
@@ -2694,7 +2714,7 @@ private fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
                 )
                 Spacer(Modifier.height(16.dp))
                 for ((m, title, sub) in listOf(
-                    Triple(ConnectionMode.AUTO, "Automatic", "Local on Wi-Fi, cloud elsewhere"),
+                    Triple(ConnectionMode.AUTO, "Automatic", "Local address first on Wi-Fi, Ethernet or VPN; the cloud URL first elsewhere. Falls back either way and switches back on its own."),
                     Triple(ConnectionMode.LOCAL, "Local only", "Always use the local address"),
                     Triple(ConnectionMode.CLOUD, "Cloud only", "Always use the Nabu Casa remote UI"),
                 )) {
@@ -2713,22 +2733,42 @@ private fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
+                    value = localUrl,
+                    onValueChange = { localUrl = it },
+                    label = { Text("Local URL (on your home network)") },
+                    placeholder = { Text("http://192.168.1.10:8123") },
+                    singleLine = true,
+                    isError = localInvalid,
+                    supportingText = if (localInvalid) {
+                        { Text("That isn't a local network address.") }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
                     value = cloudUrl,
                     onValueChange = { cloudUrl = it },
                     label = { Text("Cloud URL (Nabu Casa remote UI)") },
+                    placeholder = { Text("https://xxxx.ui.nabu.casa") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Paste the remote-UI URL from your Home Assistant Cloud settings. Nothing is detected automatically.",
+                    "Haven fills an empty field from Home Assistant's own network settings once it connects " +
+                        "(admin accounts). A URL you enter here is never overwritten.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { vm.switchConnection(mode, cloudUrl); onDismiss() }) { Text("Save") }
+            TextButton(
+                enabled = !localInvalid,
+                onClick = { vm.switchConnection(mode, cloudUrl, localUrl); onDismiss() },
+            ) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -2789,6 +2829,7 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
 
 @Composable
 private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier, corners: RoundedCornerShape = RoundedCornerShape(0.dp)) {
+    var slotWidthPx by remember { mutableIntStateOf(0) }
     Box(
         modifier.padding(1.dp).clip(corners)
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -2802,6 +2843,25 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // It also hides while its panel is open, so the
             // snapshot never doubles the video.
             .then(if (cameraId != null) Modifier.reportCardBounds(cameraId).reportCardShape(cameraId, corners).hideWhenMorphSource(cameraId) else Modifier)
+            // Reliability round: the quadrant's pixel width picks the
+            // snapshot size requested from HA (see cameraSnapshotWidthPx).
+            .onSizeChanged { slotWidthPx = it.width }
+            // Reliability round: a finger landing on the quadrant starts
+            // HA's stream worker (camera/stream) before the tap even
+            // completes; observes the down without consuming it, so the
+            // click below behaves exactly as before.
+            .then(
+                if (cameraId != null) {
+                    Modifier.pointerInput(cameraId) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            vm.prewarmCameraStream(cameraId)
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .then(if (cameraId != null) Modifier.clickable { vm.openCameraDialog(cameraId) } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
@@ -2853,9 +2913,20 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
             // swaps in a finished image and only when the cached
             // one is stale, so a failed or in-flight fetch never
             // blanks a quadrant.
-            LaunchedEffect(thumbnailId) {
-                if (vm.snapshotFor(thumbnailId) != null) kotlinx.coroutines.delay(1000)
-                vm.refreshSnapshot(thumbnailId)
+            // Reliability round: the quadrant keeps refreshing while it
+            // is on screen and the app is in the foreground (10s on the
+            // LAN, 20s through the relay) — it used to fetch once per
+            // entry, so a Home screen left open showed hour-old images.
+            // Each fetch asks HA for a quadrant-sized image.
+            val requestWidth = cameraSnapshotWidthPx(slotWidthPx)
+            LaunchedEffect(thumbnailId, requestWidth) {
+                if (vm.snapshotFor(thumbnailId) != null) kotlinx.coroutines.delay(600)
+                snapshotFlow { vm.appInForeground }.collectLatest { foreground ->
+                    while (foreground) {
+                        vm.refreshSnapshot(thumbnailId, requestWidth)
+                        kotlinx.coroutines.delay(vm.snapshotRefreshIntervalMs())
+                    }
+                }
             }
             if (frontDoorDown) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2920,8 +2991,16 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                                 ),
                             ),
                     )
+                    // Reliability round: the status pill and the Motion pill
+                    // share one Row. The Motion pill used to be a loose Box
+                    // child (its Spacer did nothing in a Box), so it painted
+                    // straight over the LIVE / Recording pill.
                     Row(
-                        Modifier.align(Alignment.TopStart).padding(8.dp)
+                        Modifier.align(Alignment.TopStart).padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                    Row(
+                        Modifier
                             .clip(RoundedCornerShape(50))
                             .background(Color.Black.copy(alpha = 0.45f))
                             .padding(horizontal = 8.dp, vertical = 3.dp),
@@ -2957,6 +3036,7 @@ private fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modi
                             Spacer(Modifier.width(4.dp))
                             Text("Motion", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
+                    }
                     }
                     Text(
                         displayCameraName(entity),
@@ -3331,7 +3411,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                 }
             }
             item {
-                Text("Tabs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Tabs", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Home is always first and Settings is always last — everything else here is yours. " +
@@ -3345,7 +3425,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                 // Hidden tabs stay listed below with a selector, so a
                 // hidden tab can always come back; Settings can never be
                 // hidden or removed, by construction in pillBarItems.
-                Text("Navigation", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Navigation", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
                 // Feedback round 15, item 3: Scenes and Energy are
                 // hideable from the bar/rail; Home and Settings are
@@ -3432,7 +3512,7 @@ fun RoomsTabsScreen(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -
                 }
             }
             item {
-                Text("Add a tab", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Add a tab", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(

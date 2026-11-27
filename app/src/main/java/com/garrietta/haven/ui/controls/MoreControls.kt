@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -213,8 +214,12 @@ private fun fmtSensor(v: Double, unit: String?): String {
 @Composable
 private fun rememberForecast(entity: HaEntity, vm: HavenViewModel, enabled: Boolean): List<Map<String, Any?>> {
     var forecast by remember { mutableStateOf<List<Map<String, Any?>>>(emptyList()) }
-    LaunchedEffect(entity.entityId, enabled) {
-        if (!enabled) return@LaunchedEffect
+    // Reliability round: re-run once the session is live — a fetch
+    // issued during cold start cannot be sent and used to leave the
+    // forecast empty until the card was recreated.
+    val live = vm.connection.collectAsState().value is com.garrietta.haven.data.ConnectionState.Connected
+    LaunchedEffect(entity.entityId, enabled, live) {
+        if (!enabled || !live) return@LaunchedEffect
         val attr = entity.attrList("forecast")?.mapNotNull { it as? Map<String, Any?> }
         if (!attr.isNullOrEmpty()) {
             forecast = attr
@@ -490,11 +495,15 @@ private fun conditionIcon(condition: String): ImageVector = when (condition) {
  * portrait phone showed a sideways letterboxed feed.
  */
 fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
-    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // Reliability round: the card paints the shared snapshot cache at
+    // once (the same image the Home quadrants and the disk cache hold)
+    // and refreshes it at card size, instead of a blank box while a
+    // full-resolution frame crossed the network on every open.
     var refreshKey by remember { mutableStateOf(0) }
     LaunchedEffect(entity.entityId, refreshKey) {
-        bitmap = vm.client.fetchCameraBitmap(entity.entityId)
+        vm.refreshSnapshot(entity.entityId, widthPx = 960, force = refreshKey > 0)
     }
+    val bitmap = vm.snapshotFor(entity.entityId)
     Column {
         if (bitmap != null) {
             Box(
@@ -503,7 +512,7 @@ fun CameraControl(entity: HaEntity, vm: HavenViewModel) {
                     .clickable { vm.openCameraFullscreen(entity.entityId) },
             ) {
                 Image(
-                    bitmap!!.asImageBitmap(),
+                    bitmap.asImageBitmap(),
                     contentDescription = entity.friendlyName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -544,13 +553,26 @@ fun AutomationControl(entity: HaEntity, vm: HavenViewModel) {
 @Composable
 fun TodoControl(entity: HaEntity, vm: HavenViewModel) {
     var items by remember { mutableStateOf<JSONArray?>(null) }
+    var loadFailed by remember { mutableStateOf(false) }
     var newItem by remember { mutableStateOf("") }
     var refreshKey by remember { mutableStateOf(0) }
-    LaunchedEffect(entity.entityId, refreshKey) {
+    // Reliability round: refetch once the session is live (a fetch at
+    // cold start used to fail and never retry), when the entity's
+    // state moves (its state is the open-item count, so every edit
+    // from anywhere refreshes the list), and after each local edit
+    // lands (onDone below), never before.
+    val live = vm.connection.collectAsState().value is com.garrietta.haven.data.ConnectionState.Connected
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    LaunchedEffect(entity.entityId, refreshKey, live, entity.state) {
+        if (!live) return@LaunchedEffect
         vm.client.fetchTodoItems(entity.entityId) { arr ->
-            Handler(Looper.getMainLooper()).post { items = arr }
+            mainHandler.post {
+                if (arr != null) items = arr
+                loadFailed = arr == null && items == null
+            }
         }
     }
+    val afterEdit: (Boolean) -> Unit = { mainHandler.post { refreshKey++ } }
     Column {
         val arr = items
         if (arr != null) {
@@ -563,21 +585,23 @@ fun TodoControl(entity: HaEntity, vm: HavenViewModel) {
                     Checkbox(
                         checked = done,
                         onCheckedChange = { checked ->
-                            vm.client.todoUpdate(entity.entityId, uid, if (checked) "completed" else "needs_action")
-                            refreshKey++
+                            vm.client.todoUpdate(entity.entityId, uid, if (checked) "completed" else "needs_action", afterEdit)
                         },
                     )
                     Text(summary, modifier = Modifier.weight(1f), fontSize = 15.sp)
                     IconButton(onClick = {
-                        vm.client.todoDelete(entity.entityId, uid)
-                        refreshKey++
+                        vm.client.todoDelete(entity.entityId, uid, afterEdit)
                     }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Delete", modifier = Modifier.size(20.dp))
                     }
                 }
             }
         } else {
-            Text("Loading tasks…", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (loadFailed) "Couldn't load tasks — they'll load when Home Assistant is reachable." else "Loading tasks…",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -591,9 +615,8 @@ fun TodoControl(entity: HaEntity, vm: HavenViewModel) {
             Spacer(Modifier.width(8.dp))
             Button(onClick = {
                 if (newItem.isNotBlank()) {
-                    vm.client.todoCreate(entity.entityId, newItem.trim())
+                    vm.client.todoCreate(entity.entityId, newItem.trim(), afterEdit)
                     newItem = ""
-                    refreshKey++
                 }
             }) { Text("Add") }
         }

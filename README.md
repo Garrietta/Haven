@@ -19,6 +19,7 @@ Two ways in, both against your own instance:
 - **Creation inside the app:** guided automation builder (trigger → condition → action), scene builder (capture current device states), script builder (service-call steps), helper builder (input_*, timer, counter). Automations/scripts/scenes save over the REST config API (`POST /api/config/<kind>/config/<kind>.<slug>`); helpers save over WebSocket (`<domain>/create`).
 - **Areas browser, entity search** (name / id / area / domain), and **entity detail** with attributes and a 24-hour history sparkline.
 - **Live updates** over WebSocket (`get_states` + `subscribe_events state_changed`) with automatic reconnect.
+- **Local ⇄ remote routing:** Automatic mode tries the LAN address first on Wi-Fi / Ethernet / VPN (3s budget) and the Nabu Casa URL first elsewhere, falls back either way, and switches back to the LAN make-before-break when it answers again. The Nabu Casa / LAN URLs are filled in from Home Assistant's own `network/url` when a slot is empty. OAuth tokens renew ahead of expiry.
 
 ## Honest gaps (v1)
 
@@ -38,7 +39,8 @@ GitHub Actions builds a debug APK on every push to `main` and on manual dispatch
 
 ## Architecture
 
-- `data/HaClient.kt` — OkHttp WebSocket client (auth, states, events, services, registries, Lovelace, todo) + REST (history, camera proxy, config saves).
+- `data/HaClient.kt` — connection engine (per-socket links, ordered endpoints, fallback + switch-back, pings, prompt failure of in-flight calls) over OkHttp WebSocket (auth, states, events, services, registries, Lovelace, todo) + REST (history, sized camera snapshots, config saves) with a 401 token-renewal authenticator.
+- `data/ConnectionPlanner.kt` — pure routing / backoff / token-timing / snapshot-sizing rules (unit-tested). `data/TokenExchange.kt` — the /auth/token exchange shared by the app and the Device Controls service.
 - `data/TokenStore.kt` — Keystore AES/GCM token storage. `data/SettingsStore.kt` — theme / reduce-motion prefs.
 - `ui/theme/` — M3E polygon shapes + morphing, dynamic color, house spring.
 - `ui/controls/` — one control per entity domain. `ui/screens/` — login, Today, boards + editor, areas/search/detail, builders.

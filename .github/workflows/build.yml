@@ -2,7 +2,9 @@ name: Build APKs
 
 on:
   push:
-    branches: [main]
+    # claude/** branches build too, so a review branch produces an
+    # installable APK before it is merged.
+    branches: [main, 'claude/**']
   workflow_dispatch:
 
 jobs:

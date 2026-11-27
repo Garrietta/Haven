@@ -399,7 +399,7 @@ private fun DetailPageContent(
     val history: @Composable () -> Unit = {
         if (entity.state.toDoubleOrNull() != null) {
             Spacer(Modifier.height(24.dp))
-            Text("Last 24 hours", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Last 24 hours", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             DetailHistoryStrip(vm, entity)
             Spacer(Modifier.height(16.dp))
