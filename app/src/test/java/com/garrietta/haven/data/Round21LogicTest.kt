@@ -7,9 +7,6 @@ import com.garrietta.haven.ui.components.contrastRatio
 import com.garrietta.haven.ui.components.morphCardAlpha
 import com.garrietta.haven.ui.components.topMorphProgress
 import com.garrietta.haven.ui.components.topMorphSourceId
-import com.garrietta.haven.ui.screens.RoomFilter
-import com.garrietta.haven.ui.screens.RoomSection
-import com.garrietta.haven.ui.screens.buildHomeChips
 import com.garrietta.haven.ui.screens.dialTrackColor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,69 +29,6 @@ import com.garrietta.haven.ui.theme.colors
  * still cover the Arrange behavior itself.
  */
 class Round21LogicTest {
-
-    // Item 1: a room chip tap dispatches its room's filter.
-    @Test
-    fun roomChipTapSwitchesFilter() {
-        var filter: RoomFilter? = null
-        var navigated: Screen? = null
-        val rooms = listOf(
-            RoomSection("bedroom", "Bedroom", listOf("light.lamp_socket_1"), null),
-            RoomSection("living", "Living Room", listOf("light.standing_lamp_socket_1"), null),
-            RoomSection(null, "No room", listOf("sensor.temperature"), null),
-        )
-        val chips = buildHomeChips(
-            rooms, RoomFilter.All, { Placement.ROOM_CHIP }, emptyList(),
-            onRoomFilter = { filter = it },
-            onNavigateTab = { navigated = it },
-        )
-        assertEquals(4, chips.size)
-        assertTrue(chips[0].selected)
-        chips[1].onClick()
-        assertEquals(RoomFilter.Area("bedroom"), filter)
-        chips[2].onClick()
-        assertEquals(RoomFilter.Area("living"), filter)
-        chips[3].onClick()
-        assertEquals(RoomFilter.Unassigned, filter)
-        chips[0].onClick()
-        assertEquals(RoomFilter.All, filter)
-        assertNull(navigated)
-    }
-
-    // Item 1: a hidden room produces no chip; a nav-tab room
-    // produces no chip either.
-    @Test
-    fun nonChipRoomsProduceNoChip() {
-        val rooms = listOf(RoomSection("bedroom", "Bedroom", emptyList(), null))
-        val hidden = buildHomeChips(
-            rooms, RoomFilter.All, { Placement.HIDDEN }, emptyList(),
-            onRoomFilter = {}, onNavigateTab = {},
-        )
-        assertEquals(1, hidden.size)
-        val navTab = buildHomeChips(
-            rooms, RoomFilter.All, { Placement.NAV_TAB }, emptyList(),
-            onRoomFilter = {}, onNavigateTab = {},
-        )
-        assertEquals(1, navTab.size)
-    }
-
-    // Item 1: a tab chip navigates instead of filtering.
-    @Test
-    fun tabChipTapNavigates() {
-        var filter: RoomFilter? = null
-        var navigated: Screen? = null
-        val tabs = listOf(UserTab("t1", "Lights", listOf("light.lamp_socket_1"), chip = true))
-        val chips = buildHomeChips(
-            emptyList(), RoomFilter.All, { Placement.ROOM_CHIP }, tabs,
-            onRoomFilter = { filter = it },
-            onNavigateTab = { navigated = it },
-        )
-        assertEquals(2, chips.size)
-        assertFalse(chips[1].selected)
-        chips[1].onClick()
-        assertEquals(Screen.UserTab("t1"), navigated)
-        assertNull(filter)
-    }
 
     // Item 2: the dial track clears 3:1 against the plain disc in
     // both themes (the round-8 outline track measured ~1.3:1).

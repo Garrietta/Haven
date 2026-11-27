@@ -7,7 +7,6 @@ import com.garrietta.haven.ui.components.dragRangeForPanelOverlay
 import com.garrietta.haven.ui.components.morphSwapContainerAlpha
 import com.garrietta.haven.ui.components.morphTileAlpha
 import com.garrietta.haven.ui.components.resizePreviewScale
-import com.garrietta.haven.ui.screens.tabTileGridIndices
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -24,59 +23,6 @@ import org.junit.Test
 class Round24LogicTest {
 
     // ---- Item 4: shape-index stability ----
-
-    @Test
-    fun shapeIndex_stableOrder() {
-        val cards = listOf(
-            "type: entities\nentity: light.lamp",
-            "type: entities\nentities:\n  - light.a\n  - light.b",
-            "type: entities\nentity: climate.thermostat",
-        )
-        val indices = tabTileGridIndices(cards)
-        assertEquals(0, indices["light.lamp"])
-        assertEquals(1, indices["light.a"])
-        assertEquals(2, indices["light.b"])
-        assertEquals(3, indices["climate.thermostat"])
-    }
-
-    @Test
-    fun shapeIndex_nonEntityCardsContributeNothing() {
-        val cards = listOf(
-            "type: gauge\nentity: sensor.temp",
-            "type: button\nentity: light.x",
-            "just a string",
-            "type: entities\nentity: light.lamp",
-        )
-        assertEquals(mapOf("light.lamp" to 0), tabTileGridIndices(cards))
-    }
-
-    @Test
-    fun shapeIndex_duplicateKeepsFirstIndex() {
-        val cards = listOf(
-            "type: entities\nentity: light.lamp",
-            "type: entities\nentity: light.lamp",
-            "type: entities\nentity: light.other",
-        )
-        val indices = tabTileGridIndices(cards)
-        assertEquals(0, indices["light.lamp"])
-        // The duplicate consumed index 1 without moving the
-        // first card's index, so the next card lands at 2.
-        assertEquals(2, indices["light.other"])
-    }
-
-    @Test
-    fun shapeIndex_missingEntityStillConsumesAnIndex() {
-        // An id whose entity is missing from states still emits
-        // a MissingEntityTile and still consumes an index, so
-        // its neighbors never shift when the entity appears.
-        val cards = listOf(
-            "type: entities\nentity: light.gone",
-            "type: entities\nentity: light.lamp",
-        )
-        val indices = tabTileGridIndices(cards)
-        assertEquals(0, indices["light.gone"])
-        assertEquals(1, indices["light.lamp"])
-    }
 
     // ---- Item 3: drag-range minimum ----
 

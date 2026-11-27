@@ -36,87 +36,6 @@ class NavItemsTest {
     ) = UserTab(id, title, cards, icon, hidden, pinned)
 
     @Test
-    fun barDefaultsToFourDestinations() {
-        // Feedback round 15, item 3: the DEFAULT bar is still Home,
-        // Scenes, Energy, Settings — Home first, Settings last and
-        // always present, so the user can never strand themselves
-        // on a screen with no way back to Settings. Scenes/Energy
-        // hideability and pinned tabs are covered below.
-        val items = pillBarItems()
-        assertEquals(listOf("Home", "Scenes", "Energy", "Settings"), items.map { it.label })
-        assertEquals(Screen.Today, items[0].screen)
-        assertEquals(Screen.Scenes, items[1].screen)
-        assertEquals(Screen.Energy, items[2].screen)
-        assertEquals(Screen.Settings, items[3].screen)
-    }
-
-    @Test
-    fun hideableBuiltInsDropButHomeAndSettingsNeverDo() {
-        assertEquals(
-            listOf("Home", "Energy", "Settings"),
-            pillBarItems(showScenes = false).map { it.label },
-        )
-        assertEquals(
-            listOf("Home", "Scenes", "Settings"),
-            pillBarItems(showEnergy = false).map { it.label },
-        )
-        assertEquals(
-            listOf("Home", "Settings"),
-            pillBarItems(showScenes = false, showEnergy = false).map { it.label },
-        )
-    }
-
-    @Test
-    fun pinnedTabsSitBetweenEnergyAndSettingsCappedAtTwo() {
-        val a = tab("a", "Cameras", pinned = true)
-        val b = tab("b", "Lights", pinned = true)
-        val c = tab("c", "Garage", pinned = true)
-        // Two pins: Home, Scenes, Energy, pins in user-tab order, Settings.
-        val two = pillBarItems(pinnedTabs = listOf(a, b))
-        assertEquals(listOf("Home", "Scenes", "Energy", "Cameras", "Lights", "Settings"), two.map { it.label })
-        assertEquals(Screen.UserTab("a"), two[3].screen)
-        assertEquals(Screen.UserTab("b"), two[4].screen)
-        // A third pin is dropped by the cap (the ViewModel setter
-        // backstops the same cap; this function trusts the caller
-        // and takes the first two).
-        val three = pillBarItems(pinnedTabs = listOf(a, b, c))
-        assertEquals(listOf("Home", "Scenes", "Energy", "Cameras", "Lights", "Settings"), three.map { it.label })
-        // Pins combine with hidden built-ins: six tabs max means the
-        // cap, not the built-ins, bounds the bar.
-        val hidden = pillBarItems(showScenes = false, showEnergy = false, pinnedTabs = listOf(a, b))
-        assertEquals(listOf("Home", "Cameras", "Lights", "Settings"), hidden.map { it.label })
-    }
-
-    @Test
-    fun settingsSubmenusMapToSettingsForRailHighlight() {
-        // Feedback round 15, item 4: every Settings submenu keeps
-        // the Settings rail highlight. Feedback round 17,
-        // item 3, OVERRIDES the round-15 Browse carve-out for
-        // exactly four destinations: Dashboards, Areas, Search,
-        // and UserTabs now map to Settings too (Manage home page
-        // and Rooms & tabs cleared the indicator on the
-        // 2026-11-04 runs).
-        for (screen in listOf(
-            Screen.HomeEditor, Screen.SettingsPage("areas/areas"),
-            Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs,
-            Screen.AutomationBuilder, Screen.SceneBuilder, Screen.ScriptBuilder,
-            Screen.HelperBuilder, Screen.UpdatesPanel,
-        )) {
-            assertEquals(Screen.Settings, navActiveScreen(screen))
-        }
-        // The remaining browse destinations keep the
-        // nothing-selected rule.
-        assertEquals(Screen.DashboardEdit, navActiveScreen(Screen.DashboardEdit))
-        assertEquals(Screen.AreaDetail("area.bedroom"), navActiveScreen(Screen.AreaDetail("area.bedroom")))
-        // Ordinary destinations map to themselves.
-        assertEquals(Screen.Today, navActiveScreen(Screen.Today))
-        assertEquals(Screen.Scenes, navActiveScreen(Screen.Scenes))
-        assertEquals(Screen.Energy, navActiveScreen(Screen.Energy))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.Settings))
-        assertEquals(Screen.UserTab("a"), navActiveScreen(Screen.UserTab("a")))
-    }
-
-    @Test
     fun iconOverrideBeatsAutoDerivation() {
         // A camera card would auto-derive Videocam; the picker wins.
         val cameraCard = "type: tile\nentity: camera.tapo_1_live_view"
@@ -157,24 +76,6 @@ class NavItemsTest {
     }
 
     @Test
-    fun selectedIndexMatchesFixedBarOrder() {
-        val items = pillBarItems()
-        // Bar order: Home(0), Scenes(1), Energy(2), Settings(3).
-        assertEquals(0, selectedNavIndex(Screen.Today, items))
-        assertEquals(1, selectedNavIndex(Screen.Scenes, items))
-        assertEquals(2, selectedNavIndex(Screen.Energy, items))
-        assertEquals(3, selectedNavIndex(Screen.Settings, items))
-    }
-
-    @Test
-    fun selectedIndexNullForNonBarScreens() {
-        val items = pillBarItems()
-        assertNull(selectedNavIndex(Screen.UserTab("a"), items))
-        assertNull(selectedNavIndex(Screen.Dashboards, items))
-        assertNull(selectedNavIndex(Screen.Areas, items))
-    }
-
-    @Test
     fun floatingGeometryMatchesCurrentBar() {
         val g = navPillGeometry(NavStyle.FLOATING)
         assertEquals(64.dp, g.barHeight)
@@ -204,20 +105,6 @@ class NavItemsTest {
         assertEquals(NavStyle.COMPACT, navStyleFromKey("compact"))
         assertEquals(NavStyle.FLOATING, navStyleFromKey("bogus"))
         assertEquals(NavStyle.FLOATING, navStyleFromKey(""))
-    }
-
-    @Test
-    fun securitySitsBesideHomeAndTheBarStaysAtSix() {
-        val a = com.garrietta.haven.data.UserTab("a", "A", emptyList(), pinned = true)
-        val b = com.garrietta.haven.data.UserTab("b", "B", emptyList(), pinned = true)
-        val bar = pillBarItems(pinnedTabs = listOf(a, b), showSecurity = true)
-        assertEquals(listOf("Home", "Security", "Scenes", "Energy", "A", "Settings"), bar.map { it.label })
-        assertEquals(6, bar.size)
-        // With Scenes off there is room for both pinned tabs again.
-        assertEquals(
-            listOf("Home", "Security", "Energy", "A", "B", "Settings"),
-            pillBarItems(showScenes = false, pinnedTabs = listOf(a, b), showSecurity = true).map { it.label },
-        )
     }
 
     @Test

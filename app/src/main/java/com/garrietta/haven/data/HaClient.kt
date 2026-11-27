@@ -1200,6 +1200,7 @@ class HaClient(
                         displayName,
                         d.text("model").ifEmpty { null },
                         maker.ifEmpty { null },
+                        service = d.text("entry_type") == "service",
                     )
                 }
             }

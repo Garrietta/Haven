@@ -224,46 +224,6 @@ fun polygonForKey(key: String): RoundedPolygon? = when (key) {
     else -> null
 }
 
-/**
- * The resolved shape preferences, provided by HavenApp from
- * SettingsStore (re-read whenever [HavenViewModel.bumpShapePrefs]
- * fires, so a picker choice applies immediately). Resolution is
- * per-entity override > domain default > global default;
- * null means "built-in default" (badges) or "default corners"
- * (cards). Feedback round 15, item 5: the domain maps ARE what
- * "Domain default" means — a domain default applies to every
- * entity of that domain (a socket-named lamp is still a light),
- * and a per-entity override still wins over it. The id-only
- * accessors keep the old per-entity > global behavior for call
- * sites that know no domain (morph landing fallbacks, where the
- * reported tile shape already carries the domain default).
- * Menu-row badges keep their fixed kinds — they are navigation
- * chrome, not entity shapes — and the camera hero container
- * stays its rectangular 24dp shape by design.
- */
-data class ShapePrefs(
-    val globalBadge: String?,
-    val globalCard: String?,
-    val badgeOverrides: Map<String, String>,
-    val cardOverrides: Map<String, String>,
-    val domainBadge: Map<String, String> = emptyMap(),
-    val domainCard: Map<String, String> = emptyMap(),
-) {
-    fun badgeShapeKey(entityId: String): String? = badgeOverrides[entityId] ?: globalBadge
-    fun cardShapeKey(entityId: String): String? = cardOverrides[entityId] ?: globalCard
-    fun badgeShapeKeyFor(entityId: String, domain: String?): String? =
-        badgeOverrides[entityId] ?: domain?.let { domainBadge[it] } ?: globalBadge
-    fun cardShapeKeyFor(entityId: String, domain: String?): String? =
-        cardOverrides[entityId] ?: domain?.let { domainCard[it] } ?: globalCard
-    fun badgeShape(entityId: String): Shape? = badgeShapeKey(entityId)?.let { shapeForKey(it) }
-    fun badgeShapeFor(entityId: String, domain: String?): Shape? = badgeShapeKeyFor(entityId, domain)?.let { shapeForKey(it) }
-    fun badgePolygon(entityId: String): RoundedPolygon? = badgeShapeKey(entityId)?.let { polygonForKey(it) }
-    fun badgePolygonFor(entityId: String, domain: String?): RoundedPolygon? = badgeShapeKeyFor(entityId, domain)?.let { polygonForKey(it) }
-    fun cardShape(entityId: String): Shape? = cardShapeKey(entityId)?.let { shapeForKey(it) }
-    fun cardShapeFor(entityId: String, domain: String?): Shape? = cardShapeKeyFor(entityId, domain)?.let { shapeForKey(it) }
-}
-
-val LocalShapePrefs = compositionLocalOf { ShapePrefs(null, null, emptyMap(), emptyMap()) }
 
 /**
  * A dialog header name, Round 6: a SINGLE Text at
@@ -348,11 +308,6 @@ fun DomainBadge(
     val idle = stateShapePolygon(badgeIdleShape(domain))
     val active = stateShapePolygon(badgeActiveShape(domain, if (domain == "weather") state else null))
     val (bg, iconTint) = badgeOverride ?: badgeColors(scheme, entity, accent)
-    // Shape-picker override (2026-10-30): a picked shape replaces
-    // the idle/active morph pair with that one static shape, in
-    // the badge's exact colors — the picker's shape IS the badge.
-    // Without an override the morph pair below is unchanged.
-    val overrideShape = LocalShapePrefs.current.badgeShapeFor(entity.entityId, entity.domain)
     Box(
         modifier.graphicsLayer {
             if (!reduceMotion) {
@@ -366,11 +321,7 @@ fun DomainBadge(
         },
         contentAlignment = Alignment.Center,
     ) {
-        if (overrideShape != null) {
-            Box(Modifier.fillMaxSize().background(bg, overrideShape))
-        } else {
-            MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
-        }
+        MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
         Icon(
             icon,
             contentDescription = null,
@@ -547,16 +498,8 @@ fun TravelingBadge(
     val (bg, iconTint) = badgeOverride ?: badgeColors(scheme, entity, accent)
     val domain = entity.domain
     val state = entity.state
-    // Shape-picker override (2026-10-30): the traveler morphs
-    // from the picked shape to itself (identity), so a picked
-    // badge keeps its shape across the whole travel instead of
-    // morphing through the domain/state pair.
-    val overridePolygon = LocalShapePrefs.current.badgePolygonFor(entity.entityId, entity.domain)
-    val from = overridePolygon
-        ?: if (tileSource) com.garrietta.haven.ui.theme.expressivePolygon(shapeForDomain(domain))
-        else stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
-    val to = overridePolygon
-        ?: stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
+    val to = stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
+    val from = if (tileSource) com.garrietta.haven.ui.theme.expressivePolygon(shapeForDomain(domain)) else to
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val morph = Morph(from, to)

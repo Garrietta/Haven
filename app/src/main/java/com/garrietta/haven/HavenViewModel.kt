@@ -71,7 +71,6 @@ import com.garrietta.haven.ui.components.MAX_PINNED_TABS
 import com.garrietta.haven.ui.components.RoomBarItem
 import com.garrietta.haven.ui.components.barExtraSlots
 import com.garrietta.haven.ui.components.canPinBarExtra
-import com.garrietta.haven.ui.screens.RoomFilter
 import com.garrietta.haven.ui.components.NavStyle
 import com.garrietta.haven.ui.components.navStyleFromKey
 import com.garrietta.haven.data.isNetworkAvailable
@@ -100,57 +99,42 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 
-/** Top-level navigation destinations. Detail screens push on top of these. */
+/**
+ * Where the app can be. The four on the bar (Home, Security, Climate,
+ * Settings) are fixed; everything else opens on top of one of them: a
+ * Settings page, a device's popup, a system's panel, a camera's clips, or
+ * one of Home Assistant's own pages reached from Settings.
+ */
 sealed class Screen {
+    /** Home. */
     data object Today : Screen()
-    /** Stage F: first-class Scenes destination (brief §4/§10). */
-    data object Scenes : Screen()
-    /** Stage F: first-class Energy destination (brief §4/§11). */
-    data object Energy : Screen()
     /** The cameras, their motion detection, the alarm, doors and locks. */
     data object Security : Screen()
     /** Thermostats, and every temperature and humidity reading. */
     data object Climate : Screen()
-    data object Dashboards : Screen()
-    data object Areas : Screen()
-    data object Search : Screen()
-    /** UI rewrite round: the custom-tabs browse list (Settings -> Browse -> User Tabs). */
-    data object UserTabs : Screen()
     data object Settings : Screen()
-    /** A user-created tab; Home and Settings are the built-in tabs. */
-    data class UserTab(val tabId: String) : Screen()
     /** A page under Settings, named by its route (see SettingsRoute). */
     data class SettingsPage(val route: String) : Screen()
-    /** Feedback round 19, item 5: a room pinned as a navigation tab — renders Today with that room's filter. */
-    data class RoomTab(val areaId: String) : Screen()
-    data object HomeEditor : Screen()
+    /** A device's popup. */
     data class EntityDetail(val entityId: String) : Screen()
-    /** Round 3 morph panels: full-screen panels on both postures, reusing the PanelOverlay morph machinery. */
+    /** Full-screen panels for a system: the vacuum, a TV, the alarm keypad, the greenhouse, updates. */
     data object VacuumPanel : Screen()
     data class MediaPanel(val entityId: String) : Screen()
     data object SecurityPanel : Screen()
     data object GreenhousePanel : Screen()
     data object UpdatesPanel : Screen()
-    /** UI rewrite round §7: a Home Status group's full-screen panel. */
-    data class HomeStatusPanel(val categoryKey: String) : Screen()
-    /** A room, opened from its card on Home as a popup. A null area is "No room". */
-    data class RoomPanel(val areaId: String?) : Screen()
-    /** Scrollable recorded-clips timeline for a camera (long-press on its tile). */
+    /** A camera's recorded clips. */
     data class CameraClips(val entityId: String) : Screen()
+    /** Home Assistant's dashboards, and their editor, from Settings. */
+    data object Dashboards : Screen()
     data class AreaDetail(val areaId: String) : Screen()
     data object DashboardEdit : Screen()
+    /** Home Assistant's automation, scene, script and helper builders, from Settings. */
     data object AutomationBuilder : Screen()
     data object SceneBuilder : Screen()
     data object ScriptBuilder : Screen()
     data object HelperBuilder : Screen()
 }
-
-/**
- * The shape picker target: null = closed; entityId null = the
- * global default; forCard false = badge shape, true = card
- * outline shape.
- */
-data class ShapePickerTarget(val entityId: String?, val forCard: Boolean)
 
 class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -194,19 +178,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Feedback round 19, item 3: the Home room filter, hoisted out
-     * of TodayScreen into the ViewModel. TodayScreen used to own
-     * it in remember, so every AnimatedContent/direct swap (popup
-     * open/close, detail return) disposed TodayScreen and reset
-     * the filter to My Home — the 2026-11-04 video's "back to My
-     * Home instead of my room" bug. As ViewModel state it survives
-     * popup opens, closes, and recompositions; returning from a
-     * detail lands back in the room view. Tab taps to Home reset
-     * it to All in goTop (Home means My Home); chips set it.
-     */
-    internal var roomFilter by mutableStateOf<RoomFilter>(RoomFilter.All)
-
-    /**
      * Feedback round 19, item 5: per-area placements, mirrored in
      * Compose state so the bar/rail/chips recompose on change
      * (the store alone is not observable). The store is the
@@ -243,13 +214,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         return canPinBarExtra(userTabs.count { it.pinned }, roomNavTabs, alreadyOnBar, barExtraSlotsNow())
     }
 
-    /**
-     * Whether a built-in tab can be switched on without pushing a pinned
-     * tab or room off the bar: the extras already pinned must still fit.
-     */
-    fun canShowBuiltIn(security: Boolean, scenes: Boolean, energy: Boolean, climate: Boolean = navShowClimate): Boolean =
-        barPinnedExtrasCount() <= barExtraSlots(security, scenes, energy, climate)
-
     fun setRoomPlacement(areaId: String, placement: Placement) {
         if (placement == Placement.NAV_TAB &&
             !canPinBarExtra(
@@ -262,45 +226,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         settingsStore.setRoomPlacement(areaId, placement.storageKey())
         roomPlacementsState = settingsStore.roomPlacements()
         bumpHomePrefs()
-    }
-
-    /** Bar/rail room tabs in stored room order (snapshot read — the transition spec reads this at transition time). */
-    fun roomBarItemsSnapshot(): List<RoomBarItem> {
-        val ordered = resolveOrder(settingsStore.roomOrder(), areas.value.map { it.id })
-        val names = settingsStore.roomDisplayNames()
-        val icons = settingsStore.roomIconKeys()
-        return ordered.mapNotNull { areaId ->
-            val area = areas.value.firstOrNull { it.id == areaId } ?: return@mapNotNull null
-            if (roomPlacement(areaId) != Placement.NAV_TAB) return@mapNotNull null
-            RoomBarItem(areaId, names[areaId] ?: area.name, icons[areaId])
-        }
-    }
-
-    /**
-     * Feedback round 19, item 5: the placement selector's single
-     * write path for a tab. NAV_TAB maps to pinned (cap-checked,
-     * chip/hidden cleared — placement is exclusive); ROOM_CHIP
-     * maps to chip (pinned/hidden cleared); HIDDEN clears pinned
-     * and chip and sets hidden (browse-list-only, exactly the old
-     * unpinned tab's visibility). The old pinned+hidden
-     * combination no longer has a selector value.
-     */
-    fun setTabPlacement(tabId: String, placement: Placement) {
-        val tab = userTabs.firstOrNull { it.id == tabId } ?: return
-        when (placement) {
-            Placement.NAV_TAB -> {
-                if (!canPinBarExtra(
-                        userTabs.count { it.pinned },
-                        roomPlacementsState.values.count { placementFromKey(it) == Placement.NAV_TAB },
-                        tab.pinned,
-                        barExtraSlotsNow(),
-                    )
-                ) return
-                mutateTab(tabId) { it.copy(pinned = true, chip = false, hidden = false) }
-            }
-            Placement.ROOM_CHIP -> mutateTab(tabId) { it.copy(pinned = false, chip = true, hidden = false) }
-            Placement.HIDDEN -> mutateTab(tabId) { it.copy(pinned = false, chip = false, hidden = true) }
-        }
     }
 
     /** Feedback round 19, item 6: event notification toggles, persisted like navShowScenes. */
@@ -359,25 +284,8 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun bumpHomePrefs() { homePrefsVersion++ }
 
     /**
-     * Bumped whenever the shape picker saves, so HavenApp recomposes
-     * its shape-preference provider from the store and every badge
-     * and card outline updates immediately, without relaunching.
-     */
-    var shapePrefsVersion by mutableStateOf(0)
-        private set
-
-    fun bumpShapePrefs() { shapePrefsVersion++ }
-
-    var shapePickerTarget by mutableStateOf<ShapePickerTarget?>(null)
-        private set
-
-    fun openShapePicker(entityId: String?, forCard: Boolean) { shapePickerTarget = ShapePickerTarget(entityId, forCard) }
-    fun closeShapePicker() { shapePickerTarget = null }
-
-    /**
-     * Customization round, item 2: bumped whenever Card settings
-     * saves, so every surface reading the customization maps
-     * recomposes immediately (same pattern as shapePrefsVersion).
+     * Bumped whenever a tile's options are saved, so every surface
+     * reading the name, icon and color maps recomposes at once.
      */
     var cardCustomVersion by mutableStateOf(0)
         private set
@@ -388,18 +296,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     var cardSettingsTarget by mutableStateOf<String?>(null)
         private set
 
-    /** Arrange mode for the grid the sheet was opened from, when that grid has one. */
-    var cardSettingsArrange by mutableStateOf<(() -> Unit)?>(null)
-        private set
-
-    fun openCardSettings(entityId: String, onArrange: (() -> Unit)? = null) {
-        cardSettingsArrange = onArrange
+    fun openCardSettings(entityId: String) {
         cardSettingsTarget = entityId
     }
 
     fun closeCardSettings() {
         cardSettingsTarget = null
-        cardSettingsArrange = null
     }
 
     // ---- Connection switcher (feedback round 16, item 7; reliability round) ----
@@ -1144,7 +1046,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             val file = java.io.File(getApplication<Application>().filesDir, "haven_state_cache.json")
             if (!file.isFile) return
             val data = parseStateCache(file.readText()) ?: return
-            client.restoreCachedStates(data.states, data.areas, data.entityAreas)
+            client.restoreCachedStates(data.states, data.areas, data.entityAreas, data.entityDevices, data.deviceInfo, data.auxiliary)
         } catch (_: Exception) {
             // Disk cache is best effort; never block startup.
         }
@@ -1168,9 +1070,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         entityAreas: Map<String, String>,
     ) {
         if (states.isEmpty()) return
+        val entityDevices = client.entityDevices.value
+        val deviceInfo = client.deviceInfo.value
+        val auxiliary = client.auxiliaryEntities.value
         withContext(Dispatchers.IO) {
             try {
-                val text = serializeStateCache(states, areas, entityAreas)
+                val text = serializeStateCache(states, areas, entityAreas, entityDevices, deviceInfo, auxiliary)
                 val dir = getApplication<Application>().filesDir
                 val tmp = java.io.File(dir, "haven_state_cache.json.tmp")
                 val file = java.io.File(dir, "haven_state_cache.json")
@@ -1384,35 +1289,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         return id
     }
 
-    fun renameTab(tabId: String, title: String) {
-        mutateTab(tabId) { it.copy(title = title.trim().ifEmpty { it.title }) }
-    }
-
-    fun deleteTab(tabId: String) {
-        userTabs = userTabs.filter { it.id != tabId }
-        tabsStore.saveTabs(userTabs)
-    }
-
-    /** Puts the tabs in the order of [ids]; a tab missing from [ids] keeps its place at the end. */
-    fun setTabOrder(ids: List<String>) {
-        val byId = userTabs.associateBy { it.id }
-        val ordered = ids.mapNotNull { byId[it] } + userTabs.filter { it.id !in ids }
-        if (ordered.map { it.id } == userTabs.map { it.id }) return
-        userTabs = ordered
-        tabsStore.saveTabs(userTabs)
-    }
-
-    fun moveTab(tabId: String, delta: Int) {
-        val list = userTabs.toMutableList()
-        val i = list.indexOfFirst { it.id == tabId }
-        val j = (i + delta).coerceIn(list.indices)
-        if (i < 0 || i == j) return
-        val tab = list.removeAt(i)
-        list.add(j, tab)
-        userTabs = list
-        tabsStore.saveTabs(userTabs)
-    }
-
     fun addCardToTab(tabId: String, yaml: String) {
         mutateTab(tabId) { it.copy(cards = it.cards + yaml) }
     }
@@ -1422,35 +1298,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /** Ordered favorite entity ids, owned here so Home recomposes on change. */
     var favorites by mutableStateOf(settingsStore.favoriteEntityIds())
         private set
-
-    fun addFavorite(entityId: String) {
-        if (entityId in favorites) return
-        favorites = favorites + entityId
-        settingsStore.setFavoriteEntityIds(favorites)
-    }
-
-    fun removeFavorite(entityId: String) {
-        favorites = favorites - entityId
-        settingsStore.setFavoriteEntityIds(favorites)
-    }
-
-    /** Puts the favorites in the order of [ids], as a drag leaves them. */
-    fun setFavoriteOrder(ids: List<String>) {
-        if (ids.toSet() != favorites.toSet() || ids == favorites) return
-        favorites = ids
-        settingsStore.setFavoriteEntityIds(favorites)
-    }
-
-    fun moveFavorite(entityId: String, delta: Int) {
-        val list = favorites.toMutableList()
-        val i = list.indexOf(entityId)
-        val j = (i + delta).coerceIn(list.indices)
-        if (i < 0 || i == j) return
-        val id = list.removeAt(i)
-        list.add(j, id)
-        favorites = list
-        settingsStore.setFavoriteEntityIds(favorites)
-    }
 
     // ---- Round 24, item 6: per-room entity order (drag reorder) ----
 
@@ -1465,24 +1312,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun roomEntityOrder(areaId: String?): List<String> =
         roomEntityOrdersState[areaId ?: "unassigned"] ?: emptyList()
-
-    /**
-     * Moves [entityId] by [delta] positions within the room's
-     * CURRENT display order ([orderedMemberIds], as rendered —
-     * wide-media rows first, then the standard grid in row
-     * order) and persists the result, so a dragged reorder
-     * survives a restart. The stored order is over entity ids
-     * only, so it survives a card moving between the
-     * wide-media and standard sections (a play-state change).
-     * No-op when the entity is unknown or the move would not
-     * change its position.
-     */
-    fun moveRoomEntity(areaId: String?, orderedMemberIds: List<String>, entityId: String, delta: Int) {
-        val moved = movedByDelta(orderedMemberIds, entityId, delta)
-        if (moved === orderedMemberIds) return
-        settingsStore.setRoomEntityOrder(areaId, moved)
-        roomEntityOrdersState = settingsStore.roomEntityOrders()
-    }
 
     // ---- Stage E badge preferences (persisting setters, like navStyle) ----
 
@@ -1504,43 +1333,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Stage G reset customization ----
 
-    /**
-     * Restores presentation defaults WITHOUT deleting user content:
-     * default Home sections shown (Greeting, Cameras, Home Status,
-     * Favorites — the fresh-state default, not "show everything"),
-     * canonical section order, room
-     * presentation cleared (names/icons/order), navigation reset
-     * (floating pill, automatic icons, all tabs shown), badge prefs
-     * on. Favorites and tabs are CONTENT, not presentation, and are
-     * never touched by a reset.
-     */
-    fun resetCustomization() {
-        settingsStore.homeHiddenSections = DEFAULT_HIDDEN_HOME_SECTIONS
-        settingsStore.setHomeSectionOrder(HOME_SECTION_ORDER_DEFAULT)
-        settingsStore.setRoomOrder(emptyList())
-        for (id in settingsStore.roomDisplayNames().keys.toList()) {
-            settingsStore.setRoomDisplayName(id, null)
-        }
-        for (id in settingsStore.roomIconKeys().keys.toList()) {
-            settingsStore.setRoomIconKey(id, null)
-        }
-        resetNavigation()
-        badgeNav = true
-        badgeRoom = true
-        bumpHomePrefs()
-    }
-
     // ---- Stage C navigation customization ----
-
-    /** Picker icon key, or null for automatic. Unknown keys fall back to auto at render. */
-    fun setTabIcon(tabId: String, iconKey: String?) {
-        mutateTab(tabId) { it.copy(icon = iconKey) }
-    }
-
-    /** Hides the tab from the pill bar (it stays listed in TabManager). */
-    fun setTabHidden(tabId: String, hidden: Boolean) {
-        mutateTab(tabId) { it.copy(hidden = hidden) }
-    }
 
     /**
      * Feedback round 15, item 3: pins the tab onto the bar/rail
@@ -1639,37 +1432,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         mutateTab(tabId) { tab ->
             if (index !in tab.cards.indices) tab
             else tab.copy(cards = tab.cards.toMutableList().also { it[index] = yaml })
-        }
-    }
-
-    fun removeCardFromTab(tabId: String, index: Int) {
-        mutateTab(tabId) { tab ->
-            if (index !in tab.cards.indices) tab
-            else tab.copy(cards = tab.cards.filterIndexed { i, _ -> i != index })
-        }
-    }
-
-    fun moveCardInTab(tabId: String, from: Int, to: Int) {
-        mutateTab(tabId) { tab ->
-            if (from !in tab.cards.indices || to !in tab.cards.indices || from == to) tab
-            else {
-                val cards = tab.cards.toMutableList()
-                val card = cards.removeAt(from)
-                cards.add(to, card)
-                tab.copy(cards = cards)
-            }
-        }
-    }
-
-    /** Re-serializes a card with a new type; false when the YAML won't parse (nothing saved). */
-    fun changeTabCardType(tabId: String, index: Int, newType: String): Boolean {
-        val tab = userTabs.firstOrNull { it.id == tabId } ?: return false
-        val yaml = tab.cards.getOrNull(index) ?: return false
-        return try {
-            updateCardYaml(tabId, index, cardToYaml(changeCardType(parseCardYaml(yaml), newType)))
-            true
-        } catch (e: Exception) {
-            false
         }
     }
 
@@ -2202,18 +1964,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     fun turnOn(id: String) = actuate(id, "on") { done ->
         client.callService(id.substringBefore("."), "turn_on", id, null, done)
-    }
-
-    /**
-     * Stage F: scene activation. A DIRECT service call, not turnOn:
-     * a scene's state is its last-activated timestamp, not on/off, so
-     * actuate()'s optimistic "on" would paint a false state and fight
-     * the guard. Reports Home Assistant's own success/failure via
-     * [onDone] so the UI can show Sent/Failed honestly — never
-     * "active", because scenes have no active state.
-     */
-    fun activateScene(entityId: String, onDone: (Boolean) -> Unit) {
-        client.callService("scene", "turn_on", entityId, null, onDone)
     }
 
     fun turnOff(id: String) = actuate(id, "off") { done ->

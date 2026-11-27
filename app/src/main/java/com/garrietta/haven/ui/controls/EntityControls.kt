@@ -105,7 +105,6 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
-import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
@@ -471,11 +470,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
     // are held. No snapshot (sheet without one, no morph) = live.
     val snap = if (morphSource) vm.travelSnapshots[entity.entityId] else null
     val display = snap ?: entity
-    // Card-outline shape (2026-10-30 picker): a per-entity
-    // override beats the global default; without either, the
-    // token extraLarge corners are unchanged.
-    val cardShape = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain)
-        ?: generalCardShape(0)
+    val cardShape = generalCardShape(0)
     // Feedback round 16, item 4a: the card's container color as
     // a named value, so the morph can report it alongside the
     // bounds/shape — the surface must start at the card's own

@@ -428,8 +428,7 @@ private fun DeviceEntityRow(
 
 /**
  * An entity: Home Assistant's settings for it (name, icon, area, id,
- * visible, enabled) and how its card looks in Haven, which otherwise
- * follows its type's style.
+ * visible, enabled) and, under In Haven, its tile's options.
  */
 @Composable
 fun EntitySettingsPage(vm: HavenViewModel, entityId: String, onBack: () -> Unit, navigate: (Screen) -> Unit) {
@@ -439,7 +438,6 @@ fun EntitySettingsPage(vm: HavenViewModel, entityId: String, onBack: () -> Unit,
     val states by vm.states.collectAsState()
     val areas by vm.areas.collectAsState()
     @Suppress("UNUSED_VARIABLE") val cardTick = vm.cardCustomVersion
-    @Suppress("UNUSED_VARIABLE") val shapeTick = vm.shapePrefsVersion
     val entity = states[entityId]
     val reg: RegistryEntity? = (registry.state as? Loaded.Ready)?.value?.firstOrNull { it.entityId == entityId }
     var prompt by remember { mutableStateOf<String?>(null) }
@@ -452,13 +450,13 @@ fun EntitySettingsPage(vm: HavenViewModel, entityId: String, onBack: () -> Unit,
         registry.reload()
     }
 
-    SettingsPage(entity?.friendlyName ?: reg?.name ?: entityId, onBack, intro = entityId) {
+    SettingsPage(entity?.friendlyName ?: reg?.name ?: entityId, onBack) {
         statusItem(status)
         if (entity != null) {
             item(key = "controls") {
                 MenuGroup {
                     MenuRow(
-                        entityId, shapeForDomain(domain), domainIcon(entity), "Controls", entity.state,
+                        entityId, shapeForDomain(domain), domainIcon(entity), "Controls", com.garrietta.haven.data.tileState(entity),
                         onClick = { navigate(Screen.EntityDetail(entityId)) }, flat = true,
                     )
                 }
@@ -516,43 +514,16 @@ fun EntitySettingsPage(vm: HavenViewModel, entityId: String, onBack: () -> Unit,
             }
         }
         item(key = "haven") {
-            val typeLabel = DOMAIN_DEFAULT_OPTIONS.firstOrNull { it.first == domain }?.second ?: humanizeOptionLabel(domain)
             val ownTitle = store.customTitles()[entityId]
             val ownIcon = store.customIconKeys()[entityId]
             val ownTile = store.customTilePresets()[entityId]
-            val ownBadge = store.badgeShapeOverrides()[entityId]
-            val ownCard = store.cardShapeOverrides()[entityId]
-            val custom = listOf(ownTitle, ownIcon, ownTile, ownBadge, ownCard).any { it != null }
             MenuSection("In Haven")
             MenuGroup {
                 MenuRow(
-                    "ent-card", ExpressiveKind.SUNNY, Icons.Filled.Tune, "Title, icon and color",
-                    listOfNotNull(ownTitle?.let { "\"$it\"" }, ownIcon?.let { "own icon" }, ownTile?.let { "own color" }).joinToString(" · ").ifEmpty { "As its type" },
+                    "ent-card", ExpressiveKind.SUNNY, Icons.Filled.Tune, "Tile",
+                    listOfNotNull(ownTitle?.let { "\"$it\"" }, ownIcon?.let { "own icon" }, ownTile?.let { "own color" }).joinToString(" · ")
+                        .ifEmpty { "Name, icon, color and whether it shows on Home" },
                     onClick = { vm.openCardSettings(entityId) }, flat = true,
-                )
-                MenuDivider()
-                MenuRow("ent-badge", ExpressiveKind.SUNNY, Icons.Filled.Tune, "Badge shape", shapeLabel(ownBadge) ?: "As its type", onClick = { vm.openShapePicker(entityId, false) }, flat = true)
-                MenuDivider()
-                MenuRow("ent-cardshape", ExpressiveKind.SUNNY, Icons.Filled.Tune, "Card shape", shapeLabel(ownCard) ?: "As its type", onClick = { vm.openShapePicker(entityId, true) }, flat = true)
-                MenuDivider()
-                MenuRow(
-                    "ent-type", ExpressiveKind.SUNNY, Icons.Filled.Tune, "$typeLabel style",
-                    if (custom) "This one differs from its type. Tap to make it match." else "This one follows the style for $typeLabel",
-                    onClick = if (custom) {
-                        {
-                            store.setCustomTitle(entityId, null)
-                            store.setCustomIconKey(entityId, null)
-                            store.setCustomTilePreset(entityId, null)
-                            store.setBadgeShapeOverride(entityId, null)
-                            store.setCardShapeOverride(entityId, null)
-                            vm.bumpCardCustom()
-                            vm.bumpShapePrefs()
-                            status.report(null, "Now follows the style for $typeLabel")
-                        }
-                    } else {
-                        { navigate(Screen.SettingsPage(SettingsRoute.style(domain))) }
-                    },
-                    flat = true,
                 )
             }
         }

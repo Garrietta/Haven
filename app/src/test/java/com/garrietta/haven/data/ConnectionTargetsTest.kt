@@ -3,7 +3,6 @@ package com.garrietta.haven.data
 import androidx.compose.ui.geometry.Rect
 import com.garrietta.haven.Screen
 import com.garrietta.haven.ui.components.NavItem
-import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.selectedNavIndex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -109,16 +108,4 @@ class ConnectionTargetsTest {
         assertFalse(shouldAutoPinNewTab(3))
     }
 
-    // Item 9 — the active index is recomputed from the CURRENT bar
-    // list, never carried as a stored index: after a pinned tab is
-    // inserted, Settings resolves to its new index, not the stale one.
-    @Test fun selectedNavIndex_recomputesAfterTabListChanges() {
-        val before: List<NavItem> = pillBarItems(true, true, emptyList())
-        assertEquals(3, selectedNavIndex(Screen.Settings, before))
-        val climate = UserTab("tab_1", "climate", emptyList(), pinned = true)
-        val after: List<NavItem> = pillBarItems(true, true, listOf(climate))
-        assertEquals(4, selectedNavIndex(Screen.Settings, after))
-        assertEquals(3, selectedNavIndex(Screen.UserTab("tab_1"), after))
-        assertNull(selectedNavIndex(Screen.UserTab("tab_missing"), after))
-    }
 }

@@ -8,7 +8,6 @@ import com.garrietta.haven.ui.components.NavItem
 import com.garrietta.haven.ui.components.badgeColors
 import com.garrietta.haven.ui.components.cardTapRoute
 import com.garrietta.haven.ui.components.navActiveScreen
-import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.railIndicatorTop
 import com.garrietta.haven.ui.components.selectedNavIndex
 import com.garrietta.haven.ui.components.tileBadgePair
@@ -117,20 +116,6 @@ class Round17LogicTest {
         assertEquals(116, railIndicatorTop(2).value.toInt())
     }
 
-    @Test fun navActiveScreen_subScreensHighlightSettings() {
-        assertEquals(Screen.Settings, navActiveScreen(Screen.HomeEditor))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.SettingsPage("areas/areas")))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.Dashboards))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.Areas))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.Search))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.UserTabs))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.AutomationBuilder))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.SceneBuilder))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.ScriptBuilder))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.HelperBuilder))
-        assertEquals(Screen.Settings, navActiveScreen(Screen.UpdatesPanel))
-    }
-
     @Test fun navActiveScreen_browseDestinationsKeepNoSelection() {
         assertEquals(Screen.DashboardEdit, navActiveScreen(Screen.DashboardEdit))
         assertEquals(Screen.AreaDetail("area_1"), navActiveScreen(Screen.AreaDetail("area_1")))
@@ -138,12 +123,6 @@ class Round17LogicTest {
             Screen.CameraClips("camera.front_door_live_view"),
             navActiveScreen(Screen.CameraClips("camera.front_door_live_view")),
         )
-    }
-
-    @Test fun selectedNavIndex_todayIsAlwaysZero() {
-        val items: List<NavItem> = pillBarItems(true, true, emptyList())
-        assertEquals(0, selectedNavIndex(Screen.Today, items))
-        assertEquals(0, selectedNavIndex(navActiveScreen(Screen.Today), items))
     }
 
     // Item 4 — null subtitles and grammar.

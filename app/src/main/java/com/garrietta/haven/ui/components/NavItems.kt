@@ -103,37 +103,13 @@ data class RoomBarItem(
     val iconKey: String?,
 )
 
-fun pillBarItems(
-    showScenes: Boolean = true,
-    showEnergy: Boolean = true,
-    pinnedTabs: List<UserTab> = emptyList(),
-    roomTabs: List<RoomBarItem> = emptyList(),
-    showSecurity: Boolean = false,
-    showClimate: Boolean = false,
-): List<NavItem> {
-    val items = mutableListOf(
-        NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home),
-    )
-    // Security sits beside Home: the two answer "is the house all right".
-    if (showSecurity) items += NavItem(Screen.Security, "Security", Icons.Filled.Security, Icons.Outlined.Security)
-    // Climate beside it: how the house feels.
-    if (showClimate) items += NavItem(Screen.Climate, "Climate", Icons.Filled.Thermostat, Icons.Outlined.Thermostat)
-    if (showScenes) items += NavItem(Screen.Scenes, "Scenes", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
-    if (showEnergy) items += NavItem(Screen.Energy, "Energy", Icons.Filled.Bolt, Icons.Outlined.Bolt)
-    val extras = mutableListOf<NavItem>()
-    for (tab in pinnedTabs) {
-        val (icon, outlined) = tabIcons(tab)
-        extras += NavItem(Screen.UserTab(tab.id), tab.title, icon, outlined)
-    }
-    for (room in roomTabs) {
-        val (icon, outlined) = room.iconKey?.let { tabIconPairForKey(it) }
-            ?: (Icons.Filled.GridView to Icons.Outlined.GridView)
-        extras += NavItem(Screen.RoomTab(room.areaId), room.title, icon, outlined)
-    }
-    items += extras.take(barExtraSlots(showSecurity, showScenes, showEnergy, showClimate))
-    items += NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
-    return items
-}
+/** The bar, the same on every phone and in every posture: Home, Security, Climate, Settings. */
+fun barItems(): List<NavItem> = listOf(
+    NavItem(Screen.Today, "Home", Icons.Filled.Home, Icons.Outlined.Home),
+    NavItem(Screen.Security, "Security", Icons.Filled.Security, Icons.Outlined.Security),
+    NavItem(Screen.Climate, "Climate", Icons.Filled.Thermostat, Icons.Outlined.Thermostat),
+    NavItem(Screen.Settings, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
+)
 
 /**
  * Feedback round 15, item 4: the rail/bar active screen for a
@@ -151,11 +127,7 @@ fun pillBarItems(
  * maps to itself.
  */
 fun navActiveScreen(current: Screen): Screen = when (current) {
-    Screen.HomeEditor,
     Screen.Dashboards,
-    Screen.Areas,
-    Screen.Search,
-    Screen.UserTabs,
     Screen.AutomationBuilder,
     Screen.SceneBuilder,
     Screen.ScriptBuilder,

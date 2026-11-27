@@ -14,7 +14,11 @@ import com.garrietta.haven.ui.theme.StateFamily
  * whatever is named for the greenhouse, the sprinklers or the garden is
  * the Greenhouse, wherever it plugs in.
  *
- * Only active, useful devices are tiles. A leftover is left out: an
+ * Only active, useful devices are tiles, and only things that belong to a
+ * device: a helper made in Home Assistant (an input boolean a dashboard
+ * theme left behind, a template sensor) is not a device, and neither is
+ * an entry the registry marks as a service (an integration, an add-on).
+ * A leftover is left out too: an
  * entity Home Assistant restored from a setup that no longer loads, or
  * one that has not answered for a week ([STALE_DAYS]); a TV that is
  * merely switched off for the evening stays. A device's settings (a
@@ -50,8 +54,8 @@ private val GROUP_ORDER = listOf(GROUP_CLIMATE, GROUP_LIGHTS, GROUP_DOORS, GROUP
 /** A device that has not answered for this many days is a leftover. */
 const val STALE_DAYS = 7L
 
-/** What a device-registry entry says about a device: its name and model. */
-data class DeviceFacts(val name: String?, val model: String?)
+/** What a device-registry entry says about a device: its name, its model, and whether it is a service rather than hardware. */
+data class DeviceFacts(val name: String?, val model: String?, val service: Boolean = false)
 
 /** Domains a person controls from a tile. */
 private val CONTROL_DOMAINS = setOf(
@@ -111,7 +115,7 @@ fun deviceGroup(entity: HaEntity, deviceName: String? = null): String? {
  * [entityDevices] is each entity's device, [devices] what the registry
  * says about each device, and [auxiliary] the entities Home Assistant
  * marks as settings, diagnostics or hidden. [nowMillis] dates leftovers.
- * [shownOnHome] decides lights the owner has taken off or put back.
+ * [shownOnHome] decides tiles the owner has taken off Home or put back.
  */
 fun homeGroups(
     states: Map<String, HaEntity>,
@@ -119,7 +123,7 @@ fun homeGroups(
     devices: Map<String, DeviceFacts>,
     auxiliary: Set<String>,
     nowMillis: Long,
-    shownOnHome: (HaEntity) -> Boolean = { !isIndicatorLight(it) || it.domain != "light" },
+    shownOnHome: (HaEntity) -> Boolean = { isShownOnHome(it, emptyMap()) },
 ): List<HomePlace> {
     // A physical device can be in the registry twice (a TV added by two
     // integrations): the same name and model are taken to be one device.
@@ -131,14 +135,22 @@ fun homeGroups(
         return if (!name.isNullOrEmpty() && !model.isNullOrEmpty()) "$name|$model" else deviceId
     }
 
-    val live = states.values.filterNot { isLeftover(it, nowMillis) }
+    // Until the registry has arrived nothing can be said about devices,
+    // so everything stays; once it has, only what belongs to hardware does.
+    val registryKnown = entityDevices.isNotEmpty()
+    fun onDevice(entityId: String): Boolean {
+        if (!registryKnown) return true
+        val deviceId = entityDevices[entityId] ?: return false
+        return devices[deviceId]?.service != true
+    }
+    val live = states.values.filter { !isLeftover(it, nowMillis) && onDevice(it.entityId) }
     val byDevice = live.groupBy { deviceKey(it.entityId) }
     fun deviceHas(key: String?, domains: Set<String>) = key != null && byDevice[key].orEmpty().any { it.domain in domains }
 
     val candidates = live.filter { e ->
         e.domain in CONTROL_DOMAINS &&
             e.entityId !in auxiliary &&
-            (e.domain != "light" || shownOnHome(e)) &&
+            shownOnHome(e) &&
             !isDetectionSwitch(e)
     }.filter { e ->
         val key = deviceKey(e.entityId)
@@ -265,8 +277,31 @@ fun tileActive(entity: HaEntity): Boolean = entity.known() && when (entity.domai
     else -> false
 }
 
+/** Words that name a part of a device rather than the device itself. */
+private val PART_WORDS = Regex(
+    "^(socket|switch|plug|outlet|power|relay|light|main|channel|live|live view|live stream|stream|hd stream|sd stream|snapshot|camera)( \\d+)?( \\(.*\\))?$",
+    RegexOption.IGNORE_CASE,
+)
+
+/**
+ * The name a device goes by in Haven. Home Assistant names an entity
+ * after its device and then the part: "Smart Garage Door Opener Garage
+ * Door", "Outdoor camera HD Stream (Direct)", "Standing lamp Socket". The
+ * part alone is the name when it says what the thing is ("Garage Door");
+ * the device's name is when the part is only a socket, a stream or a
+ * channel ("Outdoor camera", "Standing lamp"). A name not built on its
+ * device's stays as it is.
+ */
+fun deviceDisplayName(friendlyName: String, deviceName: String?): String {
+    val device = deviceName?.trim().orEmpty()
+    if (device.isEmpty() || friendlyName.equals(device, ignoreCase = true)) return friendlyName
+    if (!friendlyName.startsWith("$device ", ignoreCase = true)) return friendlyName
+    val part = friendlyName.substring(device.length).trim()
+    return if (part.isEmpty() || PART_WORDS.matches(part)) device else part
+}
+
 /** A place's heading line: its readings and what is on in it. "68° · 53% · Lamp is on". */
-fun placeLine(place: HomePlace, states: Map<String, HaEntity>): String {
+fun placeLine(place: HomePlace, states: Map<String, HaEntity>, nameOf: (HaEntity) -> String = { it.friendlyName }): String {
     val parts = mutableListOf<String>()
     // A thermostat's tile already shows the temperature in large type.
     val hasThermostat = place.entityIds.any { states[it]?.domain == "climate" }
@@ -278,7 +313,7 @@ fun placeLine(place: HomePlace, states: Map<String, HaEntity>): String {
     val on = place.entityIds.mapNotNull(states::get).filter { tileActive(it) && it.domain != "climate" }
     when (on.size) {
         0 -> {}
-        1 -> parts += "${on[0].friendlyName} is ${activeWord(on[0])}"
+        1 -> parts += "${shortName(nameOf(on[0]), place.name)} is ${activeWord(on[0])}"
         else -> parts += "${on.size} on"
     }
     return parts.joinToString(" · ")
@@ -309,7 +344,12 @@ data class StatusCard(
  * fixed order, saying how it is. A card is colored only when something
  * wants attention or is running; at rest it is quiet.
  */
-fun homeStatus(allStates: Map<String, HaEntity>, places: List<HomePlace>, nowMillis: Long): List<StatusCard> {
+fun homeStatus(
+    allStates: Map<String, HaEntity>,
+    places: List<HomePlace>,
+    nowMillis: Long,
+    nameOf: (HaEntity) -> String = { it.friendlyName },
+): List<StatusCard> {
     val states = allStates.filterValues { !isLeftover(it, nowMillis) }
     val onTiles = places.flatMap { it.entityIds }.mapNotNull(states::get)
     val cards = mutableListOf<StatusCard>()
@@ -334,7 +374,7 @@ fun homeStatus(allStates: Map<String, HaEntity>, places: List<HomePlace>, nowMil
     if (alarm != null || hasCameras || locks.isNotEmpty() || openEntrances.isNotEmpty()) {
         val (value, family) = when {
             alarm?.state == "triggered" -> "Alarm!" to StateFamily.Alert
-            openEntrances.isNotEmpty() -> (if (openEntrances.size == 1) "${openEntrances[0].friendlyName} open" else "${openEntrances.size} open") to StateFamily.Alert
+            openEntrances.isNotEmpty() -> (if (openEntrances.size == 1) entranceOpenWord(openEntrances[0]) else "${openEntrances.size} open") to StateFamily.Alert
             alarm?.state?.startsWith("armed") == true -> when (alarm.state) {
                 "armed_away" -> "Armed away"
                 "armed_night" -> "Armed night"
@@ -374,7 +414,7 @@ fun homeStatus(allStates: Map<String, HaEntity>, places: List<HomePlace>, nowMil
         val running = members.filter { tileActive(it) }
         val value = when (running.size) {
             0 -> "Resting"
-            1 -> "${shortName(running[0].friendlyName, "Greenhouse")} on"
+            1 -> "${shortName(nameOf(running[0]), "Greenhouse")} on"
             else -> "${running.size} running"
         }
         cards += StatusCard(StatusKind.Greenhouse, "Greenhouse", value, if (running.isEmpty()) StateFamily.Quiet else StateFamily.On, gh.entityIds)
@@ -388,12 +428,23 @@ fun homeStatus(allStates: Map<String, HaEntity>, places: List<HomePlace>, nowMil
         val playing = players.filter { it.state == "playing" }
         cards += StatusCard(
             StatusKind.Media, "TV & audio",
-            when { playing.size == 1 -> "${playing[0].friendlyName} playing"; playing.size > 1 -> "${playing.size} playing"; else -> "All off" },
+            when { playing.isNotEmpty() -> if (playing.size == 1) "Playing" else "${playing.size} playing"; else -> "All off" },
             if (playing.isEmpty()) StateFamily.Quiet else StateFamily.Media,
             players.map { it.entityId },
         )
     }
     return cards
+}
+
+/**
+ * A status card's value for one open entrance, short enough for the card:
+ * what kind of entrance, not its full name, which the card's sheet shows.
+ */
+private fun entranceOpenWord(e: HaEntity): String = when {
+    e.domain == "lock" -> "Unlocked"
+    e.attrString("device_class") == "garage" -> "Garage open"
+    e.attrString("device_class") == "gate" -> "Gate open"
+    else -> "Door open"
 }
 
 /** "Greenhouse Heater" in the greenhouse is the "Heater". */

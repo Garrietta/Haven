@@ -22,7 +22,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.garrietta.haven.HavenApp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
-import com.garrietta.haven.ui.screens.RoomFilter
 import com.garrietta.haven.ui.screens.SettingsPageHost
 import com.garrietta.haven.ui.screens.AppearanceControls
 import com.garrietta.haven.ui.theme.HavenTheme
@@ -168,18 +167,6 @@ class HavenScreenshotTest {
 
     @Test fun home_unfolded_dark() = shoot("home_unfolded_dark", UNFOLDED, viewModel(signedIn = true, dark = true))
 
-    @Test fun room_folded_light() {
-        val vm = viewModel(signedIn = true, dark = false)
-        vm.roomFilter = RoomFilter.Area("living_room")
-        shoot("room_folded_light", FOLDED, vm)
-    }
-
-    @Test fun room_folded_dark() {
-        val vm = viewModel(signedIn = true, dark = true)
-        vm.roomFilter = RoomFilter.Area("kitchen")
-        shoot("room_folded_dark", FOLDED, vm)
-    }
-
     /** The Lights card opens a sheet of every light, each a tile. */
     @Test fun lights_sheet_folded_light() =
         shoot("lights_sheet_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapCard("Lights") }
@@ -196,35 +183,27 @@ class HavenScreenshotTest {
     @Test fun settings_unfolded_light() =
         shoot("settings_unfolded_light", UNFOLDED, viewModel(signedIn = true, dark = false)) { tapTab("Settings") }
 
-    @Test fun scenes_folded_light() =
-        shoot("scenes_folded_light", FOLDED, viewModel(signedIn = true, dark = false)) { tapTab("Scenes") }
 
-    @Test fun energy_folded_dark() =
-        shoot("energy_folded_dark", FOLDED, viewModel(signedIn = true, dark = true)) { tapTab("Energy") }
 
     @Test fun light_popup_folded_light() {
         val vm = viewModel(signedIn = true, dark = false)
-        vm.roomFilter = RoomFilter.Area("living_room")
         shoot("light_popup_folded_light", FOLDED, vm) { openTile("Floor Lamp") }
     }
 
     @Test fun light_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
-        vm.roomFilter = RoomFilter.Area("living_room")
         shoot("light_popup_folded_dark", FOLDED, vm) { openTile("Floor Lamp") }
     }
 
     /** A switch's pop-up: the power slab, empty while it is off. */
     @Test fun switch_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
-        vm.roomFilter = RoomFilter.Area("kitchen")
         shoot("switch_popup_folded_dark", FOLDED, vm) { openTile("Coffee Maker") }
     }
 
     /** A fan's pop-up: the slab filled to its speed. */
     @Test fun fan_popup_folded_light() {
         val vm = viewModel(signedIn = true, dark = false)
-        vm.roomFilter = RoomFilter.Area("bedroom")
         shoot("fan_popup_folded_light", FOLDED, vm) { openTile("Ceiling Fan") }
     }
 
@@ -242,13 +221,11 @@ class HavenScreenshotTest {
 
     @Test fun tile_options_folded_light() {
         val vm = viewModel(signedIn = true, dark = false)
-        vm.roomFilter = RoomFilter.Area("kitchen")
         shoot("tile_options_folded_light", FOLDED, vm) { holdTile("Coffee Maker") }
     }
 
     @Test fun tile_options_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
-        vm.roomFilter = RoomFilter.Area("bedroom")
         shoot("tile_options_folded_dark", FOLDED, vm) { holdTile("Ceiling Fan") }
     }
 
@@ -259,14 +236,12 @@ class HavenScreenshotTest {
      */
     @Test fun tile_options_icons_light() {
         val vm = viewModel(signedIn = true, dark = false)
-        vm.roomFilter = RoomFilter.Area("kitchen")
         shoot("tile_options_icons_light", "w384dp-h2700dp-xhdpi", vm) { holdTile("Coffee Maker") }
     }
 
     /** A lock's pop-up: full and secure while locked. */
     @Test fun lock_popup_folded_light() {
         val vm = viewModel(signedIn = true, dark = false)
-        vm.roomFilter = RoomFilter.Area("garage")
         shoot("lock_popup_folded_light", FOLDED, vm) { tapText("Side Door") }
     }
 
@@ -305,37 +280,23 @@ class HavenScreenshotTest {
         compose.mainClock.advanceTimeBy(SETTLE_MS)
     }
 
-    private fun withMediaTab(vm: HavenViewModel): HavenViewModel {
-        val id = vm.addTab("Media")
-        vm.addCardToTab(id, "type: tile\nentity: media_player.living_room_tv")
-        vm.addCardToTab(id, "type: tile\nentity: light.living_room_lamp")
-        vm.addCardToTab(id, "type: tile\nentity: climate.thermostat")
-        return vm
-    }
-
     /** Rooms and tabs as rows with grips, one open. */
     @Test fun areas_folded_light() =
         shootSettingsPage("areas_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "areas/areas") {
             tapText("Kitchen")
         }
 
-    @Test fun tabs_folded_light() =
-        shootSettingsPage("tabs_folded_light", withMediaTab(viewModel(signedIn = true, dark = false)), dark = false, route = "tabs") {
-            tapText("Media")
-        }
-
     /** Settings' hub: Home Assistant's sections, then Haven's. */
     @Test fun settings_hub_folded_dark() =
         shoot("settings_hub_folded_dark", FOLDED, viewModel(signedIn = true, dark = true)) { tapTab("Settings") }
 
-    @Test fun device_styles_folded_light() =
-        shootSettingsPage("device_styles_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "styles")
-
-    @Test fun device_style_light_folded_dark() =
-        shootSettingsPage("device_style_light_folded_dark", viewModel(signedIn = true, dark = true), dark = true, route = "style/light")
-
-    @Test fun home_navigation_folded_light() =
-        shootSettingsPage("home_navigation_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "home")
+    /** Tiles taken off Home, each with Show to bring it back. */
+    @Test fun hidden_from_home_folded_light() {
+        val vm = viewModel(signedIn = true, dark = false)
+        vm.settingsStore.setHomeLightOverride("switch.coffee_maker", false)
+        vm.settingsStore.setHomeLightOverride("light.kitchen_pendants", false)
+        shootSettingsPage("hidden_from_home_folded_light", vm, dark = false, route = "home/hidden")
+    }
 
     @Test fun app_updates_folded_light() =
         shootSettingsPage("app_updates_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "updates")
@@ -349,27 +310,6 @@ class HavenScreenshotTest {
     /** An entity's page: Home Assistant's settings (unreachable here) and its look in Haven. */
     @Test fun entity_settings_folded_light() =
         shootSettingsPage("entity_settings_folded_light", viewModel(signedIn = true, dark = false), dark = false, route = "entity/light.living_room_lamp")
-
-    /**
-     * A room dragged by its grip: captured mid-drag, lifted over the rows
-     * that have stepped aside, then dropped, and the new order is stored.
-     */
-    @Test fun areas_drag_folded_dark() {
-        val vm = viewModel(signedIn = true, dark = true)
-        shootSettingsPage("areas_drag_folded_dark", vm, dark = true, route = "areas/areas") {
-            val grip = compose.onNodeWithContentDescription("Reorder Living Room", useUnmergedTree = true)
-            grip.performTouchInput { down(center) }
-            frame()
-            // Down past Kitchen and Bedroom, a frame at a time, as a finger would.
-            repeat(40) {
-                grip.performTouchInput { moveBy(Offset(0f, 9f)) }
-                frame()
-            }
-        }
-        compose.onNodeWithContentDescription("Reorder Living Room", useUnmergedTree = true).performTouchInput { up() }
-        settle()
-        assertEquals(listOf("kitchen", "bedroom", "living_room", "garage"), vm.settingsStore.roomOrder())
-    }
 
     private fun withSecurity(vm: HavenViewModel, open: Boolean = false): HavenViewModel {
         val extra = if (open) {
@@ -460,7 +400,6 @@ class HavenScreenshotTest {
 
     @Test fun thermostat_popup_folded_dark() {
         val vm = viewModel(signedIn = true, dark = true)
-        vm.roomFilter = RoomFilter.Area("living_room")
         shoot("thermostat_popup_folded_dark", FOLDED, vm) { tapText("Thermostat") }
     }
 

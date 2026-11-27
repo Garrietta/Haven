@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SpaceDashboard
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.MaterialTheme
@@ -74,9 +75,7 @@ object SettingsRoute {
     const val GENERAL = "system/general"
     const val ABOUT = "about"
     const val APPEARANCE = "appearance"
-    const val STYLES = "styles"
-    const val HOME = "home"
-    const val TABS = "tabs"
+    const val HIDDEN = "home/hidden"
     const val NOTIFICATIONS = "notifications"
     const val CONNECTION = "connection"
     const val UPDATES = "updates"
@@ -86,7 +85,6 @@ object SettingsRoute {
     fun areas(tab: String) = "$AREAS/$tab"
     fun device(id: String) = "device/$id"
     fun entity(id: String) = "entity/$id"
-    fun style(domain: String) = "style/$domain"
 }
 
 /** The app's own appearance choices, which HavenApp owns and passes down. */
@@ -153,11 +151,9 @@ fun SettingsScreen(
     val haven: @Composable () -> Unit = {
         MenuSection("Haven")
         MenuGroup {
-            HubRow("app-appearance", Icons.Filled.Palette, "Appearance", "Light or dark, color, motion and badges") { go(SettingsRoute.APPEARANCE) }
+            HubRow("app-appearance", Icons.Filled.Palette, "Appearance", "Light or dark, color style, motion") { go(SettingsRoute.APPEARANCE) }
             MenuDivider()
-            HubRow("app-styles", Icons.Filled.Category, "Device styles", "Color and shapes for each type of device") { go(SettingsRoute.STYLES) }
-            MenuDivider()
-            HubRow("app-home", Icons.Filled.SpaceDashboard, "Home & navigation", "Home page, the bar, and your tabs") { go(SettingsRoute.HOME) }
+            HubRow("app-hidden", Icons.Filled.VisibilityOff, "Hidden from Home", "Tiles you took off Home") { go(SettingsRoute.HIDDEN) }
             MenuDivider()
             HubRow("app-notifications", Icons.Filled.Notifications, "Notifications", "Alerts Haven sends to this phone") { go(SettingsRoute.NOTIFICATIONS) }
             MenuDivider()
@@ -194,13 +190,15 @@ fun SettingsScreen(
             Spacer(Modifier.height(4.dp))
             if (LocalWideLayout.current) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column(Modifier.weight(1f)) { homeAssistant() }
                     Column(Modifier.weight(1f)) { haven() }
+                    Column(Modifier.weight(1f)) { homeAssistant() }
                 }
             } else {
-                homeAssistant()
-                Spacer(Modifier.height(8.dp))
+                // Haven's own settings first: they are what is changed
+                // most; Home Assistant's administration is under them.
                 haven()
+                Spacer(Modifier.height(8.dp))
+                homeAssistant()
             }
         }
     }
@@ -245,10 +243,7 @@ fun SettingsPageHost(
         route == SettingsRoute.GENERAL -> GeneralPage(vm, onBack)
         route == SettingsRoute.ABOUT -> AboutPage(vm, onBack)
         route == SettingsRoute.APPEARANCE -> AppearancePage(vm, appearance, onBack)
-        route == SettingsRoute.STYLES -> DeviceStylesPage(vm, onBack, navigate)
-        head == "style" -> DeviceStylePage(vm, rest, onBack)
-        route == SettingsRoute.HOME -> HomeNavigationPage(vm, onBack, navigate)
-        route == SettingsRoute.TABS -> CustomTabsPage(vm, onBack, navigate)
+        route == SettingsRoute.HIDDEN -> HiddenFromHomePage(vm, onBack)
         route == SettingsRoute.NOTIFICATIONS -> NotificationsPage(vm, onBack)
         route == SettingsRoute.CONNECTION -> ConnectionPage(vm, appearance.onSignOut, onBack)
         route == SettingsRoute.UPDATES -> AppUpdatesPage(onBack)

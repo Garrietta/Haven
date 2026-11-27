@@ -258,3 +258,11 @@ fun isIndicatorLight(entity: HaEntity): Boolean =
  */
 fun isLightShownOnHome(entity: HaEntity, overrides: Map<String, Boolean>): Boolean =
     overrides[entity.entityId] ?: !isIndicatorLight(entity)
+
+/**
+ * Whether any tile belongs on Home: the owner's choice from the tile's
+ * options if they made one (stored in the same per-entity map the light
+ * choices always used), else everything but a device's indicator lights.
+ */
+fun isShownOnHome(entity: HaEntity, overrides: Map<String, Boolean>): Boolean =
+    overrides[entity.entityId] ?: !(entity.domain == "light" && isIndicatorLight(entity))

@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,7 +59,6 @@ import com.garrietta.haven.data.tilePresetFor
 import com.garrietta.haven.ui.components.CARD_ICON_GROUPS
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.ui.components.CARD_ICON_OPTIONS
-import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.SectionTitle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.components.cardIconForKey
@@ -71,32 +72,35 @@ import com.garrietta.haven.ui.theme.HavenChrome
 import com.garrietta.haven.ui.theme.polygonShape
 
 /**
- * A tile's options: its color, its icon, its name and its badge shape,
- * opened by pressing and holding the tile (and from the Card settings
- * row of a device's settings). A color or an icon applies the moment it
- * is tapped, so the tile behind the sheet changes as you choose; the
- * name is kept when the sheet closes. Opened from a grid that can be
- * rearranged, it also carries Arrange.
+ * A tile's options: its name, whether it shows on Home, its color and its
+ * icon. Opened by pressing and holding a tile anywhere, or from Tile at
+ * the foot of the device's popup. A color or an icon applies the moment
+ * it is tapped, so the tile behind the sheet changes as you choose; the
+ * name is kept when the sheet closes.
  *
- * Choices are stored per entity in SettingsStore and apply everywhere
- * the entity appears (tiles, the room switches on Home, popups, search),
- * because every surface resolves them through the same helpers and
- * recomposes on [HavenViewModel.bumpCardCustom]. A color is an on-state
- * color: it shows while the device is on, and an off tile stays quiet.
+ * How a tile is shaped is not here: shapes and corners are fixed by kind
+ * (DESIGN.md). Choices are stored per entity in SettingsStore and apply
+ * everywhere the entity appears, because every surface resolves them
+ * through the same helpers and recomposes on
+ * [HavenViewModel.bumpCardCustom]. A color is an on-state color: it shows
+ * while the device is on, and an off tile stays quiet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CardSettingsSheet(vm: HavenViewModel, entityId: String, onArrange: (() -> Unit)? = null, onDismiss: () -> Unit) {
+fun CardSettingsSheet(vm: HavenViewModel, entityId: String, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val entity = vm.states.value[entityId]
     val store = vm.settingsStore
     val custom = rememberCardCustom(vm)
+    val nameOf = rememberEntityNamer(vm)
     val iconKey = customIconKeyFor(custom.iconKeys, entityId, CARD_ICON_KEYS)
     val presetKey = custom.tilePresets[entityId]
-    var title by remember { mutableStateOf(store.customTitles()[entityId] ?: entity?.friendlyName ?: "") }
+    val automaticName = entity?.let { e -> custom.titles[entityId]?.let { e.friendlyName } ?: nameOf(e) }.orEmpty()
+    var title by remember { mutableStateOf(store.customTitles()[entityId] ?: automaticName) }
+    var shownOnHome by remember { mutableStateOf(entity?.let { com.garrietta.haven.data.isShownOnHome(it, store.homeLightOverrides()) } ?: true) }
     val keepTitle = {
         val trimmed = title.trim()
-        val stored = if (trimmed.isEmpty() || trimmed == entity?.friendlyName) null else trimmed
+        val stored = if (trimmed.isEmpty() || trimmed == automaticName) null else trimmed
         if (stored != store.customTitles()[entityId]) {
             store.setCustomTitle(entityId, stored)
             vm.bumpCardCustom()
@@ -121,10 +125,40 @@ fun CardSettingsSheet(vm: HavenViewModel, entityId: String, onArrange: (() -> Un
                 .padding(start = 20.dp, end = 20.dp, bottom = 32.dp),
         ) {
             if (entity != null) {
-                SheetHeader(entity, title.ifBlank { entity.friendlyName }, iconKey, presetKey, isDark)
+                SheetHeader(entity, title.ifBlank { automaticName }, iconKey, presetKey, isDark)
                 Spacer(Modifier.height(24.dp))
             }
 
+            SectionTitle("Name")
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(automaticName) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { keepTitle() }),
+            )
+
+            Spacer(Modifier.height(16.dp))
+            com.garrietta.haven.ui.components.MenuGroup {
+                com.garrietta.haven.ui.components.MenuRow(
+                    "tile-home", com.garrietta.haven.ui.theme.ExpressiveKind.SUNNY, Icons.Filled.Home, "Show on Home",
+                    if (shownOnHome) "Shown with the others of its kind" else "Hidden from Home. Settings, Hidden from Home brings it back.",
+                    onClick = null,
+                    trailing = {
+                        androidx.compose.material3.Switch(checked = shownOnHome, onCheckedChange = { on ->
+                            shownOnHome = on
+                            store.setHomeLightOverride(entityId, on)
+                            vm.bumpCardCustom()
+                        })
+                    },
+                    flat = true,
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
             SectionTitle("Color")
             Text(
                 "Shown while it is on.",
@@ -172,49 +206,7 @@ fun CardSettingsSheet(vm: HavenViewModel, entityId: String, onArrange: (() -> Un
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
-            SectionTitle("Name")
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = title,
-                onValueChange = { title = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(entity?.friendlyName ?: "") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { keepTitle() }),
-            )
-
-            Spacer(Modifier.height(16.dp))
-            SectionTitle("Badge shape")
-            Spacer(Modifier.height(8.dp))
-            PressablePillButton(
-                onClick = { vm.openShapePicker(entityId, false) },
-                height = 52.dp,
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ) {
-                Text(
-                    shapeLabel(store.badgeShapeOverrides()[entityId] ?: store.globalBadgeShape) ?: "Domain default",
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-
             Spacer(Modifier.height(24.dp))
-            if (onArrange != null) {
-                PressablePillButton(
-                    onClick = {
-                        close()
-                        onArrange()
-                    },
-                    height = 52.dp,
-                    modifier = Modifier.fillMaxWidth(),
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                ) { Text("Arrange tiles", style = MaterialTheme.typography.labelLarge) }
-                Spacer(Modifier.height(12.dp))
-            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 PressablePillButton(
                     onClick = {
@@ -260,8 +252,7 @@ private fun SheetHeader(entity: HaEntity, name: String, iconKey: String?, preset
     val preset = presetKey?.let { key -> TILE_PRESETS.firstOrNull { it.key == key } }
     val (badgeBg, badgeGlyph) = preset?.let { presetBadgeColors(it, isDark) }
         ?: tileBadgePair(emptyMap(), emptyMap(), entity, isDark, scheme, accentFor(entity.entityId))
-    val shape = LocalShapePrefs.current.badgeShapeFor(entity.entityId, entity.domain)
-        ?: polygonShape(shapeForDomain(entity.domain))
+    val shape = polygonShape(shapeForDomain(entity.domain))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.size(64.dp).background(badgeBg, shape),
@@ -272,7 +263,7 @@ private fun SheetHeader(entity: HaEntity, name: String, iconKey: String?, preset
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.titleLarge, color = scheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(entity.entityId, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(com.garrietta.haven.data.tileState(entity), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -379,5 +370,28 @@ fun rememberCardCustom(vm: HavenViewModel): CardCustomSnapshot {
     val store = vm.settingsStore
     return remember(version) {
         CardCustomSnapshot(store.customTitles(), store.customIconKeys(), store.customTilePresets(), store.domainTilePresets())
+    }
+}
+
+/**
+ * The name a device goes by everywhere in Haven: the owner's own name for
+ * its tile if there is one, else the name built from its device
+ * ([deviceDisplayName]: "Garage Door", not "Smart Garage Door Opener
+ * Garage Door"), with a camera's feed words taken off. Tiles, sheets,
+ * popups, status cards and the Climate tab all call this, so a device
+ * has one name on every screen.
+ */
+@Composable
+fun rememberEntityNamer(vm: HavenViewModel): (com.garrietta.haven.data.HaEntity) -> String {
+    val custom = rememberCardCustom(vm)
+    val entityDevices by vm.entityDevices.collectAsState()
+    val deviceInfo by vm.deviceInfo.collectAsState()
+    return remember(custom, entityDevices, deviceInfo) {
+        { entity ->
+            custom.titles[entity.entityId]?.trim()?.takeIf { it.isNotEmpty() } ?: run {
+                val base = if (entity.domain == "camera") com.garrietta.haven.data.displayCameraName(entity) else entity.friendlyName
+                com.garrietta.haven.data.deviceDisplayName(base, deviceInfo[entityDevices[entity.entityId]]?.name)
+            }
+        }
     }
 }

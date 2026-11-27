@@ -1,5 +1,4 @@
 package com.garrietta.haven
-import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.nonTabSlideDirection
 import com.garrietta.haven.ui.components.shouldApplyFoldedNavClearance
 import com.garrietta.haven.ui.components.LocalSuppressTraveler
@@ -23,7 +22,6 @@ import com.garrietta.haven.ui.components.dragRangeForCenteredPopup
 import com.garrietta.haven.ui.components.dragRangeForPanelOverlay
 import com.garrietta.haven.ui.components.popupDragDetector
 import com.garrietta.haven.ui.components.shouldDismissDrag
-import com.garrietta.haven.ui.components.ShapePrefs
 import com.garrietta.haven.ui.components.LocalModalActive
 import com.garrietta.haven.ui.components.LocalPopupDragHandle
 import com.garrietta.haven.ui.components.LocalPopupDragRangePx
@@ -47,7 +45,7 @@ import com.garrietta.haven.ui.components.navActiveScreen
 import com.garrietta.haven.ui.components.shouldNavigateOnTabTap
 import com.garrietta.haven.ui.components.navPillGeometry
 import com.garrietta.haven.ui.components.railIndicatorTop
-import com.garrietta.haven.ui.components.pillBarItems
+import com.garrietta.haven.ui.components.barItems
 import com.garrietta.haven.ui.components.tabSlideDirection
 import com.garrietta.haven.ui.components.tabSlideOffsets
 import com.garrietta.haven.ui.components.railSelectedIndexWithFallback
@@ -267,40 +265,29 @@ import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.dialogHeaderState
 import com.garrietta.haven.ui.controls.domainIcon
 import com.garrietta.haven.ui.controls.formatTemp
-import com.garrietta.haven.ui.screens.AreasScreen
 import com.garrietta.haven.ui.screens.AreaDetailScreen
 import com.garrietta.haven.ui.screens.AutomationBuilderScreen
 import com.garrietta.haven.ui.screens.CameraClipsScreen
 import com.garrietta.haven.ui.screens.DashboardEditScreen
 import com.garrietta.haven.ui.screens.DashboardsScreen
-import com.garrietta.haven.ui.screens.EnergyScreen
-import com.garrietta.haven.ui.screens.ScenesScreen
 import com.garrietta.haven.ui.screens.SecurityScreen
 import com.garrietta.haven.ui.screens.ClimateScreen
 import com.garrietta.haven.ui.screens.DetailPageScreen
 import com.garrietta.haven.ui.screens.HelperBuilderScreen
-import com.garrietta.haven.ui.screens.HomeEditorScreen
-import com.garrietta.haven.ui.screens.HomeStatusPanelScreen
 import com.garrietta.haven.ui.screens.LoginScreen
 import com.garrietta.haven.ui.screens.SceneBuilderScreen
 import com.garrietta.haven.ui.screens.ScriptBuilderScreen
-import com.garrietta.haven.ui.screens.SearchScreen
-import com.garrietta.haven.ui.screens.RoomFilter
 import com.garrietta.haven.ui.screens.AppearanceControls
 import com.garrietta.haven.ui.screens.SettingsPageHost
 import com.garrietta.haven.ui.screens.SettingsScreen
-import com.garrietta.haven.ui.screens.ShapePickerDialog
 import com.garrietta.haven.ui.screens.CardSettingsSheet
 import com.garrietta.haven.ui.screens.rememberCardCustom
-import com.garrietta.haven.ui.screens.UserTabsScreen
 import com.garrietta.haven.ui.screens.ThermostatPopout
-import com.garrietta.haven.ui.screens.TodayScreen
 import com.garrietta.haven.ui.screens.GreenhousePanelScreen
 import com.garrietta.haven.ui.screens.MediaPanelScreen
 import com.garrietta.haven.ui.screens.SecurityPanelScreen
 import com.garrietta.haven.ui.screens.UpdatesPanelScreen
 import com.garrietta.haven.ui.screens.VacuumPanelScreen
-import com.garrietta.haven.ui.screens.UserTabScreen
 import com.garrietta.haven.ui.theme.HavenTheme
 import com.garrietta.haven.ui.theme.resolveHavenIsDark
 import com.garrietta.haven.ui.theme.Palette
@@ -316,23 +303,12 @@ import com.garrietta.haven.data.FRONT_DOOR_INFO_SENSOR_ID
 import com.garrietta.haven.data.ringMqttLivePath
 import com.garrietta.haven.data.frontDoorNotLiveLine
 
-// Stage C: the navigation model (NavItem, pillBarItems, tabIcons,
-// selectedNavIndex) moved to ui/components/NavItems.kt as pure,
-// unit-testable functions — same behavior, plus hidden-tab filtering
-// and picker icon overrides. See that file for the contract.
+// The bar's items and which one is selected live in ui/components/NavItems.kt.
 
 private fun isTopLevel(screen: Screen): Boolean = when (screen) {
-    Screen.Today, Screen.Security, Screen.Climate, Screen.Scenes, Screen.Energy, Screen.Dashboards, Screen.Areas, Screen.Search, Screen.UserTabs, Screen.Settings -> true
-    is Screen.UserTab -> true
-    is Screen.RoomTab -> true
+    Screen.Today, Screen.Security, Screen.Climate, Screen.Dashboards, Screen.Settings -> true
     else -> false
 }
-
-// Stage F cleanup: the old private selectedNavIndex that lived here
-// (3-arg, userTabs-indexed) is DELETED — it was dead code left by
-// Stage C's move (both call sites already used the NavItems version),
-// and its userTabs math was wrong under hidden-tab filtering. The
-// live function is selectedNavIndex in ui/components/NavItems.kt.
 
 /** Entity id a detail screen belongs to (the shared card key it morphs from). Round 3 panels morph from their source card where one exists on Home; the updates panel has no Home card, so it uses the graceful fallback rect. */
 private fun detailEntityId(screen: Screen): String = when (screen) {
@@ -341,7 +317,6 @@ private fun detailEntityId(screen: Screen): String = when (screen) {
     is Screen.VacuumPanel -> "vacuum.t2292"
     is Screen.SecurityPanel -> "alarm_control_panel.bloomington_mode"
     is Screen.GreenhousePanel -> "automation.greenhouse_brain"
-    is Screen.RoomPanel -> com.garrietta.haven.ui.screens.roomPanelSourceId(screen.areaId)
     else -> ""
 }
 
@@ -367,9 +342,6 @@ fun HavenApp(vm: HavenViewModel) {
     // the user explicitly enables it in Settings → Appearance.
     var dynamicColor by remember { mutableStateOf(vm.settingsStore.dynamicColor) }
     val darkTheme = resolveHavenIsDark(themeMode, isSystemInDarkTheme())
-    // Read so shape-picker saves recompose the provider below from the store.
-    @Suppress("UNUSED_VARIABLE")
-    val shapePrefsVersion = vm.shapePrefsVersion
     HavenTheme(darkTheme = darkTheme, dynamicColor = dynamicColor) {
         // Status-bar/navigation-bar icon colors follow the background's
         // luminance (Koda's approach): light background -> dark icons, dark
@@ -440,7 +412,7 @@ fun HavenApp(vm: HavenViewModel) {
             is Screen.EntityDetail,
             is Screen.VacuumPanel, is Screen.MediaPanel,
             is Screen.SecurityPanel, is Screen.GreenhousePanel,
-            is Screen.UpdatesPanel, is Screen.HomeStatusPanel, is Screen.RoomPanel -> current
+            is Screen.UpdatesPanel -> current
             else -> null
         }
         val cardBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -533,17 +505,6 @@ fun HavenApp(vm: HavenViewModel) {
         ControlDeepLinkRouter(vm, current, navigate)
         val goTop: (Screen) -> Unit = {
             navDirection = 1
-            // Feedback round 19, item 3: a tab jump to Home means
-            // My Home (the old behavior fell out of TodayScreen
-            // disposal; the ViewModel-hoisted filter needs the
-            // explicit reset). A room tab jump sets that room's
-            // filter. Other tabs leave the filter alone — it only
-            // renders on Today anyway.
-            when (it) {
-                Screen.Today -> vm.roomFilter = RoomFilter.All
-                is Screen.RoomTab -> vm.roomFilter = RoomFilter.Area(it.areaId)
-                else -> {}
-            }
             morphGeneration++
             vm.pageOrigin = null
             detailAnim = null
@@ -559,7 +520,6 @@ fun HavenApp(vm: HavenViewModel) {
             arcTarget = null
             vm.closeClimatePopout()
             vm.closeCameraDialog()
-            vm.closeShapePicker()
             vm.clearAllTravelSnapshots()
             scrollVisibility.reset()
             backstack.clear()
@@ -908,7 +868,6 @@ fun HavenApp(vm: HavenViewModel) {
             arcTarget = null
             vm.closeClimatePopout()
             vm.closeCameraDialog()
-            vm.closeShapePicker()
             vm.clearAllTravelSnapshots()
             vm.signOut()
             backstack.clear()
@@ -1017,7 +976,6 @@ fun HavenApp(vm: HavenViewModel) {
         // never sees.
         val anyModalOpen = detailAnim != null || panelDetailAnim != null || popoutAnim != null || vm.cameraDialogId != null
         LaunchedEffect(anyModalOpen) { scrollVisibility.reset() }
-        LaunchedEffect(vm.roomFilter) { scrollVisibility.reset() }
         // Camera overlay transitions share the same language:
         // view rises as a bottom sheet out of the tapped camera tile and
         // sinks back on close.
@@ -1320,20 +1278,6 @@ fun HavenApp(vm: HavenViewModel) {
                 // now the shared rootMorphProgress above (the
                 // panel detail's progress joins the when-branch).
                 LocalMorphProgress provides rootMorphProgress,
-                // Shape picker state (2026-10-30): badges and card
-                // outlines resolve through this; re-read from the
-                // store whenever a picker save bumps the version.
-                LocalShapePrefs provides ShapePrefs(
-                    vm.settingsStore.globalBadgeShape,
-                    vm.settingsStore.globalCardShape,
-                    vm.settingsStore.badgeShapeOverrides(),
-                    vm.settingsStore.cardShapeOverrides(),
-                    // Feedback round 15, item 5: domain defaults
-                    // resolve between per-entity overrides and
-                    // the globals (see ShapePrefs).
-                    vm.settingsStore.domainBadgeShapes(),
-                    vm.settingsStore.domainCardShapes(),
-                ),
                 // Round 6 source-card rule (Google Home container
                 // transform, reconciled curves — see MorphOverlay):
                 // the card NEVER hides or fades, on enter or on
@@ -1438,7 +1382,7 @@ fun HavenApp(vm: HavenViewModel) {
                     // the user's bar (hideable Scenes/Energy, up to
                     // two pinned tabs); Settings submenus resolve
                     // to Settings for the active highlight below.
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate)
+                    val barItems = barItems()
                     // Stage E §9: the Home dot lights only for a real
                     // important alert (unlocked lock, open door/window,
                     // triggered alarm) — never a count, never for
@@ -1619,7 +1563,7 @@ fun HavenApp(vm: HavenViewModel) {
                     is Screen.EntityDetail,
                     is Screen.VacuumPanel, is Screen.MediaPanel,
                     is Screen.SecurityPanel, is Screen.GreenhousePanel,
-                    is Screen.UpdatesPanel, is Screen.HomeStatusPanel, is Screen.RoomPanel ->
+                    is Screen.UpdatesPanel ->
                         backstack.getOrNull(backstack.lastIndex - 1) ?: Screen.Today
                     else -> current
                 }
@@ -1680,7 +1624,7 @@ fun HavenApp(vm: HavenViewModel) {
                         if (reduceMotionTop) {
                             EnterTransition.None togetherWith ExitTransition.None
                         } else {
-                            val barScreens = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate).map { it.screen }
+                            val barScreens = barItems().map { it.screen }
                             // Feedback round 17, item 6: NO fades.
                             // The old slide + fade let the outgoing
                             // and incoming pages show through each
@@ -1778,7 +1722,7 @@ fun HavenApp(vm: HavenViewModel) {
             // unmount it cleanly.
             key(LocalWideLayout.current) {
                 if (!LocalWideLayout.current && isTopLevel(current)) {
-                    val barItems = pillBarItems(vm.navShowScenes, vm.navShowEnergy, vm.userTabs.filter { it.pinned }, vm.roomBarItemsSnapshot(), showSecurity = vm.navShowSecurity, showClimate = vm.navShowClimate)
+                    val barItems = barItems()
                     val selectedIndex = selectedNavIndex(navActiveScreen(current), barItems)
                     // Stage E §9: same Home dot as the rail.
                     // Collected here so only the bar recomposes on
@@ -1856,8 +1800,7 @@ fun HavenApp(vm: HavenViewModel) {
                 val detailFromPanel = detailPrev is Screen.EntityDetail ||
                     detailPrev is Screen.VacuumPanel || detailPrev is Screen.MediaPanel ||
                     detailPrev is Screen.SecurityPanel || detailPrev is Screen.GreenhousePanel ||
-                    detailPrev is Screen.UpdatesPanel || detailPrev is Screen.HomeStatusPanel ||
-                    detailPrev is Screen.RoomPanel
+                    detailPrev is Screen.UpdatesPanel
                 // The morph source is the rect captured at open,
                 // NOT the live map: once the base page lays out
                 // (item 4's instant base below), its cards
@@ -1878,7 +1821,7 @@ fun HavenApp(vm: HavenViewModel) {
                         onDismiss = { dismissDetail() },
                         dragHandle = detailHandle,
                         isClosing = detailExiting && !detailDrag.settling,
-                        landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        landingShape = anim.sourceShape ?: cardShapes[anim.entityId],
                         ghost = { morphGhosts[anim.entityId] },
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
@@ -1904,7 +1847,7 @@ fun HavenApp(vm: HavenViewModel) {
                     dragHandle = detailHandle,
                     heroTargetReporter = { r -> heroTarget = anim.entityId to r },
                     arcTargetReporter = { r -> arcTarget = anim.entityId to r },
-                    landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    landingShape = anim.sourceShape ?: cardShapes[anim.entityId],
                     ghost = { morphGhosts[anim.entityId] },
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides detailFromPanel) {
@@ -1949,7 +1892,7 @@ fun HavenApp(vm: HavenViewModel) {
                         onDismiss = { dismissPanelDetail() },
                         dragHandle = panelDetailHandle,
                         isClosing = panelDetailExiting && !panelDetailDrag.settling,
-                        landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                        landingShape = anim.sourceShape ?: cardShapes[anim.entityId],
                         ghost = { morphGhosts[anim.entityId] },
                     ) {
                         CompositionLocalProvider(LocalSuppressTraveler provides true) {
@@ -1965,7 +1908,7 @@ fun HavenApp(vm: HavenViewModel) {
                     sourceCardColor = anim.sourceColor ?: MaterialTheme.colorScheme.surfaceContainerHighest,
                     isClosing = panelDetailExiting && !panelDetailDrag.settling,
                     dragHandle = panelDetailHandle,
-                    landingShape = anim.sourceShape ?: cardShapes[anim.entityId] ?: LocalShapePrefs.current.cardShape(anim.entityId),
+                    landingShape = anim.sourceShape ?: cardShapes[anim.entityId],
                     ghost = { morphGhosts[anim.entityId] },
                 ) {
                     CompositionLocalProvider(LocalSuppressTraveler provides true) {
@@ -1998,7 +1941,7 @@ fun HavenApp(vm: HavenViewModel) {
                         onDismiss = { dismissPopout() },
                         dragHandle = popoutHandle,
                         isClosing = popoutExiting && !popoutDrag.settling,
-                        landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                        landingShape = anim.sourceShape ?: cardShapes[anim.id],
                         ghost = { morphGhosts[anim.id] },
                     ) {
                         ThermostatPopoutContent(
@@ -2019,7 +1962,7 @@ fun HavenApp(vm: HavenViewModel) {
                     dragHandle = popoutHandle,
                     heroTargetReporter = { r -> heroTarget = anim.id to r },
                     arcTargetReporter = { r -> arcTarget = anim.id to r },
-                    landingShape = anim.sourceShape ?: cardShapes[anim.id] ?: LocalShapePrefs.current.cardShape(anim.id),
+                    landingShape = anim.sourceShape ?: cardShapes[anim.id],
                     ghost = { morphGhosts[anim.id] },
                 ) {
                     ThermostatPopoutContent(
@@ -2066,7 +2009,7 @@ fun HavenApp(vm: HavenViewModel) {
                     scrollContent = false,
                     isClosing = cameraDialogExiting && !cameraDrag.settling,
                     dragHandle = cameraHandle,
-                    landingShape = cardShapes[camId] ?: LocalShapePrefs.current.cardShape(camId),
+                    landingShape = cardShapes[camId],
                 ) {
                     // Front Door live probe (Round 2): the Front
                     // Door panel alone gets the Live View / Event
@@ -2136,16 +2079,9 @@ fun HavenApp(vm: HavenViewModel) {
                     }
                 }
             }
-            // Shape picker dialog (2026-10-30): above every other
-            // overlay; opened from Settings (global default) or an
-            // entity sheet (per-entity override).
-            if (vm.shapePickerTarget != null) {
-                ShapePickerDialog(vm, vm.shapePickerTarget!!, onClose = { vm.closeShapePicker() })
-            }
-            // Customization round, item 2: Card settings sheet,
-            // above every other overlay like the shape picker.
+            // The tile options sheet, above every other overlay.
             if (vm.cardSettingsTarget != null) {
-                CardSettingsSheet(vm, vm.cardSettingsTarget!!, onArrange = vm.cardSettingsArrange, onDismiss = { vm.closeCardSettings() })
+                CardSettingsSheet(vm, vm.cardSettingsTarget!!, onDismiss = { vm.closeCardSettings() })
             }
             }
         }
@@ -2186,9 +2122,6 @@ private fun ScreenContent(
         // the cameras and its places, in ui/home/HavenHome.kt.
         Screen.Today -> com.garrietta.haven.ui.home.HavenHome(vm, navigate, openTab = goTop)
         Screen.Dashboards -> DashboardsScreen(vm, navigate)
-        Screen.Areas -> AreasScreen(vm, navigate)
-        Screen.Search -> SearchScreen(vm, navigate)
-        Screen.UserTabs -> UserTabsScreen(vm, navigate)
         Screen.Settings -> SettingsScreen(
             vm = vm,
             themeMode = themeMode,
@@ -2200,18 +2133,13 @@ private fun ScreenContent(
             onSignOut = onSignOut,
             navigate = navigate,
         )
-        is Screen.UserTab -> UserTabScreen(vm, screen.tabId, navigate)
         // Stage F destinations (first-class bar items, brief §4).
         Screen.Security -> SecurityScreen(vm, navigate)
         Screen.Climate -> ClimateScreen(vm, navigate)
-        Screen.Scenes -> ScenesScreen(vm)
-        Screen.Energy -> EnergyScreen(vm)
         is Screen.SettingsPage -> SettingsPageHost(
             vm, screen.route, goBack, navigate,
             AppearanceControls(themeMode, reduceMotion, onThemeMode, onReduceMotion, dynamicColor, onDynamicColor, onSignOut),
         )
-        Screen.HomeEditor -> HomeEditorScreen(vm, goBack, navigate)
-        is Screen.RoomTab -> TodayScreen(vm, homeListState, homeLeftScrollState, homeRightScrollState, navigate, onReconnectTap = { vm.reconnectNow() })
         // Detail pages replaced the old generic detail screen: per-domain
         // pages (climate still routes to its thermostat page inside).
         is Screen.EntityDetail -> DetailPageScreen(vm, screen.entityId, goBack, navigate)
@@ -2221,8 +2149,6 @@ private fun ScreenContent(
         is Screen.SecurityPanel -> SecurityPanelScreen(vm, goBack)
         is Screen.GreenhousePanel -> GreenhousePanelScreen(vm, goBack)
         is Screen.UpdatesPanel -> UpdatesPanelScreen(vm, goBack)
-        is Screen.HomeStatusPanel -> HomeStatusPanelScreen(vm, screen.categoryKey, navigate, onPanelDetail)
-        is Screen.RoomPanel -> com.garrietta.haven.ui.screens.RoomPanelScreen(vm, screen.areaId, navigate, onPanelDetail)
         is Screen.CameraClips -> CameraClipsScreen(vm, screen.entityId, goBack)
         is Screen.AreaDetail -> AreaDetailScreen(vm, screen.areaId, goBack, navigate)
         Screen.DashboardEdit -> DashboardEditScreen(vm, goBack)
@@ -2263,8 +2189,7 @@ private fun ThermostatPopoutContent(
  * and the measurement frame, both deleted this round):
  * every device detail opens as a panel morphing from its source
  * card rect to full-screen, on BOTH folded and unfolded postures.
- * No centered device dialog remains; the only dialog left is the
- * shape picker (see ShapePickerDialog, intentionally preserved).
+ * No centered device dialog remains.
  * - Container: NO scrim — the panel covers the page at rest. A
  *   touch interceptor fills the screen behind the morphing rect
  *   so taps outside the still-small panel mid-flight never reach

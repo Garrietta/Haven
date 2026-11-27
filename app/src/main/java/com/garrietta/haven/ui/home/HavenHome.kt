@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -148,13 +149,14 @@ fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) 
     val places = remember(states, entityDevices, deviceInfo, auxiliary, lightOverrides) {
         homeGroups(
             states, entityDevices,
-            deviceInfo.mapValues { (_, d) -> DeviceFacts(d.name, d.model) },
+            deviceInfo.mapValues { (_, d) -> DeviceFacts(d.name, d.model, d.service) },
             auxiliary,
             nowMillis = now,
-            shownOnHome = { isLightShownOnHome(it, lightOverrides) },
+            shownOnHome = { com.garrietta.haven.data.isShownOnHome(it, lightOverrides) },
         )
     }
-    val status = remember(states, places) { homeStatus(states, places, now) }
+    val nameOf = com.garrietta.haven.ui.screens.rememberEntityNamer(vm)
+    val status = remember(states, places, nameOf) { homeStatus(states, places, now, nameOf) }
     val cameraIds = curated(vm.securityCameraIds(states), vm.curation(SECURITY_CAMERAS)) { id ->
         states[id]?.let { !isLeftover(it, now) } == true
     }
@@ -176,7 +178,7 @@ fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) 
             StatusKind.Lights, StatusKind.Media -> sheet = card.kind
         }
     }
-    val actions = TileActions(vm, navigate)
+    val actions = TileActions(vm, navigate, nameOf)
 
     if (LocalWideLayout.current) {
         Row(Modifier.fillMaxSize().statusBarsPadding().padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
@@ -240,7 +242,7 @@ fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) 
 }
 
 /** What a tile does when tapped, held, or nudged. */
-private class TileActions(val vm: HavenViewModel, val navigate: (Screen) -> Unit) {
+private class TileActions(val vm: HavenViewModel, val navigate: (Screen) -> Unit, val nameOf: (HaEntity) -> String) {
     fun tap(entity: HaEntity) = when {
         tapToggles(entity) -> vm.toggle(entity.entityId)
         entity.domain == "vacuum" -> navigate(Screen.VacuumPanel)
@@ -426,7 +428,7 @@ private fun LazyListScope.places(
 ) {
     for (place in places) {
         item(key = "place-" + place.id) {
-            PlaceHeading(place, states, navigate, Modifier.padding(horizontal = horizontal + 4.dp).padding(top = 24.dp, bottom = 10.dp))
+            PlaceHeading(place, states, navigate, actions.nameOf, Modifier.padding(horizontal = horizontal + 4.dp).padding(top = 24.dp, bottom = 10.dp))
         }
         // Rows of tiles; a wide tile takes a row of its own.
         val rows = mutableListOf<List<String>>()
@@ -444,8 +446,10 @@ private fun LazyListScope.places(
         if (current.isNotEmpty()) rows += current
         rows.forEachIndexed { r, row ->
             item(key = "row-" + place.id + "-" + row.first()) {
+                // A row takes its tallest tile's height, so a name on two
+                // lines grows the row instead of pushing the state off the tile.
                 Row(
-                    Modifier.padding(horizontal = horizontal).padding(bottom = 8.dp),
+                    Modifier.padding(horizontal = horizontal).padding(bottom = 8.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     for ((c, id) in row.withIndex()) {
@@ -465,7 +469,7 @@ private fun LazyListScope.places(
 }
 
 @Composable
-private fun PlaceHeading(place: HomePlace, states: Map<String, HaEntity>, navigate: (Screen) -> Unit, modifier: Modifier) {
+private fun PlaceHeading(place: HomePlace, states: Map<String, HaEntity>, navigate: (Screen) -> Unit, nameOf: (HaEntity) -> String, modifier: Modifier) {
     val scheme = MaterialTheme.colorScheme
     // The greenhouse has a page of its own (automations, watering).
     val opens: (() -> Unit)? = when (place.name) {
@@ -479,7 +483,7 @@ private fun PlaceHeading(place: HomePlace, states: Map<String, HaEntity>, naviga
     ) {
         Column(Modifier.weight(1f)) {
             Text(place.name, style = MaterialTheme.typography.titleLarge, color = scheme.onBackground)
-            val line = placeLine(place, states)
+            val line = placeLine(place, states, nameOf)
             if (line.isNotEmpty()) {
                 Text(line, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -517,12 +521,12 @@ private fun DeviceTile(entity: HaEntity, place: HomePlace, actions: TileActions,
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.96f else 1f, pressBounce(), label = "tilePress")
-    val name = custom.titles[entity.entityId] ?: shortName(entity.friendlyName, place.name)
+    val name = custom.titles[entity.entityId]?.takeIf { it.isNotBlank() } ?: shortName(actions.nameOf(entity), place.name)
     val accent = accentFor(entity.entityId)
     val badge = com.garrietta.haven.ui.components.tileBadgePair(custom.tilePresets, custom.domainTilePresets, entity, isDark, scheme, accent)
     Box(
         modifier
-            .height(124.dp)
+            .heightIn(min = 124.dp).fillMaxHeight()
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(leafCard(index))
             .background(container)
@@ -590,12 +594,12 @@ private fun ThermostatTile(entity: HaEntity, actions: TileActions, modifier: Mod
             .height(124.dp)
             .clip(leafCard(index))
             .background(container)
-            .clickable(onClickLabel = "Open ${entity.friendlyName}", role = Role.Button) { actions.open(entity) }
+            .clickable(onClickLabel = "Open ${actions.nameOf(entity)}", role = Role.Button) { actions.open(entity) }
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(entity.friendlyName, style = MaterialTheme.typography.labelLarge, color = ink.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(actions.nameOf(entity), style = MaterialTheme.typography.labelLarge, color = ink.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(inside, style = MaterialTheme.typography.displaySmall, color = ink)
             Text(climateLine(entity) + humidity, style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -638,7 +642,7 @@ private fun CategorySheet(
             Text(title, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
             val members = ids.mapNotNull(states::get)
             for ((r, row) in members.chunked(2).withIndex()) {
-                Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.padding(bottom = 8.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((c, entity) in row.withIndex()) {
                         DeviceTile(entity, HomePlace("sheet", "", null, emptyList()), actions, Modifier.weight(1f), r * 2 + c)
                     }

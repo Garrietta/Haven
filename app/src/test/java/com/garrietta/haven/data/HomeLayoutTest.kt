@@ -200,7 +200,7 @@ class HomeLayoutTest {
         val open = states + ("cover.garage_door" to e("cover.garage_door", "open", "Garage Door", "device_class" to "garage"))
         val deck = homeStatus(open, places, now).associateBy { it.kind }
         assertEquals(StateFamily.Alert, deck.getValue(StatusKind.Security).family)
-        assertEquals("Garage Door open", deck.getValue(StatusKind.Security).value)
+        assertEquals("Garage open", deck.getValue(StatusKind.Security).value)
         assertEquals(StateFamily.Alert, deck.getValue(StatusKind.Garage).family)
     }
 
@@ -216,7 +216,7 @@ class HomeLayoutTest {
     @Test
     fun aGroupHeadingSaysWhatIsOn() {
         assertEquals("Lamp is on", placeLine(group(GROUP_LIGHTS), states))
-        assertEquals("Greenhouse Fan is on", placeLine(group(GROUP_GREENHOUSE), states))
+        assertEquals("Fan is on", placeLine(group(GROUP_GREENHOUSE), states))
         assertEquals("", placeLine(group(GROUP_CLIMATE), states))
     }
 

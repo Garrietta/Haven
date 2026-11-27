@@ -1,7 +1,6 @@
 package com.garrietta.haven.data
 
 import com.garrietta.haven.Screen
-import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.railSelectedIndexWithFallback
 import com.garrietta.haven.ui.components.scrollVisibilityAfter
 import com.garrietta.haven.ui.components.topMorphSourceId
@@ -67,27 +66,6 @@ class Round22LogicTest {
         val lamp = HaEntity("light.lamp_socket_1", "unavailable", emptyMap())
         assertEquals("Unavailable", lamp.stateText())
         assertEquals("Unavailable", lamp.dialogHeaderState())
-    }
-
-    // Item 6: the rail capsule never disappears.
-    @Test
-    fun railFallbackKeepsOnTabIndex() {
-        val bar = pillBarItems(showScenes = true, showEnergy = true)
-        assertEquals(2, railSelectedIndexWithFallback(2, Screen.Today, bar))
-    }
-
-    @Test
-    fun railFallbackUsesLastTabScreenWhenOffTab() {
-        val bar = pillBarItems(showScenes = true, showEnergy = true)
-        // Settings is last in the default bar (index 3).
-        assertEquals(3, railSelectedIndexWithFallback(null, Screen.Settings, bar))
-    }
-
-    @Test
-    fun railFallbackFallsToHomeWhenLastTabLeftTheBar() {
-        val bar = pillBarItems(showScenes = false, showEnergy = false)
-        // Scenes is not in this bar; Home (index 0) is the fallback.
-        assertEquals(0, railSelectedIndexWithFallback(null, Screen.Scenes, bar))
     }
 
     // Item 3: the camera dialog is the last morph-source fallback.

@@ -63,26 +63,22 @@ fun isRingCamera(entity: HaEntity): Boolean =
     entity.attrString("brand")?.equals("Ring", ignoreCase = true) == true ||
         entity.manufacturer?.equals("Ring", ignoreCase = true) == true
 
+/** The stream or feed words Home Assistant appends to a camera's name. */
+private val CAMERA_FEED_SUFFIX = Regex(
+    "\\s+(live view|live stream|live|(hd|sd) stream( \\(direct\\))?|stream|snapshot)$",
+    RegexOption.IGNORE_CASE,
+)
+
 /**
- * Display name for a camera (Gemini mockup round, 2026-11-01): HA
- * names the Ring camera "Front Door Live view", which reads as a
- * live feed everywhere it appears (tiles, dialog headers, the clips
- * title) while its caption says "Not live" — the naming mismatch
- * from the 2026-11-01 unfolded video. For Ring cameras only, the
- * trailing " Live view" is stripped ("Front Door"), and the
- * recording caption alongside it carries the truth. Native cameras
- * are genuinely live, so their names are untouched. This renames
- * the DISPLAY string only — HA's registry is never written.
+ * The name a camera goes by: its name without the feed Home Assistant
+ * appends to it ("Front Door Live view" is the Front Door, "Outdoor
+ * camera HD Stream (Direct)" the Outdoor camera). Whether the picture is
+ * live is said by the camera's own label, not by its name. Only the
+ * display string changes; Home Assistant's registry is never written.
  */
 fun displayCameraName(entity: HaEntity): String {
-    if (!isRingCamera(entity)) return entity.friendlyName
     val name = entity.friendlyName
-    val stripped = if (name.endsWith(" live view", ignoreCase = true)) {
-        name.dropLast(" live view".length)
-    } else {
-        name
-    }
-    return stripped.ifBlank { name }
+    return name.replace(CAMERA_FEED_SUFFIX, "").ifBlank { name }
 }
 
 /**

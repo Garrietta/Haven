@@ -110,258 +110,41 @@ fun AppearancePage(vm: HavenViewModel, controls: AppearanceControls, onBack: () 
                     flat = true,
                 )
             }
-            MenuSection("Badges")
-            MenuGroup {
+        }
+    }
+}
+
+/**
+ * The tiles taken off Home from their options, each with Show to put it
+ * back. A hidden tile cannot be held on Home, so this page is how it
+ * returns.
+ */
+@Composable
+fun HiddenFromHomePage(vm: HavenViewModel, onBack: () -> Unit) {
+    @Suppress("UNUSED_VARIABLE") val tick = vm.cardCustomVersion
+    val states by vm.states.collectAsState()
+    val nameOf = rememberEntityNamer(vm)
+    val hidden = vm.settingsStore.homeLightOverrides().filterValues { !it }.keys
+        .mapNotNull { states[it] }
+        .sortedBy { nameOf(it).lowercase() }
+    SettingsPage("Hidden from Home", onBack, intro = "Tiles you took off Home. They still show on Security and Climate.") {
+        if (hidden.isEmpty()) {
+            item(key = "empty") { SettingsNote("Nothing is hidden. Press and hold a tile on Home, then turn off Show on Home.") }
+        } else {
+            groupedRows(hidden, key = { "hidden-" + it.entityId }) { entity ->
                 MenuRow(
-                    "badges-nav", ExpressiveKind.FLOWER, Icons.Filled.Visibility, "On the Home tab",
-                    "A dot when a lock is unlocked, a door or window is open, or the alarm is triggered.",
+                    "hidden-${entity.entityId}", shapeForDomain(entity.domain), com.garrietta.haven.ui.controls.domainIcon(entity),
+                    nameOf(entity), com.garrietta.haven.data.tileState(entity),
                     onClick = null,
-                    trailing = { Switch(checked = vm.badgeNav, onCheckedChange = { vm.badgeNav = it }) },
-                    flat = true,
-                )
-                MenuDivider()
-                MenuRow(
-                    "badges-room", ExpressiveKind.WAVE, Icons.Filled.Home, "On rooms",
-                    "A dot on a room when something in it is unlocked, open or triggered.",
-                    onClick = null,
-                    trailing = { Switch(checked = vm.badgeRoom, onCheckedChange = { vm.badgeRoom = it }) },
-                    flat = true,
-                )
-            }
-        }
-    }
-}
-
-/** The family a type of device is drawn in when it is on and has no color of its own. */
-internal fun typeFamily(domain: String): StateFamily = when (domain) {
-    "light" -> StateFamily.Light
-    "switch", "input_boolean", "fan", "vacuum" -> StateFamily.On
-    "climate" -> StateFamily.Heat
-    "lock", "cover", "alarm_control_panel" -> StateFamily.Secure
-    "media_player" -> StateFamily.Media
-    "weather" -> StateFamily.Cool
-    else -> StateFamily.Quiet
-}
-
-/** "All devices" is the global default; the rest are one entity type each. */
-private const val ALL_TYPES = "all"
-
-/** A small card in a type's color, with its badge in its badge shape. */
-@Composable
-private fun StylePreview(card: Shape, badge: Shape, fill: Color, badgeFill: Color, size: Int = 56) {
-    Box(
-        Modifier.size(width = (size * 1.25f).dp, height = size.dp).background(fill, card),
-        contentAlignment = Alignment.TopStart,
-    ) {
-        Box(Modifier.padding((size / 7).dp).size((size / 2.5f).dp).background(badgeFill, badge))
-    }
-}
-
-/** What a type's preview looks like with the stored choices. */
-private data class TypeStyle(val card: Shape, val badge: Shape, val family: StateFamily, val tileLabel: String?, val badgeKey: String?, val cardKey: String?)
-
-private fun typeStyle(vm: HavenViewModel, domain: String): TypeStyle {
-    val store = vm.settingsStore
-    val badgeKey = if (domain == ALL_TYPES) store.globalBadgeShape else store.domainBadgeShapes()[domain]
-    val cardKey = if (domain == ALL_TYPES) store.globalCardShape else store.domainCardShapes()[domain]
-    val tile = if (domain == ALL_TYPES) null else store.domainTilePresets()[domain]?.let { key -> TILE_PRESETS.firstOrNull { it.key == key } }
-    val badgeShape = badgeKey?.let { shapeForKey(it) }
-        ?: store.globalBadgeShape?.let { shapeForKey(it) }
-        ?: polygonShape(if (domain == ALL_TYPES) ExpressiveKind.SUNNY else shapeForDomain(domain))
-    val cardShape = cardKey?.let { shapeForKey(it) } ?: store.globalCardShape?.let { shapeForKey(it) } ?: generalCardShape(0)
-    return TypeStyle(cardShape, badgeShape, tile?.family ?: typeFamily(if (domain == ALL_TYPES) "switch" else domain), tile?.label, badgeKey, cardKey)
-}
-
-@Composable
-fun DeviceStylesPage(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
-    @Suppress("UNUSED_VARIABLE") val shapeTick = vm.shapePrefsVersion
-    @Suppress("UNUSED_VARIABLE") val cardTick = vm.cardCustomVersion
-    val isDark = isDarkBackdrop(MaterialTheme.colorScheme.background)
-    val types = listOf(ALL_TYPES to "All devices") + DOMAIN_DEFAULT_OPTIONS
-    SettingsPage(
-        "Device styles",
-        onBack,
-        intro = "How each type of device looks on Home and in its popup: its color, its badge and its card. " +
-            "A type you leave alone follows All devices. One device can still differ, from its page under Devices & services.",
-    ) {
-        groupedRows(types, key = { "style-" + it.first }) { (domain, label) ->
-            val style = typeStyle(vm, domain)
-            val family = style.family.colors(isDark)
-            Row(
-                Modifier.fillMaxWidth().clickable { navigate(Screen.SettingsPage(SettingsRoute.style(domain))) }.padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StylePreview(style.card, style.badge, family.container, family.accent, size = 44)
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(label, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                    Text(
-                        listOfNotNull(
-                            style.tileLabel,
-                            shapeLabel(style.badgeKey)?.let { "$it badge" },
-                            shapeLabel(style.cardKey),
-                        ).joinToString(" · ").ifEmpty { if (domain == ALL_TYPES) "Haven's shapes" else "Follows All devices" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** One type's style: a large preview, then its color, badge shape and card shape. */
-@Composable
-fun DeviceStylePage(vm: HavenViewModel, domain: String, onBack: () -> Unit) {
-    @Suppress("UNUSED_VARIABLE") val shapeTick = vm.shapePrefsVersion
-    @Suppress("UNUSED_VARIABLE") val cardTick = vm.cardCustomVersion
-    val store = vm.settingsStore
-    val isDark = isDarkBackdrop(MaterialTheme.colorScheme.background)
-    val label = if (domain == ALL_TYPES) "All devices" else DOMAIN_DEFAULT_OPTIONS.firstOrNull { it.first == domain }?.second ?: domain
-    val style = typeStyle(vm, domain)
-    val tileKey = if (domain == ALL_TYPES) null else store.domainTilePresets()[domain]
-    fun setBadge(key: String?) {
-        if (domain == ALL_TYPES) store.globalBadgeShape = key else store.setDomainBadgeShape(domain, key)
-        vm.bumpShapePrefs()
-    }
-    fun setCard(key: String?) {
-        if (domain == ALL_TYPES) store.globalCardShape = key else store.setDomainCardShape(domain, key)
-        vm.bumpShapePrefs()
-    }
-
-    SettingsPage(label, onBack) {
-        item(key = "preview") {
-            val family = style.family.colors(isDark)
-            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                StylePreview(style.card, style.badge, family.container, family.accent, size = 120)
-            }
-            Spacer(Modifier.height(8.dp))
-        }
-        if (domain != ALL_TYPES) {
-            item(key = "color") {
-                MenuSection("Color when on")
-                OptionGrid(
-                    options = listOf<String?>(null) + TILE_PRESETS.map { it.key },
-                    selected = tileKey,
-                    columns = 4,
-                    label = { key -> TILE_PRESETS.firstOrNull { it.key == key }?.label ?: "Automatic" },
-                    onPick = { key ->
-                        store.setDomainTilePreset(domain, key)
-                        vm.bumpCardCustom()
+                    trailing = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            vm.settingsStore.setHomeLightOverride(entity.entityId, true)
+                            vm.bumpCardCustom()
+                        }) { Text("Show") }
                     },
-                ) { key, selected ->
-                    val fill = key?.let { k -> TILE_PRESETS.first { it.key == k }.family.colors(isDark).container }
-                        ?: typeFamily(domain).colors(isDark).container
-                    Box(
-                        Modifier.size(44.dp).background(fill, CircleShape)
-                            .border(if (selected) 3.dp else 0.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape),
-                    )
-                }
-            }
-        }
-        item(key = "badge") {
-            MenuSection("Badge shape")
-            ShapeOptionGrid(SHAPE_OPTIONS, style.badgeKey, if (domain == ALL_TYPES) "Haven's" else "As All devices", isDark, ::setBadge)
-        }
-        item(key = "card") {
-            MenuSection("Card shape")
-            ShapeOptionGrid(
-                CARD_CORNER_OPTIONS.map { ShapeOption(it.key, it.label) } + SHAPE_OPTIONS,
-                style.cardKey,
-                if (domain == ALL_TYPES) "Haven's leaf card" else "As All devices",
-                isDark,
-                ::setCard,
-            )
-        }
-    }
-}
-
-/** A grid of choices, "none" (null) first, each drawn by [swatch] over its label. */
-@Composable
-private fun OptionGrid(
-    options: List<String?>,
-    selected: String?,
-    columns: Int,
-    label: (String?) -> String,
-    onPick: (String?) -> Unit,
-    swatch: @Composable (String?, Boolean) -> Unit,
-) {
-    Column {
-        for (row in options.chunked(columns)) {
-            Row(Modifier.fillMaxWidth()) {
-                for (key in row) {
-                    Column(
-                        Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).clickable { onPick(key) }.padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        swatch(key, key == selected)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            label(key),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (key == selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                        )
-                    }
-                }
-                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShapeOptionGrid(options: List<ShapeOption>, selected: String?, noneLabel: String, isDark: Boolean, onPick: (String?) -> Unit) {
-    val fill = StateFamily.On.colors(isDark).accent
-    OptionGrid(
-        options = listOf<String?>(null) + options.map { it.key },
-        selected = selected,
-        columns = 4,
-        label = { key -> if (key == null) noneLabel else shapeLabel(key) ?: key },
-        onPick = onPick,
-    ) { key, isSelected ->
-        Box(
-            Modifier.size(48.dp)
-                .border(if (isSelected) 3.dp else 0.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(12.dp))
-                .padding(4.dp)
-                .background(if (key == null) MaterialTheme.colorScheme.surfaceContainerHighest else fill, key?.let { shapeForKey(it) } ?: RoundedCornerShape(12.dp)),
-        )
-    }
-}
-
-@Composable
-fun HomeNavigationPage(vm: HavenViewModel, onBack: () -> Unit, navigate: (Screen) -> Unit) {
-    SettingsPage("Home & navigation", onBack) {
-        item(key = "home") {
-            MenuGroup {
-                MenuRow(
-                    "home-page", ExpressiveKind.SUNNY, Icons.Filled.SpaceDashboard, "Home page",
-                    "Welcome message, which sections show and in what order, favorites and lights",
-                    onClick = { navigate(Screen.HomeEditor) }, flat = true,
-                )
-                MenuDivider()
-                MenuRow(
-                    "home-tabs", ExpressiveKind.SUNNY, Icons.Filled.ViewQuilt, "Your tabs",
-                    "${vm.userTabs.size} tab${if (vm.userTabs.size == 1) "" else "s"}: their order, cards and where they show",
-                    onClick = { navigate(Screen.SettingsPage(SettingsRoute.TABS)) }, flat = true,
-                )
-                MenuDivider()
-                MenuRow(
-                    "home-rooms", ExpressiveKind.SUNNY, Icons.Filled.Map, "Rooms",
-                    "Order, names in Haven, and where each shows: under Areas",
-                    onClick = { navigate(Screen.SettingsPage(SettingsRoute.areas("areas"))) }, flat = true,
-                )
-                MenuDivider()
-                MenuRow(
-                    "home-boards", ExpressiveKind.SUNNY, Icons.Filled.GridView, "Dashboards",
-                    "Home Assistant's dashboards, drawn natively",
-                    onClick = { navigate(Screen.Dashboards) }, flat = true,
+                    flat = true,
                 )
             }
-        }
-        item(key = "bar") {
-            MenuSection("Navigation bar")
-            NavigationSettings(vm)
         }
     }
 }

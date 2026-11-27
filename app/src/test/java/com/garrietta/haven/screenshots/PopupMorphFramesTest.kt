@@ -13,7 +13,6 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.garrietta.haven.HavenApp
 import com.garrietta.haven.HavenViewModel
-import com.garrietta.haven.ui.screens.RoomFilter
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -45,7 +44,6 @@ class PopupMorphFramesTest {
         vm.settingsStore.themeMode = if (dark) "dark" else "light"
         vm.client.restoreCachedStates(DemoHome.states, DemoHome.areas, DemoHome.entityAreas)
         vm.loginWithToken("http://127.0.0.1:9", "screenshot-token")
-        vm.roomFilter = RoomFilter.Area(room)
         RuntimeEnvironment.setQualifiers(FOLDED)
         compose.mainClock.autoAdvance = false
         compose.activityRule.scenario.recreate()

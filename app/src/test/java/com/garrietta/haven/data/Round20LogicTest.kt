@@ -7,7 +7,6 @@ import com.garrietta.haven.ui.components.SensorKind
 import com.garrietta.haven.ui.components.chartLineColor
 import com.garrietta.haven.ui.components.resolveLandingShape
 import com.garrietta.haven.ui.components.sensorKind
-import com.garrietta.haven.ui.screens.toggleEntitySelection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -98,30 +97,6 @@ class Round20LogicTest {
     fun differentMeasurementsGetDifferentLines() {
         val colors = SensorKind.values().map { chartLineColor(it, isDark = true) }.toSet()
         assertEquals(SensorKind.values().size, colors.size)
-    }
-
-    // Item 4: selection survives filtering (it lives outside the
-    // filtered list) and toggling never disturbs other members.
-    @Test
-    fun toggleAddsAndRemoves() {
-        assertEquals(setOf("sensor.a"), toggleEntitySelection(emptySet<String>(), "sensor.a"))
-        assertEquals(emptySet<String>(), toggleEntitySelection(setOf("sensor.a"), "sensor.a"))
-    }
-
-    @Test
-    fun togglePreservesOtherMembers() {
-        val selected = setOf("sensor.a", "sensor.b")
-        assertEquals(setOf("sensor.a", "sensor.b", "sensor.c"), toggleEntitySelection(selected, "sensor.c"))
-        assertEquals(setOf("sensor.b"), toggleEntitySelection(selected, "sensor.a"))
-    }
-
-    @Test
-    fun doubleToggleIsIdentity() {
-        val selected = setOf("sensor.a", "sensor.b")
-        assertEquals(
-            selected,
-            toggleEntitySelection(toggleEntitySelection(selected, "sensor.c"), "sensor.c"),
-        )
     }
 
     // Item 5: drag-vector snap.
