@@ -399,7 +399,12 @@ fun ConnectionPage(vm: HavenViewModel, onSignOut: () -> Unit, onBack: () -> Unit
     var dialog by remember { mutableStateOf(false) }
     var confirmSignOut by remember { mutableStateOf(false) }
     val tick = vm.connectionPrefsVersion
-    val (label, target) = remember(tick) { vm.connectionDisplay() }
+    // Reliability round: keyed on the endpoint actually in use, so the
+    // rows follow a fallback / switch-back as it happens.
+    val activeUrl by vm.activeUrl.collectAsState()
+    val (label, target) = remember(tick, activeUrl) { vm.connectionDisplay() }
+    val preferredUrl = remember(tick, activeUrl) { vm.connectionTarget() }
+    val onFallback = activeUrl != null && preferredUrl != null && activeUrl != preferredUrl
     SettingsPage("Connection", onBack) {
         item(key = "rows") {
             MenuGroup {
@@ -412,7 +417,8 @@ fun ConnectionPage(vm: HavenViewModel, onSignOut: () -> Unit, onBack: () -> Unit
                 MenuRow(
                     "connection-status", ExpressiveKind.CLOUD, Icons.Filled.Wifi, "Status",
                     when (val c = connection) {
-                        is ConnectionState.Connected -> "Connected"
+                        is ConnectionState.Connected -> "Connected · $label" +
+                            if (onFallback) " (fallback — switches back when ${com.garrietta.haven.data.connectionLabel(preferredUrl)} answers)" else ""
                         is ConnectionState.Connecting -> "Connecting…"
                         is ConnectionState.Authenticating -> "Signing in…"
                         is ConnectionState.Error -> c.message

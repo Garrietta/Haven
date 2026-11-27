@@ -50,6 +50,13 @@ fun connectionHostOf(url: String?): String? {
 fun isLocalAddress(url: String?): Boolean {
     val host = connectionHostOf(url) ?: return false
     if (host == "localhost" || host.endsWith(".local") || host == "::1") return true
+    // Reliability round: the LAN suffixes routers hand out (.lan,
+    // .home, .home.arpa, .internal, .localdomain) and bare single-
+    // label names ("homeassistant") are local too — normalizeInstanceUrl
+    // already treats them as local (http://), but this rule used to
+    // label them Cloud, which put them in the wrong AUTO slot.
+    if (LOCAL_DNS_SUFFIXES.any { host.endsWith(it) }) return true
+    if (!host.contains(".") && !host.contains(":") && host.any { it.isLetter() }) return true
     // IPv6 literals only (they contain ':'): link-local and
     // unique-local prefixes. Hostnames never reach this branch.
     if (host.contains(":") &&
@@ -68,6 +75,8 @@ fun isLocalAddress(url: String?): Boolean {
         else -> false
     }
 }
+
+private val LOCAL_DNS_SUFFIXES = listOf(".lan", ".home", ".home.arpa", ".internal", ".localdomain")
 
 /** Item 7 — the Connection row label: Local or Cloud, nothing else. */
 fun connectionLabel(url: String?): String = if (isLocalAddress(url)) "Local" else "Cloud"

@@ -162,7 +162,8 @@ fun SettingsScreen(
             HubRow("app-notifications", Icons.Filled.Notifications, "Notifications", "Alerts Haven sends to this phone") { go(SettingsRoute.NOTIFICATIONS) }
             MenuDivider()
             val tick = vm.connectionPrefsVersion
-            val (label, target) = remember(tick) { vm.connectionDisplay() }
+            val activeUrl by vm.activeUrl.collectAsState()
+            val (label, target) = remember(tick, activeUrl) { vm.connectionDisplay() }
             val status = when (connection) {
                 is ConnectionState.Connected -> "Connected"
                 is ConnectionState.Connecting -> "Connecting"

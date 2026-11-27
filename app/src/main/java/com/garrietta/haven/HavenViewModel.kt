@@ -39,14 +39,26 @@ import com.garrietta.haven.data.DEFAULT_HIDDEN_HOME_SECTIONS
 import com.garrietta.haven.data.HOME_SECTION_ORDER_DEFAULT
 import com.garrietta.haven.data.ConnectionMode
 import com.garrietta.haven.data.TokenStore
+import com.garrietta.haven.data.DetectedUrls
+import com.garrietta.haven.data.NETWORK_SETTLE_MS
+import com.garrietta.haven.data.NetworkProfile
+import com.garrietta.haven.data.TokenRefreshOutcome
+import com.garrietta.haven.data.cameraSupportsStream
+import com.garrietta.haven.data.exchangeTokenAt
+import com.garrietta.haven.data.refreshTokenVia
+import com.garrietta.haven.data.connectionCandidates
+import com.garrietta.haven.data.decodeJpegScaled
+import com.garrietta.haven.data.detectedCloudUrl
+import com.garrietta.haven.data.detectedLocalUrl
+import com.garrietta.haven.data.hlsUrlReusable
+import com.garrietta.haven.data.isRingCamera
+import com.garrietta.haven.data.tokenNeedsRefresh
+import com.garrietta.haven.data.tokenRefreshDelayMs
 import com.garrietta.haven.data.connectionLabel
 import com.garrietta.haven.data.connectionModeFromKey
 import com.garrietta.haven.data.isLocalAddress
-import com.garrietta.haven.data.alternateConnectionTarget
 import com.garrietta.haven.data.authRetryDelayMs
-import com.garrietta.haven.data.MAX_AUTH_RETRIES
 import com.garrietta.haven.data.parseStateCache
-import com.garrietta.haven.data.resolveConnectionTarget
 import com.garrietta.haven.data.serializeStateCache
 import com.garrietta.haven.data.shouldAutoPinNewTab
 import com.garrietta.haven.data.HavenNotificationManager
@@ -72,15 +84,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -387,24 +402,21 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         cardSettingsArrange = null
     }
 
-    // ---- Connection switcher (feedback round 16, item 7) ----
+    // ---- Connection switcher (feedback round 16, item 7; reliability round) ----
     //
     // Two URL slots: the legacy instanceUrl (local when it
-    // classifies local) and the pasted Nabu Casa remote-UI URL.
-    // The row in Settings -> Connection shows Local vs Cloud for
-    // the EFFECTIVE target (anything not a local address reads
-    // Cloud), and tapping it switches mode + cloud URL. The same
-    // HA token works through both URLs (remote UI forwards to
-    // the same instance), so a switch never re-logs in.
-    // AUTO means Wi-Fi -> local, off Wi-Fi -> cloud. Wi-Fi
-    // TRANSPORT is the platform-allowed signal: SSID-specific
-    // "home" detection would need location permission, so any
-    // Wi-Fi counts as local-capable; if the local URL is
-    // unreachable on a foreign Wi-Fi, pinning Local/Cloud in
-    // the dialog overrides AUTO. Cloud-URL auto-detection from
-    // HA's cloud integration is not exposed through any API the
-    // app uses, so the cloud side is a paste field — no URL is
-    // ever guessed or hardcoded from a screenshot.
+    // classifies local) and the cloud URL (pasted, or detected from
+    // Home Assistant's own network/url / cloud/status once
+    // connected). The same HA token works through both URLs (remote
+    // UI forwards to the same instance), so a switch never re-logs in.
+    //
+    // Reliability round: routing is a candidate LIST, not a single
+    // pick (see connectionCandidates). AUTO tries the LAN first on
+    // Wi-Fi / Ethernet / VPN with a short connect timeout and the
+    // cloud right behind it; elsewhere the cloud first. HaClient
+    // walks the list, and while it runs on a fallback it re-probes
+    // the preferred endpoint and moves back make-before-break. The
+    // Settings row shows the endpoint actually in use.
     var connectionPrefsVersion by mutableStateOf(0)
         private set
 
@@ -422,56 +434,124 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     val connectionMode: ConnectionMode
         get() = connectionModeFromKey(tokenStore.connectionModeKey)
 
-    /** Wi-Fi transport only — no location permission involved. */
-    fun isWifiConnected(): Boolean {
+    /** The endpoint the live session runs on (null while not connected). */
+    val activeUrl = client.activeUrl
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** The active network, reduced to routing facts. Written on the main thread; read anywhere. */
+    @Volatile
+    private var networkProfile: NetworkProfile = NetworkProfile.OFFLINE
+
+    private fun readNetworkProfile(): NetworkProfile {
         return try {
             val cm = getApplication<Application>()
                 .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                ?: return false
-            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                ?: return NetworkProfile.OFFLINE
+            val network = cm.activeNetwork ?: return NetworkProfile.OFFLINE
+            val caps = cm.getNetworkCapabilities(network) ?: return NetworkProfile.OFFLINE
+            NetworkProfile(
+                available = true,
+                wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+                ethernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                vpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                cellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+            )
         } catch (_: Exception) {
-            false
+            NetworkProfile.OFFLINE
         }
     }
 
-    /** The URL the current mode + transport resolve to, if any. */
-    fun connectionTarget(): String? = resolveConnectionTarget(
-        connectionMode, connectionLocalUrl, connectionCloudUrl, isWifiConnected(),
-    )
+    /** Wi-Fi transport only — no location permission involved. */
+    fun isWifiConnected(): Boolean = readNetworkProfile().wifi
 
-    /** (Local|Cloud, effective target) for the Settings row. */
+    /** Ordered endpoints for the current mode + network; the legacy URL when nothing resolves. */
+    fun connectionEndpoints(): List<String> =
+        connectionCandidates(connectionMode, connectionLocalUrl, connectionCloudUrl, networkProfile)
+            .ifEmpty { listOfNotNull(tokenStore.instanceUrl) }
+
+    /** The URL the current mode + network prefer, if any. */
+    fun connectionTarget(): String? = connectionEndpoints().firstOrNull()
+
+    /**
+     * (Local|Cloud, endpoint) for the Settings row: the endpoint the
+     * live session actually uses, else the preferred one. The old row
+     * showed the preferred target, so a silent cloud fallback on a
+     * foreign Wi-Fi still read "Local".
+     */
     fun connectionDisplay(): Pair<String, String?> {
-        val target = connectionTarget()
+        val target = client.activeUrl.value ?: connectionTarget()
         return connectionLabel(target) to target
     }
 
-    /** Last AUTO-resolved target: reconnects happen only on change. */
-    private var lastAutoTarget: String? = null
+    private var networkSettleJob: Job? = null
 
+    // Session-renewal state. Declared HERE, above init: Kotlin runs
+    // property initializers and init blocks in textual order, and
+    // init's autoConnect() already uses these (a declaration below
+    // init would be null during autoConnect, then reset to null
+    // afterwards, losing the live job handle).
+
+    /** Serializes every token renewal (timer, auth_invalid, REST 401, foreground). */
+    private val tokenRefreshMutex = Mutex()
+
+    /** The proactive renewal timer (OAuth only). Main thread. */
+    private var tokenRefreshJob: Job? = null
+
+    /**
+     * Auth-retry loop's job handle. Only one loop runs at a time;
+     * signOut() and a definitive refusal cancel it, so a retry can
+     * never reconnect after an explicit sign-out.
+     */
+    private var authRetryJob: Job? = null
+
+    /**
+     * Default-network watcher. Callbacks arrive on a binder thread and
+     * in bursts during a handoff (available / capabilities / lost), and
+     * onCapabilitiesChanged also fires for signal-strength changes, so
+     * every callback just schedules one settled evaluation on the main
+     * thread. (The old callback read activeNetwork from the binder
+     * thread on onAvailable — often still the network being replaced —
+     * and only reconnected when the AUTO pick changed, so a phone that
+     * regained the SAME network waited out the full backoff.)
+     */
     private val connectivityCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) = reevaluateAutoConnection()
-        override fun onLost(network: Network) = reevaluateAutoConnection()
+        override fun onAvailable(network: Network) = scheduleNetworkEvaluation()
+        override fun onLost(network: Network) = scheduleNetworkEvaluation()
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) =
+            scheduleNetworkEvaluation()
     }
 
-    private fun reevaluateAutoConnection() {
-        if (connectionMode != ConnectionMode.AUTO) return
-        val target = connectionTarget() ?: return
-        if (target == lastAutoTarget) return
+    private fun scheduleNetworkEvaluation() {
+        mainHandler.post {
+            networkSettleJob?.cancel()
+            networkSettleJob = viewModelScope.launch {
+                delay(NETWORK_SETTLE_MS)
+                onNetworkSettled()
+            }
+        }
+    }
+
+    private fun onNetworkSettled() {
+        val profile = readNetworkProfile()
+        val changed = profile != networkProfile
+        networkProfile = profile
+        client.setNetworkAvailable(profile.available)
+        // Only a real routing change acts (signal-strength callbacks
+        // produce the same profile): an unchanged network must not
+        // restart passes and defeat the client's backoff.
+        if (!isAuthenticated || !changed) return
+        Log.d("Haven", "network -> $profile")
         val token = tokenStore.accessToken ?: return
-        lastAutoTarget = target
-        client.connect(target, token)
+        client.updateEndpoints(connectionEndpoints(), token)
     }
 
     /**
-     * Saves the mode (+ a pasted cloud URL, when given) and
-     * reconnects to the new effective target with the existing
-     * token. A reconnect to the same URL is harmless; the dialog
-     * is an explicit user action, so no change-guard here — the
-     * guard lives in reevaluateAutoConnection, which must never
-     * loop on transport flaps.
+     * Saves the mode, the cloud URL and (optionally) the local URL, then
+     * reconnects over the new candidate list with the existing token.
+     * An explicit user action, so it always starts a fresh pass.
      */
-    fun switchConnection(mode: ConnectionMode, cloudUrlInput: String?) {
+    fun switchConnection(mode: ConnectionMode, cloudUrlInput: String?, localUrlInput: String? = null) {
         tokenStore.connectionModeKey = when (mode) {
             ConnectionMode.AUTO -> null
             ConnectionMode.LOCAL -> "local"
@@ -480,11 +560,50 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         val cleanCloud = cloudUrlInput?.trim()?.takeIf { it.isNotEmpty() }
             ?.let { normalizeInstanceUrl(it) }
         if (cleanCloud != null) tokenStore.cloudInstanceUrl = cleanCloud
+        val cleanLocal = localUrlInput?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { normalizeInstanceUrl(it) }
+            ?.takeIf { isLocalAddress(it) }
+        if (cleanLocal != null) {
+            // Moving the legacy slot to the LAN URL must not lose a cloud
+            // login that only lived there.
+            val legacy = tokenStore.instanceUrl
+            if (legacy != null && !isLocalAddress(legacy) && tokenStore.cloudInstanceUrl == null) {
+                tokenStore.cloudInstanceUrl = legacy
+            }
+            tokenStore.instanceUrl = cleanLocal
+        }
         bumpConnectionPrefs()
-        val target = connectionTarget()
-        lastAutoTarget = target
-        val token = tokenStore.accessToken
-        if (target != null && token != null) client.connect(target, token)
+        networkProfile = readNetworkProfile()
+        val token = tokenStore.accessToken ?: return
+        client.connect(connectionEndpoints(), token)
+    }
+
+    /**
+     * Adopts the URLs Home Assistant reports for itself, filling ONLY
+     * empty slots — a pasted or signed-in URL is never overwritten. A
+     * local login thereby learns its Nabu Casa URL (and keeps working
+     * when the phone leaves the house) without any copy-paste.
+     */
+    private fun adoptDetectedUrls(detected: DetectedUrls) {
+        var changed = false
+        if (tokenStore.cloudInstanceUrl == null) {
+            val legacyCloud = tokenStore.instanceUrl?.takeIf { !isLocalAddress(it) }
+            val pick = legacyCloud ?: detectedCloudUrl(detected)?.let { normalizeInstanceUrl(it) }
+            if (pick != null) {
+                tokenStore.cloudInstanceUrl = pick
+                changed = true
+            }
+        }
+        val local = detectedLocalUrl(detected)?.let { normalizeInstanceUrl(it) }
+        if (connectionLocalUrl == null && local != null) {
+            tokenStore.instanceUrl = local
+            changed = true
+        }
+        if (!changed) return
+        Log.d("Haven", "adopted instance URLs from Home Assistant (local=${connectionLocalUrl != null}, cloud=${connectionCloudUrl != null})")
+        bumpConnectionPrefs()
+        val token = tokenStore.accessToken ?: return
+        client.updateEndpoints(connectionEndpoints(), token)
     }
 
     val connection = client.connection
@@ -562,7 +681,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     var fullscreenCameraId by mutableStateOf<String?>(null)
         private set
 
-    fun openCameraFullscreen(entityId: String) { fullscreenCameraId = entityId }
+    fun openCameraFullscreen(entityId: String) {
+        prewarmCameraStream(entityId)
+        fullscreenCameraId = entityId
+    }
     fun closeCameraFullscreen() { fullscreenCameraId = null }
 
     /**
@@ -599,7 +721,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     var cameraDialogId by mutableStateOf<String?>(null)
         private set
 
-    fun openCameraDialog(entityId: String) { cameraDialogId = entityId }
+    fun openCameraDialog(entityId: String) {
+        prewarmCameraStream(entityId)
+        cameraDialogId = entityId
+    }
     fun closeCameraDialog() { cameraDialogId = null }
 
     /**
@@ -678,7 +803,70 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
 
     /** App backgrounded (MainActivity.onStop): a backgrounded live session must never hold the switch. */
     fun onAppBackgrounded() {
+        appInForeground = false
         if (frontDoorLiveEngaged) disengageFrontDoorLive("background")
+    }
+
+    // ---- HLS prewarm (reliability round) ----
+    //
+    // `camera/stream` makes Home Assistant start the camera's stream
+    // worker (RTSP connect + first HLS segment), which is most of the
+    // wait before a live view renders. The request now goes out the
+    // moment a finger lands on a camera tile and again (deduplicated)
+    // when the viewer opens, and the playlist URL is reused for
+    // [com.garrietta.haven.data.HLS_URL_REUSE_MS], so by the time the
+    // morph has finished the stream is usually already warm.
+
+    private class HlsUrlEntry(val url: String, val atMs: Long)
+    private val hlsUrlCache = mutableMapOf<String, HlsUrlEntry>()
+    private val hlsUrlWaiters = mutableMapOf<String, MutableList<(String?) -> Unit>>()
+    private val hlsUrlRequestedAt = mutableMapOf<String, Long>()
+
+    /** True when the live viewer plays this camera over HLS (non-Ring, stream-capable). */
+    fun cameraUsesHls(entityId: String): Boolean {
+        val entity = states.value[entityId] ?: return false
+        return !isRingCamera(entity) && cameraSupportsStream(entity)
+    }
+
+    /**
+     * The HLS playlist URL for [entityId], shared by every caller: a
+     * fresh cached URL answers at once, an in-flight request is joined,
+     * otherwise one `camera/stream` request goes out. [onResult] runs on
+     * the main thread with null when the camera cannot stream.
+     */
+    fun requestCameraHlsUrl(entityId: String, onResult: (String?) -> Unit) {
+        val now = System.currentTimeMillis()
+        hlsUrlCache[entityId]?.let { cached ->
+            if (hlsUrlReusable(cached.atMs, now)) {
+                onResult(cached.url)
+                return
+            }
+            hlsUrlCache.remove(entityId)
+        }
+        val waiting = hlsUrlWaiters[entityId]
+        val requestedAt = hlsUrlRequestedAt[entityId] ?: 0L
+        if (waiting != null && now - requestedAt < 10_000L) {
+            waiting += onResult
+            return
+        }
+        hlsUrlWaiters[entityId] = mutableListOf(onResult)
+        hlsUrlRequestedAt[entityId] = now
+        client.requestHlsUrl(entityId) { url, diagnostic ->
+            if (url != null) {
+                hlsUrlCache[entityId] = HlsUrlEntry(url, System.currentTimeMillis())
+            } else if (diagnostic != null) {
+                Log.d("Haven", "camera/stream $entityId: $diagnostic")
+            }
+            val callbacks = hlsUrlWaiters.remove(entityId).orEmpty()
+            hlsUrlRequestedAt.remove(entityId)
+            for (cb in callbacks) cb(url)
+        }
+    }
+
+    /** Starts Home Assistant's stream worker ahead of the viewer (no-op for MJPEG cameras). */
+    fun prewarmCameraStream(entityId: String) {
+        if (!connection.value.isLive() || !cameraUsesHls(entityId)) return
+        requestCameraHlsUrl(entityId) { }
     }
 
     override fun onCleared() {
@@ -697,6 +885,13 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             } catch (_: Exception) {
             }
         }
+        // Reliability round: close the session with the ViewModel. The
+        // socket used to outlive viewModelScope (only its retry jobs
+        // died), so every Activity finish leaked a live WebSocket that
+        // kept receiving the whole event stream until process death.
+        tokenRefreshJob?.cancel()
+        client.tokenRefresher = null
+        client.disconnect()
         super.onCleared()
     }
 
@@ -833,8 +1028,6 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     private val snapshotRefreshing = mutableSetOf<String>()
     /** Epoch millis of the image currently held for each camera (disk load or fresh fetch). */
     private val snapshotTimestamps = mutableMapOf<String, Long>()
-    /** A cached snapshot younger than this is "fresh": no refetch (2026-11-01 polish round). */
-    private val snapshotFreshMs = 60_000L
 
     /** Cache key: the entity id sanitized for use as a file name (disk and memory share it, so a disk-loaded image is found by [snapshotFor]). */
     private fun snapshotKey(entityId: String): String = entityId.replace(Regex("[^A-Za-z0-9_-]"), "_")
@@ -842,29 +1035,65 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun snapshotFor(entityId: String): android.graphics.Bitmap? = snapshotCache[snapshotKey(entityId)]
 
     /**
-     * Cache-first snapshot refresh (2026-11-01 polish round): a
-     * fetch only starts when the held image is absent or older
-     * than [snapshotFreshMs] — a fresh image is never swapped out
-     * — and a finished image replaces the held one atomically, so
-     * a failed or in-flight fetch can never blank a quadrant. On
-     * success the image is also persisted to disk, so the NEXT
-     * cold open paints last-known images immediately (see
-     * [loadDiskSnapshots], run from init before first composition).
+     * The best still to show while a camera's live view starts: the
+     * last live frame, else its snapshot, else (front door) the
+     * dedicated snapshot camera's image. Never blank when anything
+     * is known.
      */
-    fun refreshSnapshot(entityId: String) {
+    fun cameraPoster(entityId: String): android.graphics.Bitmap? =
+        lastCameraFrame(entityId)
+            ?: snapshotFor(entityId)
+            ?: if (entityId == com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID) {
+                snapshotFor(com.garrietta.haven.data.FRONT_DOOR_SNAPSHOT_ID)
+            } else {
+                null
+            }
+
+    /** True when the live session runs over the LAN. */
+    fun onLocalConnection(): Boolean = client.activeUrl.value?.let { isLocalAddress(it) } == true
+
+    /** Refresh cadence for a VISIBLE camera tile on the current connection (10s LAN, 20s relay). */
+    fun snapshotRefreshIntervalMs(): Long =
+        com.garrietta.haven.data.snapshotRefreshIntervalMs(onLocalConnection())
+
+    /**
+     * Visible camera tiles refresh only while the app is in the
+     * foreground — a stopped Activity keeps its composition, so a tile
+     * loop alone would keep pulling snapshots through the relay in
+     * the background. Set from MainActivity.onStart / onStop.
+     */
+    var appInForeground by mutableStateOf(true)
+        private set
+
+    /**
+     * Cache-first snapshot refresh (2026-11-01 polish round, reworked
+     * in the reliability round): a fetch only starts when the held
+     * image is absent or older than the current refresh cadence (or
+     * [force]), and a finished image replaces the held one atomically,
+     * so a failed or in-flight fetch can never blank a quadrant. The
+     * fetch waits for the live session first — before it is up the
+     * client may still be aiming at an unreachable endpoint — and asks
+     * Home Assistant for a [widthPx]-wide image (0 = full size). The
+     * JPEG bytes as served are persisted, so the NEXT cold open paints
+     * last-known images immediately (see [loadDiskSnapshots]) without
+     * a lossy re-encode.
+     */
+    fun refreshSnapshot(entityId: String, widthPx: Int = 0, force: Boolean = false) {
         val key = snapshotKey(entityId)
         if (key in snapshotRefreshing) return
         val heldAt = snapshotTimestamps[key]
-        if (snapshotCache.containsKey(key) && heldAt != null &&
-            System.currentTimeMillis() - heldAt < snapshotFreshMs
+        val freshForMs = snapshotRefreshIntervalMs() - 1_000L
+        if (!force && snapshotCache.containsKey(key) && heldAt != null &&
+            System.currentTimeMillis() - heldAt < freshForMs
         ) return
         snapshotRefreshing += key
         viewModelScope.launch {
             try {
-                client.fetchCameraBitmap(entityId)?.let { bitmap ->
-                    snapshotCache[key] = bitmap
+                withTimeoutOrNull(30_000L) { connection.first { it.isLive() } } ?: return@launch
+                client.fetchCameraSnapshot(entityId, widthPx)?.let { snap ->
+                    snapshotCache[key] = snap.bitmap
                     snapshotTimestamps[key] = System.currentTimeMillis()
-                    persistSnapshot(entityId, bitmap)
+                    persistSnapshotBytes(entityId, snap.bytes)
                 }
             } finally {
                 snapshotRefreshing -= key
@@ -885,7 +1114,11 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             for (file in dir.listFiles() ?: return) {
                 if (!file.name.endsWith(".jpg")) continue
                 try {
-                    val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath) ?: continue
+                    // Sampled decode: files written before the reliability
+                    // round are full-resolution frames; tiles never need
+                    // more than ~960px, and the decode runs before the
+                    // first frame is drawn.
+                    val bitmap = decodeJpegScaled(file.readBytes(), 960) ?: continue
                     val key = file.nameWithoutExtension
                     snapshotCache[key] = bitmap
                     snapshotTimestamps[key] = file.lastModified()
@@ -917,31 +1150,35 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Last state-cache write, for the 10s persist throttle below. */
-    private var lastStateCachePersistMs: Long = 0L
-
     /**
-     * Round 25, item 2: persists the latest states + areas +
-     * entityAreas to haven_state_cache.json, throttled to at most
-     * one write per 10 seconds (state_changed events arrive far
-     * more often than the cache needs to move). Skips empty
-     * states — a blank write would poison the next cold start.
-     * Runs on Dispatchers.IO; best effort, never fatal.
+     * Round 25, item 2 (reworked in the reliability round): persists
+     * the latest states + areas + entityAreas to
+     * haven_state_cache.json at most once per 10 seconds. The flows
+     * are conflated and the write always uses the NEWEST value, so the
+     * final state before a quiet period is never skipped (the old
+     * throttle dropped any change that landed inside the window), and
+     * the ~300KB serialization runs on Dispatchers.IO instead of the
+     * main thread. Empty states are never written — a blank write
+     * would poison the next cold start. Written atomically
+     * (temp + rename). Best effort, never fatal.
      */
-    private fun persistStateCacheThrottled(
+    private suspend fun persistStateCache(
         states: Map<String, com.garrietta.haven.data.HaEntity>,
         areas: List<com.garrietta.haven.data.HaArea>,
         entityAreas: Map<String, String>,
     ) {
         if (states.isEmpty()) return
-        val now = System.currentTimeMillis()
-        if (now - lastStateCachePersistMs < 10_000L) return
-        lastStateCachePersistMs = now
-        val text = serializeStateCache(states, areas, entityAreas)
-        viewModelScope.launch(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             try {
-                val file = java.io.File(getApplication<Application>().filesDir, "haven_state_cache.json")
-                file.writeText(text)
+                val text = serializeStateCache(states, areas, entityAreas)
+                val dir = getApplication<Application>().filesDir
+                val tmp = java.io.File(dir, "haven_state_cache.json.tmp")
+                val file = java.io.File(dir, "haven_state_cache.json")
+                tmp.writeText(text)
+                if (!tmp.renameTo(file)) {
+                    file.delete()
+                    tmp.renameTo(file)
+                }
                 // The widgets draw from this file: bring them up to date with it.
                 com.garrietta.haven.widget.HavenWidgets.updateAll(getApplication())
             } catch (_: Exception) {
@@ -950,13 +1187,18 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun persistSnapshot(entityId: String, bitmap: android.graphics.Bitmap) {
+    /** Writes the JPEG as served, atomically (temp file + rename) so a crash mid-write never leaves a torn image. */
+    private fun persistSnapshotBytes(entityId: String, bytes: ByteArray) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val file = snapshotFile(entityId)
-                file.parentFile?.mkdirs()
-                file.outputStream().use { out ->
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                val dir = file.parentFile ?: return@launch
+                dir.mkdirs()
+                val tmp = java.io.File(dir, file.name + ".tmp")
+                tmp.writeBytes(bytes)
+                if (!tmp.renameTo(file)) {
+                    file.delete()
+                    tmp.renameTo(file)
                 }
             } catch (_: Exception) {
                 // Disk persistence is best effort; the in-memory image already updated.
@@ -1044,10 +1286,14 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         // on frame 0, and the socket updates silently behind.
         loadStateCache()
         // Round 25, item 2: persist the cache whenever the flows
-        // move (the throttle inside keeps it to one write per 10s).
+        // move — conflated, newest value, at most one write per 10s.
         viewModelScope.launch {
             combine(client.states, client.areas, client.entityAreas) { s, a, ea -> Triple(s, a, ea) }
-                .collect { (s, a, ea) -> persistStateCacheThrottled(s, a, ea) }
+                .conflate()
+                .collect { (s, a, ea) ->
+                    persistStateCache(s, a, ea)
+                    delay(10_000L)
+                }
         }
         // Dashboard choice must be wired before autoConnect: connect ->
         // auth_ok -> refreshLovelace reads the preference on its first run.
@@ -1064,11 +1310,12 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             val first = client.states.first { it.isNotEmpty() }
             maybeMigrateCameras(first)
         }
-        // Round 16, item 7: seed the AUTO target BEFORE the
-        // callback registers (its first fire is immediate and
-        // must be a no-op, not a reconnect), then watch
-        // transport changes for Wi-Fi <-> cellular flips.
-        lastAutoTarget = connectionTarget()
+        // Reliability round: read the network BEFORE the callback
+        // registers (its first fire is immediate; the settle delay and
+        // the unchanged profile make it a no-op), then watch the
+        // default network for Wi-Fi / cellular / VPN changes.
+        networkProfile = readNetworkProfile()
+        client.setNetworkAvailable(networkProfile.available)
         try {
             val cm = getApplication<Application>()
                 .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -1083,12 +1330,32 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         client.stateChangedListener = { event ->
             notificationManager.onStateChanged(event, wasLocallyActuated(event.entityId))
         }
-        // Round 25, item 1: auth rejections and transport drops
-        // retry through the ViewModel — never sign out, never clear
-        // tokens. Wired before autoConnect so no early failure is
-        // missed.
-        client.onAuthInvalid = { startAuthRetryLoop() }
-        client.onTransportFailure = { handleTransportFailure() }
+        // Reliability round: a rejected token is renewed here (never a
+        // sign-out unless the instance refuses the refresh token
+        // itself); REST 401s renew through the same single-flight
+        // refresh. Both callbacks arrive on OkHttp threads.
+        client.onAuthInvalid = { mainHandler.post { startAuthRetryLoop() } }
+        client.tokenRefresher = { stale -> refreshTokenBlocking(stale) }
+        // Each new session: learn the instance's own URLs once (fills
+        // an empty local/cloud slot — the Nabu Casa link for a LAN
+        // login), and keep the access token renewed ahead of expiry.
+        viewModelScope.launch {
+            var lastSessionUrl: String? = null
+            client.activeUrl.collect { url ->
+                if (url != null && url != lastSessionUrl) {
+                    lastSessionUrl = url
+                    bumpConnectionPrefs()
+                    if (tokenStore.cloudInstanceUrl == null || connectionLocalUrl == null) {
+                        client.fetchInstanceUrls { detected ->
+                            if (detected != null) mainHandler.post { adoptDetectedUrls(detected) }
+                        }
+                    }
+                } else if (url == null && lastSessionUrl != null) {
+                    lastSessionUrl = null
+                    bumpConnectionPrefs()
+                }
+            }
+        }
         autoConnect()
     }
 
@@ -1465,31 +1732,52 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Auth ----
 
     private fun autoConnect() {
-        // Round 16, item 7: start on the mode-resolved target
-        // (AUTO on home Wi-Fi -> local), falling back to the
-        // legacy URL exactly as before when nothing resolves.
-        val url = connectionTarget() ?: tokenStore.instanceUrl
+        // Reliability round: connect over the candidate list for the
+        // current mode + network (legacy URL when nothing resolves),
+        // renewing an expired or nearly expired OAuth token FIRST — a
+        // stale token would only earn an auth_invalid round trip (and,
+        // over REST, a failed-login strike toward HA's IP ban).
+        val endpoints = connectionEndpoints()
         val token = tokenStore.accessToken
-        if (url != null && token != null) {
-            isAuthenticated = true
-            if (tokenStore.refreshToken != null && tokenStore.tokenExpiresAtMs > 0 &&
-                tokenStore.tokenExpiresAtMs < System.currentTimeMillis() + 60_000
-            ) {
-                refreshAndConnect(url)
-            } else {
-                client.connect(url, token)
+        if (endpoints.isEmpty() || token == null) return
+        isAuthenticated = true
+        client.updateToken(token)
+        if (tokenStore.refreshToken != null &&
+            tokenNeedsRefresh(tokenStore.tokenExpiresAtMs, System.currentTimeMillis())
+        ) {
+            viewModelScope.launch {
+                when (refreshAccessToken(null)) {
+                    TokenRefreshOutcome.OK -> {
+                        scheduleTokenRefresh()
+                        client.connect(connectionEndpoints(), tokenStore.accessToken ?: return@launch)
+                    }
+                    TokenRefreshOutcome.REJECTED -> handleSessionExpired()
+                    // Instance unreachable right now: start the pass with
+                    // the stored token; auth_invalid (if it is expired)
+                    // routes into the retry loop once the instance answers.
+                    TokenRefreshOutcome.UNREACHABLE -> client.connect(connectionEndpoints(), token)
+                }
             }
+        } else {
+            scheduleTokenRefresh()
+            client.connect(endpoints, token)
         }
     }
 
-    fun loginWithToken(url: String, token: String) {
-        val clean = normalizeInstanceUrl(url)
-        // Round 16, item 7: slot the login URL without losing
-        // the other side — a cloud login must not wipe a stored
-        // local URL (switching back would strand the app), and
-        // a local login replaces the local slot only. First-ever
-        // login keeps the legacy field populated either way.
+    /**
+     * Files a sign-in URL into the right slot without losing the other
+     * side: a cloud login must not wipe a stored local URL (switching
+     * back would strand the app), and a local login replaces the local
+     * slot only. First-ever login keeps the legacy field populated
+     * either way. (OAuth used to overwrite the legacy slot outright, so
+     * a Nabu Casa sign-in erased the LAN URL.)
+     */
+    private fun slotInstanceUrl(clean: String) {
         if (isLocalAddress(clean)) {
+            val legacy = tokenStore.instanceUrl
+            if (legacy != null && !isLocalAddress(legacy) && tokenStore.cloudInstanceUrl == null) {
+                tokenStore.cloudInstanceUrl = legacy
+            }
             tokenStore.instanceUrl = clean
         } else {
             if (tokenStore.instanceUrl?.let { isLocalAddress(it) } != true) {
@@ -1498,12 +1786,22 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             tokenStore.cloudInstanceUrl = clean
         }
         bumpConnectionPrefs()
+    }
+
+    /** The URL just used to sign in goes first; the rest of the candidate list stays as fallback. */
+    private fun endpointsPreferring(url: String): List<String> = (listOf(url) + connectionEndpoints()).distinct()
+
+    fun loginWithToken(url: String, token: String) {
+        val clean = normalizeInstanceUrl(url)
+        slotInstanceUrl(clean)
         tokenStore.accessToken = token
         tokenStore.refreshToken = null
         tokenStore.tokenExpiresAtMs = 0L
         authError = null
         isAuthenticated = true
-        client.connect(clean, token)
+        tokenRefreshJob?.cancel()
+        networkProfile = readNetworkProfile()
+        client.connect(endpointsPreferring(clean), token)
     }
 
     /**
@@ -1523,7 +1821,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             val result = if (!isNetworkAvailable(getApplication())) {
                 ProbeResult.NoNetwork
             } else {
-                probeInstance(clean, OkHttpClient())
+                probeInstance(clean, HaClient.sharedHttp)
             }
             probing = false
             when (result) {
@@ -1542,7 +1840,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             scanning = true
             scanMessage = null
-            scanMessage = when (val outcome = discovery.scanSubnet(OkHttpClient())) {
+            scanMessage = when (val outcome = discovery.scanSubnet(HaClient.sharedHttp)) {
                 is ScanOutcome.Done -> if (outcome.found > 0) {
                     "Found ${outcome.found} instance${if (outcome.found == 1) "" else "s"}."
                 } else {
@@ -1558,8 +1856,8 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     /** Opens the instance's OAuth authorize page in the system browser (PKCE S256). */
     fun startOAuth(url: String): Uri {
         val clean = normalizeInstanceUrl(url)
-        tokenStore.instanceUrl = clean
         pendingOAuthUrl = clean
+        tokenStore.oauthPendingUrl = clean
         val verifier = generateVerifier()
         tokenStore.pkceVerifier = verifier
         val state = generateVerifier().take(16)
@@ -1595,7 +1893,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
             authError = uri.getQueryParameter("error") ?: "Sign-in was cancelled."
             return
         }
-        val url = pendingOAuthUrl ?: tokenStore.instanceUrl ?: return
+        val url = pendingOAuthUrl ?: tokenStore.oauthPendingUrl ?: tokenStore.instanceUrl ?: return
         exchangeCode(url, code)
     }
 
@@ -1608,11 +1906,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
                 .add("client_id", OAUTH_CLIENT_ID)
                 .add("redirect_uri", OAUTH_REDIRECT)
             tokenStore.pkceVerifier?.let { form.add("code_verifier", it) }
-            val ok = exchangeToken(url, form.build())
+            val outcome = exchangeToken(url, form.build())
             oauthExchanging = false
-            if (ok) {
+            if (outcome == TokenRefreshOutcome.OK) {
+                slotInstanceUrl(url)
+                tokenStore.oauthPendingUrl = null
+                tokenStore.pkceVerifier = null
+                authError = null
                 isAuthenticated = true
-                client.connect(url, tokenStore.accessToken!!)
+                scheduleTokenRefresh()
+                networkProfile = readNetworkProfile()
+                client.connect(endpointsPreferring(url), tokenStore.accessToken ?: return@launch)
             } else {
                 authError = "Could not finish sign-in. Try the long-lived token option."
             }
@@ -1620,152 +1924,215 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Round 25, item 1: the auth-retry loop's job handle. Only one
-     * loop runs at a time — starting a new one (manual tap, fresh
-     * auth_invalid) cancels the old. signOut() cancels it too, so a
-     * retry can never reconnect after an explicit sign-out.
+     * Single-flight token renewal shared by every path — the proactive
+     * timer, auth_invalid recovery, REST 401s, and foreground checks —
+     * so concurrent triggers never race two refreshes. [staleToken] is
+     * the token the caller saw fail: if the stored token already moved
+     * on, the work is done (OK) without another exchange. Tries the
+     * live endpoint first, then the other candidates, stopping at the
+     * first definitive answer (OK or REJECTED).
      */
-    private var authRetryJob: Job? = null
-
-    /** Round 25, item 1: last AUTO fallback switch, for the 30s cooldown. */
-    private var lastFallbackAtMs: Long = 0L
-
-    /**
-     * Round 25, item 1: manual reconnect — the connection status
-     * line under the greeting calls this, never signOut(). Attempts
-     * a token refresh + reconnect immediately, without clearing
-     * tokenStore; a transient failure keeps retrying with backoff
-     * in the background (see [authRetryLoop]).
-     */
-    fun reconnectNow() {
-        startAuthRetryLoop()
-    }
-
-    private fun startAuthRetryLoop() {
-        authRetryJob?.cancel()
-        authRetryJob = viewModelScope.launch { authRetryLoop() }
-    }
-
-    /**
-     * Round 25, item 1: refresh + reconnect with backoff. Tries
-     * the current target first; in AUTO, tries the alternate URL
-     * before waiting. After MAX_AUTH_RETRIES failed attempts the
-     * refresh token is presumed dead and the app surfaces "Your
-     * session expired. Please sign in again." — the only path that
-     * asks for a fresh sign-in, and only after ~5 minutes of
-     * retries. Cancelled by signOut() and by a successful connect.
-     * With no refresh token stored at all (long-lived-token
-     * login), there is nothing to retry — it gives up immediately.
-     */
-    private suspend fun authRetryLoop() {
-        if (tokenStore.refreshToken == null) {
-            isAuthenticated = false
-            authError = "Your session expired. Please sign in again."
-            return
-        }
-        var attempt = 0
-        while (true) {
-            val target = connectionTarget() ?: tokenStore.instanceUrl ?: return
-            if (tryRefresh(target)) {
-                client.connect(target, tokenStore.accessToken!!)
-                return
+    private suspend fun refreshAccessToken(staleToken: String?): TokenRefreshOutcome =
+        tokenRefreshMutex.withLock {
+            val current = tokenStore.accessToken
+            if (staleToken != null && current != null && current != staleToken) {
+                client.updateToken(current)
+                return@withLock TokenRefreshOutcome.OK
             }
-            if (connectionMode == ConnectionMode.AUTO) {
-                val alt = alternateConnectionTarget()
-                if (alt != null && alt != target && tryRefresh(alt)) {
-                    lastAutoTarget = alt
-                    client.connect(alt, tokenStore.accessToken!!)
-                    return
+            val urls = listOfNotNull(client.activeUrl.value) + connectionEndpoints()
+            val outcome = refreshTokenVia(urls, tokenStore, OAUTH_CLIENT_ID)
+            if (outcome == TokenRefreshOutcome.OK) {
+                tokenStore.accessToken?.let { client.updateToken(it) }
+                Log.d("Haven", "access token renewed")
+            } else {
+                Log.w("Haven", "token renewal: $outcome")
+            }
+            outcome
+        }
+
+    /**
+     * REST 401 path (OkHttp worker thread, may block): renew once and
+     * hand back the fresh token, or null. A refusal of the refresh
+     * token itself ends the session on the main thread.
+     */
+    private fun refreshTokenBlocking(staleToken: String): String? {
+        if (tokenStore.refreshToken == null) return null
+        val outcome = try {
+            runBlocking { refreshAccessToken(staleToken) }
+        } catch (e: Exception) {
+            TokenRefreshOutcome.UNREACHABLE
+        }
+        return when (outcome) {
+            TokenRefreshOutcome.OK -> {
+                mainHandler.post { scheduleTokenRefresh() }
+                tokenStore.accessToken
+            }
+            TokenRefreshOutcome.REJECTED -> {
+                mainHandler.post { handleSessionExpired() }
+                null
+            }
+            TokenRefreshOutcome.UNREACHABLE -> null
+        }
+    }
+
+    /**
+     * Renews the OAuth access token [TOKEN_REFRESH_MARGIN_MS] before it
+     * expires, without touching the live socket. The old app refreshed
+     * only at launch: after 30 minutes every snapshot, history plot and
+     * HLS segment came back 401 while the socket still looked healthy.
+     * An unreachable instance retries in 30s; a refused refresh token
+     * ends the session.
+     */
+    private fun scheduleTokenRefresh() {
+        tokenRefreshJob?.cancel()
+        tokenRefreshJob = null
+        if (tokenStore.refreshToken == null) return
+        val delayMs = tokenRefreshDelayMs(tokenStore.tokenExpiresAtMs, System.currentTimeMillis()) ?: return
+        tokenRefreshJob = viewModelScope.launch {
+            delay(delayMs)
+            when (refreshAccessToken(null)) {
+                TokenRefreshOutcome.OK -> scheduleTokenRefresh()
+                TokenRefreshOutcome.REJECTED -> handleSessionExpired()
+                TokenRefreshOutcome.UNREACHABLE -> {
+                    delay(30_000L)
+                    scheduleTokenRefresh()
                 }
             }
-            attempt++
-            if (attempt >= MAX_AUTH_RETRIES) {
-                isAuthenticated = false
-                authError = "Your session expired. Please sign in again."
-                return
-            }
-            delay(authRetryDelayMs(attempt - 1))
         }
     }
-
-    /** Round 25, item 1: one refresh-token exchange against [url]. False when no refresh token is stored. */
-    private suspend fun tryRefresh(url: String): Boolean {
-        val refresh = tokenStore.refreshToken ?: return false
-        return exchangeToken(
-            url,
-            FormBody.Builder()
-                .add("grant_type", "refresh_token")
-                .add("refresh_token", refresh)
-                .add("client_id", OAUTH_CLIENT_ID)
-                .build(),
-        )
-    }
-
-    /** Round 25, item 1: the alternate URL for the current target (pure helper in Round16Logic). */
-    private fun alternateConnectionTarget(): String? = alternateConnectionTarget(
-        connectionMode, connectionLocalUrl, connectionCloudUrl, isWifiConnected(),
-    )
 
     /**
-     * Round 25, item 1: the socket dropped on the current URL.
-     * In AUTO, switch to the alternate URL immediately (the same
-     * token works through both) — at most once per 30 seconds, so
-     * a flapping link cannot ping-pong between URLs. In
-     * LOCAL/CLOUD the client's own same-URL backoff handles the
-     * retry.
+     * App came to the foreground (MainActivity.onStart). Re-reads the
+     * network (callbacks can be deferred while stopped), renews a token
+     * that expired in the background, then makes sure the session is
+     * genuinely alive — a socket that slept through Doze can look open
+     * while its TCP flow is dead, so it is pinged and replaced if
+     * silent. With no session at all, a pass starts immediately
+     * instead of waiting out a long backoff.
      */
-    private fun handleTransportFailure() {
-        if (connectionMode != ConnectionMode.AUTO) return
-        val alt = alternateConnectionTarget() ?: return
-        val current = connectionTarget() ?: return
-        if (alt == current) return
-        val now = System.currentTimeMillis()
-        if (now - lastFallbackAtMs < 30_000L) return
-        lastFallbackAtMs = now
-        lastAutoTarget = alt
+    fun onAppForegrounded() {
+        appInForeground = true
+        if (!isAuthenticated) return
+        networkProfile = readNetworkProfile()
+        client.setNetworkAvailable(networkProfile.available)
         val token = tokenStore.accessToken ?: return
-        client.connect(alt, token)
+        if (tokenStore.refreshToken != null &&
+            tokenNeedsRefresh(tokenStore.tokenExpiresAtMs, System.currentTimeMillis(), 120_000L)
+        ) {
+            viewModelScope.launch {
+                when (refreshAccessToken(null)) {
+                    TokenRefreshOutcome.OK -> scheduleTokenRefresh()
+                    TokenRefreshOutcome.REJECTED -> {
+                        handleSessionExpired()
+                        return@launch
+                    }
+                    TokenRefreshOutcome.UNREACHABLE -> Unit
+                }
+                client.updateEndpoints(connectionEndpoints(), tokenStore.accessToken)
+                client.ensureAlive()
+            }
+        } else {
+            if (tokenRefreshJob?.isActive != true) scheduleTokenRefresh()
+            client.updateEndpoints(connectionEndpoints(), token)
+            client.ensureAlive()
+        }
     }
 
-    private fun refreshAndConnect(url: String) {
-        viewModelScope.launch {
-            if (tryRefresh(url)) {
-                client.connect(url, tokenStore.accessToken!!)
-            } else {
-                // Refresh failed; retry with backoff (+ the
-                // alternate URL in AUTO) instead of stranding the
-                // app in "Sign-in expired" — see authRetryLoop.
-                startAuthRetryLoop()
+    /**
+     * Manual reconnect — the connection status line under the
+     * greeting calls this, never signOut(). A rejected session renews
+     * its token first; otherwise the client verifies the live session
+     * or starts a fresh pass right now (backoff reset).
+     */
+    fun reconnectNow() {
+        val conn = connection.value
+        if (conn is ConnectionState.Error && !conn.retrying) {
+            startAuthRetryLoop(restart = true)
+        } else {
+            networkProfile = readNetworkProfile()
+            client.setNetworkAvailable(networkProfile.available)
+            val token = tokenStore.accessToken ?: return
+            client.updateEndpoints(connectionEndpoints(), token)
+            client.reconnectNow()
+        }
+    }
+
+    /**
+     * auth_invalid recovery (main thread): renew the token and start a
+     * fresh pass. A refused refresh token (or a revoked long-lived
+     * token) is definitive — the user must sign in again, and retrying
+     * would only add failed-login strikes toward HA's IP ban. An
+     * unreachable token endpoint keeps retrying with backoff (paused
+     * while offline); a relay hiccup must never log anyone out.
+     */
+    private fun startAuthRetryLoop(restart: Boolean = false) {
+        if (!restart && authRetryJob?.isActive == true) return
+        authRetryJob?.cancel()
+        authRetryJob = viewModelScope.launch {
+            if (tokenStore.refreshToken == null) {
+                handleSessionExpired()
+                return@launch
+            }
+            var attempt = 0
+            while (true) {
+                when (refreshAccessToken(null)) {
+                    TokenRefreshOutcome.OK -> {
+                        scheduleTokenRefresh()
+                        networkProfile = readNetworkProfile()
+                        client.connect(connectionEndpoints(), tokenStore.accessToken ?: return@launch)
+                        return@launch
+                    }
+                    TokenRefreshOutcome.REJECTED -> {
+                        handleSessionExpired()
+                        return@launch
+                    }
+                    TokenRefreshOutcome.UNREACHABLE -> {
+                        client.markRenewingSignIn()
+                        delay(authRetryDelayMs(attempt))
+                        attempt++
+                        if (!readNetworkProfile().available) {
+                            // Wait for a network rather than burning attempts offline.
+                            withTimeoutOrNull(10 * 60_000L) {
+                                while (!readNetworkProfile().available) delay(2_000L)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    private suspend fun exchangeToken(url: String, body: FormBody): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder().url("$url/auth/token").post(body).build()
-            val resp = OkHttpClient().newCall(req).execute()
-            val text = resp.body?.string() ?: return@withContext false
-            if (!resp.isSuccessful) return@withContext false
-            val json = JSONObject(text)
-            val access = json.optString("access_token")
-            if (access.isEmpty()) return@withContext false
-            tokenStore.accessToken = access
-            val refresh = json.optString("refresh_token")
-            if (refresh.isNotEmpty()) tokenStore.refreshToken = refresh
-            val expiresIn = json.optLong("expires_in", 0L)
-            if (expiresIn > 0) tokenStore.tokenExpiresAtMs = System.currentTimeMillis() + expiresIn * 1000L
-            true
-        } catch (e: Exception) {
-            false
-        }
+    /**
+     * The instance refused our credentials for good. Stop everything
+     * that could retry, keep the URLs (the login screen pre-fills
+     * them), and ask for a fresh sign-in.
+     */
+    private fun handleSessionExpired() {
+        if (!isAuthenticated) return
+        Log.w("Haven", "session expired; sign-in required")
+        tokenRefreshJob?.cancel()
+        tokenRefreshJob = null
+        val retry = authRetryJob
+        authRetryJob = null
+        client.disconnect()
+        isAuthenticated = false
+        authError = "Your session expired. Please sign in again."
+        retry?.cancel()
     }
 
+    /** One /auth/token exchange (shared with the Device Controls service; see exchangeTokenAt). */
+    private suspend fun exchangeToken(url: String, body: FormBody): TokenRefreshOutcome =
+        exchangeTokenAt(url, body, tokenStore)
+
     fun signOut() {
-        // Round 25, item 1: the auth-retry loop must never
-        // reconnect after an explicit sign-out — cancel it first.
+        // The auth-retry loop and the renewal timer must never
+        // reconnect after an explicit sign-out — cancel them first.
         // signOut stays strictly on the Settings button; nothing
         // else in the app calls it.
         authRetryJob?.cancel()
+        authRetryJob = null
+        tokenRefreshJob?.cancel()
+        tokenRefreshJob = null
         client.disconnect()
         tokenStore.clear()
         isAuthenticated = false

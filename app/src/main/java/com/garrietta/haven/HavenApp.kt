@@ -1741,6 +1741,16 @@ fun HavenApp(vm: HavenViewModel) {
                 // A failed tap used to vanish silently; now it banners here on
                 // every screen until dismissed.
                 val serviceError by vm.serviceError.collectAsState()
+                // Reliability round: a "Not connected — not sent" banner
+                // clears itself once the session is back (the action can
+                // simply be retried); real rejections still wait for a tap.
+                val sessionLive = vm.connection.collectAsState().value.isLive()
+                LaunchedEffect(serviceError, sessionLive) {
+                    if (sessionLive && serviceError?.startsWith("Not connected") == true) {
+                        delay(1_500)
+                        vm.dismissServiceError()
+                    }
+                }
                 if (serviceError != null) {
                     ServiceErrorBanner(
                         serviceError!!,
@@ -3684,8 +3694,10 @@ private fun CameraLiveBody(
     onFirstFrame: (() -> Unit)? = null,
     onError: ((String) -> Unit)? = null,
 ) {
-    val states by vm.states.collectAsState()
-    val entity = states[cameraId]
+    // Reliability round: this camera's own flow, not the whole states
+    // map — the live body used to recompose on every state change in
+    // the house while the video played.
+    val entity = vm.entityFlow(cameraId).collectAsState().value
     // Ring + non-stream cameras + unknown entities: MJPEG, unchanged.
     if (entity == null || isRingCamera(entity) || !cameraSupportsStream(entity)) {
         CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, onFirstFrame, onError)
@@ -3702,7 +3714,9 @@ private fun CameraLiveBody(
                 hlsFailed = true
             }
         }
-        vm.client.requestHlsUrl(cameraId) { url, _ ->
+        // Shared, deduplicated request: usually already answered by
+        // the prewarm that fired when the finger touched the tile.
+        vm.requestCameraHlsUrl(cameraId) { url ->
             if (!done) {
                 done = true
                 timeout.cancel()
@@ -3719,7 +3733,7 @@ private fun CameraLiveBody(
         // Attempting: mirror the MJPEG Connecting stage (cached
         // frame dimmed + loading text) so the wait reads the same.
         Box(Modifier.fillMaxSize().background(Color.Black)) {
-            val last = vm.lastCameraFrame(cameraId)
+            val last = vm.cameraPoster(cameraId)
             if (last != null) {
                 Image(
                     bitmap = last.asImageBitmap(),
@@ -3869,7 +3883,7 @@ private fun CameraHlsPlayerBody(
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (!rendered) {
-            val last = vm.lastCameraFrame(cameraId)
+            val last = vm.cameraPoster(cameraId)
             if (last != null) {
                 Image(
                     bitmap = last.asImageBitmap(),
@@ -3982,7 +3996,7 @@ private fun CameraRtspPlayerBody(
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (!rendered) {
-            val last = vm.lastCameraFrame(FRONT_DOOR_LIVE_VIEW_ID)
+            val last = vm.cameraPoster(FRONT_DOOR_LIVE_VIEW_ID)
             if (last != null) {
                 Image(
                     bitmap = last.asImageBitmap(),
@@ -4060,7 +4074,10 @@ private fun CameraMjpegBody(
             job.cancel()
         }
     }
-    val last = vm.lastCameraFrame(cameraId)
+    val last = vm.cameraPoster(cameraId)
+    // "Reconnecting…" only after this camera actually streamed; a still
+    // poster from the snapshot cache is not a lost live session.
+    val hadLiveFrame = vm.lastCameraFrame(cameraId) != null
     when (val state = streamState) {
         is CameraStreamState.Playing -> {
             Image(
@@ -4098,7 +4115,7 @@ private fun CameraMjpegBody(
                     Text(
                         if (connectingText != null) connectingText
                         else if (recording) "Loading recording…"
-                        else if (last != null) "Reconnecting…" else "Loading camera…",
+                        else if (hadLiveFrame) "Reconnecting…" else "Loading camera…",
                         color = Color.White,
                         fontSize = 16.sp,
                     )

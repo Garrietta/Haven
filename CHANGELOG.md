@@ -1,5 +1,23 @@
 # Haven Changelog
 
+## 3.2: Steadier connection, faster cameras, home ⇄ away without a hitch (2026-11-26)
+
+**What you will see**
+
+- Leaving or coming home switches between your local address and Nabu Casa on its own. On Wi-Fi Haven tries home first and gives up on it within 3 seconds when it does not answer; when home answers again it moves back without dropping anything.
+- Settings, Connection says which address is actually in use ("Connected · Cloud (fallback — switches back when Local answers)"), has a Local URL field, and fills an empty Local or Cloud URL from Home Assistant's own network settings.
+- A dropped connection is noticed in seconds and retried at once when the network comes back; returning to the app checks the connection is really alive.
+- Camera tiles load a picture sized for the tile and keep refreshing while they are on screen (every 10 seconds at home, 20 away). A camera's live view starts sooner — the stream is started when your finger touches the tile — and shows its last picture while it loads.
+- Cameras, history and video keep working past 30 minutes: the sign-in is renewed before it expires.
+- The Motion label on a camera no longer covers the Live / Recording label. To-do items can be added, ticked and deleted.
+
+**Under it**
+
+- `HaClient` is rebuilt around a per-socket `Link` (a replaced socket can no longer break the live one), an ordered endpoint list (`ConnectionPlanner.connectionCandidates`), make-before-break switch-back, WebSocket pings, and prompt `not_connected` failure for in-flight calls. `subscribe_events` now really sends `event_type: state_changed` — a trailing lambda had bound to `onResult`, so Home Assistant streamed every bus event. Todo edits are `todo.*` service calls (the same lambda slip sent them empty).
+- OAuth tokens renew 5 minutes before expiry, on foreground, on auth_invalid, and on a REST 401 (OkHttp authenticator), single-flight; a rejected token is never retried (Home Assistant counts each as a failed login toward its IP ban). `TokenExchange` is shared with Device Controls, which now also routes local/cloud.
+- Snapshots use HA's `?width=`, are sample-decoded and stored as served; HLS prewarm with a 45s URL cache, 0.5s start buffer, media over the shared OkHttp pool (`media3-datasource-okhttp`); closing an MJPEG view aborts its download. Sockets close with the ViewModel and the service; REST responses are always closed.
+- Tests: `ConnectionPlannerTest`; `tools/connection-harness` runs the real `HaClient` against a scripted fake OkHttp (fallback, stale sockets, switch-back, auth rejection, offline pause, ping/pong, 401 renewal).
+
 ## 3.1: Devices, not rooms; the doorbell live from anywhere (2026-11-23)
 
 **What you will see**

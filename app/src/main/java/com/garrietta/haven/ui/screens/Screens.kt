@@ -1,5 +1,14 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import kotlinx.coroutines.flow.collectLatest
+import com.garrietta.haven.data.cameraSnapshotWidthPx
 import com.garrietta.haven.ui.theme.glow
 import com.garrietta.haven.ui.theme.grainGlow
 import androidx.compose.material.icons.filled.Lightbulb
@@ -2346,24 +2355,28 @@ private fun HomeWeatherCard(weather: HaEntity, vm: HavenViewModel, navigate: (Sc
 
 /**
  * Feedback round 16, item 7: the connection switcher dialog.
- * Mode + cloud URL save through [HavenViewModel.switchConnection],
- * which reconnects with the existing token (Nabu Casa remote UI
- * forwards to the same instance, so no re-login). The cloud URL
- * is pasted by the user: HA's cloud integration does not expose
- * the remote-UI URL through any API the app uses, so nothing is
- * guessed or hardcoded. AUTO keys on Wi-Fi transport (no location
- * permission involved): local on Wi-Fi, cloud elsewhere.
+ * Mode + local URL + cloud URL save through
+ * [HavenViewModel.switchConnection], which reconnects with the
+ * existing token (Nabu Casa remote UI forwards to the same instance,
+ * so no re-login). Reliability round: empty slots are filled from
+ * Home Assistant's own `network/url` (or `cloud/status`) once
+ * connected — nothing is guessed or hardcoded, and a typed URL is
+ * never overwritten. AUTO keys on the transport (no location
+ * permission involved).
  */
 @Composable
 internal fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
     var mode by remember { mutableStateOf(vm.connectionMode) }
     var cloudUrl by remember { mutableStateOf(vm.connectionCloudUrl ?: "") }
+    var localUrl by remember { mutableStateOf(vm.connectionLocalUrl ?: "") }
     val (label, target) = vm.connectionDisplay()
+    val localInvalid = localUrl.isNotBlank() &&
+        !com.garrietta.haven.data.isLocalAddress(com.garrietta.haven.data.normalizeInstanceUrl(localUrl))
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Connection") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     "Current: $label" + (target?.let { " · $it" } ?: ""),
                     fontSize = 14.sp,
@@ -2371,7 +2384,7 @@ internal fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
                 )
                 Spacer(Modifier.height(16.dp))
                 for ((m, title, sub) in listOf(
-                    Triple(ConnectionMode.AUTO, "Automatic", "Local on Wi-Fi, cloud elsewhere"),
+                    Triple(ConnectionMode.AUTO, "Automatic", "Local address first on Wi-Fi, Ethernet or VPN; the cloud URL first elsewhere. Falls back either way and switches back on its own."),
                     Triple(ConnectionMode.LOCAL, "Local only", "Always use the local address"),
                     Triple(ConnectionMode.CLOUD, "Cloud only", "Always use the Nabu Casa remote UI"),
                 )) {
@@ -2390,22 +2403,42 @@ internal fun ConnectionDialog(vm: HavenViewModel, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
+                    value = localUrl,
+                    onValueChange = { localUrl = it },
+                    label = { Text("Local URL (on your home network)") },
+                    placeholder = { Text("http://192.168.1.10:8123") },
+                    singleLine = true,
+                    isError = localInvalid,
+                    supportingText = if (localInvalid) {
+                        { Text("That isn't a local network address.") }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
                     value = cloudUrl,
                     onValueChange = { cloudUrl = it },
                     label = { Text("Cloud URL (Nabu Casa remote UI)") },
+                    placeholder = { Text("https://xxxx.ui.nabu.casa") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Paste the remote-UI URL from your Home Assistant Cloud settings. Nothing is detected automatically.",
+                    "Haven fills an empty field from Home Assistant's own network settings once it connects " +
+                        "(admin accounts). A URL you enter here is never overwritten.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { vm.switchConnection(mode, cloudUrl); onDismiss() }) { Text("Save") }
+            TextButton(
+                enabled = !localInvalid,
+                onClick = { vm.switchConnection(mode, cloudUrl, localUrl); onDismiss() },
+            ) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -2466,6 +2499,7 @@ fun CameraQuadrantHero(vm: HavenViewModel, navigate: (Screen) -> Unit, states: M
 
 @Composable
 internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Modifier = Modifier, corners: RoundedCornerShape = RoundedCornerShape(0.dp)) {
+    var slotWidthPx by remember { mutableIntStateOf(0) }
     Box(
         modifier.padding(1.dp).clip(corners)
             .background(MaterialTheme.colorScheme.surfaceContainer)
@@ -2479,6 +2513,25 @@ internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Mod
             // It also hides while its panel is open, so the
             // snapshot never doubles the video.
             .then(if (cameraId != null) Modifier.reportCardBounds(cameraId).reportCardShape(cameraId, corners).hideWhenMorphSource(cameraId) else Modifier)
+            // Reliability round: the tile's pixel width picks the
+            // snapshot size requested from HA (see cameraSnapshotWidthPx).
+            .onSizeChanged { slotWidthPx = it.width }
+            // Reliability round: a finger landing on the tile starts HA's
+            // stream worker (camera/stream) before the tap even completes;
+            // observes the down without consuming it, so the click below
+            // behaves exactly as before.
+            .then(
+                if (cameraId != null) {
+                    Modifier.pointerInput(cameraId) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            vm.prewarmCameraStream(cameraId)
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .then(if (cameraId != null) Modifier.clickable { vm.openCameraDialog(cameraId) } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
@@ -2530,9 +2583,20 @@ internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Mod
             // swaps in a finished image and only when the cached
             // one is stale, so a failed or in-flight fetch never
             // blanks a quadrant.
-            LaunchedEffect(thumbnailId) {
-                if (vm.snapshotFor(thumbnailId) != null) kotlinx.coroutines.delay(1000)
-                vm.refreshSnapshot(thumbnailId)
+            // Reliability round: the tile keeps refreshing while it is on
+            // screen and the app is in the foreground (10s on the LAN, 20s
+            // through the relay) — it used to fetch once per entry, so a
+            // screen left open showed stale images. Each fetch asks HA for
+            // a tile-sized image.
+            val requestWidth = cameraSnapshotWidthPx(slotWidthPx)
+            LaunchedEffect(thumbnailId, requestWidth) {
+                if (vm.snapshotFor(thumbnailId) != null) kotlinx.coroutines.delay(600)
+                snapshotFlow { vm.appInForeground }.collectLatest { foreground ->
+                    while (foreground) {
+                        vm.refreshSnapshot(thumbnailId, requestWidth)
+                        kotlinx.coroutines.delay(vm.snapshotRefreshIntervalMs())
+                    }
+                }
             }
             if (frontDoorDown) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2597,8 +2661,16 @@ internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Mod
                                 ),
                             ),
                     )
+                    // Reliability round: the status pill and the Motion pill
+                    // share one Row. The Motion pill used to be a loose Box
+                    // child (its Spacer did nothing in a Box), so it painted
+                    // straight over the LIVE / Recording pill.
                     Row(
-                        Modifier.align(Alignment.TopStart).padding(8.dp)
+                        Modifier.align(Alignment.TopStart).padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                    Row(
+                        Modifier
                             .clip(RoundedCornerShape(50))
                             .background(Color.Black.copy(alpha = 0.45f))
                             .padding(horizontal = 8.dp, vertical = 3.dp),
@@ -2634,6 +2706,7 @@ internal fun CameraQuadrant(vm: HavenViewModel, cameraId: String?, modifier: Mod
                             Spacer(Modifier.width(4.dp))
                             Text("Motion", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
+                    }
                     }
                     Text(
                         displayCameraName(entity),

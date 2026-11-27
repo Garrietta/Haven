@@ -79,6 +79,20 @@ class TokenStore(context: Context) {
             else prefs.edit().putString("oauth_state", value).apply()
         }
 
+    /**
+     * Reliability round: the instance an in-flight OAuth sign-in
+     * targets. startOAuth used to write it into [instanceUrl] (the
+     * local slot) so the redirect could find it — which erased the LAN
+     * URL whenever someone signed in through Nabu Casa. It lives here
+     * until the code exchange finishes, and the URL is slotted then.
+     */
+    var oauthPendingUrl: String?
+        get() = prefs.getString("oauth_pending_url", null)
+        set(value) {
+            if (value == null) prefs.edit().remove("oauth_pending_url").apply()
+            else prefs.edit().putString("oauth_pending_url", value).apply()
+        }
+
     fun clear() {
         prefs.edit().clear().apply()
     }

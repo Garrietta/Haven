@@ -56,7 +56,8 @@ CI (`.github/workflows/build.yml`) runs the tests and uploads the screenshots an
 
 | Path | Holds |
 |---|---|
-| `data/HaClient.kt` | The WebSocket and REST client: auth, states, events, services, registries, Lovelace, history, cameras. |
+| `data/HaClient.kt` | The WebSocket and REST client: auth, states, events, services, registries, Lovelace, history, cameras. Its connection engine walks an ordered local/cloud endpoint list, switches back to the LAN make-before-break, pings, and renews tokens on a 401. |
+| `data/ConnectionPlanner.kt` | Pure routing, backoff, token-timing and snapshot-sizing rules (unit-tested); `tools/connection-harness` exercises the engine against a fake server. |
 | `data/` | Stores (tokens, settings, tabs, card sizes, state cache) and pure logic, each rule unit-tested. |
 | `HavenViewModel.kt` | App state and every action a screen can take. |
 | `HavenApp.kt` | The root: theme, navigation, the bar and rail, popups and their morphs. |
