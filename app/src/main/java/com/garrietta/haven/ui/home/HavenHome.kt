@@ -1,5 +1,9 @@
 package com.garrietta.haven.ui.home
 
+import com.garrietta.haven.data.statusCardKey
+import com.garrietta.haven.ui.components.reportCardBounds
+import com.garrietta.haven.ui.components.reportCardColor
+import com.garrietta.haven.ui.components.reportCardShape
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.onClick
@@ -145,7 +149,7 @@ import org.json.JSONObject
  */
 
 @Composable
-fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) -> Unit) {
+fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val states by vm.states.collectAsState()
     val entityDevices by vm.entityDevices.collectAsState()
     val deviceInfo by vm.deviceInfo.collectAsState()
@@ -180,8 +184,9 @@ fun HavenHome(vm: HavenViewModel, navigate: (Screen) -> Unit, openTab: (Screen) 
 
     val onStatus: (StatusCard) -> Unit = { card ->
         when (card.kind) {
-            StatusKind.Climate -> openTab(Screen.Climate)
-            StatusKind.Security -> openTab(Screen.Security)
+            // A card opens a popup over Home, never another tab.
+            StatusKind.Climate -> navigate(Screen.ClimatePopup)
+            StatusKind.Security -> navigate(Screen.SecurityPopup)
             StatusKind.Garage -> card.entityIds.singleOrNull()?.let { navigate(Screen.EntityDetail(it)) } ?: run { sheet = card.kind }
             StatusKind.Greenhouse -> navigate(Screen.GreenhousePanel)
             StatusKind.Vacuum -> navigate(Screen.VacuumPanel)
@@ -392,9 +397,13 @@ private fun StatusCardView(card: StatusCard, modifier: Modifier, onClick: () -> 
     val colors = card.family.colors(isDark)
     val container by animateColorAsState(colors.container, label = "statusContainer")
     val ink = colors.onContainer
+    val key = statusCardKey(card.kind)
     Column(
         modifier
             .height(124.dp)
+            .reportCardBounds(key)
+            .reportCardShape(key, RoundedCornerShape(Corner.xl))
+            .reportCardColor(key, container)
             .clip(RoundedCornerShape(Corner.xl))
             .background(container)
             .clickable(onClickLabel = card.title, role = Role.Button, onClick = onClick)

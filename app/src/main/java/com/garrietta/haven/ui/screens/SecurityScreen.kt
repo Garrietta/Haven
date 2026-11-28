@@ -1,5 +1,7 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,6 +90,64 @@ import com.garrietta.haven.ui.theme.colors
  */
 @Composable
 fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    val page = securityPage(vm)
+    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var addQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    if (editing) {
+        LazyColumn(
+            Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
+                .background(MaterialTheme.colorScheme.background),
+            contentPadding = PaddingValues(bottom = 16.dp),
+        ) {
+            item(key = "head") {
+                EditableTitle("Security", editing) { editing = !editing; addQuery = "" }
+                Spacer(Modifier.height(12.dp))
+            }
+            securityEditor(vm, page, addQuery) { addQuery = it }
+        }
+        return
+    }
+    Column(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()
+            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp),
+    ) {
+        EditableTitle("Security", editing) { editing = !editing; addQuery = "" }
+        Spacer(Modifier.height(12.dp))
+        SecurityBody(vm, page, navigate, columns = if (LocalWideLayout.current) 3 else 2)
+    }
+}
+
+/**
+ * The Security page as a popup, opened from Home's Security card: the
+ * same line, alarm, cameras, detection and doors as the tab, so a tap
+ * never has to leave Home.
+ */
+@Composable
+fun SecurityPopupScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    val page = securityPage(vm)
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        PagePopupHeader("Security")
+        Spacer(Modifier.height(12.dp))
+        SecurityBody(vm, page, navigate, columns = 2)
+    }
+}
+
+/** What the Security page shows, worked out once for the page, its popup and its editor. */
+private class SecurityPage(
+    val states: Map<String, HaEntity>,
+    val nameOf: (HaEntity) -> String,
+    val cameraDefaults: List<String>,
+    val cameraIds: List<String>,
+    val cameras: List<com.garrietta.haven.data.CameraSecurity>,
+    val loose: List<HaEntity>,
+    val detectionDefaults: List<String>,
+    val detectionIds: List<String>,
+    val doorDefaults: List<String>,
+    val doorIds: List<String>,
+)
+
+@Composable
+private fun securityPage(vm: HavenViewModel): SecurityPage {
     val states by vm.states.collectAsState()
     val nameOf = rememberEntityNamer(vm)
     val entityDevices by vm.entityDevices.collectAsState()
@@ -104,101 +164,91 @@ fun SecurityScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     val detectionIds = curated(detectionDefaults, vm.curation(SECURITY_DETECTION), exists)
     val doorDefaults = securityDoorIds(states)
     val doorIds = curated(doorDefaults, vm.curation(SECURITY_DOORS), exists)
-    val summary = securitySummary(states, nameOf)
-    val alarm = securityAlarm(states)
-    val columns = if (LocalWideLayout.current) 3 else 2
-    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    var addQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    return SecurityPage(states, nameOf, cameraDefaults, cameraIds, cameras, loose, detectionDefaults, detectionIds, doorDefaults, doorIds)
+}
 
-    LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)
-            .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(bottom = 16.dp),
-    ) {
-        item(key = "head") {
-            EditableTitle("Security", editing) { editing = !editing; addQuery = "" }
-            Spacer(Modifier.height(12.dp))
-            if (!editing) {
-                SummaryCard(summary.line, summary.calm)
-                Spacer(Modifier.height(20.dp))
-            }
-        }
-        if (editing) {
-            fun section(key: String, title: String, defaults: List<String>, shown: List<String>) = EditorSection(
-                key, title,
-                shown.map { editorItem(states[it], it, states[it]?.let(nameOf)) },
-                takenOff(defaults, vm.curation(key)).map { editorItem(states[it], it, states[it]?.let(nameOf)) },
-            )
-            pageEditor(
-                vm,
-                sections = listOf(
-                    section(SECURITY_CAMERAS, "Cameras", cameraDefaults, cameraIds),
-                    section(SECURITY_DOORS, "Doors & locks", doorDefaults, doorIds),
-                    section(SECURITY_DETECTION, "Motion detection", detectionDefaults, detectionIds),
-                ),
-                candidates = { q ->
-                    val onPage = (cameraIds + doorIds + detectionIds).toSet()
-                    if (q.isEmpty()) emptyList() else states.values
-                        .filter { it.entityId !in onPage && (it.friendlyName.lowercase().contains(q) || it.entityId.contains(q)) }
-                        .sortedBy { it.friendlyName.lowercase() }
-                        .take(25)
-                },
-                query = addQuery,
-                onQuery = { addQuery = it },
-                onAdd = { entity -> vm.updateCuration(securitySectionFor(entity.entityId)) { it.add(entity.entityId) } },
-            )
-            return@LazyColumn
-        }
-        if (alarm != null) {
-            item(key = "alarm") {
-                AlarmChoices(vm, alarm, onNeedsCode = { navigate(Screen.SecurityPanel) })
-                Spacer(Modifier.height(20.dp))
-            }
-        }
-        item(key = "cameras-title") {
-            SectionTitle("Cameras")
-            Spacer(Modifier.height(8.dp))
-            if (cameras.isEmpty()) {
-                Text(
-                    "No cameras in Home Assistant yet. Cameras you add there appear here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun androidx.compose.foundation.lazy.LazyListScope.securityEditor(
+    vm: HavenViewModel,
+    page: SecurityPage,
+    query: String,
+    onQuery: (String) -> Unit,
+) {
+    val states = page.states
+    val nameOf = page.nameOf
+    fun section(key: String, title: String, defaults: List<String>, shown: List<String>) = EditorSection(
+        key, title,
+        shown.map { editorItem(states[it], it, states[it]?.let(nameOf)) },
+        takenOff(defaults, vm.curation(key)).map { editorItem(states[it], it, states[it]?.let(nameOf)) },
+    )
+    pageEditor(
+        vm,
+        sections = listOf(
+            section(SECURITY_CAMERAS, "Cameras", page.cameraDefaults, page.cameraIds),
+            section(SECURITY_DOORS, "Doors & locks", page.doorDefaults, page.doorIds),
+            section(SECURITY_DETECTION, "Motion detection", page.detectionDefaults, page.detectionIds),
+        ),
+        candidates = { q ->
+            val onPage = (page.cameraIds + page.doorIds + page.detectionIds).toSet()
+            if (q.isEmpty()) emptyList() else states.values
+                .filter { it.entityId !in onPage && (it.friendlyName.lowercase().contains(q) || it.entityId.contains(q)) }
+                .sortedBy { it.friendlyName.lowercase() }
+                .take(25)
+        },
+        query = query,
+        onQuery = onQuery,
+        onAdd = { entity -> vm.updateCuration(securitySectionFor(entity.entityId)) { it.add(entity.entityId) } },
+    )
+}
+
+/**
+ * The Security page's content, for the tab and its popup: the opening
+ * line, the alarm, the cameras [columns] to a row, motion detection,
+ * doors and locks, and the siren.
+ */
+@Composable
+private fun SecurityBody(vm: HavenViewModel, page: SecurityPage, navigate: (Screen) -> Unit, columns: Int) {
+    val states = page.states
+    val summary = securitySummary(states, page.nameOf)
+    val alarm = securityAlarm(states)
+    SummaryCard(summary.line, summary.calm)
+    Spacer(Modifier.height(20.dp))
+    if (alarm != null) {
+        AlarmChoices(vm, alarm, onNeedsCode = { navigate(Screen.SecurityPanel) })
+        Spacer(Modifier.height(20.dp))
+    }
+    SectionTitle("Cameras")
+    Spacer(Modifier.height(8.dp))
+    if (page.cameras.isEmpty()) {
+        Text(
+            "No cameras in Home Assistant yet. Cameras you add there appear here.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    // The cameras as a grid of their own pictures; a tap opens the
+    // camera, live where it can be.
+    for (row in page.cameras.chunked(columns)) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (camera in row) {
+                CameraQuadrant(
+                    vm,
+                    camera.cameraId,
+                    Modifier.weight(1f).aspectRatio(16f / 9f),
+                    RoundedCornerShape(Corner.lg),
                 )
             }
+            repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
         }
-        // The cameras as a grid of their own pictures; a tap opens the
-        // camera, live where it can be.
-        for (row in cameras.chunked(columns)) {
-            item(key = "cameras-" + row.first().cameraId) {
-                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (camera in row) {
-                        CameraQuadrant(
-                            vm,
-                            camera.cameraId,
-                            Modifier.weight(1f).aspectRatio(16f / 9f),
-                            RoundedCornerShape(Corner.lg),
-                        )
-                    }
-                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
-                }
-            }
-        }
-        item(key = "motion") {
-            Spacer(Modifier.height(12.dp))
-            SectionTitle("Motion detection")
-            Spacer(Modifier.height(8.dp))
-            MotionDetection(vm, cameras, loose, detectionIds)
-            Spacer(Modifier.height(20.dp))
-        }
-        item(key = "doors") {
-            DoorsAndLocks(states, doorIds, navigate, nameOf)
-        }
-        if (states[SIREN_ID] != null) {
-            item(key = "siren") {
-                Spacer(Modifier.height(20.dp))
-                SirenRow(vm, states.getValue(SIREN_ID))
-            }
-        }
+    }
+    Spacer(Modifier.height(12.dp))
+    SectionTitle("Motion detection")
+    Spacer(Modifier.height(8.dp))
+    MotionDetection(vm, page.cameras, page.loose, page.detectionIds)
+    Spacer(Modifier.height(20.dp))
+    DoorsAndLocks(states, page.doorIds, navigate, page.nameOf)
+    if (states[SIREN_ID] != null) {
+        Spacer(Modifier.height(20.dp))
+        SirenRow(vm, states.getValue(SIREN_ID))
     }
 }
 

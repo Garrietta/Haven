@@ -8,9 +8,12 @@
 - The doorbell tries for its live view instead of showing the recording at once. If live does not come, it says so, with Try again and Show the last recording.
 - The solar outdoor camera is asked for a new picture every 15 minutes rather than every few seconds, is not woken when a finger merely touches its tile, and its live view pauses after two minutes with Keep watching.
 - Any live view stops when you leave the app and starts again when you come back.
+- Camera tiles for battery cameras (the solar camera, the doorbell) say Snapshot instead of LIVE, since their picture is refreshed every 15 minutes.
+- Nothing you tap jumps to another tab any more. Home's Climate and Security cards open those pages as popups over Home, with the same cards as the tabs; drag down or go back to close them.
 
 **Underneath**
 
+- `Screen.ClimatePopup` and `Screen.SecurityPopup` open in the popup window; `ClimateBody` and `SecurityBody` draw the page content for both the tab and the popup (the tabs scroll as a `Column` outside Edit, so the same composables serve the popup's scroll). `HavenHome` no longer takes `openTab`; status cards report their bounds under `statusCardKey` so the popup grows out of the card.
 - `ThermostatControl` (`ThermostatPage.kt`) is the panel; `ThermostatDial.kt`, the dial state and its geometry helpers are removed, apart from the shared `Dial`'s touch geometry, now in `DialLogic.kt`. `EntityControlCard` draws `ThermostatControl` for a climate entity too, so the kind has one design everywhere. Set points come from `thermostatSetpoints` and `movedRange` (`data/Climate.kt`, tested). `ChoiceRow` takes `idleColors` for rows on a colored panel.
 - Camera transport: the capabilities wait starts once the WebSocket is live (it used to time out during connection and fall straight to the MJPEG recording); without an answer `fallbackStreamTypes` decides (Ring is WebRTC). WebRTC is tried twice; a WebRTC-only camera then shows `CameraStoppedPoster` instead of the recording.
 - `WebRtcCrashGuard` counts a death only when Android records a crash (`exitReasonIsCrash`), and keys its counts by version code and CI build number under a new preferences name, so the old counts (which took ordinary background reclaims for crashes and switched WebRTC off for the doorbell) are dropped.

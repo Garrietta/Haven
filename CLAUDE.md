@@ -60,7 +60,7 @@ Breaking one is a bug even when it compiles. Reasons are in `DESIGN.md`.
 7. **Headings and menus use the shared components**: `ScreenTitle`, `SectionTitle`, `MenuSection` / `MenuGroup` / `MenuRow`.
 8. **Design is not a setting.** Shapes and corners are fixed by kind; color is the one choice, a whole-app style. Do not add per-tile or per-type look options.
 9. **One popup per device.** Everything that shows a device opens `Screen.EntityDetail`; the popup ends with `EntityPopupMenuRows`. A kind of device has one control design, used wherever that kind is controlled (the thermostat's is `ThermostatControl`).
-10. **The bar is fixed**: Home, Security, Climate, Settings (`barItems`).
+10. **The bar is fixed**: Home, Security, Climate, Settings (`barItems`). **Only the bar switches tab**: every other press opens a window over where you are (a popup, a panel or a sheet). Home's Climate and Security cards open their pages as popups (`Screen.ClimatePopup`, `Screen.SecurityPopup`), drawn from the same body as the tabs.
 11. **Gestures, not buttons.** Reorder by holding the item itself and dragging (`holdToReorder`, `tileGestures`), remove from a list by swiping it away, set a level by sliding across the tile. Never arrows to step an item, never a mode to enter first; every gesture also has a TalkBack action.
 12. **The logo is generated** (`tools/logo.py`). Change the geometry there, never the XML or `BrandGeometry.kt`. Haven's own icon glyphs are generated the same way (`tools/glyphs.py` writes `HavenGlyphs.kt`).
 

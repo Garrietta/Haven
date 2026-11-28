@@ -417,6 +417,7 @@ internal fun CameraQuadrant(
                 // down). Every other quadrant keeps the existing
                 // brand rule (LIVE for native feeds, Recording
                 // for Ring).
+                val batteryCamera = cameraId != null && vm.isBatteryCamera(cameraId)
                 val showLive = if (cameraId == FRONT_DOOR_LIVE_VIEW_ID) {
                     // Round 21, item 3: the quadrant reads LIVE
                     // for the fallback once the RTSP fallback has
@@ -425,7 +426,9 @@ internal fun CameraQuadrant(
                     // it stays Recording.
                     frontDoorQuadrantShowsLive(resolveFrontDoorCameraSource(frontDoorStates), false, rtspProven = vm.frontDoorRtspProven)
                 } else {
-                    !isRingCamera(entity)
+                    // A battery camera's tile is a picture taken every
+                    // 15 minutes, so it says Snapshot rather than LIVE.
+                    !isRingCamera(entity) && !batteryCamera
                 }
                 Box(Modifier.fillMaxSize()) {
                     Box(
@@ -459,7 +462,7 @@ internal fun CameraQuadrant(
                             Spacer(Modifier.width(4.dp))
                             Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         } else {
-                            Text("Recording", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(if (batteryCamera) "Snapshot" else "Recording", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     // Motion pill (item 7): only while the linked

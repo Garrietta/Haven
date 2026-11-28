@@ -123,6 +123,9 @@ sealed class Screen {
     data object SecurityPanel : Screen()
     data object GreenhousePanel : Screen()
     data object UpdatesPanel : Screen()
+    /** The Climate and Security pages as popups, opened from Home's status cards rather than switching tab. */
+    data object ClimatePopup : Screen()
+    data object SecurityPopup : Screen()
     /** A camera's recorded clips. */
     data class CameraClips(val entityId: String) : Screen()
     /** Home Assistant's dashboards, and their editor, from Settings. */

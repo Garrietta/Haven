@@ -427,6 +427,14 @@ class HavenScreenshotTest {
             tapText("Main Floor")
         }
 
+    /** Home's Climate card opens the Climate page as a popup over Home, not the Climate tab. */
+    @Test fun climate_popup_folded_light() =
+        shoot("climate_popup_folded_light", FOLDED, withClimate(viewModel(signedIn = true, dark = false))) { tapCard("Climate") }
+
+    /** Home's Security card opens the Security page as a popup over Home. */
+    @Test fun security_popup_folded_light() =
+        shoot("security_popup_folded_light", FOLDED, livedIn(dark = false)) { tapCard("Security") }
+
     /** A heat-and-cool thermostat at rest: the green panel with Heat to and Cool to. */
     @Test fun thermostat_popup_heat_cool_light() =
         shoot("thermostat_popup_heat_cool_light", FOLDED, livedIn(dark = false)) { tapText("Thermostat") }

@@ -1,5 +1,7 @@
 package com.garrietta.haven.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.Canvas
@@ -87,6 +89,64 @@ import com.garrietta.haven.ui.theme.leafCard
  */
 @Composable
 fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    val page = climatePage(vm)
+    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var addQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    if (editing) {
+        LazyColumn(
+            Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = 16.dp),
+        ) {
+            item(key = "head") {
+                EditableTitle("Climate", editing) { editing = !editing; addQuery = "" }
+                Spacer(Modifier.height(12.dp))
+            }
+            climateEditor(vm, page, addQuery) { addQuery = it }
+        }
+        return
+    }
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp).padding(bottom = 16.dp),
+    ) {
+        EditableTitle("Climate", editing) { editing = !editing; addQuery = "" }
+        Spacer(Modifier.height(12.dp))
+        ClimateBody(vm, page, navigate, wide = LocalWideLayout.current)
+    }
+}
+
+/**
+ * The Climate page as a popup, opened from Home's Climate card: the same
+ * cards as the tab, one column wide, so a tap never has to leave Home.
+ */
+@Composable
+fun ClimatePopupScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
+    val page = climatePage(vm)
+    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        PagePopupHeader("Climate")
+        Spacer(Modifier.height(12.dp))
+        ClimateBody(vm, page, navigate, wide = false)
+    }
+}
+
+/** What the Climate page shows, worked out once for the page, its popup and its editor. */
+private class ClimatePage(
+    val states: Map<String, HaEntity>,
+    val nameOf: (HaEntity) -> String,
+    val areaNames: Map<String, String>,
+    val thermostatDefaults: List<String>,
+    val thermostats: List<HaEntity>,
+    val readingDefaults: List<String>,
+    val byKey: Map<String, ClimateReading>,
+    val readings: List<ClimateReading>,
+    val weather: HaEntity?,
+) {
+    val indoor get() = readings.filterNot { it.outdoor }
+    val outdoor get() = readings.filter { it.outdoor }
+}
+
+@Composable
+private fun climatePage(vm: HavenViewModel): ClimatePage {
     val states by vm.states.collectAsState()
     val nameOf = rememberEntityNamer(vm)
     val entityDevices by vm.entityDevices.collectAsState()
@@ -110,145 +170,136 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         readingCuration.added.filter { it !in covered }.mapNotNull(states::get).associate { it.entityId to addedReading(it, entityAreas) }
     val readingDefaults = found.map { it.key }
     val readings = curated(readingDefaults, readingCuration) { it in byKey }.mapNotNull(byKey::get)
-    val indoor = readings.filterNot { it.outdoor }
-    val outdoor = readings.filter { it.outdoor }
-    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-    var addQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
-    val weather = states.values.firstOrNull { it.domain == "weather" }
-    val summary = climateSummary(readings, thermostats, weather)
-    val dark = isDarkBackdrop(MaterialTheme.colorScheme.background)
-    val wide = LocalWideLayout.current
-    val columns = if (wide) 3 else 2
+    return ClimatePage(
+        states, nameOf, areaNames, thermostatDefaults, thermostats, readingDefaults, byKey, readings,
+        weather = states.values.firstOrNull { it.domain == "weather" },
+    )
+}
 
-    LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(bottom = 16.dp),
-    ) {
-        item(key = "head") {
-            EditableTitle("Climate", editing) { editing = !editing; addQuery = "" }
-            Spacer(Modifier.height(12.dp))
-        }
-        if (editing) {
-            pageEditor(
-                vm,
-                sections = listOf(
-                    EditorSection(
-                        CLIMATE_THERMOSTATS, "Thermostats",
-                        thermostats.map { editorItem(it, it.entityId, nameOf(it)) },
-                        takenOff(thermostatDefaults, vm.curation(CLIMATE_THERMOSTATS)).map { editorItem(states[it], it, states[it]?.let(nameOf)) },
-                    ),
-                    EditorSection(
-                        CLIMATE_READINGS, "Readings",
-                        readings.map { EditorItem(it.key, it.name, readingSummary(it, it.areaId?.let(areaNames::get))) },
-                        takenOff(readingDefaults, readingCuration).mapNotNull { key ->
-                            byKey[key]?.let { EditorItem(key, it.name, readingSummary(it, it.areaId?.let(areaNames::get))) }
-                        },
-                    ),
-                ),
-                candidates = { q ->
-                    val onPage = (thermostats.map { it.entityId } + readings.flatMap { listOfNotNull(it.key, it.temperature?.entityId, it.humidity?.entityId, it.other?.entityId) }).toSet()
-                    if (q.isEmpty()) emptyList() else states.values
-                        .filter { it.entityId !in onPage && (it.domain == "climate" || it.domain == "sensor") }
-                        .filter { it.friendlyName.lowercase().contains(q) || it.entityId.contains(q) }
-                        .sortedBy { it.friendlyName.lowercase() }
-                        .take(25)
+private fun androidx.compose.foundation.lazy.LazyListScope.climateEditor(
+    vm: HavenViewModel,
+    page: ClimatePage,
+    query: String,
+    onQuery: (String) -> Unit,
+) {
+    val states = page.states
+    val nameOf = page.nameOf
+    val readingCuration = vm.curation(CLIMATE_READINGS)
+    pageEditor(
+        vm,
+        sections = listOf(
+            EditorSection(
+                CLIMATE_THERMOSTATS, "Thermostats",
+                page.thermostats.map { editorItem(it, it.entityId, nameOf(it)) },
+                takenOff(page.thermostatDefaults, vm.curation(CLIMATE_THERMOSTATS)).map { editorItem(states[it], it, states[it]?.let(nameOf)) },
+            ),
+            EditorSection(
+                CLIMATE_READINGS, "Readings",
+                page.readings.map { EditorItem(it.key, it.name, readingSummary(it, it.areaId?.let(page.areaNames::get))) },
+                takenOff(page.readingDefaults, readingCuration).mapNotNull { key ->
+                    page.byKey[key]?.let { EditorItem(key, it.name, readingSummary(it, it.areaId?.let(page.areaNames::get))) }
                 },
-                query = addQuery,
-                onQuery = { addQuery = it },
-                onAdd = { entity -> vm.updateCuration(climateSectionFor(entity.entityId)) { it.add(entity.entityId) } },
-            )
-            return@LazyColumn
+            ),
+        ),
+        candidates = { q ->
+            val onPage = (page.thermostats.map { it.entityId } + page.readings.flatMap { listOfNotNull(it.key, it.temperature?.entityId, it.humidity?.entityId, it.other?.entityId) }).toSet()
+            if (q.isEmpty()) emptyList() else states.values
+                .filter { it.entityId !in onPage && (it.domain == "climate" || it.domain == "sensor") }
+                .filter { it.friendlyName.lowercase().contains(q) || it.entityId.contains(q) }
+                .sortedBy { it.friendlyName.lowercase() }
+                .take(25)
+        },
+        query = query,
+        onQuery = onQuery,
+        onAdd = { entity -> vm.updateCuration(climateSectionFor(entity.entityId)) { it.add(entity.entityId) } },
+    )
+}
+
+/**
+ * The Climate page's cards, for the tab and its popup: the house, each
+ * thermostat's panel, each room's air, then outside. [wide] sets the
+ * house beside the first thermostat and three readings to a row.
+ */
+@Composable
+private fun ClimateBody(vm: HavenViewModel, page: ClimatePage, navigate: (Screen) -> Unit, wide: Boolean) {
+    val thermostats = page.thermostats
+    val summary = climateSummary(page.readings, thermostats, page.weather)
+    val dark = isDarkBackdrop(MaterialTheme.colorScheme.background)
+    val columns = if (wide) 3 else 2
+    // Unfolded, the house and the first thermostat sit side by side
+    // rather than each stretching across the whole width.
+    val first = thermostats.firstOrNull()
+    if (wide && first != null) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HouseCard(summary, first, dark, Modifier.weight(1f))
+            ThermostatSection(first, vm, 0, navigate, Modifier.weight(1.3f))
         }
-        item(key = "house") {
-            // Unfolded, the house and the first thermostat sit side by side
-            // rather than each stretching across the whole width.
-            val first = thermostats.firstOrNull()
-            if (wide && first != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    HouseCard(summary, first, dark, Modifier.weight(1f))
-                    ThermostatSection(first, vm, 0, navigate, Modifier.weight(1.3f))
-                }
-            } else {
-                HouseCard(summary, first, dark)
-            }
-            Spacer(Modifier.height(20.dp))
+    } else {
+        HouseCard(summary, first, dark)
+    }
+    Spacer(Modifier.height(20.dp))
+    if (thermostats.isEmpty() && page.readings.isEmpty()) {
+        Text(
+            "No thermostats or temperature sensors in Home Assistant yet. Those you add there appear here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    thermostats.forEachIndexed { index, thermostat ->
+        if (wide && index == 0) return@forEachIndexed
+        ThermostatSection(thermostat, vm, index, navigate)
+        Spacer(Modifier.height(12.dp))
+    }
+    if (page.indoor.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        SectionTitle("Rooms")
+        Spacer(Modifier.height(8.dp))
+        ReadingRows(page.indoor, columns, vm, page.areaNames, dark, navigate)
+    }
+    val weather = page.weather
+    if (page.outdoor.isNotEmpty() || weather != null) {
+        Spacer(Modifier.height(8.dp))
+        SectionTitle("Outside")
+        Spacer(Modifier.height(8.dp))
+        if (weather != null) {
+            WeatherCard(weather, dark, onOpen = { navigate(Screen.EntityDetail(weather.entityId)) })
+            Spacer(Modifier.height(8.dp))
         }
-        if (thermostats.isEmpty() && readings.isEmpty()) {
-            item(key = "empty") {
-                Text(
-                    "No thermostats or temperature sensors in Home Assistant yet. Those you add there appear here.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        thermostats.forEachIndexed { index, thermostat ->
-            if (wide && index == 0) return@forEachIndexed
-            item(key = "thermostat-" + thermostat.entityId) {
-                ThermostatSection(thermostat, vm, index, navigate)
-                Spacer(Modifier.height(12.dp))
-            }
-        }
-        if (indoor.isNotEmpty()) {
-            item(key = "rooms-title") {
-                Spacer(Modifier.height(8.dp))
-                SectionTitle("Rooms")
-                Spacer(Modifier.height(8.dp))
-            }
-            readingRows(indoor, columns, "rooms", vm, areaNames, dark, navigate)
-        }
-        if (outdoor.isNotEmpty() || weather != null) {
-            item(key = "outside-title") {
-                Spacer(Modifier.height(8.dp))
-                SectionTitle("Outside")
-                Spacer(Modifier.height(8.dp))
-            }
-            if (weather != null) {
-                item(key = "weather") {
-                    WeatherCard(weather, dark, onOpen = { navigate(Screen.EntityDetail(weather.entityId)) })
-                    Spacer(Modifier.height(8.dp))
-                }
-            }
-            readingRows(outdoor, columns, "outside", vm, areaNames, dark, navigate)
-        }
+        ReadingRows(page.outdoor, columns, vm, page.areaNames, dark, navigate)
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.readingRows(
+@Composable
+private fun ReadingRows(
     readings: List<ClimateReading>,
     columns: Int,
-    keyPrefix: String,
     vm: HavenViewModel,
     areaNames: Map<String, String>,
     dark: Boolean,
     navigate: (Screen) -> Unit,
 ) {
     readings.chunked(columns).forEachIndexed { row, group ->
-        item(key = "$keyPrefix-${group.first().key}") {
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                group.forEachIndexed { index, reading ->
-                    ReadingCard(
-                        reading,
-                        areaName = reading.areaId?.let(areaNames::get),
-                        vm = vm,
-                        dark = dark,
-                        shapeIndex = row * columns + index,
-                        onOpen = {
-                            val id = reading.temperature?.entityId ?: reading.humidity?.entityId
-                            if (id != null) navigate(Screen.EntityDetail(id))
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                // A card alone in its row takes the row rather than
-                // sitting beside empty space.
-                if (group.size > 1) repeat(columns - group.size) { Spacer(Modifier.weight(1f)) }
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            group.forEachIndexed { index, reading ->
+                ReadingCard(
+                    reading,
+                    areaName = reading.areaId?.let(areaNames::get),
+                    vm = vm,
+                    dark = dark,
+                    shapeIndex = row * columns + index,
+                    onOpen = {
+                        val id = reading.temperature?.entityId ?: reading.humidity?.entityId
+                        if (id != null) navigate(Screen.EntityDetail(id))
+                    },
+                    modifier = Modifier.weight(1f),
+                )
             }
+            // A card alone in its row takes the row rather than
+            // sitting beside empty space.
+            if (group.size > 1) repeat(columns - group.size) { Spacer(Modifier.weight(1f)) }
         }
     }
 }
-
-/** The color of what a thermostat is doing: ember heating, frost cooling, quiet at rest or off. */
 
 /** The house in one card: inside, humidity, outside, and what the thermostat is doing. */
 @Composable

@@ -352,6 +352,9 @@ private fun activeWord(e: HaEntity): String = when (e.domain) {
 /** The status cards across the top of Home. */
 enum class StatusKind { Climate, Security, Lights, Garage, Greenhouse, Vacuum, Media }
 
+/** The key a status card reports its place under, so a popup opened from it grows out of it. */
+fun statusCardKey(kind: StatusKind): String = "status:" + kind.name.lowercase()
+
 /** One status card: what it is about, its headline value, a line under it, its color, and what it covers. */
 data class StatusCard(
     val kind: StatusKind,
