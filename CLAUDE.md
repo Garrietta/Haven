@@ -88,6 +88,8 @@ Renaming any of these silently resets or breaks a saved choice.
 | `targetSdk` bumped along with `compileSdk` | Changes runtime behaviour (predictive back, large-screen rules) that has not had a device pass. `compileSdk` moves freely; `targetSdk` is held at 35. |
 | Media3 bumped casually | The camera transports (HLS, RTSP) were tuned against 1.6.1. Bump it with a camera test pass. |
 | A screenshot test waiting for idle | Never returns: something is always animating. Drive `mainClock` by hand, as `shoot()` does. |
+| A live camera body that does not register with `registerLiveView` | Keeps streaming while the app is in the background: a stopped app does not recompose, so its `DisposableEffect` never ends the stream. |
+| A camera asked for pictures or streams without checking `isBatteryCamera` | Drains a battery camera, which wakes for each one. |
 
 ## Known debt
 

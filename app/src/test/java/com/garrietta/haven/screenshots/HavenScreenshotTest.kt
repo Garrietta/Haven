@@ -419,6 +419,18 @@ class HavenScreenshotTest {
     @Test fun climate_folded_dark() =
         shoot("climate_folded_dark", FOLDED, withClimate(viewModel(signedIn = true, dark = true))) { tapTab("Climate") }
 
+    /** A thermostat's popup, opened by a tap on its panel on the Climate tab: the panel, its last 24 hours, the menu rows. */
+    @Test fun thermostat_popup_folded_light() =
+        shoot("thermostat_popup_folded_light", FOLDED, withClimate(viewModel(signedIn = true, dark = false))) {
+            tapTab("Climate")
+            settle()
+            tapText("Main Floor")
+        }
+
+    /** A heat-and-cool thermostat at rest: the green panel with Heat to and Cool to. */
+    @Test fun thermostat_popup_heat_cool_light() =
+        shoot("thermostat_popup_heat_cool_light", FOLDED, livedIn(dark = false)) { tapText("Thermostat") }
+
     /** Scrolled to each room's air: the comfort bars and the outdoor cards. */
     @Test fun climate_rooms_folded_light() =
         shoot("climate_rooms_folded_light", FOLDED, withClimate(viewModel(signedIn = true, dark = false))) {

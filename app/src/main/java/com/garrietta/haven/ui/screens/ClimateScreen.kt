@@ -1,16 +1,13 @@
 package com.garrietta.haven.ui.screens
 
-import androidx.compose.foundation.combinedClickable
-import com.garrietta.haven.ui.theme.glow
-import com.garrietta.haven.ui.theme.grainGlow
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,26 +21,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.WaterDrop
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,21 +59,15 @@ import com.garrietta.haven.data.climateSummary
 import com.garrietta.haven.data.climateThermostats
 import com.garrietta.haven.data.comfortPosition
 import com.garrietta.haven.data.fmtDegrees
-import com.garrietta.haven.data.hvacModeLabel
-import com.garrietta.haven.data.presetLabel
-import com.garrietta.haven.data.setpointStep
 import com.garrietta.haven.data.thermostatActivity
 import com.garrietta.haven.ui.components.LocalWideLayout
-import com.garrietta.haven.ui.components.ScreenTitle
 import com.garrietta.haven.ui.components.SectionTitle
 import com.garrietta.haven.ui.components.SensorKind
 import com.garrietta.haven.ui.components.ShimmerBox
 import com.garrietta.haven.ui.components.Sparkline
 import com.garrietta.haven.ui.components.chartLineColor
-import com.garrietta.haven.ui.components.choiceChipColors
 import com.garrietta.haven.ui.components.isDarkBackdrop
 import com.garrietta.haven.ui.controls.stateText
-import com.garrietta.haven.ui.theme.FamilyColors
 import com.garrietta.haven.ui.theme.StateFamily
 import com.garrietta.haven.ui.theme.colors
 import com.garrietta.haven.ui.theme.leafCard
@@ -183,7 +166,7 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             if (wide && first != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HouseCard(summary, first, dark, Modifier.weight(1f))
-                    ThermostatSection(first, vm, 0, Modifier.weight(1.3f))
+                    ThermostatSection(first, vm, 0, navigate, Modifier.weight(1.3f))
                 }
             } else {
                 HouseCard(summary, first, dark)
@@ -202,7 +185,7 @@ fun ClimateScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         thermostats.forEachIndexed { index, thermostat ->
             if (wide && index == 0) return@forEachIndexed
             item(key = "thermostat-" + thermostat.entityId) {
-                ThermostatSection(thermostat, vm, index)
+                ThermostatSection(thermostat, vm, index, navigate)
                 Spacer(Modifier.height(12.dp))
             }
         }
@@ -266,14 +249,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.readingRows(
 }
 
 /** The color of what a thermostat is doing: ember heating, frost cooling, quiet at rest or off. */
-private fun thermostatFamily(t: HaEntity?): StateFamily = when {
-    t == null || t.state == "off" || t.state == "unavailable" -> StateFamily.Quiet
-    t.attrString("hvac_action") == "heating" -> StateFamily.Heat
-    t.attrString("hvac_action") == "cooling" -> StateFamily.Cool
-    t.state == "heat" -> StateFamily.Heat
-    t.state == "cool" -> StateFamily.Cool
-    else -> StateFamily.On
-}
 
 /** The house in one card: inside, humidity, outside, and what the thermostat is doing. */
 @Composable
@@ -316,48 +291,19 @@ private fun HouseCard(summary: ClimateSummary, thermostat: HaEntity?, dark: Bool
 }
 
 /**
- * A thermostat on the Climate tab: its name and what it is doing, then
- * the same [ThermostatControl] its popup shows, so it looks and works the
- * same in both places. Press and hold the name for the tile's options,
- * as anywhere else.
+ * A thermostat on the Climate tab: its panel ([ThermostatControl]), the
+ * same one its popup shows. A tap on the panel away from its controls
+ * opens the popup; holding it opens the tile's options.
  */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ThermostatSection(t: HaEntity, vm: HavenViewModel, index: Int, modifier: Modifier = Modifier) {
-    val nameOf = rememberEntityNamer(vm)
-    val humidity = t.attrDouble("current_humidity")
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = leafCard(index + 1),
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(
-                Modifier.fillMaxWidth().combinedClickable(
-                    onClickLabel = null,
-                    onLongClickLabel = "Options for ${nameOf(t)}",
-                    onLongClick = { vm.openCardSettings(t.entityId) },
-                    onClick = {},
-                ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(nameOf(t), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(thermostatActivity(t), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (humidity != null) {
-                    Icon(Icons.Filled.WaterDrop, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text("${Math.round(humidity)}%", style = MaterialTheme.typography.titleSmall)
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            ThermostatControl(t, vm)
-        }
-    }
+private fun ThermostatSection(t: HaEntity, vm: HavenViewModel, index: Int, navigate: (Screen) -> Unit, modifier: Modifier = Modifier) {
+    ThermostatControl(
+        t, vm, modifier,
+        shapeIndex = index + 1,
+        onOpen = { navigate(Screen.EntityDetail(t.entityId)) },
+        onLongPress = { vm.openCardSettings(t.entityId) },
+    )
 }
-
-
 
 /**
  * One place's air: its name and room, the temperature large with the

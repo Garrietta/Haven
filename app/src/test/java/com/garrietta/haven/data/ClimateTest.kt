@@ -137,6 +137,26 @@ class ClimateTest {
     }
 
     @Test
+    fun setpointsAreOneAPairOrNoneWhileOff() {
+        assertEquals(ThermostatSetpoints.Single(68.0), thermostatSetpoints(e("climate.t", "heat", "T", "temperature" to 68)))
+        assertEquals(
+            ThermostatSetpoints.Range(66.0, 74.0),
+            thermostatSetpoints(e("climate.t", "heat_cool", "T", "target_temp_low" to 66, "target_temp_high" to 74)),
+        )
+        assertEquals(ThermostatSetpoints.None, thermostatSetpoints(e("climate.t", "off", "T", "temperature" to 68)))
+        assertEquals(ThermostatSetpoints.None, thermostatSetpoints(e("climate.t", "heat", "T")))
+    }
+
+    @Test
+    fun heatStaysAStepBelowCool() {
+        assertEquals(67.0 to 74.0, movedRange(66.0, 74.0, 1.0, newLow = 67.0))
+        assertEquals(73.0 to 74.0, movedRange(66.0, 74.0, 1.0, newLow = 74.0))
+        assertEquals(66.0 to 67.0, movedRange(66.0, 74.0, 1.0, newHigh = 65.0))
+        assertEquals(66.0 to 75.0, movedRange(66.0, 74.0, 1.0, newHigh = 75.0))
+        assertEquals(66.0 to 74.0, movedRange(66.0, 74.0, 1.0))
+    }
+
+    @Test
     fun aSensorAddedByHandIsItsOwnReading() {
         val co2 = e("sensor.office_co2", "612", "Office CO2", "device_class" to "carbon_dioxide", "unit_of_measurement" to "ppm")
         val reading = addedReading(co2, mapOf("sensor.office_co2" to "office"))

@@ -7,7 +7,6 @@ import com.garrietta.haven.ui.components.contrastRatio
 import com.garrietta.haven.ui.components.morphCardAlpha
 import com.garrietta.haven.ui.components.topMorphProgress
 import com.garrietta.haven.ui.components.topMorphSourceId
-import com.garrietta.haven.ui.screens.dialTrackColor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,40 +28,6 @@ import com.garrietta.haven.ui.theme.colors
  * still cover the Arrange behavior itself.
  */
 class Round21LogicTest {
-
-    // Item 2: the dial track clears 3:1 against the plain disc in
-    // both themes (the round-8 outline track measured ~1.3:1).
-    @Test
-    fun dialTrackClearsThreeToOneDark() {
-        val disc = Color(0xFF2B2B2B) // dark surfaceContainerHigh
-        val track = dialTrackColor(disc, Color(0xFFF2F2EF)) // dark onSurface
-        assertTrue(contrastRatio(track, disc) >= 3.0)
-    }
-
-    @Test
-    fun dialTrackClearsThreeToOneLight() {
-        val disc = Color(0xFFDDE5D0) // light surfaceContainerHigh
-        val track = dialTrackColor(disc, Color(0xFF1E1E1A)) // light onSurface
-        assertTrue(contrastRatio(track, disc) >= 3.0)
-    }
-
-    // Item 2: the old outline track really was near-invisible, and
-    // the new track holds its floor even on the 20% mode-tinted
-    // popout disc.
-    @Test
-    fun dialTrackBeatsTheOldOutlineTrack() {
-        val disc = Color(0xFF2B2B2B)
-        assertTrue(contrastRatio(Color(0xFF3F3F3A), disc) < 2.0)
-        assertTrue(contrastRatio(dialTrackColor(disc, Color(0xFFF2F2EF)), disc) >= 3.0)
-    }
-
-    @Test
-    fun dialTrackHoldsOnModeTintedDisc() {
-        val plain = Color(0xFF2B2B2B)
-        val tinted = compositeOver(Color(0xFFFF8F00).copy(alpha = 0.20f), plain)
-        val track = dialTrackColor(tinted, Color(0xFFF2F2EF))
-        assertTrue(contrastRatio(track, tinted) >= 3.0)
-    }
 
     // Item 3: the RTSP URL derives from the local instance host.
     @Test

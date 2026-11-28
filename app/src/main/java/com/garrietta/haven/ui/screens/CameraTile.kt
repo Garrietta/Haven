@@ -359,18 +359,17 @@ internal fun CameraQuadrant(
             // swaps in a finished image and only when the cached
             // one is stale, so a failed or in-flight fetch never
             // blanks a quadrant.
-            // Reliability round: the tile keeps refreshing while it is on
-            // screen and the app is in the foreground (10s on the LAN, 20s
-            // through the relay) — it used to fetch once per entry, so a
-            // screen left open showed stale images. Each fetch asks HA for
-            // a tile-sized image.
+            // The tile keeps refreshing while it is on screen and the app
+            // is in the foreground: every 10s on the LAN, 20s through the
+            // relay, and every 15 minutes for a battery camera, which wakes
+            // for each picture. Each fetch asks HA for a tile-sized image.
             val requestWidth = cameraSnapshotWidthPx(slotWidthPx)
             LaunchedEffect(thumbnailId, requestWidth) {
                 if (vm.snapshotFor(thumbnailId) != null) kotlinx.coroutines.delay(600)
                 snapshotFlow { vm.appInForeground }.collectLatest { foreground ->
                     while (foreground) {
                         vm.refreshSnapshot(thumbnailId, requestWidth)
-                        kotlinx.coroutines.delay(vm.snapshotRefreshIntervalMs())
+                        kotlinx.coroutines.delay(vm.snapshotRefreshIntervalMs(thumbnailId))
                     }
                 }
             }

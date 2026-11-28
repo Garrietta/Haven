@@ -130,6 +130,8 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -179,6 +181,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import android.os.Handler
 import android.os.Looper
@@ -3440,6 +3443,7 @@ private fun FrontDoorLivePanel(
         tab == FrontDoorTab.HISTORY -> "Latest motion recording · Not live"
         live -> "Live"
         transport == "mjpeg" -> "Live view unavailable — showing latest motion recording"
+        transport == "failed" -> "Couldn't start the live view"
         else -> "Connecting to live view…"
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -3568,48 +3572,124 @@ private fun CameraLiveBody(
     // recording truthfully.
     onTransport: ((String) -> Unit)? = null,
 ) {
-    // Reliability round: this camera's own flow, not the whole states
-    // map — the live body used to recompose on every state change in
-    // the house while the video played.
+    // This camera's own flow, not the whole states map, so the live
+    // body does not recompose on every state change in the house.
     val entity = vm.entityFlow(cameraId).collectAsState().value
     val mjpegFirstFrame: () -> Unit = { onTransport?.invoke("mjpeg"); onFirstFrame?.invoke() }
     if (entity == null) {
         CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, mjpegFirstFrame, onError)
         return
     }
-    // Performance round: the transport comes from HA's own
-    // camera/capabilities (what the HA frontend uses): WebRTC first —
-    // go2rtc / Ring / Nest, sub-second — then HLS, then the MJPEG proxy.
+    // A battery camera's live view pauses after a couple of minutes,
+    // until asked to keep going, so one left open does not drain it.
+    val battery = remember(cameraId) { vm.isBatteryCamera(cameraId) }
+    var watchRound by remember(cameraId) { mutableIntStateOf(0) }
+    var pausedForBattery by remember(cameraId) { mutableStateOf(false) }
+    if (battery && !pausedForBattery) {
+        LaunchedEffect(cameraId, watchRound) {
+            delay(com.garrietta.haven.data.BATTERY_LIVE_LIMIT_MS)
+            pausedForBattery = true
+        }
+    }
+    if (pausedForBattery) {
+        CameraStoppedPoster(
+            vm, cameraId, "Paused to save the camera's battery",
+            primary = "Keep watching" to { pausedForBattery = false; watchRound++ },
+        )
+        return
+    }
+    // Live views stopped when the app went to the background start
+    // afresh when it comes back (liveViewEpoch), as does a new watch.
+    key(vm.liveViewEpoch, watchRound) {
+        CameraTransportBody(
+            vm, cameraId, entity, enterProgress, recording, onClose,
+            connectingText, errorPrefix, onFirstFrame, onError, onTransport, mjpegFirstFrame,
+        )
+    }
+}
+
+/**
+ * Picks and runs a camera's transport, as Home Assistant's own frontend
+ * does from `camera/capabilities`: WebRTC first (go2rtc, Ring, Nest),
+ * then HLS, then the MJPEG proxy.
+ *
+ * Capabilities come over the WebSocket, so the wait for them starts once
+ * the connection is up; if they still do not come, the camera's own state
+ * decides ([fallbackStreamTypes]), which for a Ring camera is WebRTC, its
+ * only live path. WebRTC that fails is tried once more. A camera that has
+ * another live transport then falls to it; one that has none (Ring) says
+ * the live view could not start, with Try again and the last recording,
+ * rather than showing the recording as if it were the answer.
+ */
+@Composable
+private fun CameraTransportBody(
+    vm: HavenViewModel,
+    cameraId: String,
+    entity: HaEntity,
+    enterProgress: () -> Float,
+    recording: Boolean,
+    onClose: () -> Unit,
+    connectingText: String?,
+    errorPrefix: String?,
+    onFirstFrame: (() -> Unit)?,
+    onError: ((String) -> Unit)?,
+    onTransport: ((String) -> Unit)?,
+    mjpegFirstFrame: () -> Unit,
+) {
     var streamTypes by remember(cameraId) { mutableStateOf(vm.cachedCameraStreamTypes(cameraId)) }
     LaunchedEffect(cameraId) {
         if (streamTypes != null) return@LaunchedEffect
-        var done = false
-        val timeout = launch {
-            delay(3000)
-            if (!done) { done = true; streamTypes = emptyList() }
+        kotlinx.coroutines.withTimeoutOrNull(15_000) {
+            vm.connection.first { it.isLive() }
         }
-        vm.requestCameraStreamTypes(cameraId) { types ->
-            if (!done) { done = true; timeout.cancel(); streamTypes = types }
+        val asked = kotlinx.coroutines.withTimeoutOrNull(4_000) {
+            kotlinx.coroutines.suspendCancellableCoroutine<List<String>> { cont ->
+                vm.requestCameraStreamTypes(cameraId) { types -> if (cont.isActive) cont.resumeWith(Result.success(types)) }
+            }
+        }
+        streamTypes = asked ?: com.garrietta.haven.data.fallbackStreamTypes(entity).also {
+            Log.w("Haven", "camera $cameraId capabilities did not arrive; using $it")
         }
     }
-    var webrtcFailed by remember(cameraId) { mutableStateOf(false) }
+    var webrtcAttempt by remember(cameraId) { mutableIntStateOf(0) }
+    var webrtcFailures by remember(cameraId) { mutableIntStateOf(0) }
+    var showRecording by remember(cameraId) { mutableStateOf(false) }
     val types = streamTypes
     if (types == null) {
         CameraConnectingPoster(vm, cameraId, connectingText ?: "Connecting…")
         return
     }
-    if (!webrtcFailed && vm.webRtcAllowed && "web_rtc" in types) {
-        CameraWebRtcBody(
-            vm, cameraId, enterProgress,
-            onFirstFrame = { onTransport?.invoke("web_rtc"); onFirstFrame?.invoke() },
-            onFailed = { stage ->
-                Log.w("Haven", "camera $cameraId WebRTC failed ($stage) — falling back")
-                webrtcFailed = true
-            },
+    val webrtc = "web_rtc" in types
+    val hls = "hls" in types
+    if (showRecording) {
+        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, mjpegFirstFrame, onError)
+        return
+    }
+    if (webrtc && !hls && (!vm.webRtcAllowed || webrtcFailures >= 2)) {
+        // WebRTC is this camera's only live path and it is not working.
+        LaunchedEffect(Unit) { onTransport?.invoke("failed") }
+        CameraStoppedPoster(
+            vm, cameraId,
+            if (vm.webRtcAllowed) "Couldn't start the live view" else "Live view is off on this phone after a crash",
+            primary = if (vm.webRtcAllowed) "Try again" to { webrtcFailures = 0; webrtcAttempt++ } else null,
+            secondary = "Show the last recording" to { showRecording = true },
         )
         return
     }
-    if ("hls" !in types) {
+    if (webrtc && vm.webRtcAllowed && webrtcFailures < 2) {
+        key(webrtcAttempt, webrtcFailures) {
+            CameraWebRtcBody(
+                vm, cameraId, enterProgress,
+                onFirstFrame = { onTransport?.invoke("web_rtc"); onFirstFrame?.invoke() },
+                onFailed = { stage ->
+                    Log.w("Haven", "camera $cameraId WebRTC failed ($stage), attempt ${webrtcFailures + 1}")
+                    webrtcFailures++
+                },
+            )
+        }
+        return
+    }
+    if (!hls) {
         CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, mjpegFirstFrame, onError)
         return
     }
@@ -3774,7 +3854,11 @@ private fun CameraHlsPlayerBody(
         }
     }
     DisposableEffect(cameraId, playlistUrl) {
-        onDispose { player.release() }
+        vm.registerLiveView(player) { player.stop() }
+        onDispose {
+            vm.unregisterLiveView(player)
+            player.release()
+        }
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // Fit: the largest rect of the video aspect inside the
@@ -3848,6 +3932,50 @@ private fun CameraConnectingPoster(vm: HavenViewModel, cameraId: String, text: S
 }
 
 /**
+ * A live view that has stopped and says why: the last picture behind a
+ * line of text and up to two buttons (a battery camera's "Keep watching",
+ * a failed view's "Try again" and "Show the last recording").
+ */
+@Composable
+private fun CameraStoppedPoster(
+    vm: HavenViewModel,
+    cameraId: String,
+    text: String,
+    primary: Pair<String, () -> Unit>? = null,
+    secondary: Pair<String, () -> Unit>? = null,
+) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        val poster = vm.cameraPoster(cameraId)
+        if (poster != null) {
+            Image(
+                bitmap = poster.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.45f },
+            )
+        }
+        Column(
+            Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(text, color = Color.White, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            if (primary != null || secondary != null) Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (primary != null) {
+                    Button(onClick = primary.second) { Text(primary.first) }
+                }
+                if (secondary != null) {
+                    OutlinedButton(
+                        onClick = secondary.second,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    ) { Text(secondary.first) }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Performance round: WebRTC live video through Home Assistant (see
  * HaWebRtcSession). The renderer letterboxes itself (SCALE_ASPECT_FIT)
  * and is centered; the poster covers it until the first decoded frame.
@@ -3899,7 +4027,11 @@ private fun CameraWebRtcBody(
                 },
                 onFailed = { failOnce(it) },
             )
-            onDispose { session.close(renderer) }
+            vm.registerLiveView(session) { session.close(renderer) }
+            onDispose {
+                vm.unregisterLiveView(session)
+                session.close(renderer)
+            }
         }
     }
     LaunchedEffect(cameraId) {
@@ -3964,7 +4096,11 @@ private fun CameraRtspPlayerBody(
         }
     }
     DisposableEffect(rtspUrl) {
-        onDispose { player.release() }
+        vm.registerLiveView(player) { player.stop() }
+        onDispose {
+            vm.unregisterLiveView(player)
+            player.release()
+        }
     }
     // 8s first-frame timeout: a dead RTSP endpoint must degrade
     // to the recording instead of hanging on "Loading camera…".
@@ -4052,9 +4188,11 @@ private fun CameraMjpegBody(
             if (state is CameraStreamState.Error) onError?.invoke(state.message)
             streamState = state
         }
+        vm.registerLiveView(job) { job.cancel() }
         try {
             job.join()
         } finally {
+            vm.unregisterLiveView(job)
             job.cancel()
         }
     }

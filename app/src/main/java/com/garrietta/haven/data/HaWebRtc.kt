@@ -379,33 +379,61 @@ object WebRtcEngine {
  * version re-enables it.
  */
 object WebRtcCrashGuard {
-    private const val PREFS = "haven_webrtc_guard"
+    // A new name drops the counts kept under the earlier rule, which took
+    // any process end mid-attempt for a crash.
+    private const val PREFS = "haven_webrtc_guard_v2"
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    private fun versionOf(ctx: Context): Long = try {
+    /** The build the counts belong to: the version code and the CI build number, since test builds share a version code. */
+    private fun versionOf(ctx: Context): String = try {
         val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
-        if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
-    } catch (_: Exception) { 0L }
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+        "$code.${com.garrietta.haven.BuildConfig.BUILD_NUMBER}"
+    } catch (_: Exception) { "0" }
 
     /** Call once per process start. Returns true when WebRTC may be used. */
     fun checkOnLaunch(ctx: Context): Boolean {
         val p = prefs(ctx)
         val version = versionOf(ctx)
-        if (p.getLong("version", -1) != version) {
-            p.edit().clear().putLong("version", version).apply()
+        if (p.getString("build", null) != version) {
+            p.edit().clear().putString("build", version).apply()
         }
         if (p.getBoolean("inflight", false)) {
-            val deaths = p.getInt("deaths", 0) + 1
-            p.edit().putBoolean("inflight", false).putInt("deaths", deaths).apply()
-            Log.w("Haven", "WebRTC: previous process died mid-negotiation ($deaths)")
+            // Only a crash counts. The process also ends, perfectly normally,
+            // when Android reclaims a backgrounded app that had a camera
+            // still connecting; counting those switched WebRTC off for
+            // cameras (the doorbell) that have no other live path.
+            if (lastExitWasCrash(ctx)) {
+                val deaths = p.getInt("deaths", 0) + 1
+                p.edit().putBoolean("inflight", false).putInt("deaths", deaths).apply()
+                Log.w("Haven", "WebRTC: previous process crashed mid-negotiation ($deaths)")
+            } else {
+                p.edit().putBoolean("inflight", false).apply()
+            }
         }
         return enabled(ctx)
     }
 
     fun enabled(ctx: Context): Boolean = prefs(ctx).getInt("deaths", 0) < 2
 
+    /** Whether Android recorded the app's last exit as a crash (API 30+; earlier versions cannot tell, so no). */
+    private fun lastExitWasCrash(ctx: Context): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 30) return false
+        return try {
+            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val last = am.getHistoricalProcessExitReasons(ctx.packageName, 0, 1).firstOrNull() ?: return false
+            exitReasonIsCrash(last.reason)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun attemptStarted(ctx: Context) { prefs(ctx).edit().putBoolean("inflight", true).commit() }
 
     fun attemptEnded(ctx: Context) { prefs(ctx).edit().putBoolean("inflight", false).apply() }
 }
+
+/** Whether an ApplicationExitInfo reason is a crash (a native one, or an uncaught Java exception), not an ordinary end. */
+fun exitReasonIsCrash(reason: Int): Boolean =
+    reason == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE || reason == android.app.ApplicationExitInfo.REASON_CRASH

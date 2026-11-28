@@ -707,6 +707,37 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun onAppBackgrounded() {
         appInForeground = false
         if (frontDoorLiveEngaged) disengageFrontDoorLive("background")
+        stopLiveViews()
+    }
+
+    // ---- Live views and the background ----
+    //
+    // A stopped Activity keeps its composition but stops recomposing, so a
+    // live view left open when the app goes to the background would keep
+    // its stream running (and a battery camera awake) until the app came
+    // back. Each live body registers how to stop itself; going to the
+    // background stops them all at once, and coming back bumps
+    // [liveViewEpoch] so the bodies, keyed on it, start fresh.
+
+    private val liveViewStops = mutableMapOf<Any, () -> Unit>()
+    private var liveViewsStoppedInBackground = false
+
+    /** Bumped when the app returns after its live views were stopped; live bodies key on it to restart. */
+    var liveViewEpoch by mutableStateOf(0)
+        private set
+
+    fun registerLiveView(token: Any, stop: () -> Unit) { liveViewStops[token] = stop }
+
+    fun unregisterLiveView(token: Any) { liveViewStops.remove(token) }
+
+    private fun stopLiveViews() {
+        if (liveViewStops.isEmpty()) return
+        val stops = liveViewStops.values.toList()
+        liveViewStops.clear()
+        for (stop in stops) {
+            try { stop() } catch (e: Exception) { Log.w("Haven", "live view stop failed", e) }
+        }
+        liveViewsStoppedInBackground = true
     }
 
     // ---- HLS prewarm (reliability round) ----
@@ -773,6 +804,8 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun prewarmCameraStream(entityId: String) {
         if (!connection.value.isLive()) return
+        // A battery camera is only woken when it is actually opened.
+        if (isBatteryCamera(entityId)) return
         requestCameraStreamTypes(entityId) { types ->
             val webrtc = "web_rtc" in types && webRtcAllowed
             if (!webrtc && "hls" in types) requestCameraHlsUrl(entityId) { }
@@ -795,24 +828,17 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun cachedCameraStreamTypes(entityId: String): List<String>? = streamTypesCache[entityId]
 
     /**
-     * The camera's stream types, deduplicated and cached. Falls back to the
-     * legacy `frontend_stream_type` attribute / SUPPORT_STREAM bit when the
-     * capabilities command is unavailable. Callback on the main thread.
+     * The camera's stream types, deduplicated and cached. When the
+     * capabilities command fails, the camera's state decides
+     * ([com.garrietta.haven.data.fallbackStreamTypes]) and nothing is
+     * cached, so the next opening asks again. Callback on the main thread.
      */
     fun requestCameraStreamTypes(entityId: String, onResult: (List<String>) -> Unit) {
         streamTypesCache[entityId]?.let { onResult(it); return }
         streamTypesWaiters[entityId]?.let { it += onResult; return }
         streamTypesWaiters[entityId] = mutableListOf(onResult)
         client.cameraCapabilities(entityId) { types ->
-            val resolved = types ?: run {
-                val entity = states.value[entityId]
-                val legacy = entity?.attrString("frontend_stream_type")
-                when {
-                    legacy != null -> listOf(legacy)
-                    entity != null && cameraSupportsStream(entity) -> listOf("hls")
-                    else -> emptyList()
-                }
-            }
+            val resolved = types ?: states.value[entityId]?.let { com.garrietta.haven.data.fallbackStreamTypes(it) }.orEmpty()
             if (types != null) streamTypesCache[entityId] = resolved
             Log.d("Haven", "camera $entityId stream types: $resolved")
             streamTypesWaiters.remove(entityId).orEmpty().forEach { it(resolved) }
@@ -1008,6 +1034,14 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun snapshotRefreshIntervalMs(): Long =
         com.garrietta.haven.data.snapshotRefreshIntervalMs(onLocalConnection())
 
+    /** True for a camera on a battery (a solar camera), which wakes and spends charge for every picture. */
+    fun isBatteryCamera(entityId: String): Boolean =
+        com.garrietta.haven.data.cameraHasBattery(entityId, states.value, client.entityDevices.value)
+
+    /** How often a visible tile refreshes [entityId]: a battery camera every 15 minutes, others by connection. */
+    fun snapshotRefreshIntervalMs(entityId: String): Long =
+        if (isBatteryCamera(entityId)) com.garrietta.haven.data.BATTERY_SNAPSHOT_INTERVAL_MS else snapshotRefreshIntervalMs()
+
     /**
      * Visible camera tiles refresh only while the app is in the
      * foreground — a stopped Activity keeps its composition, so a tile
@@ -1034,7 +1068,7 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         val key = snapshotKey(entityId)
         if (key in snapshotRefreshing) return
         val heldAt = snapshotTimestamps[key]
-        val freshForMs = snapshotRefreshIntervalMs() - 1_000L
+        val freshForMs = snapshotRefreshIntervalMs(entityId) - 1_000L
         if (!force && snapshotCache.containsKey(key) && heldAt != null &&
             System.currentTimeMillis() - heldAt < freshForMs
         ) return
@@ -1824,6 +1858,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onAppForegrounded() {
         appInForeground = true
+        if (liveViewsStoppedInBackground) {
+            liveViewsStoppedInBackground = false
+            liveViewEpoch++
+        }
         if (!isAuthenticated) return
         networkProfile = readNetworkProfile()
         client.setNetworkAvailable(networkProfile.available)

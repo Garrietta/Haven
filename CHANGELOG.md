@@ -1,5 +1,22 @@
 # Haven Changelog
 
+## 3.6: The thermostat panel again; cameras that spare the battery and really try for live (2026-11-28)
+
+**What you will see**
+
+- The thermostat dial is gone. A thermostat is one big panel in the color of what it is doing: its temperature in large type, − and + for the set point (Heat to and Cool to in heat-and-cool), then Mode, Comfort and Fan. The Climate tab shows the panel; tapping it anywhere away from its buttons opens the thermostat's popup, which shows the same panel with its last 24 hours.
+- The doorbell tries for its live view instead of showing the recording at once. If live does not come, it says so, with Try again and Show the last recording.
+- The solar outdoor camera is asked for a new picture every 15 minutes rather than every few seconds, is not woken when a finger merely touches its tile, and its live view pauses after two minutes with Keep watching.
+- Any live view stops when you leave the app and starts again when you come back.
+
+**Underneath**
+
+- `ThermostatControl` (`ThermostatPage.kt`) is the panel; `ThermostatDial.kt`, the dial state and its geometry helpers are removed, apart from the shared `Dial`'s touch geometry, now in `DialLogic.kt`. `EntityControlCard` draws `ThermostatControl` for a climate entity too, so the kind has one design everywhere. Set points come from `thermostatSetpoints` and `movedRange` (`data/Climate.kt`, tested). `ChoiceRow` takes `idleColors` for rows on a colored panel.
+- Camera transport: the capabilities wait starts once the WebSocket is live (it used to time out during connection and fall straight to the MJPEG recording); without an answer `fallbackStreamTypes` decides (Ring is WebRTC). WebRTC is tried twice; a WebRTC-only camera then shows `CameraStoppedPoster` instead of the recording.
+- `WebRtcCrashGuard` counts a death only when Android records a crash (`exitReasonIsCrash`), and keys its counts by version code and CI build number under a new preferences name, so the old counts (which took ordinary background reclaims for crashes and switched WebRTC off for the doorbell) are dropped.
+- Battery cameras (`cameraHasBattery`): `snapshotRefreshIntervalMs(entityId)`, no prewarm, `BATTERY_LIVE_LIMIT_MS`. Live bodies register a stop with `registerLiveView`; `onAppBackgrounded` runs them and `liveViewEpoch` restarts the bodies on return.
+- The overnight drop on the outdoor camera (about 5% an hour between 03:25 and 05:23 UTC, against about 0.4% normally) lines up with the backend agent's live testing that night rather than with Haven; the changes above stop Haven adding to it.
+
 ## 3.5: The new backend under the 3.4 design (2026-11-28)
 
 The 3.4 design (build 162) with the backend work from the performance round below and from the Haven 2.0 rewrite (whose visuals were not kept):

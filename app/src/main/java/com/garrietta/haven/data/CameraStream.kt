@@ -552,3 +552,36 @@ fun formatHaTimestamp(iso: String?, zone: java.time.ZoneId = java.time.ZoneId.sy
         null
     }
 }
+
+/**
+ * Whether a camera runs on a battery: something on its own device reports
+ * a battery (a battery sensor, or a battery level). Such a camera wakes,
+ * and spends charge, every time it is asked for a picture or a stream, so
+ * Haven asks it far less often (see [BATTERY_SNAPSHOT_INTERVAL_MS]).
+ */
+fun cameraHasBattery(cameraId: String, states: Map<String, HaEntity>, entityDevices: Map<String, String>): Boolean {
+    if (states[cameraId]?.attributes?.containsKey("battery_level") == true) return true
+    val device = entityDevices[cameraId] ?: return false
+    return states.values.any { e ->
+        entityDevices[e.entityId] == device && e.entityId != cameraId &&
+            (e.attrString("device_class") == "battery" || e.attributes.containsKey("battery_level"))
+    }
+}
+
+/** A battery camera's tile picture is refreshed at most this often. */
+const val BATTERY_SNAPSHOT_INTERVAL_MS = 15 * 60_000L
+
+/** A battery camera's live view pauses after this long, until asked to keep going. */
+const val BATTERY_LIVE_LIMIT_MS = 2 * 60_000L
+
+/**
+ * The live transports a camera offers when Home Assistant has not said
+ * (its capabilities did not arrive in time): what its state advertises,
+ * WebRTC for a Ring camera (the only live path Ring has), HLS for a
+ * camera that can stream at all, nothing otherwise.
+ */
+fun fallbackStreamTypes(entity: HaEntity): List<String> {
+    entity.attrString("frontend_stream_type")?.let { return listOf(it) }
+    if (isRingCamera(entity)) return listOf("web_rtc")
+    return if (cameraSupportsStream(entity)) listOf("hls") else emptyList()
+}

@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.controls
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.filled.Sync
 import com.garrietta.haven.ui.components.suggestedIconKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
@@ -8,8 +10,6 @@ import com.garrietta.haven.ui.components.generalCardShape
 import com.garrietta.haven.ui.components.reportCardColor
 import com.garrietta.haven.ui.components.reportCardShape
 import com.garrietta.haven.data.customIconKeyFor
-import com.garrietta.haven.ui.components.CoolBlue
-import com.garrietta.haven.ui.components.HeatOrange
 
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -60,8 +60,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Videocam
@@ -74,23 +72,18 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -103,14 +96,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.data.HaEntity
-import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
-import com.garrietta.haven.ui.controls.GarageDoorVisual
 import com.garrietta.haven.ui.screens.rememberCardCustom
-import com.garrietta.haven.ui.screens.resolveThermostatDisplayRange
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.data.domainCardColors
@@ -136,12 +126,6 @@ import com.garrietta.haven.ui.theme.pressBounce
 import com.garrietta.haven.ui.theme.springSnappy
 import com.garrietta.haven.ui.theme.polygonShape
 import org.json.JSONObject
-import com.garrietta.haven.ui.screens.SetpointSelector
-import com.garrietta.haven.ui.screens.clampCoolSetpoint
-import com.garrietta.haven.ui.screens.clampHeatSetpoint
-import com.garrietta.haven.ui.screens.defaultSelector
-import com.garrietta.haven.ui.screens.snapToDegree
-import com.garrietta.haven.ui.screens.toggleSelector
 import com.garrietta.haven.ui.components.choiceChipColors
 
 fun Double.formatTemp(): String =
@@ -615,7 +599,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 "light" -> LightControl(entity, vm)
                 "switch" -> SwitchControl(entity, vm, pageAccent)
                 "cover" -> CoverControl(entity, vm, pageAccent)
-                "climate" -> ClimateControl(entity, vm, pageAccent)
+                "climate" -> com.garrietta.haven.ui.screens.ThermostatControl(entity, vm, showName = false)
                 "vacuum" -> VacuumControl(entity, vm, pageAccent, pageBadge)
                 "media_player" -> MediaControl(entity, vm, pageAccent, pageBadge)
                 "fan" -> FanControl(entity, vm, pageAccent)
@@ -834,155 +818,6 @@ fun CoverControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null
     ServiceSlider(position.toFloat(), 0f..100f, { vm.setCoverPosition(entity.entityId, it.toInt()) }, pageAccent ?: accent, formatValue = { "${it.toInt()}%" })
 }
 
-
-@Composable
-fun ClimateControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
-    val accent = accentFor(entity.entityId)
-    val current = entity.attrDouble("current_temperature")
-    // Heat/cool thermostats (like the Ecobee) report target_temp_high/low
-    // instead of a single temperature. The sheet dial edits exactly one
-    // setpoint — the active selector, toggled by tapping inside the dial
-    // face — and shows it large with its name in the subtitle, so the
-    // sheet never has to fall back to a hardcoded value or a midpoint.
-    val high = entity.attrDouble("target_temp_high")
-    val low = entity.attrDouble("target_temp_low")
-    val heatCool = high != null && low != null
-    val min = entity.attrDouble("min_temp")?.toFloat() ?: 10f
-    val max = entity.attrDouble("max_temp")?.toFloat() ?: 30f
-    // Round 6: the sheet dial uses the SAME resolved display
-    // window as the popout — the decade formula around the current
-    // setpoints (66/67° → 50–80°), or the Settings override when
-    // both override values are set (see
-    // resolveThermostatDisplayRange) — NOT the full HA min..max.
-    // State coercion stays in HA range exactly like the popout
-    // (out-of-window values pin at the ends); only the drawn bar
-    // + slider window change. Display-range only: the override
-    // never touches live setpoints.
-    val displaySetpoints = if (heatCool) {
-        listOfNotNull(low?.toFloat(), high?.toFloat())
-    } else {
-        listOfNotNull(entity.attrDouble("temperature")?.toFloat())
-    }
-    val displayRange = resolveThermostatDisplayRange(
-        min, max, displaySetpoints,
-        vm.settingsStore.thermostatDisplayMin,
-        vm.settingsStore.thermostatDisplayMax,
-    )
-    var heat by remember(low) { mutableStateOf(low?.toFloat()?.coerceIn(min, max) ?: min) }
-    var cool by remember(high) { mutableStateOf(high?.toFloat()?.coerceIn(min, max) ?: max) }
-    var single by remember(entity.attrDouble("temperature")) {
-        mutableStateOf(entity.attrDouble("temperature")?.toFloat()?.coerceIn(min, max) ?: min)
-    }
-    var selector by remember(entity.entityId, entity.state) { mutableStateOf(defaultSelector(entity.state)) }
-    val active: Float = if (heatCool) {
-        if (selector == SetpointSelector.HEATING) heat else cool
-    } else {
-        single
-    }
-    val dialAccent: Color = if (heatCool) {
-        if (selector == SetpointSelector.HEATING) HeatOrange else CoolBlue
-    } else {
-        accent
-    }
-    val setActive: (Float) -> Unit = {
-        if (heatCool) {
-            if (selector == SetpointSelector.HEATING) heat = it else cool = it
-        } else {
-            single = it
-        }
-    }
-    val modes = entity.attrList("hvac_modes")?.mapNotNull { it as? String } ?: emptyList()
-    val presets = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Dial(
-            value = active,
-            range = displayRange,
-            onValueChange = setActive,
-            onFinished = { applyClimateSetpoint(vm, entity, selector, it.toDouble()) },
-            centerText = active.toDouble().formatTemp(),
-            centerSub = if (heatCool) {
-                val name = if (selector == SetpointSelector.HEATING) "Heating setpoint" else "Cooling setpoint"
-                if (current != null) "$name · Now ${current.formatTemp()}" else name
-            } else if (current != null) {
-                "Now ${current.formatTemp()}"
-            } else {
-                entity.stateText()
-            },
-            accent = dialAccent,
-            onInsideTap = if (heatCool) {
-                { selector = toggleSelector(selector) }
-            } else {
-                null
-            },
-            snapToWhole = true,
-            showRangeEnds = true,
-        )
-        // The slider moves the same active setpoint and snaps to whole
-        // degrees on release, so every path changes temperature in 1°
-        // intervals. Its window matches the dial's dynamic window.
-        // Feedback round 5, item 4: the sheet climate slider follows the assigned tile color;
-        // the dial itself keeps its heat/cool mode colors (they carry mode meaning, item 6
-        // reworks only the dial's label/stepper layout around the kept scallop).
-        ServiceSlider(active, displayRange, { applyClimateSetpoint(vm, entity, selector, snapToDegree(it.toDouble())) }, pageAccent ?: accent, formatValue = { "${snapToDegree(it.toDouble()).toInt()}°" })
-        if (modes.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                for (mode in modes) {
-                    FilterChip(
-                        colors = choiceChipColors(),
-                        selected = entity.state == mode,
-                        onClick = { vm.setClimateHvacMode(entity.entityId, mode) },
-                        label = { Text(mode.replace('_', ' ').replaceFirstChar { it.uppercase() }) },
-                    )
-                }
-            }
-        }
-        if (presets.isNotEmpty()) {
-            Spacer(Modifier.height(4.dp))
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                for (preset in presets) {
-                    FilterChip(
-                        colors = choiceChipColors(),
-                        selected = entity.attrString("preset_mode") == preset,
-                        onClick = {
-                            vm.callService("climate", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", preset))
-                        },
-                        label = { Text(preset.replace('_', ' ').replaceFirstChar { it.uppercase() }) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Applies a thermostat setpoint in whole degrees. Heat/cool thermostats
- * take a high/low pair, so only the ACTIVE selector's value moves — the
- * other setpoint is sent back unchanged, clamped so heating can never
- * pass cooling. Single-setpoint thermostats take the value directly.
- * This replaces the old midpoint move (both setpoints shifting to
- * preserve their gap), which the selector model supersedes.
- */
-fun applyClimateSetpoint(vm: HavenViewModel, entity: HaEntity, selector: SetpointSelector, value: Double) {
-    val high = entity.attrDouble("target_temp_high")
-    val low = entity.attrDouble("target_temp_low")
-    val min = entity.attrDouble("min_temp")
-    val max = entity.attrDouble("max_temp")
-    if (high != null && low != null) {
-        if (selector == SetpointSelector.HEATING) {
-            vm.setClimateTemperatureRange(entity.entityId, clampHeatSetpoint(value, min, high), high)
-        } else {
-            vm.setClimateTemperatureRange(entity.entityId, low, clampCoolSetpoint(value, low, max))
-        }
-    } else {
-        vm.setClimateTemperature(entity.entityId, snapToDegree(value))
-    }
-}
 
 @Composable
 /**

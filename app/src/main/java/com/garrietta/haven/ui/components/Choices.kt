@@ -26,8 +26,8 @@ import com.garrietta.haven.ui.theme.HavenChrome
  * mode and fan, the alarm, the theme, a vacuum's suction all use it, so
  * a choice looks the same wherever it is made. Options that do not fit
  * one row wrap onto even rows ([choicesPerRow]). [options] are (value, label) pairs in display
- * order; [activeColors] may tint the chosen pill (the thermostat's heat
- * and cool set points do).
+ * order; [activeColors] may tint the chosen pill, and [idleColors] the
+ * others where the row sits on a colored panel (the thermostat's does).
  */
 @Composable
 fun ChoiceRow(
@@ -36,6 +36,7 @@ fun ChoiceRow(
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
     activeColors: ((String) -> Pair<Color, Color>?)? = null,
+    idleColors: Pair<Color, Color>? = null,
 ) {
     if (options.isEmpty()) return
     val scheme = MaterialTheme.colorScheme
@@ -51,8 +52,8 @@ fun ChoiceRow(
                         onClick = { onSelect(value) },
                         modifier = Modifier.weight(1f),
                         height = 48.dp,
-                        containerColor = active?.first ?: if (isSelected) HavenChrome.capsule else scheme.surfaceContainerHigh,
-                        contentColor = active?.second ?: if (isSelected) HavenChrome.onCapsule else scheme.onSurfaceVariant,
+                        containerColor = active?.first ?: if (isSelected) HavenChrome.capsule else idleColors?.first ?: scheme.surfaceContainerHigh,
+                        contentColor = active?.second ?: if (isSelected) HavenChrome.onCapsule else idleColors?.second ?: scheme.onSurfaceVariant,
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) {
                         // Four options share a cover-screen row and the longest
@@ -95,11 +96,13 @@ fun LabeledChoiceRow(
     selected: String?,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
+    idleColors: Pair<Color, Color>? = null,
+    labelColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     if (options.isEmpty()) return
     Column(modifier.fillMaxWidth()) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.labelLarge, color = labelColor)
         Spacer(Modifier.height(6.dp))
-        ChoiceRow(options, selected, onSelect)
+        ChoiceRow(options, selected, onSelect, idleColors = idleColors)
     }
 }

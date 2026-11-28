@@ -18,7 +18,7 @@ android {
         // the Fold before it ships. compileSdk moves freely; this does not.
         targetSdk = 35
         versionCode = 3
-        versionName = "3.5"
+        versionName = "3.6"
         // Where updates come from, and which CI run built this APK (0 for a
         // local build): a test build is newer when its number is higher.
         buildConfigField("String", "GITHUB_REPO", "\"Garrietta/Haven\"")

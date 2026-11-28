@@ -241,7 +241,7 @@ These numbers were tuned on the phone, a round at a time. Do not change one with
 | `SectionTitle` | The heading over a group. One style, the primary color. |
 | `MenuSection`, `MenuGroup`, `MenuRow`, `MenuDivider` | Settings, and the option rows at the foot of a popup. A row's control drops under its text when the two cannot share a line. |
 | `ChoiceRow`, `LabeledChoiceRow` | The one way to pick one of several (`Choices.kt`): equal filled pills, the chosen one the style's capsule, wrapping evenly when they do not fit (`choicesPerRow`). A thermostat's mode, fan and comfort, the alarm, a fan's presets, light or dark. |
-| `ThermostatControl` | The thermostat, controlled: the dial in its disc, − and +, Mode, Fan and Comfort. Its popup and the Climate tab both draw it, so there is one thermostat design. |
+| `ThermostatControl` | The thermostat, controlled: one panel in the color of what it is doing (glowing with grain while it heats or cools), its temperature large with − and + for the set point (or for heat and cool), then Mode, Comfort and Fan. No dial. Its popup and the Climate tab both draw it, so there is one thermostat design; on the Climate tab a tap on the panel away from its controls opens the popup. |
 | `EntityPopupMenuRows` | The rows every device popup ends with: Tile (name, icon, color, Show on Home) and In Home Assistant. |
 | `Sparkline` | A reading's history drawn to the size it is given: line weight, inset and end dot follow the chart's height (`sparklineStrokeWidth`), and a history chart takes its height from its width (`historyChartHeight`). |
 | `choiceChipColors()` | Colors for the few chips left that are one of a set: the chosen one is the capsule. New choices use `ChoiceRow`. |
@@ -275,7 +275,13 @@ Home answers "is everything all right" before it offers anything to press, and t
 
 ### The front door's live view, at home and away
 
-At home the doorbell plays ring-mqtt's RTSP stream directly from the Home Assistant host (port 8554, LAN only). Away from home it plays the same stream relayed by Home Assistant: a Generic Camera there whose source is `rtsp://127.0.0.1:8554/<doorbell>_live` (`FRONT_DOOR_RELAY_CAMERA_ID`), which Home Assistant serves as HLS over its ordinary HTTP API, so it travels through Nabu Casa. The panel says "Live · through Home Assistant" while the relay plays, and falls back to the latest recording if no playlist comes in 20 seconds or no frame in 30. The relay camera is the front door again, so it is kept out of every camera list.
+With ring-mqtt running, at home the doorbell plays its RTSP stream directly from the Home Assistant host (port 8554, LAN only), and away from home the same stream relayed by Home Assistant: a Generic Camera there whose source is `rtsp://127.0.0.1:8554/<doorbell>_live` (`FRONT_DOOR_RELAY_CAMERA_ID`), served as HLS through Nabu Casa. The relay camera is the front door again, so it is kept out of every camera list.
+
+Without ring-mqtt the doorbell goes live over WebRTC through Home Assistant's own Ring integration, its only live path. Haven waits for the connection before asking how a camera streams, and if Home Assistant does not answer, a Ring camera is still tried over WebRTC. A WebRTC attempt that fails is made once more; after that the panel says it could not start the live view, with Try again and Show the last recording. It never shows the recording as though it were the live view.
+
+### Cameras and the battery
+
+A camera with a battery on its device (the solar outdoor camera; `cameraHasBattery`) wakes and spends charge for every picture and every stream. Its tile picture refreshes every 15 minutes instead of every 10 or 20 seconds, touching its tile does not start its stream ahead of time, and its live view pauses after two minutes with Keep watching. Every live view, on any camera, stops when the app goes to the background and starts again when it comes back: each live body registers how to stop itself with `registerLiveView`, because a stopped app keeps its screen without updating it, so nothing on that screen would end the stream.
 
 ### Settings: Haven first, then Home Assistant
 

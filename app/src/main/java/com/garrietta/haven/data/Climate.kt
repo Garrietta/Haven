@@ -127,6 +127,35 @@ fun thermostatActivity(t: HaEntity): String {
     }
 }
 
+/** What a thermostat's − and + set: one set point, a heat and cool pair, or nothing while it is off. */
+sealed interface ThermostatSetpoints {
+    data object None : ThermostatSetpoints
+    data class Single(val value: Double) : ThermostatSetpoints
+    data class Range(val low: Double, val high: Double) : ThermostatSetpoints
+}
+
+fun thermostatSetpoints(t: HaEntity): ThermostatSetpoints {
+    if (t.state == "off" || t.state == "unavailable") return ThermostatSetpoints.None
+    val target = t.attrDouble("temperature")
+    val low = t.attrDouble("target_temp_low")
+    val high = t.attrDouble("target_temp_high")
+    return when {
+        target != null -> ThermostatSetpoints.Single(target)
+        low != null && high != null -> ThermostatSetpoints.Range(low, high)
+        else -> ThermostatSetpoints.None
+    }
+}
+
+/**
+ * A heat and cool pair after one of them moves: heat stays at least one
+ * [step] below cool, so neither tap can push the pair through itself.
+ */
+fun movedRange(low: Double, high: Double, step: Double, newLow: Double? = null, newHigh: Double? = null): Pair<Double, Double> = when {
+    newLow != null -> newLow.coerceAtMost(high - step) to high
+    newHigh != null -> low to newHigh.coerceAtLeast(low + step)
+    else -> low to high
+}
+
 /** A temperature as the screen shows it: whole when whole, else one decimal. */
 fun fmtDegrees(v: Double): String =
     if (v == Math.rint(v)) v.toLong().toString() else String.format(java.util.Locale.US, "%.1f", v)
