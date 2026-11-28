@@ -1,21 +1,35 @@
 # Haven Changelog
 
-## 2.0 — full rewrite (2026-11-28)
+## 1.3 — 1.x design restored, 2.0 backend kept (2026-11-28)
 
-Haven was rebuilt from scratch. Kept: the theme (`ui/theme/Theme.kt`, `Shapes.kt` — palette, springs, M3E polygons), the design tokens + semantic colors, and the pill bar (same island, capsule, Koda animation and scrub). Everything else is new.
+The 2.0 visual redesign is reverted: this is the 1.x app and design, version code 3 so it installs over 2.0. It carries the backend work:
+- Everything in the Performance round below (WebRTC cameras via camera/capabilities, crash guard, MJPEG parser, coalesced messages, optimistic sliders/climate, slider snap-back fix, Front Door without ring-mqtt, sprinkler ids).
+- From 2.0: `subscribe_entities` — HA's compressed state stream replaces get_states + state_changed (full snapshot once, then diffs; deleted entities drop on reconnect). The optimistic guard, manufacturer tagging and the notification listener (incl. automation parent_id) behave as before. `CompressedStateStream` is pure and unit tested.
+- From 2.0: registries refresh live on area/device/entity registry events.
 
-**Architecture** (`core/` is Android-light and unit tested; `ui/` is Compose)
-- `core/net/HaConnection` — one WebSocket at a time on a single-threaded loop (no locks, stale sockets can't touch state): LAN-first on Wi-Fi / Nabu Casa-first elsewhere, 3 s LAN budget, backoff, ping watchdog, instant re-plan on network change, automatic switch back to LAN, `coalesce_messages`.
-- `core/store/HomeStore` — `subscribe_entities` compressed state stream (what HA's frontend uses), registries (areas, floors, devices, `entity_registry/list_for_display`) refreshed on registry events, optimistic edits that hold until HA confirms or expire, per-entity flows so tiles recompose alone, disk cache for instant cold start.
-- `core/auth` — OAuth PKCE S256 + long-lived tokens, Keystore AES-GCM vault, refresh ahead of expiry under a mutex, LAN/remote URLs learned from HA.
-- `core/camera` — capability routing WebRTC → HLS → MJPEG (HA's order) with the HA-frontend WebRTC signalling proven against the instance (Tapo 0.4–1.8 s, Ring live in 2.9 s), crash guard, fast MJPEG parser, snapshot cache.
+549 unit tests pass.
 
-**App**: Home (greeting, people, lights, alerts, weather, thermostat, cameras, favorites, rooms), Rooms + room detail grouped by kind, Cameras, Devices (search + filters), Settings; centered popup cards with a control per domain (light brightness/temp/color, climate dial + modes, cover, fan, lock with confirm, media with art, vacuum, alarm keypad, sensors with history, weather forecast, scenes, selects, numbers); vertical pill rail when unfolded.
+## Performance round (2026-11-28 — cameras as fast as Home Assistant, instant controls)
 
-**Not yet in 2.0** (was in 1.x): Lovelace dashboard rendering + in-app editing, automation/scene/script/helper builders, notifications, Samsung Device Controls, energy, todo lists.
+Measured against the live instance from a headless browser running the exact signalling Haven now uses: Tapo 1 first frame **0.41 s** (1080p), Tapo 2 **1.76 s**, Front Door (Ring) **2.86 s and genuinely live** — previously the MJPEG proxy took several seconds and Ring could only show its last recording. Needs a device pass.
 
-Tests: 57 (core protocol, auth, planning, optimistic overlay, formatting, filtering, cameras, cache, history + the kept token/color suites).
+**Cameras**
+1. **WebRTC, done the way HA's frontend does it** (`data/HaWebRtc.kt`, `HaWebRtcSession`): `camera/webrtc/get_client_config` ICE servers; offer sent immediately (the old session waited for ICE gathering to complete — seconds of dead time); `session` / `answer` / `candidate` / `error` subscription events; local candidates sent as RTCIceCandidateInit objects (the old code sent bare strings, which current HA rejects, and never captured the session id); the 40–60 server candidates go2rtc trickles after the answer are applied (the old code dropped them, so ICE could not complete); close = `unsubscribe_events`, which ends the provider session.
+2. **Capability routing for every camera**: `camera/capabilities` (`frontend_stream_types`) picks WebRTC → HLS → MJPEG, exactly HA's order. Ring now goes live over WebRTC through the core integration; the recording label appears only if the viewer really falls back to the proxy.
+3. **Front Door without ring-mqtt**: when ring-mqtt's camera/switch are absent (the container is paused on the instance), the panel uses the capability-routed body instead of an attempt chain against entities that no longer exist; the live-stream switch is only toggled when it exists (calling a missing entity raised a service-error banner).
+4. **Native-crash safety net** (`WebRtcCrashGuard`): an "attempt in flight" flag around negotiation; two process deaths mid-negotiation on one app version disable WebRTC for that version and cameras use HLS. Replaces the Round 7 hard gate.
+5. **Instant poster**: the last snapshot shows at full brightness with a small "Connecting…" pill until video lands (was a 25 %-dimmed frame behind "Loading camera…").
+6. **MJPEG parser rewritten**: one growable byte array scanned in place (was a boxed `ArrayDeque<Byte>` copied in full on every extraction — O(n²) and tens of thousands of allocations per frame); the stream decodes only the newest frame of each read so it never falls behind real time.
+7. **HLS** sits ~1.5 s from the live edge (LL-HLS live configuration).
 
+**Controls & connection**
+8. **Coalesced messages**: `supported_features { coalesce_messages: 1 }` after auth; batched JSON-array frames are unpacked — the initial state flood and event bursts arrive in a handful of frames.
+9. **Optimistic continuous controls**: brightness, cover position, climate setpoint(s) and HVAC mode update the local entity at once (reverted on failure), like toggles already did.
+10. **Sliders no longer snap back**: `ServiceSlider` holds the dragged value through the round trip (and 2.5 s after release) instead of resetting on any intermediate server update.
+11. Generic `HaClient.subscribe/unsubscribe` (subscriptions are failed cleanly when their socket drops).
+12. Sprinkler ids updated to the re-added Meross entities (`switch.greenhouse_sprinklers`, `sensor.smart_sprinkler_battery`, `number.smart_sprinkler_duration`).
+
+Tests: `PerformanceRoundTest` (parser exactness under random chunking with 150–190 KB frames, linear-time check, ICE url parsing). 545 unit tests pass.
 
 ## Reliability round (2026-11-26, QA/QC pass — connection, remote/local switching, camera load times, layout consistency)
 

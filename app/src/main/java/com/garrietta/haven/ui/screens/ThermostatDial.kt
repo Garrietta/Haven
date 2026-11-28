@@ -1,0 +1,645 @@
+package com.garrietta.haven.ui.screens
+import com.garrietta.haven.ui.components.CoolBlue
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.garrietta.haven.ui.components.LocalReduceMotion
+import com.garrietta.haven.ui.theme.EmphasizedDecelerate
+import com.garrietta.haven.ui.theme.springBounds
+import com.garrietta.haven.ui.theme.springMorph
+import com.garrietta.haven.ui.components.coolSetpointContainer
+import com.garrietta.haven.ui.components.coolSetpointOnContainer
+import com.garrietta.haven.ui.controls.formatTemp
+import com.garrietta.haven.ui.components.heatSetpointContainer
+import com.garrietta.haven.ui.components.heatSetpointOnContainer
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+/**
+ * The spec's thermostat dial. It reworks run #38's dial under the standing
+ * 1-degree rule (Garrett's 2026-10-29 decision): the finger drags
+ * continuously around a 270-degree sweep, but the APPLIED value always
+ * snaps to whole degrees; steppers move ±1; an inside-face tap still
+ * toggles the heating↔cooling selector; only drags that start on a thumb
+ * change values.
+ *
+ * - 270-degree sweep with a 90-degree gap centered on the bottom (start
+ *   135 degrees, end 405 = 45 degrees; round 6 moved the sweep from
+ *   240 to 270 so the arc reaches further down both sides of the
+ *   scallop). The shared [Dial] stays at 270 degrees for the sheet
+ *   dial and the weather dial; its tests are untouched.
+ * - Dual floating pill thumbs on the same track in heat_cool mode, with
+ *   the range between them shaded via the dynamic container blend
+ *   (tertiaryContainer -> primaryContainer). Single modes get one thumb.
+ * - Mode arcs: Off = dashed track at 0.38 opacity, monochromatic caps;
+ *   Heating = saturated amber-orange -> deep crimson gradient with an
+ *   outward bloom behind the thumb; Cooling = cyan -> cobalt gradient.
+ * - Needle spring (0.72 / StiffnessLow) on every thumb angle, so snapped
+ *   values still travel smoothly.
+ * - Rubber-banding: pushing the finger into the bottom gap strains the
+ *   grabbed thumb past the nearer end (overshoot damped to 35%) instead
+ *   of jumping; the applied value never moves in the gap.
+ * - Gap-proofing holds for drawn thumbs too: a drawn heat thumb never
+ *   crosses the cool thumb, and vice versa.
+ * - Variable-width track (visual-bugs round, spec item 5): the track
+ *   widens while a thumb is grabbed (12dp -> 18dp on the morph spring),
+ *   so a drag reads as an active grip, not a static ring.
+ * - Pulsing fluid indicator (spec item 5, in the Koda wavy/dashed
+ *   language): while the system is actively heating or cooling, the
+ *   matching thumb's bloom undulates gently (radius + alpha, 1600ms
+ *   reverse on the emphasized decelerate). Idle and off modes keep the
+ *   static bloom; off keeps its dashed track. The pulse reads only in
+ *   the draw phase, so it never recomposes the page.
+ *
+ * Containers use the token pipeline (heat thumb: errorContainer in
+ * single-heat mode, transitioning smoothly to tertiaryContainer in
+ * dual-band mode; cool thumb: primaryContainer). The arc gradients and
+ * the hero numbers keep the spec-named temperature hues and run #38's
+ * Google-Home orange/blue — container pastels are unreadable as dial
+ * text and thumbs, so the tokens live where containers exist.
+ */
+// Dial arc gradient stops: amber→crimson heat, cyan→cobalt cool. Not scheme roles:
+// gradients need two stops each, and the cool end is the shared CoolBlue below.
+private val HEAT_ARC_START = Color(0xFFFF8F00)
+private val HEAT_ARC_END = Color(0xFFC62828)
+private val COOL_ARC_START = Color(0xFF00BCD4)
+private val COOL_ARC_END = CoolBlue // single source: DesignTokens.CoolBlue
+
+/**
+ * Round 21, item 2: the dial track color. Round 8 set the track to
+ * scheme.outline, claiming ~3.5:1 against the scallop disc — measured
+ * it is ~1.3:1 in BOTH themes (dark outline #3F3F3A on the dark disc,
+ * light outline #C6C4B4 on the light disc), so the arc blends into
+ * the scallop and is hard to read. The track is a lerp from the disc
+ * color toward onSurface at 0.55: 4.9:1 dark / 3.5:1 light against
+ * the plain disc, still clearly quieter than the setpoint band and
+ * the thumbs. The 20% mode tint on the popout disc shifts the disc
+ * only slightly, so the floor holds there too.
+ */
+internal fun dialTrackColor(disc: Color, onSurface: Color): Color = lerp(disc, onSurface, 0.55f)
+
+@Composable
+fun ThermostatDial(
+    heat: Float,
+    cool: Float,
+    single: Float,
+    dual: Boolean,
+    current: Float?,
+    currentLabel: String?,
+    range: ClosedFloatingPointRange<Float>,
+    mode: String,
+    selector: SetpointSelector,
+    onHeatChange: (Float) -> Unit,
+    onCoolChange: (Float) -> Unit,
+    onSingleChange: (Float) -> Unit,
+    onFinished: (SetpointSelector, Float) -> Unit,
+    onInsideTap: (() -> Unit)?,
+    // Which thumb (if any) pulses as actively heating/cooling. Null
+    // means idle: static blooms. Single mode passes HEATING for either
+    // active action; dual mode passes the matching selector.
+    pulseSelector: SetpointSelector? = null,
+    // Round 21, item 2: the color directly behind the track (the
+    // scallop disc in the popout, the sheet surface elsewhere) —
+    // the track color is lerped from it (see dialTrackColor), so
+    // the arc reads against whatever it sits on.
+    trackBackdrop: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    modifier: Modifier = Modifier,
+    diameter: Dp = 300.dp,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val reduceMotion = LocalReduceMotion.current
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    // Animated heat-thumb container: errorContainer in single-heat mode,
+    // transitioning smoothly to tertiaryContainer in dual-band mode.
+    val heatContainer by animateColorAsState(
+        heatSetpointContainer(scheme, dual),
+        animationSpec = springBounds(),
+        label = "heatThumbContainer",
+    )
+    val heatOnContainer = heatSetpointOnContainer(scheme, dual)
+    val coolContainer = coolSetpointContainer(scheme)
+    val coolOnContainer = coolSetpointOnContainer(scheme)
+    val needleSpec = if (reduceMotion) spring<Float>(stiffness = 10_000f, dampingRatio = 1f)
+        else spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessLow)
+
+    // Latest values/callbacks for the gesture handlers. The pointerInput
+    // keys must NOT include values that change mid-drag, or the drag
+    // restarts on every update.
+    val heatState = rememberUpdatedState(heat)
+    val coolState = rememberUpdatedState(cool)
+    val singleState = rememberUpdatedState(single)
+    val onHeatChangeState = rememberUpdatedState(onHeatChange)
+    val onCoolChangeState = rememberUpdatedState(onCoolChange)
+    val onSingleChangeState = rememberUpdatedState(onSingleChange)
+    val onFinishedState = rememberUpdatedState(onFinished)
+    val onInsideTapState = rememberUpdatedState(onInsideTap)
+
+    var grabbed by remember { mutableStateOf<SetpointSelector?>(null) }
+    // Visual-fidelity round §5: angular offset between the pointer
+    // and the grabbed thumb's TRUE angle at drag start. The drawn
+    // thumb may sit up to 9° away from its true angle (separation),
+    // so the drag handler subtracts this offset from the pointer
+    // angle — the value stays put at grab and then follows the
+    // finger 1:1, instead of jumping ~1°F on first move.
+    var grabAngleOffset by remember { mutableStateOf(0f) }
+    var strain by remember { mutableStateOf<Float?>(null) }
+    var lastApplied by remember { mutableStateOf(0f) }
+    // Track widening while grabbed; pulse phase for the active bloom.
+    // The phase is read only inside the Canvas draw block below, so the
+    // infinite transition redraws the dial without recomposing the page.
+    // Feedback round 2, item 4: the bar protrudes more — 16dp idle
+    // (was 12dp), 22dp grabbed (was 18dp). Round 6 moves the track
+    // inset below from 20dp to 16dp. Feedback round 8 moves it again,
+    // 16dp -> 12dp, now that the thumbs are 20dp circles (see
+    // drawThumb): the grabbed stroke's outer edge then sits 1dp
+    // inside the canvas (12dp inset − 11dp half-stroke), the
+    // unstaggered thumb 2dp inside (12dp − 10dp radius), and the
+    // staggered cool thumb 10dp past the canvas edge — still
+    // 10.8dp inside the popout scallop's valley (140.8dp), which is
+    // the visible bound exactly as round 6's valley analysis had
+    // it; the hero has no scallop and draws into page space as
+    // before. 10dp would clip the grabbed stroke by 1dp, so 12dp
+    // is the smallest safe inset. The track's inner edge moves
+    // out 4dp, so the dual-number row gains 8dp of inner width
+    // (see ThermostatDialBlock's 40dp subtraction).
+    val trackStroke by animateDpAsState(
+        if (grabbed != null) 22.dp else 16.dp,
+        animationSpec = if (reduceMotion) spring(stiffness = 10_000f, dampingRatio = 1f) else springMorph(),
+        label = "trackStroke",
+    )
+    val pulseTransition = rememberInfiniteTransition(label = "dialPulse")
+    val pulsePhase by pulseTransition.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(1600, easing = EmphasizedDecelerate), RepeatMode.Reverse),
+        label = "bloomPhase",
+    )
+
+    // Drawn values: the strained value while the finger pushes into the
+    // bottom gap, else the applied value — gap-proofed so a drawn heat
+    // thumb never crosses the cool thumb, and vice versa.
+    val drawnHeat = ((if (grabbed == SetpointSelector.HEATING) strain else null) ?: heat)
+        .let { if (dual) minOf(it, cool) else it }
+    val drawnCool = ((if (grabbed == SetpointSelector.COOLING) strain else null) ?: cool)
+        .let { if (dual) maxOf(it, heat) else it }
+    val drawnSingle = (if (grabbed == SetpointSelector.HEATING && !dual) strain else null) ?: single
+    // Visual-fidelity round §5: the DRAWN dual angles are spread to
+    // a minimum 18° of arc apart (separatedDualAngles) so the
+    // purple/blue thumb circles never overlap at the top of the
+    // dial — the actual setpoint VALUES (heat/cool) are untouched;
+    // only the drawn positions move. The separated pair feeds the
+    // animated targets (hence the radii, thumb centers, and shaded
+    // range below) AND the grab test, so taps land on the thumb
+    // they see. The drag handler corrects for the separation with
+    // grabAngleOffset (below), so a grabbed thumb never jumps the
+    // value on first move.
+    val (separatedHeatAngle, separatedCoolAngle) = if (dual) {
+        separatedDualAngles(
+            dial240AngleForValue(drawnHeat, range),
+            dial240AngleForValue(drawnCool, range),
+        )
+    } else {
+        dial240AngleForValue(drawnHeat, range) to dial240AngleForValue(drawnCool, range)
+    }
+    val animatedHeatAngle by animateFloatAsState(separatedHeatAngle, needleSpec, label = "heatAngle")
+    val animatedCoolAngle by animateFloatAsState(separatedCoolAngle, needleSpec, label = "coolAngle")
+    val animatedSingleAngle by animateFloatAsState(dial240AngleForValue(drawnSingle, range), needleSpec, label = "singleAngle")
+
+    fun trackRadiusPx(sizePx: Float): Float = sizePx / 2f - with(density) { 12.dp.toPx() }
+
+    fun thumbCenter(angleDeg: Float, radius: Float, cx: Float, cy: Float): Offset {
+        val a = Math.toRadians(angleDeg.toDouble()).toFloat()
+        return Offset(cx + radius * cos(a), cy + radius * sin(a))
+    }
+
+    fun DrawScope.drawThumb(center: Offset, fill: Color, dot: Color, active: Boolean, pulsing: Boolean) {
+        // Outward bloom behind the thumb: static when idle, gently
+        // undulating (radius + alpha) while actively heating/cooling.
+        // pulsePhase is read here, in the draw phase, so the pulse
+        // redraws the dial without recomposing the page.
+        val bloomAlpha = if (pulsing) 0.18f + 0.14f * pulsePhase else 0.25f
+        val bloomRadius = if (pulsing) (24.dp + 4.dp * pulsePhase).toPx() else 24.dp.toPx()
+        drawCircle(color = fill.copy(alpha = bloomAlpha), radius = bloomRadius, center = center)
+        // Feedback round 8, item (c): compact CIRCULAR thumbs —
+        // 20dp circles replace the 30x20 ovals, so a thumb never
+        // looms over the set-temp text. VISUAL ONLY: the grab
+        // target stays 32dp and handle-grab-only (nearest wins)
+        // is untouched — the touch target does not shrink with
+        // the visual thumb.
+        drawCircle(
+            color = fill.copy(alpha = if (active) 1f else 0.55f),
+            radius = 10.dp.toPx(),
+            center = center,
+        )
+        drawCircle(
+            color = Color.White.copy(alpha = if (active) 0.9f else 0.5f),
+            radius = 10.dp.toPx(),
+            center = center,
+            style = Stroke(width = 1.5.dp.toPx()),
+        )
+        drawCircle(color = dot.copy(alpha = if (active) 1f else 0.55f), radius = 4.dp.toPx(), center = center)
+    }
+
+    Canvas(
+        modifier
+            .size(diameter)
+            .pointerInput(dual, range, mode) {
+                detectTapGestures { offset ->
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
+                    if (dialTapZone(offset.x, offset.y, cx, cy, trackRadius, 30.dp.toPx()) == DialTapZone.INSIDE) {
+                        onInsideTapState.value?.invoke()
+                    }
+                }
+            }
+            .pointerInput(dual, range, mode) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        val cx = size.width / 2f
+                        val cy = size.height / 2f
+                        val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
+                        val grabR = 32.dp.toPx()
+                        // Staggered grab centers (see dualThumbRadii):
+                        // the drawn thumbs sit on these radii when
+                        // close, so the grab test must use them too.
+                        // Visual-fidelity round §5: the grab angles
+                        // are the SEPARATED drawn angles (not the
+                        // true value angles), so the thumb the user
+                        // sees is the thumb they grab.
+                        val (grabHeatAngle, grabCoolAngle) = if (dual) {
+                            separatedDualAngles(
+                                dial240AngleForValue(heatState.value, range),
+                                dial240AngleForValue(coolState.value, range),
+                            )
+                        } else {
+                            dial240AngleForValue(heatState.value, range) to
+                                dial240AngleForValue(coolState.value, range)
+                        }
+                        val (heatGrabRadius, coolGrabRadius) = if (dual) {
+                            dualThumbRadii(
+                                grabHeatAngle,
+                                grabCoolAngle,
+                                trackRadius, 30.dp.toPx(), 20.dp.toPx(), 4.dp.toPx(), 12.dp.toPx(),
+                            )
+                        } else {
+                            trackRadius to trackRadius
+                        }
+                        fun distTo(angleDeg: Float, radius: Float): Float {
+                            val c = thumbCenter(angleDeg, radius, cx, cy)
+                            val dx = offset.x - c.x
+                            val dy = offset.y - c.y
+                            return sqrt(dx * dx + dy * dy)
+                        }
+                        grabbed = if (dual) {
+                            val dh = distTo(grabHeatAngle, heatGrabRadius)
+                            val dc = distTo(grabCoolAngle, coolGrabRadius)
+                            when {
+                                dh <= grabR && dc <= grabR ->
+                                    if (dh <= dc) SetpointSelector.HEATING else SetpointSelector.COOLING
+                                dh <= grabR -> SetpointSelector.HEATING
+                                dc <= grabR -> SetpointSelector.COOLING
+                                else -> null
+                            }
+                        } else {
+                            if (distTo(dial240AngleForValue(singleState.value, range), trackRadius) <= grabR) {
+                                SetpointSelector.HEATING
+                            } else {
+                                null
+                            }
+                        }
+                        grabbed?.let { g ->
+                            lastApplied = if (dual) {
+                                if (g == SetpointSelector.HEATING) heatState.value else coolState.value
+                            } else {
+                                singleState.value
+                            }
+                            strain = null
+                        }
+                        // Visual-fidelity round §5: record how far
+                        // the pointer sits from the grabbed thumb's
+                        // TRUE angle. The drawn thumb may be
+                        // separated from its true angle, so without
+                        // this the first drag move would jump the
+                        // value toward the pointer. The offset is
+                        // subtracted in onDrag; it is 0 when the
+                        // thumb is drawn at its true angle.
+                        grabAngleOffset = if (grabbed != null) {
+                            val pointerAngle = (Math.toDegrees(
+                                atan2(
+                                    (offset.y - cy).toDouble(),
+                                    (offset.x - cx).toDouble(),
+                                ),
+                            ).toFloat() + 360f) % 360f
+                            val trueAngle = if (dual) {
+                                if (grabbed == SetpointSelector.HEATING) {
+                                    dial240AngleForValue(heatState.value, range)
+                                } else {
+                                    dial240AngleForValue(coolState.value, range)
+                                }
+                            } else {
+                                dial240AngleForValue(singleState.value, range)
+                            }
+                            (pointerAngle - trueAngle + 540f) % 360f - 180f
+                        } else {
+                            0f
+                        }
+                    },
+                    onDragEnd = {
+                        grabbed?.let { g -> onFinishedState.value(g, lastApplied) }
+                        grabbed = null
+                        strain = null
+                        grabAngleOffset = 0f
+                    },
+                    onDragCancel = {
+                        grabbed = null
+                        strain = null
+                        grabAngleOffset = 0f
+                    },
+                    onDrag = { change, _ ->
+                        val g = grabbed ?: return@detectDragGestures
+                        change.consume()
+                        val cx = size.width / 2f
+                        val cy = size.height / 2f
+                        // Visual-fidelity round §5: the effective
+                        // angle is the pointer angle minus the grab
+                        // offset, so the value follows the finger
+                        // 1:1 from its true value instead of
+                        // jumping to the separated drawn position.
+                        val pointerAngle = (Math.toDegrees(
+                            atan2(
+                                (change.position.y - cy).toDouble(),
+                                (change.position.x - cx).toDouble(),
+                            ),
+                        ).toFloat() + 360f) % 360f
+                        val angleDeg = (pointerAngle - grabAngleOffset + 360f) % 360f
+                        val rel = (angleDeg - DIAL240_START_DEG + 360f) % 360f
+                        val span = range.endInclusive - range.start
+                        if (rel <= DIAL240_SWEEP_DEG) {
+                            strain = null
+                            val raw = range.start + (rel / DIAL240_SWEEP_DEG) * span
+                            val snapped = snapToDegree(raw.toDouble()).toFloat()
+                            val applied = if (dual) {
+                                if (g == SetpointSelector.HEATING) {
+                                    clampHeatSetpoint(snapped.toDouble(), range.start.toDouble(), coolState.value.toDouble()).toFloat()
+                                } else {
+                                    clampCoolSetpoint(snapped.toDouble(), heatState.value.toDouble(), range.endInclusive.toDouble()).toFloat()
+                                }
+                            } else {
+                                snapped.coerceIn(range)
+                            }
+                            lastApplied = applied
+                            if (dual) {
+                                if (g == SetpointSelector.HEATING) onHeatChangeState.value(applied)
+                                else onCoolChangeState.value(applied)
+                            } else {
+                                onSingleChangeState.value(applied)
+                            }
+                        } else {
+                            // Bottom gap: strain past the nearer end instead
+                            // of jumping. The gap runs from the max end
+                            // ((START + SWEEP) % 360 = 45) around the bottom
+                            // (90) to the min end (135); its midpoint (90)
+                            // splits the sides. All three numbers derive
+                            // from the DIAL240 constants — nothing here
+                            // hardcodes the old 30°/120° gap — so a future
+                            // sweep change keeps the strain symmetric.
+                            val arcEnd = (DIAL240_START_DEG + DIAL240_SWEEP_DEG) % 360f
+                            val gapDeg = 360f - DIAL240_SWEEP_DEG
+                            val gapAngle = (angleDeg - arcEnd + 360f) % 360f
+                            val overshoot = if (gapAngle <= gapDeg / 2f) {
+                                gapAngle / DIAL240_SWEEP_DEG * span
+                            } else {
+                                -(gapDeg - gapAngle) / DIAL240_SWEEP_DEG * span
+                            }
+                            val base = if (overshoot >= 0f) range.endInclusive else range.start
+                            strain = rubberBandedValue(base + overshoot, range)
+                        }
+                    },
+                )
+            },
+    ) {
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val trackRadius = trackRadiusPx(minOf(size.width, size.height).toFloat())
+        val stroke = trackStroke.toPx()
+        val topLeft = Offset(cx - trackRadius, cy - trackRadius)
+        val arcSize = Size(trackRadius * 2f, trackRadius * 2f)
+        when (mode) {
+            "off" -> {
+                drawArc(
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.38f),
+                    startAngle = DIAL240_START_DEG,
+                    sweepAngle = DIAL240_SWEEP_DEG,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(
+                        width = stroke,
+                        cap = StrokeCap.Butt,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f)),
+                    ),
+                )
+            }
+            "heat" -> {
+                val steps = 60
+                for (i in 0 until steps) {
+                    drawArc(
+                        color = lerp(HEAT_ARC_START, HEAT_ARC_END, i / (steps - 1).toFloat()),
+                        startAngle = DIAL240_START_DEG + i * (DIAL240_SWEEP_DEG / steps),
+                        sweepAngle = DIAL240_SWEEP_DEG / steps + 0.5f,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                }
+            }
+            "cool" -> {
+                val steps = 60
+                for (i in 0 until steps) {
+                    drawArc(
+                        color = lerp(COOL_ARC_START, COOL_ARC_END, i / (steps - 1).toFloat()),
+                        startAngle = DIAL240_START_DEG + i * (DIAL240_SWEEP_DEG / steps),
+                        sweepAngle = DIAL240_SWEEP_DEG / steps + 0.5f,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                }
+            }
+            "heat_cool" -> {
+                // Round 21, item 2 (SUPERSEDES the round-8 note
+                // below it): the base track was scheme.outline,
+                // which measures ~1.3:1 against the scallop disc
+                // in both themes — near-invisible, not the ~3.5:1
+                // the round-8 comment claimed. dialTrackColor
+                // lerps from the disc toward onSurface (4.9:1
+                // dark / 3.5:1 light). The shaded band between
+                // the thumbs keeps its thumb-matched container
+                // blend deliberately (it carries the setpoint
+                // colors, not the track color).
+                drawArc(
+                    color = dialTrackColor(trackBackdrop, scheme.onSurface),
+                    startAngle = DIAL240_START_DEG,
+                    sweepAngle = DIAL240_SWEEP_DEG,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                // The shaded range between the thumbs, blended across the
+                // dynamic containers (tertiary -> primary).
+                val from = animatedHeatAngle
+                val to = animatedCoolAngle
+                val steps = 40
+                for (i in 0 until steps) {
+                    drawArc(
+                        color = lerp(heatContainer, coolContainer, i / (steps - 1).toFloat()),
+                        startAngle = from + (to - from) * i / steps,
+                        sweepAngle = (to - from) / steps + 0.5f,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = stroke + 2.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                }
+            }
+            else -> {
+                // Round 21, item 2: same track fix as
+                // heat_cool — scheme.outline measured ~1.3:1
+                // against the disc in both themes.
+                drawArc(
+                    color = dialTrackColor(trackBackdrop, scheme.onSurface),
+                    startAngle = DIAL240_START_DEG,
+                    sweepAngle = DIAL240_SWEEP_DEG,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            }
+        }
+        // Current-temperature dot on the track, and its label at the top
+        // of the ring (Google-Home style, as run #38 had it).
+        if (current != null) {
+            val cPos = thumbCenter(dial240AngleForValue(current, range), trackRadius, cx, cy)
+            drawCircle(color = scheme.onSurfaceVariant, radius = 5.dp.toPx(), center = cPos)
+        }
+        if (currentLabel != null) {
+            val layout = textMeasurer.measure(
+                currentLabel,
+                TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = scheme.onSurfaceVariant),
+            )
+            // Round 4: the label lives at the BOTTOM of the ring
+            // interior, inside the 90° bottom gap where no thumb
+            // can ever travel (gap-proofing) — the old top-of-ring
+            // slot collided with the 67°/69° thumbs, whose arc
+            // positions sit near the top of the display range.
+            drawText(
+                layout,
+                topLeft = Offset(
+                    cx - layout.size.width / 2f,
+                    cy + trackRadius - 28.dp.toPx() - layout.size.height,
+                ),
+            )
+        }
+        // Feedback round 8, item (d): the range-end labels live
+        // INSIDE the dial, directly beneath the arc endpoints,
+        // instead of the legend row below the dial (removed from
+        // ThermostatDialBlock). Each label centers on its
+        // endpoint's x, 29dp below the endpoint (10dp thumb
+        // radius + 9dp half text height + 10dp gap), so even a
+        // thumb staggered outward at the extreme end clears it
+        // (stagger moves the thumb only 8.5dp vertically, leaving
+        // 1.5dp); the canvas edge still has room (popout label
+        // bottom 234dp of 240).
+        val endLabelStyle = TextStyle(fontSize = 13.sp, color = scheme.onSurfaceVariant)
+        for ((angleDeg, text) in listOf(
+            DIAL240_START_DEG to range.start.toDouble().formatTemp(),
+            (DIAL240_START_DEG + DIAL240_SWEEP_DEG) % 360f to range.endInclusive.toDouble().formatTemp(),
+        )) {
+            val a = Math.toRadians(angleDeg.toDouble()).toFloat()
+            val endX = cx + trackRadius * cos(a)
+            val endY = cy + trackRadius * sin(a)
+            val layout = textMeasurer.measure(text, endLabelStyle)
+            drawText(
+                layout,
+                topLeft = Offset(
+                    endX - layout.size.width / 2f,
+                    endY + 29.dp.toPx() - layout.size.height / 2f,
+                ),
+            )
+        }
+        // Circular thumbs on the track. When the setpoints are close,
+        // the thumbs stagger radially (see dualThumbRadii) instead
+        // of colliding — the same radii the grab test uses.
+        if (dual) {
+            val (heatThumbRadius, coolThumbRadius) = dualThumbRadii(
+                animatedHeatAngle, animatedCoolAngle,
+                trackRadius, 30.dp.toPx(), 20.dp.toPx(), 4.dp.toPx(), 12.dp.toPx(),
+            )
+            drawThumb(
+                thumbCenter(animatedHeatAngle, heatThumbRadius, cx, cy),
+                heatContainer,
+                heatOnContainer,
+                selector == SetpointSelector.HEATING,
+                pulseSelector == SetpointSelector.HEATING,
+            )
+            drawThumb(
+                thumbCenter(animatedCoolAngle, coolThumbRadius, cx, cy),
+                coolContainer,
+                coolOnContainer,
+                selector == SetpointSelector.COOLING,
+                pulseSelector == SetpointSelector.COOLING,
+            )
+        } else {
+            val (fill, dot) = when (mode) {
+                "heat" -> heatSetpointContainer(scheme, false) to heatSetpointOnContainer(scheme, false)
+                "cool" -> coolSetpointContainer(scheme) to coolSetpointOnContainer(scheme)
+                else -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
+            }
+            drawThumb(thumbCenter(animatedSingleAngle, trackRadius, cx, cy), fill, dot, true, pulseSelector != null)
+        }
+    }
+}
