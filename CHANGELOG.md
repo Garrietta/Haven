@@ -1,5 +1,14 @@
 # Haven Changelog
 
+## 1.3 — 1.x design restored, 2.0 backend kept (2026-11-28)
+
+The 2.0 visual redesign is reverted: this is the 1.x app and design, version code 3 so it installs over 2.0. It carries the backend work:
+- Everything in the Performance round below (WebRTC cameras via camera/capabilities, crash guard, MJPEG parser, coalesced messages, optimistic sliders/climate, slider snap-back fix, Front Door without ring-mqtt, sprinkler ids).
+- From 2.0: `subscribe_entities` — HA's compressed state stream replaces get_states + state_changed (full snapshot once, then diffs; deleted entities drop on reconnect). The optimistic guard, manufacturer tagging and the notification listener (incl. automation parent_id) behave as before. `CompressedStateStream` is pure and unit tested.
+- From 2.0: registries refresh live on area/device/entity registry events.
+
+549 unit tests pass.
+
 ## Performance round (2026-11-28 — cameras as fast as Home Assistant, instant controls)
 
 Measured against the live instance from a headless browser running the exact signalling Haven now uses: Tapo 1 first frame **0.41 s** (1080p), Tapo 2 **1.76 s**, Front Door (Ring) **2.86 s and genuinely live** — previously the MJPEG proxy took several seconds and Ring could only show its last recording. Needs a device pass.

@@ -1305,20 +1305,89 @@ class HaClient(
         // EVERY bus event (service calls, automation runs, logbook,
         // timers…): several times the traffic through the relay, and
         // a refused subscription for non-admin users.
-        sendCommand("subscribe_events", build = { it.put("event_type", "state_changed") })
-        // States arrive via the result message, which needs a handler — so re-send
-        // get_states with a callback that actually stores them.
-        sendCommand("get_states", onResult = { msg ->
-            val result = msg.optJSONArray("result") ?: return@sendCommand
-            val map = mutableMapOf<String, HaEntity>()
-            for (i in 0 until result.length()) {
-                val e = HaEntity.fromJson(result.optJSONObject(i) ?: continue)
-                map[e.entityId] = attachManufacturer(e)
-            }
-            _states.value = map
-        })
+        // Backend round (from 2.0): one `subscribe_entities` subscription
+        // replaces get_states + subscribe_events(state_changed). The first
+        // event is the full snapshot (it REPLACES what we hold, so entities
+        // deleted while we were away disappear); later events are diffs.
+        var firstSnapshot = true
+        subscribe(
+            type = "subscribe_entities",
+            build = { },
+            onEvent = { event ->
+                val reset = firstSnapshot && event.has("a")
+                if (reset) firstSnapshot = false
+                applyCompressedStates(event, reset)
+            },
+            onResult = { ok, error ->
+                if (!ok) Log.w(TAG, "subscribe_entities refused: $error")
+            },
+        )
+        // Registry edits (rooms, device areas, entity renames) refresh the
+        // registries live instead of waiting for the next reconnect.
+        for (eventType in listOf("area_registry_updated", "device_registry_updated", "entity_registry_updated")) {
+            subscribe(type = "subscribe_events", build = { it.put("event_type", eventType) }, onEvent = { scheduleRegistryRefresh() })
+        }
         refreshRegistries()
         refreshLovelace()
+    }
+
+    private var registryRefreshJob: Job? = null
+
+    private fun scheduleRegistryRefresh() {
+        registryRefreshJob?.cancel()
+        registryRefreshJob = scope.launch {
+            delay(1_500)
+            refreshRegistries()
+        }
+    }
+
+    /**
+     * Applies one subscribe_entities event. Same rules as the old
+     * state_changed handler: the optimistic guard drops a contradicting
+     * update while a tap's expectation is live, manufacturers are
+     * re-attached, and every applied change reaches the notification
+     * listener (removals and dropped echoes never do).
+     */
+    private fun applyCompressedStates(event: JSONObject, reset: Boolean) {
+        val applied = mutableListOf<CompressedStateStream.Change>()
+        _states.update { current ->
+            applied.clear()
+            val base = if (reset) emptyMap() else current
+            val result = CompressedStateStream.apply(base, event)
+            if (result.changes.isEmpty() && !reset) return@update current
+            val next = HashMap<String, HaEntity>(result.states.size)
+            for ((id, entity) in result.states) next[id] = attachManufacturer(entity)
+            for (change in result.changes) {
+                val new = change.new
+                if (new == null) {
+                    optimisticGuard.clear(change.entityId)
+                    continue
+                }
+                if (!reset && optimisticGuard.shouldDrop(change.entityId, new.state)) {
+                    // Keep what the user already sees until the confirming update lands.
+                    current[change.entityId]?.let { next[change.entityId] = it }
+                    continue
+                }
+                applied += change
+            }
+            next
+        }
+        if (reset) return // the snapshot is not a stream of changes
+        val listener = stateChangedListener ?: return
+        for (change in applied) {
+            val new = change.new ?: continue
+            listener(
+                StateChangeEvent(
+                    entityId = change.entityId,
+                    domain = change.entityId.substringBefore("."),
+                    oldState = change.old?.state,
+                    newState = new.state,
+                    deviceClass = new.attributes["device_class"] as? String,
+                    friendlyName = new.attributes["friendly_name"] as? String,
+                    parentId = change.parentId,
+                ),
+            )
+        }
     }
 
     /**
