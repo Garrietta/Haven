@@ -15,3 +15,4 @@ app/build
 # Design tooling output
 tools/palette.html
 __pycache__/
+.kotlin/

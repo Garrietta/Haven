@@ -17,8 +17,8 @@ android {
         // back, large-screen orientation rules) that needs a device pass on
         // the Fold before it ships. compileSdk moves freely; this does not.
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "3.5"
         // Where updates come from, and which CI run built this APK (0 for a
         // local build): a test build is newer when its number is higher.
         buildConfigField("String", "GITHUB_REPO", "\"Garrietta/Haven\"")

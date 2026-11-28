@@ -1,5 +1,12 @@
 # Haven Changelog
 
+## 3.5: The new backend under the 3.4 design (2026-11-28)
+
+The 3.4 design (build 162) with the backend work from the performance round below and from the Haven 2.0 rewrite (whose visuals were not kept):
+- `subscribe_entities` — HA's compressed state stream replaces get_states + state_changed (full snapshot once, then diffs; entities deleted while away drop on reconnect). Optimistic guard, manufacturer tagging and the notification listener (incl. automation parent_id) behave as before. `CompressedStateStream` is pure and unit tested.
+- Registries refresh live on area / device / entity registry events.
+- versionCode 3 (installs over 2.x and the 1.3 test).
+
 ## Performance round (2026-11-28 — cameras as fast as Home Assistant, instant controls)
 
 Measured against the live instance from a headless browser running the exact signalling Haven now uses: Tapo 1 first frame **0.41 s** (1080p), Tapo 2 **1.76 s**, Front Door (Ring) **2.86 s and genuinely live** — previously the MJPEG proxy took several seconds and Ring could only show its last recording. Needs a device pass.
