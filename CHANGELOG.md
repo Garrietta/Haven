@@ -1,5 +1,22 @@
 # Haven Changelog
 
+## 2.0 — full rewrite (2026-11-28)
+
+Haven was rebuilt from scratch. Kept: the theme (`ui/theme/Theme.kt`, `Shapes.kt` — palette, springs, M3E polygons), the design tokens + semantic colors, and the pill bar (same island, capsule, Koda animation and scrub). Everything else is new.
+
+**Architecture** (`core/` is Android-light and unit tested; `ui/` is Compose)
+- `core/net/HaConnection` — one WebSocket at a time on a single-threaded loop (no locks, stale sockets can't touch state): LAN-first on Wi-Fi / Nabu Casa-first elsewhere, 3 s LAN budget, backoff, ping watchdog, instant re-plan on network change, automatic switch back to LAN, `coalesce_messages`.
+- `core/store/HomeStore` — `subscribe_entities` compressed state stream (what HA's frontend uses), registries (areas, floors, devices, `entity_registry/list_for_display`) refreshed on registry events, optimistic edits that hold until HA confirms or expire, per-entity flows so tiles recompose alone, disk cache for instant cold start.
+- `core/auth` — OAuth PKCE S256 + long-lived tokens, Keystore AES-GCM vault, refresh ahead of expiry under a mutex, LAN/remote URLs learned from HA.
+- `core/camera` — capability routing WebRTC → HLS → MJPEG (HA's order) with the HA-frontend WebRTC signalling proven against the instance (Tapo 0.4–1.8 s, Ring live in 2.9 s), crash guard, fast MJPEG parser, snapshot cache.
+
+**App**: Home (greeting, people, lights, alerts, weather, thermostat, cameras, favorites, rooms), Rooms + room detail grouped by kind, Cameras, Devices (search + filters), Settings; centered popup cards with a control per domain (light brightness/temp/color, climate dial + modes, cover, fan, lock with confirm, media with art, vacuum, alarm keypad, sensors with history, weather forecast, scenes, selects, numbers); vertical pill rail when unfolded.
+
+**Not yet in 2.0** (was in 1.x): Lovelace dashboard rendering + in-app editing, automation/scene/script/helper builders, notifications, Samsung Device Controls, energy, todo lists.
+
+Tests: 57 (core protocol, auth, planning, optimistic overlay, formatting, filtering, cameras, cache, history + the kept token/color suites).
+
+
 ## Reliability round (2026-11-26, QA/QC pass — connection, remote/local switching, camera load times, layout consistency)
 
 Code audit, no video. Everything below was found by reading the code; the connection engine was additionally exercised against a scripted fake server (tools/connection-harness — 14 behaviour tests: fallback, stale-socket isolation, make-before-break switch-back, auth rejection, offline pause, ping/pong, REST 401 renewal, token scoping). Pure rules are unit-tested in ConnectionPlannerTest (27 tests). Needs a device + Nabu Casa pass before it is called done.

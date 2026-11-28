@@ -4,6 +4,10 @@ A native Material 3 Expressive Home Assistant client for Android.
 
 Haven is **not** a Lovelace WebView shell like the official app. It talks to Home Assistant over the WebSocket API + REST and renders dashboards, areas, and entity controls natively in Kotlin/Compose — with the same expressive design language as Relay, Koda, and Pixel Music: real M3E polygons (`graphics-shapes`), bouncy springs (380 / 0.62), dynamic Material You color, per-entity accent colors, a pill-bar bottom navigation, and a control designed for each entity domain. No WebView anywhere in v1.
 
+## Haven 2.0
+
+A ground-up rewrite. See CHANGELOG.md for the architecture; the pill bar and theme carry over from 1.x.
+
 ## Login
 
 Two ways in, both against your own instance:

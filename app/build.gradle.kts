@@ -12,8 +12,8 @@ android {
         applicationId = "com.garrietta.haven"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
 
     signingConfigs {
@@ -66,12 +66,9 @@ dependencies {
     implementation(libs.graphics.shapes)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)
-    implementation(libs.media3.exoplayer.rtsp)
-    implementation(libs.media3.ui)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.core.ktx)
     implementation(libs.okhttp)
-    implementation(libs.snakeyaml)
     implementation(libs.webrtc)
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
