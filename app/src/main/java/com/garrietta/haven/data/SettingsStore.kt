@@ -23,6 +23,14 @@ class SettingsStore(context: Context) {
         set(value) = prefs.edit().putBoolean("dynamic_color", value).apply()
 
     /**
+     * The color style's key (ColorStyle.key). Unset reads as Haven, or as
+     * Wallpaper for someone who had turned the old wallpaper-color switch on.
+     */
+    var colorStyleKey: String
+        get() = prefs.getString("color_style", null) ?: if (dynamicColor) "wallpaper" else "haven"
+        set(value) = prefs.edit().putString("color_style", value).apply()
+
+    /**
      * Stage C: folded pill presentation style — "floating" (the current
      * 64dp bar) or "compact" (a tighter 56dp bar). Unknown values read
      * as floating (see navStyleFromKey); the key is stored verbatim.
@@ -60,6 +68,29 @@ class SettingsStore(context: Context) {
     var navShowEnergy: Boolean
         get() = prefs.getBoolean("nav_show_energy", true)
         set(value) = prefs.edit().putBoolean("nav_show_energy", value).apply()
+
+    /**
+     * Whether Security is on the bar, or null when it has never been
+     * chosen: the ViewModel then shows it only if the bar has room
+     * beside the tabs and rooms already pinned there.
+     */
+    var navShowSecurity: Boolean?
+        get() = if (prefs.contains("nav_show_security")) prefs.getBoolean("nav_show_security", true) else null
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("nav_show_security") else putBoolean("nav_show_security", value)
+        }.apply()
+
+    /** Climate on the bar, beside Security; null until chosen. */
+    var navShowClimate: Boolean?
+        get() = if (prefs.contains("nav_show_climate")) prefs.getBoolean("nav_show_climate", true) else null
+        set(value) = prefs.edit().apply {
+            if (value == null) remove("nav_show_climate") else putBoolean("nav_show_climate", value)
+        }.apply()
+
+    /** Set once the cameras have moved from Home to the Security tab. */
+    var camerasMovedToSecurity: Boolean
+        get() = prefs.getBoolean("cameras_moved_to_security", false)
+        set(value) = prefs.edit().putBoolean("cameras_moved_to_security", value).apply()
 
     /** When on, spring animations are replaced with instant state changes. */
     var reduceMotion: Boolean
@@ -135,6 +166,31 @@ class SettingsStore(context: Context) {
         }
         set(value) = prefs.edit().putStringSet("home_hidden_sections", value.toSet()).apply()
 
+    /**
+     * The order the owner dragged each group's tiles into on Home, as one
+     * JSON object of group id to entity ids. Tiles not in it follow,
+     * in Home's own order.
+     */
+    fun homeTileOrder(): Map<String, List<String>> {
+        val raw = prefs.getString("home_tile_order_json", null) ?: return emptyMap()
+        return try {
+            val obj = org.json.JSONObject(raw)
+            obj.keys().asSequence().associateWith { key ->
+                val array = obj.optJSONArray(key) ?: org.json.JSONArray()
+                (0 until array.length()).mapNotNull { array.optString(it).takeIf { id -> id.isNotEmpty() } }
+            }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun setHomeTileOrder(groupId: String, entityIds: List<String>) {
+        val obj = org.json.JSONObject()
+        for ((id, ids) in homeTileOrder()) obj.put(id, org.json.JSONArray(ids))
+        obj.put(groupId, org.json.JSONArray(entityIds))
+        prefs.edit().putString("home_tile_order_json", obj.toString()).apply()
+    }
+
     /** Explicit per-light Home visibility choices (entity id -> shown), as one JSON object string. */
     fun homeLightOverrides(): Map<String, Boolean> {
         val raw = prefs.getString("home_light_overrides_json", null) ?: return emptyMap()
@@ -168,6 +224,13 @@ class SettingsStore(context: Context) {
      * temporarily); the section renders only ids that resolve, while the
      * Manage sheet lists every stored id so a stale one can be removed.
      */
+    /** How a tab's section has been arranged by hand (see [PageCuration]); stored per section key. */
+    fun pageCuration(section: String): PageCuration = PageCuration.fromJson(prefs.getString("page_curation_$section", null))
+
+    fun setPageCuration(section: String, curation: PageCuration) {
+        prefs.edit().putString("page_curation_$section", curation.toJson()).apply()
+    }
+
     fun favoriteEntityIds(): List<String> {
         val raw = prefs.getString("favorites_json", null) ?: return emptyList()
         return try {

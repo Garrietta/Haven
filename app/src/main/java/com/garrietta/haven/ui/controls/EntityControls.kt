@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.controls
+import androidx.compose.material.icons.filled.Sync
+import com.garrietta.haven.ui.components.suggestedIconKey
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.ui.components.cardIconForKey
 import com.garrietta.haven.ui.components.formatCondition
@@ -104,7 +106,6 @@ import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.ui.components.Dial
 import com.garrietta.haven.ui.components.DomainBadge
 import com.garrietta.haven.ui.components.LocalReduceMotion
-import com.garrietta.haven.ui.components.LocalShapePrefs
 import com.garrietta.haven.ui.components.PillToggle
 import com.garrietta.haven.ui.components.accentFor
 import com.garrietta.haven.ui.controls.GarageDoorVisual
@@ -141,6 +142,7 @@ import com.garrietta.haven.ui.screens.clampHeatSetpoint
 import com.garrietta.haven.ui.screens.defaultSelector
 import com.garrietta.haven.ui.screens.snapToDegree
 import com.garrietta.haven.ui.screens.toggleSelector
+import com.garrietta.haven.ui.components.choiceChipColors
 
 fun Double.formatTemp(): String =
     if (this % 1.0 == 0.0) "${this.toInt()}°" else "%.1f°".format(this)
@@ -158,7 +160,7 @@ fun HaEntity.stateText(): String {
     if (state.equals("unknown", ignoreCase = true)) return "Unknown"
     val unit = attrString("unit_of_measurement")
     return when (domain) {
-        "sensor" -> if (unit != null) "$state $unit" else state
+        "sensor" -> com.garrietta.haven.data.formatReading(state, unit, attrString("device_class"))
         // Weather conditions go through the display formatter:
         // HA reports "partlycloudy" glued, which must read
         // "Partly Cloudy" everywhere (2026-10-30 verdict). Other
@@ -217,7 +219,16 @@ fun sensorDisplayName(entity: HaEntity): String {
 fun entityIcon(iconKeys: Map<String, String>, entity: HaEntity): ImageVector =
     cardIconForKey(customIconKeyFor(iconKeys, entity.entityId, CARD_ICON_KEYS)) ?: domainIcon(entity)
 
-fun domainIcon(entity: HaEntity): ImageVector = when (entity.domain) {
+/**
+ * A device's icon when none was picked: what it is, where Home Assistant
+ * or its name says (a fan, a garage door, a switch called "Heater"; see
+ * [suggestedIconKey]), else its domain's.
+ */
+fun domainIcon(entity: HaEntity): ImageVector =
+    cardIconForKey(suggestedIconKey(entity.domain, entity.attrString("device_class"), entity.friendlyName))
+        ?: domainBaseIcon(entity)
+
+private fun domainBaseIcon(entity: HaEntity): ImageVector = when (entity.domain) {
     "light" -> Icons.Filled.Lightbulb
     "switch", "input_boolean" -> Icons.Filled.Power
     "cover" -> Icons.Filled.Home
@@ -478,11 +489,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
     // are held. No snapshot (sheet without one, no morph) = live.
     val snap = if (morphSource) vm.travelSnapshots[entity.entityId] else null
     val display = snap ?: entity
-    // Card-outline shape (2026-10-30 picker): a per-entity
-    // override beats the global default; without either, the
-    // token extraLarge corners are unchanged.
-    val cardShape = LocalShapePrefs.current.cardShapeFor(entity.entityId, entity.domain)
-        ?: generalCardShape(0)
+    val cardShape = generalCardShape(0)
     // Feedback round 16, item 4a: the card's container color as
     // a named value, so the morph can report it alongside the
     // bounds/shape — the surface must start at the card's own
@@ -538,15 +545,7 @@ fun EntityControlCard(entity: HaEntity, vm: HavenViewModel, showHeader: Boolean 
                 // a shape action the whole header is one detail target,
                 // exactly as before.
                 val shapeAction = if (headerClickable) shapeTapAction(vm, entity) else null
-                // Climate cards route to the primary scalloped
-                // dial panel (Round 4), never the sheet: tap or
-                // long-press on the Ecobee card opens the pop-out.
-                // Every other domain keeps the caller's detail
-                // routing (sheet on Boards/Areas/Search).
-                val detailAction: () -> Unit = {
-                    if (entity.domain == "climate") vm.openClimatePopout(entity.entityId)
-                    else onDetail(entity.entityId)
-                }
+                val detailAction: () -> Unit = { onDetail(entity.entityId) }
                 val badgeClick = when {
                     shapeAction != null -> Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -709,16 +708,29 @@ fun LightControl(entity: HaEntity, vm: HavenViewModel, showBulb: Boolean = true)
     }
     if (modes.any { it == "hs" || it == "rgb" || it == "xy" }) {
         Spacer(Modifier.height(4.dp))
-        val hues = listOf(0f, 30f, 60f, 120f, 180f, 220f, 280f, 320f)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for (hue in hues) {
-                val dot = Color.hsv(hue, 0.85f, 0.95f)
-                Box(
-                    Modifier.size(30.dp)
-                        .background(dot, polygonShape(ExpressiveKind.FLOWER))
-                        .clickable { vm.setLightHsColor(entity.entityId, hue, 100f) },
-                )
-            }
+        LightColorDots(entity, vm)
+    }
+}
+
+/**
+ * Eight hues a color lamp can be sent to in one tap. The dots are the
+ * colors themselves, so they are computed here rather than taken from
+ * the palette, which holds the app's own colors.
+ */
+@Composable
+fun LightColorDots(entity: HaEntity, vm: HavenViewModel, modifier: Modifier = Modifier, dotSize: Dp = 30.dp, spread: Boolean = false) {
+    val hues = listOf(0f, 30f, 60f, 120f, 180f, 220f, 280f, 320f)
+    Row(
+        modifier.then(if (spread) Modifier.fillMaxWidth() else Modifier),
+        horizontalArrangement = if (spread) Arrangement.SpaceBetween else Arrangement.spacedBy(10.dp),
+    ) {
+        for (hue in hues) {
+            val dot = Color.hsv(hue, 0.85f, 0.95f)
+            Box(
+                Modifier.size(dotSize)
+                    .background(dot, polygonShape(ExpressiveKind.FLOWER))
+                    .clickable { vm.setLightHsColor(entity.entityId, hue, 100f) },
+            )
         }
     }
 }
@@ -919,6 +931,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = nu
             ) {
                 for (mode in modes) {
                     FilterChip(
+                        colors = choiceChipColors(),
                         selected = entity.state == mode,
                         onClick = { vm.setClimateHvacMode(entity.entityId, mode) },
                         label = { Text(mode.replace('_', ' ').replaceFirstChar { it.uppercase() }) },
@@ -934,6 +947,7 @@ fun ClimateControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = nu
             ) {
                 for (preset in presets) {
                     FilterChip(
+                        colors = choiceChipColors(),
                         selected = entity.attrString("preset_mode") == preset,
                         onClick = {
                             vm.callService("climate", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", preset))
@@ -1046,7 +1060,7 @@ fun VacuumControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = nul
                     label = { Text(humanizeOptionLabel(speed)) },
                     // Feedback round 5, item 4: the selected speed chip carries the tile
                     // color; unselected chips stay scheme (their signal is selected-vs-not).
-                    colors = if (pageAccent != null) FilterChipDefaults.filterChipColors(selectedContainerColor = pageAccent) else FilterChipDefaults.filterChipColors(),
+                    colors = if (pageAccent != null) FilterChipDefaults.filterChipColors(selectedContainerColor = pageAccent) else choiceChipColors(),
                 )
             }
         }
@@ -1144,41 +1158,43 @@ fun MediaControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null
 }
 
 @Composable
-fun FanControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null) {
+fun FanControl(entity: HaEntity, vm: HavenViewModel, pageAccent: Color? = null, showSpeed: Boolean = true) {
     val pct = entity.attrInt("percentage") ?: 0
     val presets = entity.attrList("preset_modes")?.mapNotNull { it as? String } ?: emptyList()
     val oscillating = entity.attrBool("oscillating") ?: false
-    Text("Speed $pct%", fontWeight = FontWeight.SemiBold)
-    // Feedback round 5, item 4: speed slider + oscillate toggle follow the tile color.
-    ServiceSlider(
-        pct.toFloat(), 0f..100f,
-        { vm.callService("fan", "set_percentage", entity.entityId, JSONObject().put("percentage", it.toInt())) },
-        pageAccent ?: accentFor(entity.entityId),
-    )
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        PillToggle(
-            oscillating,
-            { vm.callService("fan", "oscillate", entity.entityId, JSONObject().put("oscillating", !oscillating)) },
+    // The pop-up's slab carries the speed there, so it passes showSpeed = false.
+    if (showSpeed) {
+        Text("Speed $pct%", fontWeight = FontWeight.SemiBold)
+        // Feedback round 5, item 4: speed slider + oscillate toggle follow the tile color.
+        ServiceSlider(
+            pct.toFloat(), 0f..100f,
+            { vm.callService("fan", "set_percentage", entity.entityId, JSONObject().put("percentage", it.toInt())) },
             pageAccent ?: accentFor(entity.entityId),
         )
-        Spacer(Modifier.width(12.dp))
-        Text("Oscillate", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    // Oscillate is a row like any other secondary control: what it is on
+    // the left, its switch on the right. Only for fans that can.
+    if (entity.attrBool("oscillating") != null) {
+        com.garrietta.haven.ui.components.MenuGroup {
+            com.garrietta.haven.ui.components.MenuRow(
+                "osc-${entity.entityId}", com.garrietta.haven.ui.theme.ExpressiveKind.WAVE, androidx.compose.material.icons.Icons.Filled.Sync,
+                "Oscillate", if (oscillating) "Turning side to side" else "Facing one way",
+                onClick = null,
+                trailing = {
+                    androidx.compose.material3.Switch(checked = oscillating, onCheckedChange = {
+                        vm.callService("fan", "oscillate", entity.entityId, JSONObject().put("oscillating", it))
+                    })
+                },
+                flat = true,
+            )
+        }
     }
     if (presets.isNotEmpty()) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            for (preset in presets) {
-                FilterChip(
-                    selected = entity.attrString("preset_mode") == preset,
-                    onClick = {
-                        vm.callService("fan", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", preset))
-                    },
-                    label = { Text(preset) },
-                )
-            }
-        }
+        Spacer(Modifier.height(12.dp))
+        com.garrietta.haven.ui.components.LabeledChoiceRow(
+            "Mode", presets.map { it to it.replace('_', ' ').replaceFirstChar { c -> c.uppercase() } }, entity.attrString("preset_mode"),
+            { vm.callService("fan", "set_preset_mode", entity.entityId, JSONObject().put("preset_mode", it)) },
+        )
     }
 }
 

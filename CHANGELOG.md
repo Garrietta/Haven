@@ -1,13 +1,11 @@
 # Haven Changelog
 
-## 1.3 — 1.x design restored, 2.0 backend kept (2026-11-28)
+## 3.5: The new backend under the 3.4 design (2026-11-28)
 
-The 2.0 visual redesign is reverted: this is the 1.x app and design, version code 3 so it installs over 2.0. It carries the backend work:
-- Everything in the Performance round below (WebRTC cameras via camera/capabilities, crash guard, MJPEG parser, coalesced messages, optimistic sliders/climate, slider snap-back fix, Front Door without ring-mqtt, sprinkler ids).
-- From 2.0: `subscribe_entities` — HA's compressed state stream replaces get_states + state_changed (full snapshot once, then diffs; deleted entities drop on reconnect). The optimistic guard, manufacturer tagging and the notification listener (incl. automation parent_id) behave as before. `CompressedStateStream` is pure and unit tested.
-- From 2.0: registries refresh live on area/device/entity registry events.
-
-549 unit tests pass.
+The 3.4 design (build 162) with the backend work from the performance round below and from the Haven 2.0 rewrite (whose visuals were not kept):
+- `subscribe_entities` — HA's compressed state stream replaces get_states + state_changed (full snapshot once, then diffs; entities deleted while away drop on reconnect). Optimistic guard, manufacturer tagging and the notification listener (incl. automation parent_id) behave as before. `CompressedStateStream` is pure and unit tested.
+- Registries refresh live on area / device / entity registry events.
+- versionCode 3 (installs over 2.x and the 1.3 test).
 
 ## Performance round (2026-11-28 — cameras as fast as Home Assistant, instant controls)
 
@@ -31,41 +29,316 @@ Measured against the live instance from a headless browser running the exact sig
 
 Tests: `PerformanceRoundTest` (parser exactness under random chunking with 150–190 KB frames, linear-time check, ICE url parsing). 545 unit tests pass.
 
-## Reliability round (2026-11-26, QA/QC pass — connection, remote/local switching, camera load times, layout consistency)
 
-Code audit, no video. Everything below was found by reading the code; the connection engine was additionally exercised against a scripted fake server (tools/connection-harness — 14 behaviour tests: fallback, stale-socket isolation, make-before-break switch-back, auth rejection, offline pause, ping/pong, REST 401 renewal, token scoping). Pure rules are unit-tested in ConnectionPlannerTest (27 tests). Needs a device + Nabu Casa pass before it is called done.
+## 3.4: Move things with your hand; your real home, cleaned up (2026-11-27)
 
-PASSES to keep (do not regress): every visual from rounds 1–25 is untouched except the two items under "Layout" below.
+**What you will see**
 
-**Connection engine (HaClient rewritten around a per-socket `Link`)**
-1. **A URL switch could kill the healthy session.** `connect()` opened a second socket without closing the first, and every listener wrote the single `socket` field — when the old socket later failed it nulled the NEW socket, flagged an error over a live session, scheduled a third socket, and asked the VM to switch URLs again. Each socket is now a generation-numbered `Link`; callbacks from a replaced link can only route results, never touch the session.
-2. **subscribe_events never sent event_type.** `sendCommand("subscribe_events") { it.put("event_type", …) }` — Kotlin binds a trailing lambda to the LAST parameter (`onResult`), so the payload builder never ran and HA streamed EVERY bus event to the phone (service calls, automation runs, logbook, timers…) — several times the traffic through the relay, and a refused subscription for non-admin users. Now `build = { … }`. The same mistake made todo create/update/delete send empty commands (to WS commands HA does not have); they are now `todo.add_item / update_item / remove_item` service calls, and the list refetches after the edit lands.
-3. **Ordered endpoints instead of one guess.** `connectionCandidates()` (pure): AUTO tries the LAN first on Wi-Fi/Ethernet/VPN and the cloud first elsewhere, keeping the other side as fallback; LOCAL/CLOUD stay pinned. LAN attempts get a 3s connect budget (was the 10s default), so a foreign Wi-Fi or a sleeping Pi falls through to Nabu Casa in ~3s instead of 10s+.
-4. **Switch back to the LAN automatically, without a blip.** While connected through a fallback, the preferred endpoint is probed every 30s (unauthenticated `manifest.json`) and immediately on a network change; when it answers, a second socket authenticates first and only then replaces the session — the old one keeps routing in-flight results for 5s before closing. Previously a cloud fallback never returned to the LAN until the network changed.
-5. **Dead sockets are detected.** WebSocket pings every 20s (none before — a socket that vanished with the Wi-Fi stayed "connected" until TCP gave up). On returning to the foreground the app sends an HA `ping`; no `pong` within 5s → fresh pass.
-6. **Reconnects react to the network instead of a timer.** The network callback now listens to capability changes too, hops to the main thread, waits for the handoff to settle (750ms), and only acts on a real routing change (signal-strength callbacks are ignored). Retries pause while offline and resume the moment a network returns; between full passes the backoff is 1/2/4/8/15/30s with ±20% jitter (was 3s→60s, and a regained network waited out the remaining backoff).
-7. **Commands never hang.** A command with no live session, or whose session drops before the reply, fails its callback promptly with `not_connected` (callers used to wait on blind timeouts — the HLS viewer's 8s). Taps that could not be sent say "Not connected — the action was not sent"; that banner clears itself once the session is back.
-8. **auth_invalid never retries a rejected token.** HA counts every rejected auth as a failed login toward its IP ban; the old flow reconnected with the same token every 3s AND switched URLs. Now the session stops, the VM renews the token once and reconnects.
-9. **OAuth tokens are renewed before they expire.** Access tokens live 30 minutes; the app only refreshed at launch, so after half an hour every snapshot, history plot and HLS segment came back 401 while the socket looked fine (and each 401 was another failed-login strike). Renewal now runs 5 minutes ahead of expiry, on foreground, on auth_invalid, and on any REST 401 (an OkHttp authenticator replays the request once) — single-flight behind one mutex. Only an explicit refusal from /auth/token (`invalid_grant`, 401/403) ends the session; a relay error page or a restarting instance keeps retrying. After a refusal REST pauses until the token changes.
-10. **Nabu Casa URL is detected.** After connecting, the app asks HA for its own URLs (`network/url`, falling back to `cloud/status`'s remote domain) and fills ONLY empty slots — a LAN login learns its Nabu Casa URL (and vice versa) with no copy-paste. The Connection dialog gains a Local URL field and says which URL is actually in use; the Settings status row reads "Connected · Cloud (fallback — switches back when Local answers)".
-11. **Login slots fixed.** OAuth sign-in overwrote the local URL slot with whatever URL was used (so a Nabu Casa sign-in erased the LAN URL). The pending OAuth URL now lives in its own pref and the URL is slotted like the token login. `isLocalAddress` now also treats `.lan`, `.home`, `.home.arpa`, `.internal`, `.localdomain` and bare hostnames as local (they were labelled Cloud).
-12. **Leaks closed.** The ViewModel and the Device Controls service now close their sockets (both outlived their scopes). All REST responses are closed (`use`) — the snapshot fetch leaked its response, which cost a fresh TLS handshake through the relay on the next request. One shared OkHttp pool for the process.
-13. **Device Controls works away from home.** The panel connected to the legacy (LAN) URL only and had no token renewal. It now uses the same candidate list and renews an expiring token (once per auth_invalid).
+- Slide across a light's tile to dim it, or a fan's to set its speed. The tile fills to the level as you slide.
+- Press and hold a tile and move it to carry it to another place in its group; Haven keeps the order. Press, hold and let go still opens its options.
+- In the Security and Climate editors, hold any row and drag it to move it, and swipe a row away to take it off. No grips to aim for, no crosses.
+- Security says "Garage Door is open", shows each camera once (not the outdoor camera's two streams, not the doorbell twice), and reads plainly ("Outdoor camera · Alarm on motion"). The doorbell's detection switches sit under Front Door.
+- Climate's rooms are real thermometers that answer: the Home Assistant machine's processor temperature, the stuck greenhouse sensor and a dead thermometer are gone, and the thermostat's own reading stays on its card.
 
-**Cameras**
-14. **Snapshots are sized for the tile.** Quadrants ask HA for `?width=` at their pixel width (bucketed 160px, 320–1920) and decode with inSampleSize: ~40KB per quadrant instead of a full-resolution frame through the relay. The JPEG is persisted as served (atomic write) — no lossy re-encode on the main path; old full-size cache files are sample-decoded on load.
-15. **Quadrants keep refreshing while visible** (10s on the LAN, 20s through the relay, foreground only). They fetched once per screen entry, so a Home screen left open showed stale images; the refresh waits for the live session so a cold start never stalls on an unreachable endpoint.
-16. **Live view starts sooner.** A finger landing on a camera quadrant (and opening the viewer) prewarms HA's stream worker with `camera/stream`; the playlist URL is shared and reused for 45s. ExoPlayer starts after 0.5s of buffer (was 2.5s), HLS uses chunkless preparation, and media requests ride the shared OkHttp pool (new dependency: media3-datasource-okhttp). The waiting state shows the camera's snapshot poster instead of black; "Reconnecting…" only appears after the camera actually streamed.
-17. **Closing an MJPEG viewer stops the download.** Cancelling the stream job did not abort the blocking read, so the MJPEG stream kept downloading in the background until the server hung up. The call is now cancelled with the job; the stream also has no socket read timeout (OkHttp's 10s default killed slow Ring proxies before the 20s/30s watchdog could).
-18. The live body collects only its camera's flow (it recomposed on every state change in the house while video played). Bearer tokens are attached only to the instance's own hosts (media thumbnails on third-party hosts used to receive the token). History requests add `no_attributes` and timestamps are parsed with java.time (microsecond fractions were read as milliseconds).
+**Under it**
 
-**Layout**
-19. Camera quadrant **Motion pill overlapped the LIVE/Recording pill** — it was a loose Box child (its Spacer did nothing inside a Box). Both pills now share one Row.
-20. **Section headers** used two sizes (15sp vs the 16sp default in Manage home, Builders, Dashboard editor, Destinations, Tabs, detail pages). All 19 now use the Home style (15sp bold primary).
-21. Weather forecast and todo lists re-fetch once the session is live (a cold-start fetch could not be sent and was never retried); the todo list shows a failure line instead of "Loading tasks…" forever. The camera card in entity sheets paints the shared snapshot cache immediately.
-22. The state cache is serialized off the main thread, written atomically, and always persists the newest state (the old throttle skipped changes inside its 10s window).
+- `tileGestures` / `TileCarry` (one detector for tap, slide, hold and carry), `holdToReorder`, swipe-to-take-off in `pageEditor`; `orderedTiles` / `movedOnto` and `home_tile_order_json`. `onePerCamera`, plain `detectionLabel`, `climateReadings` takes service devices and leaves out device-less, silent and thermostat readings. Sensors keep their full names. The unused LazyColumn reorder code is gone.
+- `RealHomeScreenshotTest` renders whole pages from a snapshot of a real home kept in the build directory. Tests: `TileOrderTest`, `SecurityCamerasTest`, and Climate's new rule.
 
-Not in this round (kept, no action): WebRTC stays gated off (`webrtcEnabled = false`); the garage-door confirmation (decided against, permanently); the settings epic queue. Follow-up candidates found in the audit: TodayScreen still collects the whole states map at its root, so Home recomposes on every state change (cards already use per-entity flows); `subscribe_entities` (compressed diffs) would cut relay traffic further.
+## 3.3: Taken apart and rebuilt: one way for every menu, color styles (2026-11-27)
+
+**What you will see**
+
+- Every device opens the same way, in the same popup, wherever you tap it. The thermostat looks and works the same on Home, on the Climate tab and in its popup: the dial, − and +, then Mode, Fan and Comfort.
+- Picking one of several looks the same everywhere: the thermostat's mode, the alarm, a fan's presets, light or dark.
+- Every popup ends with the same two rows: Tile (its name, icon, color and whether it shows on Home) and In Home Assistant.
+- Color styles in Settings, Appearance: Haven, Home Assistant (its blue, its amber for what is on, plain cards with colored icons), Wallpaper, Tide, Orchid and Graphite. The widgets follow the style.
+- Home shows only real devices: the "Material You" settings switches and the greenhouse's stuck 0° sensor are gone. Names are shorter and plainer: "Garage Door", "Outdoor camera", "Front Door".
+- A camera's name in the carousel stays inside the part you can see and fades out as the picture narrows.
+- Charts fit the space they are given. Unfolded, a reading's popup uses its full width, with the day's low and high under the chart. A room alone on the Climate tab takes the whole row. Readings are rounded the way you would say them.
+- Less to manage: the bar is always Home, Security, Climate and Settings. Badge and card shapes, device styles, the old Home page editor, your tabs, rooms as tabs and the thermostat's dial-range settings are gone. Settings opens on Haven's own pages, with Home Assistant's under them, and a new Hidden from Home page brings back tiles you took off Home.
+- A light's brightness number sits at the bottom of its slab, so the fill line no longer cuts through it.
+
+**Under it**
+
+- Deleted: the old room Home (`TodayScreen`, `RoomsHome`, `HomeDashboard`), user tabs, room tabs, the Scenes and Energy tabs, the Search and Areas browsers, the Home editor, the shape picker and Device styles, the separate thermostat overlay. `Screens.kt` is split into `Login.kt`, `ConnectionStatus.kt`, `CameraTile.kt` and `NotificationPermission.kt`. About 6,000 lines fewer.
+- `ColorStyle` / `ActiveStyle` (`ColorStyles.kt`), new ramps in `tools/palette.py` (Haven's are unchanged), `ChoiceRow`, `ThermostatControl`, `EntityPopupMenuRows`, `rememberEntityNamer` / `deviceDisplayName`, `formatReading`, `historyChartHeight`. The cold-start cache keeps the device registry, so Home sorts devices from its first frame.
+- Tests: `DeviceNamesTest`, `StateCacheTest`, `ChoicesAndReadingsTest`; screenshots for the reading popup unfolded, Appearance, Hidden from Home and Home in each style.
+
+## 3.2: Steadier connection, faster cameras, home ⇄ away without a hitch (2026-11-26)
+
+**What you will see**
+
+- Leaving or coming home switches between your local address and Nabu Casa on its own. On Wi-Fi Haven tries home first and gives up on it within 3 seconds when it does not answer; when home answers again it moves back without dropping anything.
+- Settings, Connection says which address is actually in use ("Connected · Cloud (fallback — switches back when Local answers)"), has a Local URL field, and fills an empty Local or Cloud URL from Home Assistant's own network settings.
+- A dropped connection is noticed in seconds and retried at once when the network comes back; returning to the app checks the connection is really alive.
+- Camera tiles load a picture sized for the tile and keep refreshing while they are on screen (every 10 seconds at home, 20 away). A camera's live view starts sooner — the stream is started when your finger touches the tile — and shows its last picture while it loads.
+- Cameras, history and video keep working past 30 minutes: the sign-in is renewed before it expires.
+- The Motion label on a camera no longer covers the Live / Recording label. To-do items can be added, ticked and deleted.
+
+**Under it**
+
+- `HaClient` is rebuilt around a per-socket `Link` (a replaced socket can no longer break the live one), an ordered endpoint list (`ConnectionPlanner.connectionCandidates`), make-before-break switch-back, WebSocket pings, and prompt `not_connected` failure for in-flight calls. `subscribe_events` now really sends `event_type: state_changed` — a trailing lambda had bound to `onResult`, so Home Assistant streamed every bus event. Todo edits are `todo.*` service calls (the same lambda slip sent them empty).
+- OAuth tokens renew 5 minutes before expiry, on foreground, on auth_invalid, and on a REST 401 (OkHttp authenticator), single-flight; a rejected token is never retried (Home Assistant counts each as a failed login toward its IP ban). `TokenExchange` is shared with Device Controls, which now also routes local/cloud.
+- Snapshots use HA's `?width=`, are sample-decoded and stored as served; HLS prewarm with a 45s URL cache, 0.5s start buffer, media over the shared OkHttp pool (`media3-datasource-okhttp`); closing an MJPEG view aborts its download. Sockets close with the ViewModel and the service; REST responses are always closed.
+- Tests: `ConnectionPlannerTest`; `tools/connection-harness` runs the real `HaClient` against a scripted fake OkHttp (fallback, stale sockets, switch-back, auth rejection, offline pause, ping/pong, 401 renewal).
+
+## 3.1: Devices, not rooms; the doorbell live from anywhere (2026-11-23)
+
+**What you will see**
+
+- Home groups your devices by what they are: Climate, Lights, Doors, Greenhouse, Plugs & switches, Vacuum, and TV & audio. It no longer goes by rooms or categories in Home Assistant.
+- Old devices that stopped working are gone from Home: anything that has not answered for a week, or that Home Assistant only remembers from an old setup. A TV that is off for the evening still shows.
+- The front door's live view now works away from home, through your Nabu Casa link. It says "Live · through Home Assistant" and takes a few seconds to wake the doorbell. At home it is still the instant direct stream.
+- The Lights and TV & audio sheets open to their full height, so no row of tiles is cut off.
+
+**Under it**
+
+- `homeGroups` replaces the area-based places (`deviceGroup`, `isLeftover`, `STALE_DAYS`); `HomeLayoutTest` covers groups and leftovers. A Generic Camera (`camera.127_0_0_1`) was added to Home Assistant for ring-mqtt's stream; the Front Door panel plays it as HLS when the RTSP stream is out of reach (`FrontDoorRelayBody`, `frontDoorRelayCamera`, `FrontDoorRelayTest`).
+
+## 3.0: Home, rebuilt around the house (2026-11-23)
+
+**What you will see**
+
+- Home opens on the house at a glance: the weather, and an initial for each person who is home.
+- Under it, a card for each kind of thing in the house: Climate, Security, Lights, the garage, the greenhouse, the vacuum, and TV and audio. Each says how it is in a word or two, and turns color only when something is running or wants a look (an open garage door turns red). Tap a card for its page: Climate and Security their tabs, the garage its control, the greenhouse and the vacuum their panels, lights and TV and audio a sheet of their tiles.
+- The cameras sit under the cards as a carousel of their pictures.
+- Then the places in the house, each with its devices as tiles. Devices with no room in Home Assistant are placed by their names, so the garage camera and garage door are in the Garage, the floodlight Outside, the heater, fan and sprinklers in the Greenhouse; what is left is the Whole home.
+- Tap a light or plug to switch it; the small arrow in its corner opens its controls. A garage door, a lock or the thermostat opens its control. Press and hold any tile for its color, icon and name.
+- The thermostat has a wide tile with the temperature inside in large type and − and + to change it, both ends of the range when it is holding heat and cool.
+- Settings switches, duplicate entries and indicator lights no longer show up as tiles: one lamp is one tile, one TV is one tile.
+- Unfolded, the cards and cameras are on the left and the places on the right.
+
+**Under it**
+
+- `data/HomeLayout.kt` decides the places, the tiles and the status deck as pure functions (`HomeLayoutTest`); `ui/home/HavenHome.kt` draws them. The device popups, the camera view, the panels and the tile options are the same ones as before. `HaClient.restoreCachedStates` can seed device info and settings entities, and `LivedInHome` is a screenshot home with half-filled areas, duplicates and a greenhouse. A room pinned as a tab still shows the older room view.
+
+## 2.14: The things that are on are the color (2026-11-22)
+
+**What you will see**
+
+- A lamp that is on now glows: its round switch on Home is lit from the middle, near white fading to amber, brighter the brighter the lamp, and its tile in a room glows from the badge's corner across the card. There is fine grain over the glow, so it reads as light rather than a colored shape.
+- A thermostat heating or cooling glows on the Climate tab, an ember or a frost spreading from its reading. At rest it is flat.
+- Room cards on Home are quieter: each keeps its color, only just, so the switches that are on and the lit lamps stand out.
+- Bold text is a little lighter throughout.
+
+**Under it**
+
+- One texture, `ui/theme/Grain.kt` (`grainGlow`: a radial gradient between two tones of a state's own color with tiled luminance noise laid on in Overlay), used only on these moments. `StateFamily.roomGround` and `StateFamily.glow` add the quiet card tone and the glow's hot tone to the palette's roles. The Bold cut is 600 (was 660). Direction from the unslop rules: quiet chrome, color in one or two moments.
+
+## 2.13: Hold a tile to change its color and icon (2026-11-13)
+
+**What you will see**
+
+- Press and hold a tile for its options: a color and an icon, each applied the moment it is tapped so the tile changes behind the sheet, its name and its badge shape. Arrange tiles moved into the same sheet. The round switches on Home's room cards now show the icon and color picked for a device too.
+- About a hundred icons, by group: lights, power, heating and cooling, doors and windows, water and garden, kitchen and laundry, media, security, rooms. Haven draws the ones Material has no picture of: fan, heater, garage door, sprinklers, valve, humidifier, air purifier, water heater, gate, dishwasher, oven, lamp.
+- A device with no icon picked gets a better one by itself: a fan the fan, a garage door the garage door, blinds and curtains their own, and a switch named for what it powers ("Greenhouse Heater", "Sprinklers", "Coffee Maker") that thing.
+- The temperature under Home's sentence opens the Climate tab, not one thermostat's popup.
+
+**Under it**
+
+- The glyphs are drawn and written by `tools/glyphs.py` into `ui/components/HavenGlyphs.kt`; the catalog and the default-icon rule (`suggestedIconKey`, `CardIconsTest`) are in `ui/components/CardIcons.kt`, and the sheet is `ui/screens/CardSettings.kt`. Stored icon keys are unchanged.
+
+## 2.12: Security and Climate, arranged by hand (2026-11-13)
+
+**What you will see**
+
+- Security and Climate each have Edit beside their title. It turns the tab into a list of what it shows, section by section (cameras, doors & locks, motion detection; thermostats, readings): drag an item by its grip to reorder it, tap its cross to take it off, and Show brings back anything taken off.
+- Add to this tab searches every entity and puts the one picked in the section it belongs to (a camera with the cameras, a switch with motion detection, a sensor with the readings); the search stays open for several. A sensor that is neither temperature nor humidity (CO2, air quality) gets a card of its own showing its value and its day.
+- Anything Home Assistant adds later still appears, after what has been arranged.
+
+**Under it**
+
+- `data/PageCuration.kt` (taken off, added, order, per section; `PageCurationTest`), stored as `page_curation_<section>` in `SettingsStore`; the editor is `ui/screens/PageEditor.kt`, shared by both tabs.
+
+## 2.11: Widgets (2026-11-13)
+
+**What you will see**
+
+- Three home screen widgets. **Climate**: the thermostat at work, in its color (ember heating, frost cooling), what it reads and is doing, and its set point with − and + either side; a tap elsewhere opens its dial. **Controls**: up to six favorite switches and lights as tiles, lit when on, a tap to switch (with no favorites, the lights that are on). **Security**: whether the house is shut and the alarm, in the calm or the alert color.
+- Widgets answer a tap at once and settle to what Home Assistant reports, and keep up while Haven is open.
+
+**Under it**
+
+- `widget/HavenWidgets.kt` (Glance) draws from the states the app saves (`haven_state_cache.json`), which `WidgetHa` refreshes for the widget's own entities and writes back; taps go through the REST API with the app's sign-in, refreshing the token and trying the local address before the cloud one. What each shows is pure (`data/WidgetModels.kt`, `WidgetModelsTest`).
+
+## 2.10: Back goes Home first, and rooms fill one entity at a time (2026-11-13)
+
+**What you will see**
+
+- Back on another tab's landing (Security, Climate, Scenes, a room tab) goes to Home; Back on Home leaves the app. It used to leave from any tab.
+- An area's Add list shows each device with its entities under it. Add all puts the whole device in the room; Add on an entity puts just that one. The list stays open, so several can be added in a row.
+
+## 2.9: A Climate tab, and rooms without a plug's housekeeping (2026-11-13)
+
+**What you will see**
+
+- A Climate tab sits right of Security. At its top, the house in one card: what it is inside (the thermostat's reading), the humidity, the outside, and what the thermostat is doing, in ember while heating and frost while cooling.
+- Each thermostat is a card: its reading, its set point with − and + beside it (or heat and cool set points for a range), its modes, its comfort settings (an ecobee's Home, Away and Sleep) and its fan, with the dial and history a tap away.
+- Rooms lists every temperature and humidity reading, one card a device (an ecobee remote sensor's temperature and humidity together), each with a bar placing it between cold and hot and its last day as a line. Outside holds the weather and any outdoor sensor.
+- Show Climate on bar is under Home & navigation.
+- A device's configuration and diagnostic entities no longer fill the room it is in. A dual smart plug in the Greenhouse shows its two outlets, not also its LED, auto-update, cloud connection and signal level, on Home, on the room's page and in its count.
+- Adding to an area moves just what you picked: one outlet of a dual plug can be the greenhouse fan while the other is elsewhere. The area lists each device with what of it is there, by name, and Remove takes all of it out.
+
+**Under it**
+
+- `data/Climate.kt` holds the rules (which sensors, grouped by device, outdoor by name, the summary, a thermostat's activity, labels), tested in `ClimateTest`. `ui/screens/ClimateScreen.kt` draws them; `navShowClimate` joins the bar's built-ins.
+- The entity registry's `entity_category` and `hidden_by` mark auxiliary entities (`HaClient.auxiliaryEntities`); they are left out of `entityAreas`, so out of every room.
+
+## 2.8: Devices land in their area (2026-11-12)
+
+**What you will see**
+
+- A device you put in an area in Home Assistant now shows up there in Haven, on Home and in Settings. Before, a heater or fan set to Greenhouse left Greenhouse at "0 devices" and empty on Home.
+- A device's page in Settings leads with its on/off. Its entities follow in Home Assistant's groups (Controls, Sensors, Configuration, Diagnostic), named without the device's name in front, with a switch on anything that turns on and off and a Press button on buttons. Tap one for its controls; the tune button opens its settings.
+- An area in Areas, labels & zones lists its devices, the way Home Assistant does: one row for a smart plug rather than one for each of its sensors and timers. Add a device and Remove move the whole device; something that belongs to no device still moves on its own.
+
+**Under it**
+
+- Android's `JSONObject.optString` returns the text "null" for a JSON null, so every `"area_id": null` on an entity read as an area called "null" and hid the device's area behind it. `JSONObject.text()` (`data/HaJson.kt`) reads null as empty, and the registry, event and media parsers use it. The JVM's org.json returns "" there, which is why no test caught it.
+- `entityGroup`, `mainControl`, `nameUnderDevice` and `areaMembers` in `HaAdmin.kt` are pure and tested in `DeviceGroupingTest`.
+
+## 2.7: Haven updates itself (2026-11-12)
+
+**What you will see**
+
+- Settings, App updates shows the build installed and the newest test build. Download and install fetches it and hands it to Android, which asks you to confirm. The first time, Android asks you to let Haven install apps.
+- The App updates row in Settings says when a newer build is waiting.
+
+**Under it**
+
+- CI's new `publish-test-build` job replaces one pre-release, `test-build`, after every signed build, with the APK and a `Build: <run number>` line. The app knows its own run number (`BuildConfig.BUILD_NUMBER`, 0 locally), so a higher one is newer. The repository is public, so no sign-in is needed.
+- `update/ApkInstaller.kt` downloads into the cache and commits a `PackageInstaller` session; `UpdateInstallReceiver` shows Android's confirmation and words a refusal (an APK signed with another key cannot update this one). `REQUEST_INSTALL_PACKAGES` is new.
+- A debug build says that test builds install beside it, since they are the release app.
+
+## 2.6: Settings laid out like Home Assistant's (2026-11-12)
+
+**What you will see**
+
+- Settings opens on Home Assistant's own sections, in its order: Devices & services, Automations & scenes, Areas, labels & zones, Dashboards, People, System and About. Haven's own settings follow under Haven: Appearance, Device styles, Home & navigation, Notifications and Connection.
+- Devices & services has Home Assistant's four tabs. Integrations: reload, disable or delete one, and add a new one by answering Home Assistant's own questions (a step that needs a browser sign-in opens the browser). Devices: rename, move to an area, disable, and see their entities. Entities: search every entity and open its page, with Home Assistant's settings (name, icon, area, entity ID, visible, enabled) and how its card looks in Haven. Helpers: create and delete.
+- Automations & scenes lists every automation with its switch and when it last ran, every scene and every script: run, switch, delete, or start a new one.
+- Areas, labels & zones holds your rooms (each with Home Assistant's settings and Haven's, and a grip to set their order on Home), and adds floors, labels and zones.
+- People lists people with their trackers, to add, rename or remove, and the users. System has updates, repairs, logs, backups, the general settings (name, units, time zone, location), checking the configuration, reloading YAML and restarting, which asks first. About shows the versions.
+- Device styles sets the color, badge shape and card shape for each type of device (every lamp, every lock) with a preview. The Card settings, Badge shape and Card shape rows are gone from popups; one device can still differ from its type on its own page.
+- Rooms and tabs each have one place: rooms under Areas, your tabs under Home & navigation. Browse, Shapes, Rooms & tabs, User tabs and the Create hub are gone from Settings.
+- Every list in Settings reorders by dragging its grip: Home sections, favorites, dashboard cards, rooms, tabs and a tab's cards. The arrows are gone.
+
+**Under it**
+
+- `data/HaAdminApi.kt` makes the calls (the WebSocket admin commands and the REST config API, through new awaited `HaClient.command` and `HaClient.rest`); `data/HaAdmin.kt` parses the replies, with 11 tests. `ui/screens/Settings*.kt` are the pages, routed by `Screen.SettingsPage(route)`.
+- `RoomsTabs.kt` now draws Areas and Your tabs as two pages. `Screen.RoomsTabs`, `Screen.BuilderHub` and the type-defaults dialog are gone; `reorderSubset` moves the shown part of a list among the rest.
+- An area carries its floor.
+
+## 2.5: a Security tab (2026-11-12)
+
+**What you will see**
+
+- A Security tab beside Home on the bar. It opens with one line: "Everything is shut and locked." when it is, or what is not ("Back Door is open, and Side Door is unlocked.") in red.
+- The alarm as four choices: Home, Away, Night and Off. A panel that asks for a code opens its keypad instead.
+- Every camera, as a grid of their pictures. Tap one to open it, live where it can be.
+- Motion detection: each camera's detection switches (motion, person and so on) under the camera's name, with when it last saw motion where the camera reports it. Switches that belong to no camera are listed by their own names.
+- Doors & locks: locks, garage doors and door, window and motion sensors, each opening its own popup. A lock still asks before unlocking.
+- The outdoor siren, which sounds only after a second tap.
+- The cameras have moved off Home to this tab. Manage home page can put them back on Home.
+- Security can be taken off the bar in Rooms & tabs. The bar holds six at most, so with Security, Scenes and Energy all on there is room for one pinned tab or room; a switch that would push a pinned tab off says the bar is full. After the update, Security only appears on its own if it fits beside what you have pinned.
+
+**Under it**
+
+- `data/SecurityPage.kt` (opening line, detection switches by device, labels) with 7 tests; `ui/screens/SecurityScreen.kt` draws it. `barExtraSlots` keeps the bar at six; NavItems has 2 new tests.
+- A one-time move hides the Home Cameras section (`cameras_moved_to_security`). `nav_show_security` is absent until chosen.
+- The state cache restore can carry device links, so the screenshot test draws cameras with their switches.
+
+## 2.4: drag to reorder in Rooms & tabs (2026-11-12)
+
+**What you will see**
+
+- Rooms & tabs lists each room and each tab as one row: a grip, its icon, its name, and a line saying how many devices or cards it holds and where it is pinned.
+- Hold a row's grip and drag it to move it. The row lifts and the others step out of its way; the order is saved when you let go. The order of rooms is the order Home shows them in, and the order of tabs is the order of User Tabs.
+- Tap a row to open its settings under it: names, icon, devices and where it is pinned for a room; title, icon, cards and where it is pinned for a tab. One row is open at a time, so the list stays short enough to reorder.
+- A tab's cards reorder the same way, by their grips. The up and down arrows are gone everywhere on this screen.
+- With TalkBack, each grip offers Move up and Move down.
+
+**Under it**
+
+- `ui/components/ReorderList.kt`: `LazyListReorder` for rows of a LazyColumn (reads where rows really are, so rows of different heights reorder correctly, and scrolls the list while a row is held near an edge) and `ColumnReorder` for equal rows inside one item. The rules (which row is under the dragged row's middle, edge scroll speed, equal-row steps) are pure functions with 5 tests.
+- Rooms & tabs moved out of `Screens.kt` into `ui/screens/RoomsTabs.kt`; `HavenViewModel.setTabOrder` writes a whole tab order at once.
+- Screenshot tests open a room and drag one, and check the stored order. The screen is drawn on its own in them: nothing on it animates at rest, so the test pushes state changes through by hand.
+
+## 2.3: device popups lead with one control (2026-11-12)
+
+**What you will see**
+
+- A lamp's popup opens on one large slab in the lamp's yellow. The fill is the brightness: drag up or down anywhere on it to set the level, tap it to switch the lamp on or off. It replaces the small on/off pill and the thin brightness slider.
+- Warm to cool is a track painted from amber to cool white, with a handle where the lamp sits. Tap a point on it or drag the handle.
+- Switches, fans and locks lead with the same slab. A fan's fill is its speed and can be dragged; a plug with a meter says how many watts it is drawing; a lock is full and blue while locked and asks before unlocking, as before. The Turn on / Turn off / Toggle buttons are gone from these popups.
+- The card options at the foot of every popup (Card settings, Badge shape, Card shape) sit together in one group under "Customize".
+- The lamp's details card no longer repeats on and brightness; it keeps the room, when it last changed and its smart plug.
+
+**Under it**
+
+- `ui/controls/ControlSlab.kt`: `ControlSlab` and the four device slabs, plus `ColorTempTrack`. The level, kelvin and watt rules are pure functions with 7 tests.
+- `powerWatts` (data/SemanticColors.kt) is the one reading of a plug's meter, used by the tile's family and the slab's caption.
+- Screenshot tests for the switch, fan and lock popups and the lamp popup at night.
+
+## 2.2: popups that grow, not stretch (2026-11-12)
+
+**What you will see**
+
+- A device, room or status popup now grows out of its tile as itself: it is laid out at full size from the first frame and revealed through a window that opens from the tile's rectangle to the popup's. It used to be the finished popup scaled down to the tile and back up, which stretched its text and icons on the way.
+- Opening and closing settle the way Rondo's music player does: no bounce against the popup's edges, and a calmer arrival.
+- Pull-to-dismiss runs the same motion backwards under your finger.
+
+**Under it**
+
+- `RevealWindowShape` (ui/components/MorphOverlay.kt) clips a full-size layer to the in-between rectangle; the folded surface and the unfolded centered popup both use it, moved but never scaled.
+- `popupMorphSpring` is 350 / 0.95, Rondo's player transform, up from 500 / 0.85, on the owner's word that the popups felt underworked beside that player.
+- The centered popup measures itself for the drag range only when fully open.
+
+## 2.1: Home as rooms (2026-11-11)
+
+The first screen is laid out around the rooms of the house rather than a grid of equal tiles.
+
+**What you will see**
+
+- Home opens with a sentence about the house: how many lights are on, and whether the doors are locked. The last word is a pill in that state's color, so "locked" reads calm and "unlocked" reads as a warning. A welcome message you set yourself still replaces it.
+- Under it, one card per room. A room with something happening wears that state's color and says what in a line ("Floor Lamp is on, Heating to 70°"); a room with nothing happening is a single quiet line.
+- Each card carries the room's devices as round switches. Tap a light, plug or fan to flip it; tap anything else, or hold any of them, to open its controls, which grow out of the switch.
+- Tap a card to open that room as a popup that grows out of the card: its name, what is happening in it, and every device as a tile. A tile opens its control on top; closing that comes back to the room, and closing the room comes back to Home. The chip view of a room is no longer how a room opens.
+- The sentence is also the controls. Each line ends in a state word you can tap to undo it: "on" turns those lights off, "open" closes the garage door, "running" sends the vacuum home, "playing" pauses. "locked" opens the lock's control instead of unlocking. Tap the inside temperature to open the thermostat.
+- A lit lamp is yellow everywhere: its tile, its switch on a room card and the "on" in the sentence. The room card itself stays green.
+- Home Status is gone from Home while the sentence is showing, since the sentence does its job. Cameras, Favorites and the other Home sections follow the rooms, in the order you set.
+
+**Under it**
+
+- `data/RoomDigest.kt` decides each room's color, sentence, temperature and switches, and the headline with its actions; `ui/screens/RoomsHome.kt` draws them. 17 tests cover the rules.
+- A new state family, Light, on the Volt ramp. By day its badge is the bright tone, the one exception to the tone recipe besides Quiet.
+- Rooms shown as cards follow the same placement setting the chips did. "No room" is always the quiet line.
+
+## 2.0: a new identity (2026-11-10)
+
+A redesign of the whole visual system, not a feedback round. `DESIGN.md` is now the source of truth for how the app looks and moves.
+
+**What you will see**
+
+- A new logo: a house with the light on in its doorway and the sun rising behind the roof. New launcher icon (with a themed-icon version), a splash screen that matches the app's background, and a Haven icon on notifications in place of the stock info glyph.
+- A new typeface, Google Sans Flex, rounded, across the whole app. Text that used to look double-spaced or letter-spaced now sits properly.
+- A rebuilt sign-in screen: the address and the instances found on your network in one card, one "Sign in" button, and the access-token route one tap away.
+- Home opens on the Haven signature and the greeting as the big line.
+- Lime now means "this one" everywhere: the selected tab, room, mode and choice.
+- Tiles for temperature, humidity and motion follow the same color recipe as every other tile. Every default card is a leaf card; the sharp and pillow outlines are still in the shape picker.
+- Settings rows have calmer badges, and a wide control (the thermostat range steppers) now drops under its text instead of squeezing the title.
+
+**Under it**
+
+- Every color is a tone of a generated palette (`tools/palette.py`) read through ten state families; no hex values in screens. Hues are the ones the app already used.
+- The theme is `MaterialExpressiveTheme` on material3 1.5. Toolchain: AGP 9.3, Kotlin 2.4, Gradle 9.6, compileSdk 37 (targetSdk still 35).
+- Haven's own springs are unchanged in value and now live in `Motion.kt`.
+- A screenshot harness renders the real app on the JVM with a demo home: `./gradlew :app:recordRoborazziDebug`.
+- CI tests, renders and builds the signed release for every pull request and for `main`.
+- 538 unit tests pass. Tests that pinned hex values now pin the decisions and the contrast floors.
+
+**Not yet seen on a phone:** motion, haptics, camera streams and real insets cannot be judged on the JVM. Worth a look on the Fold: the splash on a cold start, the sign-in screen with the keyboard up, popup morphs with the new type sizes, and the themed icon.
 
 ## Feedback round 25 (2026-11-05, seven items from his written spec on #135 — no video attached)
 

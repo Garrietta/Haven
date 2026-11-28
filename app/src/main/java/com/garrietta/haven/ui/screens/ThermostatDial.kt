@@ -53,6 +53,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import com.garrietta.haven.ui.theme.Palette
 
 /**
  * The spec's thermostat dial. It reworks run #38's dial under the standing
@@ -99,9 +100,9 @@ import kotlin.math.sqrt
  */
 // Dial arc gradient stops: amber→crimson heat, cyan→cobalt cool. Not scheme roles:
 // gradients need two stops each, and the cool end is the shared CoolBlue below.
-private val HEAT_ARC_START = Color(0xFFFF8F00)
-private val HEAT_ARC_END = Color(0xFFC62828)
-private val COOL_ARC_START = Color(0xFF00BCD4)
+private val HEAT_ARC_START = Palette.Honey.t70
+private val HEAT_ARC_END = Palette.Alarm.t40
+private val COOL_ARC_START = Palette.Rain.t70
 private val COOL_ARC_END = CoolBlue // single source: DesignTokens.CoolBlue
 
 /**

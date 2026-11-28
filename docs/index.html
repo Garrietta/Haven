@@ -2,12 +2,55 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Home Assistant's OAuth flow reads this page (it is Haven's client id)
+     and only accepts a redirect it finds declared here. Do not remove. -->
 <link rel="redirect_uri" href="haven://auth-callback" />
 <title>Haven — Home Assistant, designed</title>
+<meta name="description" content="Haven is a native Material 3 Expressive client for Home Assistant on Android.">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<style>
+  :root {
+    --paper: #FCF9EF; --ink: #1A1D17; --quiet: #454B40; --card: #EDF1E4;
+    --leaf: #346A22; --lime: #9BF67C; --on-lime: #042100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #000; --ink: #F3F1E6; --quiet: #C0C9B8; --card: #191D17; --leaf: #9BF67C; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: var(--paper); color: var(--ink);
+    font: 16px/1.5 "Google Sans Flex", "Google Sans", Roboto, system-ui, sans-serif;
+  }
+  main { width: min(100% - 32px, 480px); padding: 48px 0; }
+  .mark { width: 88px; height: 88px; display: block; }
+  .night { display: none; }
+  @media (prefers-color-scheme: dark) { .day { display: none; } .night { display: block; } }
+  h1 { font-size: 44px; line-height: 1.1; letter-spacing: -0.03em; font-weight: 600; margin: 20px 0 4px; }
+  .tag { font-size: 17px; font-weight: 500; color: var(--quiet); margin: 0 0 28px; }
+  .card { background: var(--card); border-radius: 28px 28px 12px 28px; padding: 20px; }
+  .card p { margin: 0 0 12px; color: var(--quiet); }
+  .card p:last-child { margin: 0; }
+  code { font: 14px ui-monospace, monospace; color: var(--ink); overflow-wrap: anywhere; }
+  a.button {
+    display: inline-block; margin-top: 20px; padding: 14px 24px; border-radius: 999px;
+    background: var(--lime); color: var(--on-lime); font-weight: 600; text-decoration: none;
+  }
+  a.button:focus-visible { outline: 3px solid var(--leaf); outline-offset: 3px; }
+</style>
 </head>
 <body>
-<h1>Haven</h1>
-<p>Haven is a native Material 3 Expressive Home Assistant client for Android. This page exists so Home Assistant's OAuth flow can verify Haven's redirect URI: <code>haven://auth-callback</code>.</p>
-<p>Source: <a href="https://github.com/Garrietta/Haven">github.com/Garrietta/Haven</a></p>
+<main>
+  <img class="mark day" src="mark.svg" alt="">
+  <img class="mark night" src="mark-night.svg" alt="">
+  <h1>Haven</h1>
+  <p class="tag">Home Assistant, designed.</p>
+  <div class="card">
+    <p>Haven is a native Material 3 Expressive client for Home Assistant on Android. It connects only to your own instance.</p>
+    <p>This page exists so Home Assistant's sign-in can verify where Haven asks to be sent back to: <code>haven://auth-callback</code>.</p>
+  </div>
+  <a class="button" href="https://github.com/Garrietta/Haven">Source on GitHub</a>
+</main>
 </body>
 </html>

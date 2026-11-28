@@ -92,17 +92,17 @@ class HomePrefsTest {
     fun round3OrderMigrationExpandsLegacyKeyInPlace() {
         assertEquals(
             listOf("cameras", "round3-security", "round3-vacuum", "round3-media", "round3-greenhouse", "rooms"),
-            migrateRound3SectionOrder(listOf("cameras", "round3", "rooms")),
+            migrateLegacySectionOrder(listOf("cameras", "round3", "rooms")),
         )
         // Orders without the legacy key pass through untouched.
         assertEquals(
             listOf("cameras", "rooms"),
-            migrateRound3SectionOrder(listOf("cameras", "rooms")),
+            migrateLegacySectionOrder(listOf("cameras", "rooms")),
         )
         // Already-migrated orders are stable (no duplication).
         assertEquals(
             listOf("round3-security", "round3-vacuum"),
-            migrateRound3SectionOrder(listOf("round3-security", "round3-vacuum")),
+            migrateLegacySectionOrder(listOf("round3-security", "round3-vacuum")),
         )
     }
 
@@ -111,12 +111,12 @@ class HomePrefsTest {
         // Combined-hidden maps to all four hidden.
         assertEquals(
             setOf("round3-security", "round3-vacuum", "round3-media", "round3-greenhouse"),
-            migrateRound3Hidden(setOf("round3")),
+            migrateLegacyHiddenSections(setOf("round3")),
         )
         // Combined-shown (or absent) maps to all four shown, and the
         // legacy key never survives in the set.
-        assertEquals(setOf("favorites"), migrateRound3Hidden(setOf("favorites")))
-        assertEquals(setOf("favorites"), migrateRound3Hidden(setOf("favorites", "round3")) - ROUND3_BLOCK_KEYS.toSet())
-        assertTrue(migrateRound3Hidden(setOf("favorites", "round3")).containsAll(ROUND3_BLOCK_KEYS))
+        assertEquals(setOf("favorites"), migrateLegacyHiddenSections(setOf("favorites")))
+        assertEquals(setOf("favorites"), migrateLegacyHiddenSections(setOf("favorites", "round3")) - ROUND3_BLOCK_KEYS.toSet())
+        assertTrue(migrateLegacyHiddenSections(setOf("favorites", "round3")).containsAll(ROUND3_BLOCK_KEYS))
     }
 }

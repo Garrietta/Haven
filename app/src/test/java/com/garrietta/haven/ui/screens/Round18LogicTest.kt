@@ -15,32 +15,6 @@ import org.junit.Test
 /** Feedback round 18: the round's new pure logic, pinned by tests. */
 class Round18LogicTest {
 
-    private fun room(areaId: String?) = RoomSection(areaId, areaId ?: "No room", listOf("light.a"), null)
-
-    private val rooms = listOf(room("area.bedroom"), room("area.living"), room(null))
-
-    @Test
-    fun visibleRoomsFor_myHomeYieldsNoRooms() {
-        assertTrue(visibleRoomsFor(RoomFilter.All, rooms).isEmpty())
-    }
-
-    @Test
-    fun visibleRoomsFor_areaYieldsOnlyThatRoom() {
-        assertEquals(listOf(room("area.bedroom")), visibleRoomsFor(RoomFilter.Area("area.bedroom"), rooms))
-    }
-
-    @Test
-    fun visibleRoomsFor_unassignedYieldsOnlyNoRoom() {
-        assertEquals(listOf(room(null)), visibleRoomsFor(RoomFilter.Unassigned, rooms))
-    }
-
-    @Test
-    fun isRoomViewFilter_onlyAllIsOverview() {
-        assertFalse(isRoomViewFilter(RoomFilter.All))
-        assertTrue(isRoomViewFilter(RoomFilter.Area("area.bedroom")))
-        assertTrue(isRoomViewFilter(RoomFilter.Unassigned))
-    }
-
     @Test
     fun useDetailTwoColumnLayout_numericOnly() {
         assertTrue(useDetailTwoColumnLayout("72.5"))
@@ -50,18 +24,6 @@ class Round18LogicTest {
         assertFalse(useDetailTwoColumnLayout("idle"))
         assertFalse(useDetailTwoColumnLayout(null))
         assertFalse(useDetailTwoColumnLayout(""))
-    }
-
-    @Test
-    fun shouldNavigateOnTabTap_subScreenReturnsToHighlightedTab() {
-        // The round-18 bug: tapping highlighted Settings inside
-        // Manage home page / Rooms & tabs was swallowed by the
-        // old index-equality guard; the screen comparison navigates.
-        assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.HomeEditor))
-        assertTrue(shouldNavigateOnTabTap(Screen.Settings, Screen.RoomsTabs))
-        assertTrue(shouldNavigateOnTabTap(Screen.Today, Screen.Settings))
-        assertFalse(shouldNavigateOnTabTap(Screen.Settings, Screen.Settings))
-        assertFalse(shouldNavigateOnTabTap(Screen.Today, Screen.Today))
     }
 
     @Test

@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Feedback round 19, item 6: real-time HA event alerts (Android 13+ runtime grant, asked once at launch). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Installs an update downloaded from Settings, App updates. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -19,11 +21,16 @@
              both the OkHttp client and the in-app WebView from reaching them at
              all ("CLEARTEXT communication not permitted"). Tokens still only ever
              go to the user's own instance. -->
+        <!-- Hears back from the package installer during an in-app update. -->
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
             android:exported="true"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Haven.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -46,6 +53,41 @@
              No metadata XML is required by the Controls API; the
              service's app intent opens MainActivity. Manifest-only
              reference, so pre-R devices never load the class. -->
+        <!-- Home screen widgets. Exported because some launchers broadcast to
+             the provider directly; the filter takes only APPWIDGET_UPDATE. -->
+        <receiver
+            android:name=".widget.ClimateWidgetReceiver"
+            android:label="@string/widget_climate_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_climate_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.ControlsWidgetReceiver"
+            android:label="@string/widget_controls_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_controls_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.SecurityWidgetReceiver"
+            android:label="@string/widget_security_label"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_security_info" />
+        </receiver>
         <service
             android:name=".HavenControlsService"
             android:label="Haven"

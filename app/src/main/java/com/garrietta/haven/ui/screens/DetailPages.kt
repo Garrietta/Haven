@@ -1,4 +1,6 @@
 package com.garrietta.haven.ui.screens
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.alpha
 import com.garrietta.haven.ui.theme.FloatingCorner
@@ -82,8 +84,16 @@ import com.garrietta.haven.data.displayCameraName
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.garrietta.haven.ui.components.DomainBadge
-import com.garrietta.haven.ui.components.KodaMenuRow
-import com.garrietta.haven.ui.components.VerticalPillToggle
+import com.garrietta.haven.ui.components.MenuDivider
+import com.garrietta.haven.ui.components.MenuGroup
+import com.garrietta.haven.ui.components.MenuRow
+import com.garrietta.haven.ui.components.MenuSection
+import com.garrietta.haven.ui.controls.BrightnessSlab
+import com.garrietta.haven.ui.controls.ColorTempTrack
+import com.garrietta.haven.ui.controls.FanSlab
+import com.garrietta.haven.ui.controls.LightColorDots
+import com.garrietta.haven.ui.controls.LockSlab
+import com.garrietta.haven.ui.controls.PowerSlab
 import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.shapeLabel
 import com.garrietta.haven.ui.controls.domainIcon
@@ -112,10 +122,7 @@ import com.garrietta.haven.ui.controls.MediaTransportRow
 import com.garrietta.haven.ui.controls.MediaVolumeRow
 import com.garrietta.haven.ui.controls.PressablePillButton
 import com.garrietta.haven.ui.controls.FanControl
-import com.garrietta.haven.ui.controls.LightControl
-import com.garrietta.haven.ui.controls.LockControl
 import com.garrietta.haven.ui.controls.ServiceSlider
-import com.garrietta.haven.ui.controls.SwitchControl
 import com.garrietta.haven.ui.controls.VacuumControl
 import com.garrietta.haven.ui.controls.WeatherControl
 import com.garrietta.haven.ui.controls.WeatherHeroCard
@@ -125,6 +132,7 @@ import com.garrietta.haven.ui.controls.sensorDisplayName
 import com.garrietta.haven.ui.controls.stateText
 import java.util.Locale
 import org.json.JSONObject
+import com.garrietta.haven.ui.components.SectionTitle
 
 /**
  * Pop-ups, one per entity (2026-10-29 pop-up round — every detail
@@ -183,7 +191,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, n
     // EntityDetail for climate renders the primary dial panel
     // directly — the secondary thermostat page is deleted.
     if (entity.domain == "climate") {
-        ThermostatPopout(entity, vm, onClose = onBack)
+        ThermostatPopout(entity, vm, onClose = onBack, navigate = navigate)
         return
     }
     // Weather's full page is an expressive page (condition hero +
@@ -214,7 +222,7 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, n
             // (the Front Door keeps its in-panel Event History
             // tab). Dismiss first, then navigate — the sheet's
             // Details handoff pattern.
-            KodaMenuRow(
+            MenuRow(
                 badgeKey = "clips-${entity.entityId}",
                 badgeKind = shapeForDomain(entity.domain),
                 icon = domainIcon(entity),
@@ -231,12 +239,12 @@ fun DetailPageScreen(vm: HavenViewModel, entityId: String, onBack: () -> Unit, n
             // Open live view button above is this surface's
             // Details action.
             Spacer(Modifier.height(24.dp))
-            EntityPopupMenuRows(vm, entity, onDetails = null)
+            EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = navigate)
             Spacer(Modifier.height(16.dp))
         }
         return
     }
-    DetailPageContent(vm, entity, onBack, badgeOverride = detailBadge, pageAccent = detailAccent)
+    DetailPageContent(vm, entity, onBack, navigate, badgeOverride = detailBadge, pageAccent = detailAccent)
 }
 
 /**
@@ -273,7 +281,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         // Dial survives only in sheets/cards via WeatherControl.
         WeatherHeroCard(entity, vm)
         Spacer(Modifier.height(16.dp))
-        Text("Hourly forecast", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        SectionTitle("Hourly forecast")
         Spacer(Modifier.height(8.dp))
         // Timeline, not a list (2026-10-29 verdict: the 24-row plain
         // list "just doesn't look very good — a forecast could be a
@@ -284,7 +292,7 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
         // Round 21, item 5: the settings rows at the very bottom,
         // for every tile. Details is omitted — this IS the full page.
         Spacer(Modifier.height(8.dp))
-        EntityPopupMenuRows(vm, entity, onDetails = null)
+        EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = null)
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -298,11 +306,15 @@ private fun WeatherPageScreen(entity: HaEntity, vm: HavenViewModel, onBack: () -
  */
 internal fun useDetailTwoColumnLayout(state: String?): Boolean = state?.toDoubleOrNull() != null
 
+/** Domains whose pop-up leads with a [ControlSlab], which is their on/off. */
+private val SLAB_DOMAINS = setOf("light", "switch", "input_boolean", "fan", "lock")
+
 @Composable
 private fun DetailPageContent(
     vm: HavenViewModel,
     entity: HaEntity,
     onBack: () -> Unit,
+    navigate: (Screen) -> Unit,
     // Feedback round 4, item 2: the preset badge pair (or null),
     // resolved by DetailPageScreen from the same store maps the
     // card reads.
@@ -315,59 +327,38 @@ private fun DetailPageContent(
     val accent = accentFor(entity.entityId)
     val control: @Composable () -> Unit = {
         when (entity.domain) {
-            // Light detail panel (2026-11-01 round 1): the primary
-            // control is a large vertical pill toggle — the Turn
-            // on / Turn off / Toggle text buttons below are
-            // suppressed for lights, and LightControl hides its
-            // bulb row here so the header badge is the panel's
-            // only bulb icon. Brightness / color sliders stay.
-            // Auto-off timer controls are NOT rendered: no lamp
-            // in this codebase's entity model exposes an auto-off
-            // entity or attribute to bind them to, and inventing
-            // a binding would actuate nothing real — flagged in
-            // the round report instead.
-            "light" -> Column(
-                Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                VerticalPillToggle(
-                    checked = entity.state == "on",
-                    onToggle = { vm.toggle(entity.entityId) },
-                    // Feedback round 5, item 2 (SUPERSEDES round 4's
-                    // badge-bg track): the toggle track is the
-                    // preset's pastel container when a preset is
-                    // active — Standing Lamp's track goes yellow
-                    // like its card — else the default primary, as
-                    // before. The knob stays hardcoded white inside
-                    // VerticalPillToggle, per the user's correction
-                    // (the background changes, not the knob).
-                    onColor = pageAccent ?: MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (entity.state == "on") "On" else "Off",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(16.dp))
-                LightControl(entity, vm, showBulb = false)
-                // Round 4: the light panel is never an empty white
-                // screen — device status cards below the pill:
-                // power state, room assignment, last-changed
-                // timestamp, and the linked smart plug's state.
-                // Any line with no backing data is omitted, never
-                // fabricated; no entity ids are shown.
+            // A lamp: the slab is on, off and how bright; under it
+            // warm to cool and the color dots, each only where the
+            // lamp supports it, then what is known about it.
+            "light" -> Column(Modifier.fillMaxWidth()) {
+                val modes = entity.attrList("supported_color_modes")?.mapNotNull { it as? String } ?: emptyList()
+                BrightnessSlab(entity, vm)
+                if (modes.contains("color_temp") || entity.attrInt("color_temp_kelvin") != null) {
+                    Spacer(Modifier.height(20.dp))
+                    ColorTempTrack(entity, vm)
+                }
+                if (modes.any { it == "hs" || it == "rgb" || it == "xy" }) {
+                    Spacer(Modifier.height(20.dp))
+                    LightColorDots(entity, vm, dotSize = 34.dp, spread = true)
+                }
                 LightStatusCard(entity, vm)
             }
-            "switch", "input_boolean" -> SwitchControl(entity, vm, pageAccent)
+            "switch", "input_boolean" -> PowerSlab(entity, vm)
             "cover" -> CoverPageControl(entity, vm, pageAccent)
-            "lock" -> LockControl(entity, vm, pageAccent)
+            "lock" -> LockSlab(entity, vm)
             // Detail keeps only the labeled strip (see history()):
             // SensorTile's own chart would duplicate it (2026-10-30).
-            "sensor", "binary_sensor" -> SensorTile(entity, vm, showHeader = false, showChart = false)
+            // A reading's popup is its header and its chart; the chart
+            // below takes the full width rather than half of it.
+            "sensor" -> Unit
+            "binary_sensor" -> SensorTile(entity, vm, showHeader = false, showChart = false)
             "media_player" -> MediaPageControl(entity, vm, pageAccent, badgeOverride)
             "vacuum" -> VacuumControl(entity, vm, pageAccent, badgeOverride)
-            "fan" -> FanControl(entity, vm, pageAccent)
+            "fan" -> Column(Modifier.fillMaxWidth()) {
+                FanSlab(entity, vm)
+                Spacer(Modifier.height(16.dp))
+                FanControl(entity, vm, pageAccent, showSpeed = false)
+            }
             "weather" -> WeatherControl(entity, vm, showForecast = true)
             // This inner card is page content, never a morph source: it
             // must not report bounds or hide (the page overlay itself
@@ -376,10 +367,9 @@ private fun DetailPageContent(
         }
         Spacer(Modifier.height(16.dp))
         // Generic on/off actions, only where they make sense: an entity
-        // whose state is on/off and which is not a read-only domain.
-        // Lights are excluded (2026-11-01 round 1): their panel's
-        // vertical pill toggle replaces these text buttons.
-        if (entity.state in listOf("on", "off") && entity.domain != "light" &&
+        // whose state is on/off, which is not a read-only domain, and
+        // which has no slab of its own (the slab is its on/off).
+        if (entity.state in listOf("on", "off") && entity.domain !in SLAB_DOMAINS &&
             entity.domain !in listOf("binary_sensor", "sensor", "weather", "camera", "person", "device_tracker")
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -399,7 +389,7 @@ private fun DetailPageContent(
     val history: @Composable () -> Unit = {
         if (entity.state.toDoubleOrNull() != null) {
             Spacer(Modifier.height(24.dp))
-            Text("Last 24 hours", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            SectionTitle("Last 24 hours")
             Spacer(Modifier.height(8.dp))
             DetailHistoryStrip(vm, entity)
             Spacer(Modifier.height(16.dp))
@@ -420,7 +410,7 @@ private fun DetailPageContent(
             // for ALL domains: DetailPopupHeader already shows
             // icon, title, and state (the Garage Door / TV
             // duplicate is fixed by removal, not by gating).
-            if (useDetailTwoColumnLayout(entity.state)) {
+            if (useDetailTwoColumnLayout(entity.state) && entity.domain != "sensor") {
                 Row(Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f).padding(end = 8.dp)) {
                         control()
@@ -437,7 +427,7 @@ private fun DetailPageContent(
             // bottom of the popup, for every tile. Details is
             // omitted here — this IS the full page.
             Spacer(Modifier.height(24.dp))
-            EntityPopupMenuRows(vm, entity, onDetails = null)
+            EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = navigate)
             Spacer(Modifier.height(16.dp))
         }
     } else {
@@ -449,7 +439,7 @@ private fun DetailPageContent(
             // bottom of the popup, for every tile. Details is
             // omitted here — this IS the full page.
             Spacer(Modifier.height(24.dp))
-            EntityPopupMenuRows(vm, entity, onDetails = null)
+            EntityPopupMenuRows(vm, entity, onClose = onBack, navigate = navigate)
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -643,79 +633,68 @@ private fun GarageDoorMenu(entity: HaEntity, vm: HavenViewModel, position: Int?,
 @Composable
 internal fun detailHeaderCustom(vm: HavenViewModel, entity: HaEntity): Pair<String, androidx.compose.ui.graphics.vector.ImageVector> {
     val custom = rememberCardCustom(vm)
-    val base = if (entity.domain == "sensor") sensorDisplayName(entity) else displayCameraName(entity)
-    val title = customTitleFor(custom.titles, entity.entityId, base)
+    val nameOf = rememberEntityNamer(vm)
+    // The popup's title is the name the tile shows.
+    val title = if (entity.domain == "sensor" && custom.titles[entity.entityId].isNullOrBlank()) sensorDisplayName(entity) else nameOf(entity)
     // Feedback round 11, item 3: the one icon path.
     val icon = entityIcon(custom.iconKeys, entity)
     return title to icon
 }
 
 /**
- * Round 21, item 5: the settings rows that used to live in the
- * long-press sheet, now at the bottom of the single-press popup
- * for EVERY tile. The sheet is gone (HavenApp's
- * EntityPopupSheetContent is deleted); these rows are the only
- * settings surface, shared verbatim by the generic detail page,
- * the thermostat popout, the weather page, the camera column,
- * and the vacuum panel. [onDetails] is the "open the full page"
- * destination — null when this surface IS the full page (generic
- * detail, thermostat popout, weather page: the row would navigate
- * to itself, and pushing a duplicate detail screen is a real
- * defect, not a no-op), non-null where a deeper surface exists
- * (vacuum panel: the generic detail page). Cameras carry their
- * own Details action (the Open live view button) plus an Event
- * history row, so they pass null here too. Badge shape / Card
- * shape / Card settings are always present.
+ * The rows every device popup ends with, in the same order: Tile (the
+ * tile's name, icon, color and whether it shows on Home, the same sheet
+ * holding the tile opens) and In Home Assistant (the entity's own
+ * settings there). A system's panel adds Details first, for the plain
+ * popup behind it. [navigate] is null where a popup cannot leave for a
+ * Settings page; In Home Assistant is then left out.
  */
 @Composable
 internal fun EntityPopupMenuRows(
     vm: HavenViewModel,
     entity: HaEntity,
-    onDetails: (() -> Unit)?,
+    onClose: () -> Unit,
+    navigate: ((Screen) -> Unit)?,
     modifier: Modifier = Modifier,
+    onDetails: (() -> Unit)? = null,
 ) {
-    Column(modifier) {
+    MenuGroup(modifier) {
         if (onDetails != null) {
-            KodaMenuRow(
-                badgeKey = entity.entityId,
+            MenuRow(
+                badgeKey = "details-" + entity.entityId,
                 badgeKind = shapeForDomain(entity.domain),
                 icon = domainIcon(entity),
                 title = "Details",
-                subtitle = "Open the full page",
+                subtitle = "Every control it has",
                 onClick = onDetails,
-                modifier = Modifier.fillMaxWidth(),
+                flat = true,
             )
-            Spacer(Modifier.height(8.dp))
+            MenuDivider()
         }
-        KodaMenuRow(
-            badgeKey = "shape-badge-${entity.entityId}",
-            badgeKind = shapeForDomain(entity.domain),
-            icon = domainIcon(entity),
-            title = "Badge shape",
-            subtitle = shapeLabel(vm.settingsStore.badgeShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalBadgeShape) ?: "Domain default",
-            onClick = { vm.openShapePicker(entity.entityId, false) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(8.dp))
-        KodaMenuRow(
-            badgeKey = "shape-card-${entity.entityId}",
-            badgeKind = shapeForDomain(entity.domain),
-            icon = domainIcon(entity),
-            title = "Card shape",
-            subtitle = shapeLabel(vm.settingsStore.cardShapeOverrides()[entity.entityId] ?: vm.settingsStore.globalCardShape) ?: "Default corners",
-            onClick = { vm.openShapePicker(entity.entityId, true) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(8.dp))
-        KodaMenuRow(
-            badgeKey = "card-settings-${entity.entityId}",
-            badgeKind = shapeForDomain(entity.domain),
-            icon = domainIcon(entity),
-            title = "Card settings",
-            subtitle = "Title, icon, badge shape, tile color",
+        MenuRow(
+            badgeKey = "popup-tile",
+            badgeKind = com.garrietta.haven.ui.theme.ExpressiveKind.SUNNY,
+            icon = Icons.Filled.Tune,
+            title = "Tile",
+            subtitle = "Name, icon, color and whether it shows on Home",
             onClick = { vm.openCardSettings(entity.entityId) },
-            modifier = Modifier.fillMaxWidth(),
+            flat = true,
         )
+        if (navigate != null) {
+            MenuDivider()
+            MenuRow(
+                badgeKey = "popup-home-assistant",
+                badgeKind = com.garrietta.haven.ui.theme.ExpressiveKind.BUN,
+                icon = Icons.Filled.Settings,
+                title = "In Home Assistant",
+                subtitle = "Its name, area and settings there",
+                onClick = {
+                    onClose()
+                    navigate(Screen.SettingsPage(SettingsRoute.entity(entity.entityId)))
+                },
+                flat = true,
+            )
+        }
     }
 }
 
@@ -833,12 +812,16 @@ private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
     LaunchedEffect(entity.entityId) {
         vm.refreshHistory(entity.entityId)
     }
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+    // The chart takes the width it is given and a height to match it.
+    val chartHeight = com.garrietta.haven.ui.components.historyChartHeight(maxWidth)
     if (cached == null) {
-        ShimmerBox(Modifier.fillMaxWidth().height(120.dp))
+        ShimmerBox(Modifier.fillMaxWidth().height(chartHeight))
     } else if (cached.size >= 2) {
         val points = cached
         val mm = sparklineMinCurrentMax(points)
         val unit = entity.attrString("unit_of_measurement")
+        val deviceClass = entity.attrString("device_class")
         // Smooth reveal (2026-10-30 verdict: never an empty box
         // snapping to a full chart): the shimmer above covers the
         // load, and the path fades in once data lands. The branch
@@ -852,26 +835,30 @@ private fun DetailHistoryStrip(vm: HavenViewModel, entity: HaEntity) {
             label = "historyStripReveal",
         )
         Column(Modifier.alpha(stripAlpha)) {
-            Sparkline(points, chartLineColor(sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(120.dp))
+            Sparkline(points, chartLineColor(sensorKind(entity.entityId, deviceClass, entity.friendlyName), isDarkBackdrop(MaterialTheme.colorScheme.background)), Modifier.fillMaxWidth().height(chartHeight))
             Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Text("24 hours ago", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text("Now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (mm != null) {
-                Text(
-                    "Min ${fmtDetailHistory(mm.first, unit)} · Current ${fmtDetailHistory(mm.second, unit)} · Max ${fmtDetailHistory(mm.third, unit)}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    for ((label, value) in listOf("Low" to mm.first, "High" to mm.third)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(com.garrietta.haven.data.formatReading(value.toString(), unit, deviceClass), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
             }
         }
     } else {
-        Text("No history yet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("No history yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
     }
 }
 
-/** Whole numbers print whole; the rest get one decimal; unit suffix when present. */
-private fun fmtDetailHistory(v: Double, unit: String?): String {
-    val num = if (v == v.toInt().toDouble()) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
-    return if (unit != null) "$num $unit" else num
-}
 
 /**
  * Scrollable recorded-clips timeline for a camera (long-press on its
@@ -1218,17 +1205,14 @@ private fun LightStatusCard(entity: HaEntity, vm: HavenViewModel) {
     val plug = linkedPlugId?.let { states[it] }
     val areaName = entityAreas[entity.entityId]?.let { areaId -> areas.firstOrNull { it.id == areaId }?.name }
     val lastChanged = formatHaTimestamp(entity.lastChanged ?: entity.lastUpdated)
-    val brightness = entity.attrInt("brightness")?.let { it * 100 / 255 }
+    // On, off and how bright are the slab's; this card holds the rest.
     val rows = buildList {
-        add("Power" to if (entity.state == "on") {
-            if (brightness != null) "On • $brightness%" else "On"
-        } else "Off")
         if (areaName != null) add("Room" to areaName)
         if (lastChanged != null) add("Last changed" to lastChanged)
         if (plug != null) add(plug.friendlyName to if (plug.state == "on") "On" else "Off")
     }
     if (rows.isEmpty()) return
-    Spacer(Modifier.height(16.dp))
+    Spacer(Modifier.height(20.dp))
     Surface(
         shape = generalCardShape(0),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1237,8 +1221,8 @@ private fun LightStatusCard(entity: HaEntity, vm: HavenViewModel) {
         Column(Modifier.padding(16.dp)) {
             for ((label, value) in rows) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(value, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(value, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
                 }
                 // Feedback round 15, item 6: light detail-panel
                 // rows share the thermostat panel's 12dp block

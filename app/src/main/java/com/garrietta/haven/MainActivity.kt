@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.garrietta.haven.data.HavenNotificationManager
 
 class MainActivity : ComponentActivity() {
@@ -29,6 +30,7 @@ class MainActivity : ComponentActivity() {
         // app owns its insets (screens consume statusBarsPadding) instead of
         // the system guessing — the old default left headers colliding with
         // the status bar on the Fold8.
+        installSplashScreen()
         enableEdgeToEdge()
         // UI rewrite round §6 (exit flash): the navigation bar is
         // fully transparent, never an opaque inset box — this

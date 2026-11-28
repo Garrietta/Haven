@@ -487,7 +487,7 @@ class MorphMathTest {
         // generalCardShape(0): three 28dp corners, 12dp bottom-right.
         assertEquals(CardCorners(28.dp, 28.dp, 12.dp, 28.dp), roundedLandingCorners(generalCardShape(0)))
         // Sharp 8dp all corners.
-        assertEquals(CardCorners(8.dp, 8.dp, 8.dp, 8.dp), roundedLandingCorners(generalCardShape(4)))
+        assertEquals(CardCorners(8.dp, 8.dp, 8.dp, 8.dp), roundedLandingCorners(cardCornerOption(4)))
         // Non-rounded outlines (and unknown shapes) read as null.
         assertEquals(null, roundedLandingCorners(androidx.compose.ui.graphics.RectangleShape))
         assertEquals(null, roundedLandingCorners(null))
@@ -540,7 +540,7 @@ class MorphMathTest {
         assertEquals(14f, mid.bottomEnd.x, 0.001f)
         assertEquals(14f, mid.bottomStart.x, 0.001f)
         // A corner landing resolves through the corner lerp.
-        val tile = morphSurfaceRadii(0f, generalCardShape(4), density = Density(1f))!!
+        val tile = morphSurfaceRadii(0f, cardCornerOption(4), density = Density(1f))!!
         assertEquals(8f, tile.topStart.x, 0.001f)
         assertEquals(8f, tile.topStart.y, 0.001f)
         // A popup over a polygon tile never goes sharp.

@@ -86,6 +86,8 @@ data class HaArea(
     val id: String,
     val name: String,
     val icon: String? = null,
+    /** The floor Home Assistant puts it on, when floors are set up. */
+    val floorId: String? = null,
 )
 
 /** One Lovelace view (tab) with its cards kept as raw JSON so the editor can round-trip them. */

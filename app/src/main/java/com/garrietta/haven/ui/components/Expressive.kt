@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.graphics.shapes.Morph
 import androidx.compose.ui.graphics.StrokeCap
@@ -77,6 +78,7 @@ import com.garrietta.haven.ui.screens.dialTapZone
 import com.garrietta.haven.ui.screens.dialValueFromAngle
 import com.garrietta.haven.ui.screens.isHandleGrab
 import com.garrietta.haven.ui.theme.ExpressiveKind
+import com.garrietta.haven.ui.theme.Palette
 import com.garrietta.haven.ui.theme.MorphPolygon
 import com.garrietta.haven.ui.theme.MorphShape
 import com.garrietta.haven.ui.theme.havenSpring
@@ -116,9 +118,9 @@ val LocalModalActive = compositionLocalOf { false }
 /** Stable per-entity accent color, hashed from the entity id (same idea as Relay's palettes).
  * Not a scheme role: an identity palette — each entity keeps its accent across launches. */
 private val ACCENTS = listOf(
-    Color(0xFFF59E0B), Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFF8B5CF6),
-    Color(0xFFEC4899), Color(0xFFF97316), Color(0xFF84CC16), Color(0xFF3B82F6),
-    Color(0xFFEAB308), Color(0xFF14B8A6), Color(0xFFF43F5E), Color(0xFFA855F7),
+    Palette.Honey.t70, Palette.Sage.t60, Palette.Dew.t60, Palette.Tune.t60,
+    Palette.Alarm.t70, Palette.Ember.t60, Palette.Leaf.t70, Palette.Frost.t60,
+    Palette.Volt.t70, Palette.Rain.t60, Palette.Ember.t70, Palette.Guard.t60,
 )
 
 fun accentFor(entityId: String): Color {
@@ -182,7 +184,7 @@ fun shapeForKey(key: String): Shape? = when (key) {
     // Customization round, item 1: card-corner picks resolve to the
     // general card shape at that variant index (unknown suffix -> null).
     "corners_0", "corners_1", "corners_2", "corners_3", "corners_4", "corners_5", "corners_6", "corners_7" ->
-        generalCardShape(key.removePrefix("corners_").toIntOrNull() ?: 0)
+        cardCornerOption(key.removePrefix("corners_").toIntOrNull() ?: 0)
     "sunny" -> polygonShape(ExpressiveKind.SUNNY)
     "flower" -> polygonShape(ExpressiveKind.FLOWER)
     "bun" -> polygonShape(ExpressiveKind.BUN)
@@ -223,46 +225,6 @@ fun polygonForKey(key: String): RoundedPolygon? = when (key) {
     else -> null
 }
 
-/**
- * The resolved shape preferences, provided by HavenApp from
- * SettingsStore (re-read whenever [HavenViewModel.bumpShapePrefs]
- * fires, so a picker choice applies immediately). Resolution is
- * per-entity override > domain default > global default;
- * null means "built-in default" (badges) or "default corners"
- * (cards). Feedback round 15, item 5: the domain maps ARE what
- * "Domain default" means — a domain default applies to every
- * entity of that domain (a socket-named lamp is still a light),
- * and a per-entity override still wins over it. The id-only
- * accessors keep the old per-entity > global behavior for call
- * sites that know no domain (morph landing fallbacks, where the
- * reported tile shape already carries the domain default).
- * Menu-row badges keep their fixed kinds — they are navigation
- * chrome, not entity shapes — and the camera hero container
- * stays its rectangular 24dp shape by design.
- */
-data class ShapePrefs(
-    val globalBadge: String?,
-    val globalCard: String?,
-    val badgeOverrides: Map<String, String>,
-    val cardOverrides: Map<String, String>,
-    val domainBadge: Map<String, String> = emptyMap(),
-    val domainCard: Map<String, String> = emptyMap(),
-) {
-    fun badgeShapeKey(entityId: String): String? = badgeOverrides[entityId] ?: globalBadge
-    fun cardShapeKey(entityId: String): String? = cardOverrides[entityId] ?: globalCard
-    fun badgeShapeKeyFor(entityId: String, domain: String?): String? =
-        badgeOverrides[entityId] ?: domain?.let { domainBadge[it] } ?: globalBadge
-    fun cardShapeKeyFor(entityId: String, domain: String?): String? =
-        cardOverrides[entityId] ?: domain?.let { domainCard[it] } ?: globalCard
-    fun badgeShape(entityId: String): Shape? = badgeShapeKey(entityId)?.let { shapeForKey(it) }
-    fun badgeShapeFor(entityId: String, domain: String?): Shape? = badgeShapeKeyFor(entityId, domain)?.let { shapeForKey(it) }
-    fun badgePolygon(entityId: String): RoundedPolygon? = badgeShapeKey(entityId)?.let { polygonForKey(it) }
-    fun badgePolygonFor(entityId: String, domain: String?): RoundedPolygon? = badgeShapeKeyFor(entityId, domain)?.let { polygonForKey(it) }
-    fun cardShape(entityId: String): Shape? = cardShapeKey(entityId)?.let { shapeForKey(it) }
-    fun cardShapeFor(entityId: String, domain: String?): Shape? = cardShapeKeyFor(entityId, domain)?.let { shapeForKey(it) }
-}
-
-val LocalShapePrefs = compositionLocalOf { ShapePrefs(null, null, emptyMap(), emptyMap()) }
 
 /**
  * A dialog header name, Round 6: a SINGLE Text at
@@ -347,11 +309,6 @@ fun DomainBadge(
     val idle = stateShapePolygon(badgeIdleShape(domain))
     val active = stateShapePolygon(badgeActiveShape(domain, if (domain == "weather") state else null))
     val (bg, iconTint) = badgeOverride ?: badgeColors(scheme, entity, accent)
-    // Shape-picker override (2026-10-30): a picked shape replaces
-    // the idle/active morph pair with that one static shape, in
-    // the badge's exact colors — the picker's shape IS the badge.
-    // Without an override the morph pair below is unchanged.
-    val overrideShape = LocalShapePrefs.current.badgeShapeFor(entity.entityId, entity.domain)
     Box(
         modifier.graphicsLayer {
             if (!reduceMotion) {
@@ -365,11 +322,7 @@ fun DomainBadge(
         },
         contentAlignment = Alignment.Center,
     ) {
-        if (overrideShape != null) {
-            Box(Modifier.fillMaxSize().background(bg, overrideShape))
-        } else {
-            MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
-        }
+        MorphPolygon(idle, active, progress, bg, Modifier.fillMaxSize())
         Icon(
             icon,
             contentDescription = null,
@@ -467,13 +420,8 @@ fun badgeColors(
  * below resolves through this, so tiles, travelers, and headers
  * can never disagree about the matrix row.
  */
-fun badgeCardColors(entity: HaEntity, isDark: Boolean): com.garrietta.haven.data.DomainCardColors? {
-    if (entity.domain == "sensor") {
-        val kind = sensorKind(entity.entityId, entity.attrString("device_class"), entity.friendlyName)
-        if (kind == SensorKind.TEMPERATURE || kind == SensorKind.HUMIDITY) return null
-    }
-    return com.garrietta.haven.data.domainCardColors(entity, isDark)
-}
+fun badgeCardColors(entity: HaEntity, isDark: Boolean): com.garrietta.haven.data.DomainCardColors? =
+    com.garrietta.haven.data.domainCardColors(entity, isDark)
 
 /**
  * Feedback round 17, item 1: the dashboard tile's EXACT badge
@@ -551,16 +499,8 @@ fun TravelingBadge(
     val (bg, iconTint) = badgeOverride ?: badgeColors(scheme, entity, accent)
     val domain = entity.domain
     val state = entity.state
-    // Shape-picker override (2026-10-30): the traveler morphs
-    // from the picked shape to itself (identity), so a picked
-    // badge keeps its shape across the whole travel instead of
-    // morphing through the domain/state pair.
-    val overridePolygon = LocalShapePrefs.current.badgePolygonFor(entity.entityId, entity.domain)
-    val from = overridePolygon
-        ?: if (tileSource) com.garrietta.haven.ui.theme.expressivePolygon(shapeForDomain(domain))
-        else stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
-    val to = overridePolygon
-        ?: stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
+    val to = stateShapePolygon(travelBadgeDestinationShape(domain, state, entity.attrString("hvac_action"), if (domain == "weather") state else null))
+    val from = if (tileSource) com.garrietta.haven.ui.theme.expressivePolygon(shapeForDomain(domain)) else to
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val morph = Morph(from, to)
@@ -592,111 +532,6 @@ fun TravelingBadge(
             modifier = Modifier.size(26.dp),
         )
     }
-}
-
-/**
- * Koda Settings menu DNA, adapted to Haven's dynamic colors (the layout /
- * surface / badge / header pattern, never Koda's hardcoded palette):
- * near-black screen background (the dynamic dark scheme already is),
- * dark rounded-rectangle rows, shaped icon badges in muted tones,
- * ALL-CAPS muted section headers, bold title + muted subtitle rows, and
- * a right chevron on rows that navigate. Used by Settings and by menu
- * rows in sheets, so every menu in the app reads as one set.
- */
-@Composable
-fun KodaMenuSection(title: String, modifier: Modifier = Modifier) {
-    Text(
-        title.uppercase(),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 1.2.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-    )
-}
-
-@Composable
-fun KodaMenuRow(
-    badgeKey: String,
-    badgeKind: ExpressiveKind,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String?,
-    onClick: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-    trailing: (@Composable () -> Unit)? = null,
-    /** Flat rows render background-less, for use inside a [KodaMenuGroup]. */
-    flat: Boolean = false,
-) {
-    val accent = accentFor(badgeKey)
-    val row = Modifier
-        .fillMaxWidth()
-        .then(if (flat) Modifier else Modifier.background(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.shapes.large))
-        .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-        .padding(horizontal = 12.dp, vertical = 16.dp)
-    Row(row.then(modifier), verticalAlignment = Alignment.CenterVertically) {
-        // Expressive-menus round: the badge grows from an icon-sized
-        // blob to a 48dp expressive polygon with a 28dp icon, so menu
-        // rows (sheet Details / Badge shape / Card shape, Settings)
-        // read as large pressable shapes, not cramped rows.
-        Box(
-            Modifier.size(48.dp).background(accent.copy(alpha = 0.20f), polygonShape(badgeKind)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(28.dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            if (subtitle != null) {
-                Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        // Feedback round 16, item 3: a default buffer between the
-        // label and the trailing control (switches included) — a
-        // long title used to run flush into the switch.
-        Spacer(Modifier.width(12.dp))
-        if (trailing != null) {
-            trailing()
-        } else if (onClick != null) {
-            Icon(
-                Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/**
- * Inset grouped rounded section (spec item 9): an extraLarge-corner
- * surfaceContainer card holding flat [KodaMenuRow]s separated by
- * [KodaMenuDivider]s. Used by Settings; the sheet Details row keeps its
- * standalone 20dp row.
- */
-@Composable
-fun KodaMenuGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        modifier = modifier,
-        shape = generalCardShape(0),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-    ) {
-        Column(content = content)
-    }
-}
-
-/**
- * A 0.5dp divider indented to the text-start boundary: row padding 12dp
- * + badge 48dp + gap 12dp = 72dp from the card edge (badge grew in
- * the expressive-menus round; the indent follows it).
- */
-@Composable
-fun KodaMenuDivider(indent: Dp = 72.dp, modifier: Modifier = Modifier) {
-    HorizontalDivider(
-        modifier = modifier.padding(start = indent),
-        thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant,
-    )
 }
 
 /**
@@ -969,45 +804,49 @@ fun Dial(
 }
 
 /**
- * Smoothed cubic-bezier sparkline with a gradient alpha area fill under
- * the curve (spec item 7). The smoothing math lives in SparklineMath so
- * it is unit-testable; this composable only draws what it returns.
- *
- * The drawn series is bucket-resampled first (see resampleHistory): raw
- * 24-hour state-change history is dense and jittery, and the plain
- * midpoint curve tracked every sample, which read as a thin jagged
- * low-contrast line on detail pages. Resampling de-noises the line;
- * Min/Current/Max labels still come from the raw series. The line itself
- * is drawn heavier than before — a soft under-glow beneath a 4dp core —
- * with a stronger gradient fill, so it holds contrast on light
- * backgrounds without changing its accent hue.
+ * A reading's history as a line over a soft fill, drawn to the size it
+ * is given. The line's weight, the inset that keeps it inside its card
+ * and the dot on the latest value all follow the chart's height, so the
+ * same chart reads as well as a small sparkline in a room's card as it
+ * does across a popup. Large charts get a faint midline to read against.
  */
 @Composable
 fun Sparkline(points: List<HistoryPoint>, color: Color, modifier: Modifier = Modifier) {
+    val grid = MaterialTheme.colorScheme.outlineVariant
     Canvas(modifier) {
-        val segments = sparklineSegments(resampleHistory(points), size.width, size.height)
+        val stroke = sparklineStrokeWidth(size.height / density).dp.toPx()
+        val inset = stroke * 2f
+        val w = size.width - inset * 2
+        val h = size.height - inset * 2
+        if (w <= 0f || h <= 0f) return@Canvas
+        val segments = sparklineSegments(resampleHistory(points), w, h)
         if (segments.isEmpty()) return@Canvas
-        val line = Path().apply {
-            moveTo(segments.first().x0, segments.first().y0)
-            segments.forEach { cubicTo(it.c1x, it.c1y, it.c2x, it.c2y, it.x1, it.y1) }
+        if (size.height >= 100.dp.toPx()) {
+            drawLine(grid.copy(alpha = 0.6f), Offset(inset, inset + h / 2), Offset(inset + w, inset + h / 2), strokeWidth = 1.dp.toPx())
         }
-        val fill = Path().apply {
-            addPath(line)
-            lineTo(segments.last().x1, size.height)
-            lineTo(segments.first().x0, size.height)
-            close()
+        translate(inset, inset) {
+            val line = Path().apply {
+                moveTo(segments.first().x0, segments.first().y0)
+                segments.forEach { cubicTo(it.c1x, it.c1y, it.c2x, it.c2y, it.x1, it.y1) }
+            }
+            val fill = Path().apply {
+                addPath(line)
+                lineTo(segments.last().x1, h + inset)
+                lineTo(segments.first().x0, h + inset)
+                close()
+            }
+            drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = 0.28f), color.copy(alpha = 0f)), startY = 0f, endY = h + inset))
+            drawPath(line, color, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawCircle(color, radius = stroke * 1.8f, center = Offset(segments.last().x1, segments.last().y1))
         }
-        drawPath(
-            fill,
-            Brush.verticalGradient(
-                listOf(color.copy(alpha = 0.45f), color.copy(alpha = 0f)),
-            ),
-        )
-        // Under-glow first, then the core: presence without a hue change.
-        drawPath(line, color.copy(alpha = 0.15f), style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(line, color, style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
+
+/** A chart's line weight in dp for its height in dp: fine on a small card, never heavy on a large one. */
+fun sparklineStrokeWidth(heightDp: Float): Float = (heightDp * 0.02f).coerceIn(1.5f, 2.5f)
+
+/** A history chart's height for the width it gets: about 2.6 wide to 1 tall, between 120 and 260dp. */
+fun historyChartHeight(width: Dp): Dp = (width / 2.6f).coerceIn(120.dp, 260.dp)
 
 /**
  * Knob-travel geometry for the pill toggles, as pure functions so

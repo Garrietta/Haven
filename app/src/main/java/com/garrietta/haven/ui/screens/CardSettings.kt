@@ -1,10 +1,11 @@
 package com.garrietta.haven.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,18 +15,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,163 +38,176 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.garrietta.haven.HavenViewModel
+import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.TILE_PRESETS
+import com.garrietta.haven.data.TilePreset
 import com.garrietta.haven.data.customIconKeyFor
+import com.garrietta.haven.data.domainCardColors
+import com.garrietta.haven.data.presetBadgeColors
+import com.garrietta.haven.data.tilePresetColor
+import com.garrietta.haven.data.tilePresetFor
+import com.garrietta.haven.ui.components.CARD_ICON_GROUPS
 import com.garrietta.haven.ui.components.CARD_ICON_KEYS
 import com.garrietta.haven.ui.components.CARD_ICON_OPTIONS
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.cardIconForKey
+import com.garrietta.haven.ui.components.isDarkBackdrop
+import com.garrietta.haven.ui.components.shapeForDomain
 import com.garrietta.haven.ui.components.shapeLabel
+import com.garrietta.haven.ui.components.tileBadgePair
 import com.garrietta.haven.ui.controls.PressablePillButton
+import com.garrietta.haven.ui.controls.domainIcon
+import com.garrietta.haven.ui.theme.HavenChrome
+import com.garrietta.haven.ui.theme.polygonShape
 
 /**
- * Card settings (customization round, item 2): ONE surface for
- * per-entity customization, reached from the menu rows at the
- * bottom of every popup (round 21, item 5 — the header pencil
- * and the long-press sheet are both gone). Title/rename, icon
- * picker, badge-shape picker (delegates to the existing shape
- * picker — no second shape store), and tile color from a preset
- * list only (the app palette + domain matrix colors; no free color
- * wheel). Saved choices persist in SettingsStore and apply
- * EVERYWHERE the entity appears, because every surface reads the
- * same store maps through the same resolution helpers and
- * recomposes on [HavenViewModel.bumpCardCustom].
+ * A tile's options: its name, whether it shows on Home, its color and its
+ * icon. Opened by pressing and holding a tile anywhere, or from Tile at
+ * the foot of the device's popup. A color or an icon applies the moment
+ * it is tapped, so the tile behind the sheet changes as you choose; the
+ * name is kept when the sheet closes.
  *
- * Surfaces that honor the overrides: Home room cards, Favorites
- * cards (same composables), media cards (title fallback + icon +
- * tile color; the playing track title still wins over a custom
- * title), user-tab cards (same composables since round 21, item 6),
- * EntityControlCard headers,
- * detail/panel headers (title + icon),
- * Home Status panel rows, Favorites sheet rows, Search rows (via
- * EntityControlCard), and the Round 3 vacuum block title.
- * Surfaces that cannot honor them (named, not silently skipped):
- * YAML user-tab cards with an explicit YAML name (the YAML text
- * wins), camera hero quadrants (a joined picture, not a tile),
- * group panels (Home Status group cards, Round 3 section banners —
- * not single entities), the thermostat dial (its own title row),
- * and PersonSheet (display-only).
+ * How a tile is shaped is not here: shapes and corners are fixed by kind
+ * (DESIGN.md). Choices are stored per entity in SettingsStore and apply
+ * everywhere the entity appears, because every surface resolves them
+ * through the same helpers and recomposes on
+ * [HavenViewModel.bumpCardCustom]. A color is an on-state color: it shows
+ * while the device is on, and an off tile stays quiet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardSettingsSheet(vm: HavenViewModel, entityId: String, onDismiss: () -> Unit) {
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val entity = vm.states.value[entityId]
     val store = vm.settingsStore
-    var title by remember { mutableStateOf(store.customTitles()[entityId] ?: entity?.friendlyName ?: "") }
-    var iconKey by remember {
-        mutableStateOf(customIconKeyFor(store.customIconKeys(), entityId, CARD_ICON_KEYS))
+    val custom = rememberCardCustom(vm)
+    val nameOf = rememberEntityNamer(vm)
+    val iconKey = customIconKeyFor(custom.iconKeys, entityId, CARD_ICON_KEYS)
+    val presetKey = custom.tilePresets[entityId]
+    val automaticName = entity?.let { e -> custom.titles[entityId]?.let { e.friendlyName } ?: nameOf(e) }.orEmpty()
+    var title by remember { mutableStateOf(store.customTitles()[entityId] ?: automaticName) }
+    var shownOnHome by remember { mutableStateOf(entity?.let { com.garrietta.haven.data.isShownOnHome(it, store.homeLightOverrides()) } ?: true) }
+    val keepTitle = {
+        val trimmed = title.trim()
+        val stored = if (trimmed.isEmpty() || trimmed == automaticName) null else trimmed
+        if (stored != store.customTitles()[entityId]) {
+            store.setCustomTitle(entityId, stored)
+            vm.bumpCardCustom()
+        }
     }
-    var presetKey by remember { mutableStateOf(store.customTilePresets()[entityId]) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    val close = {
+        keepTitle()
+        onDismiss()
+    }
+    fun pickIcon(key: String?) {
+        store.setCustomIconKey(entityId, key)
+        vm.bumpCardCustom()
+    }
+    fun pickColor(key: String?) {
+        store.setCustomTilePreset(entityId, key)
+        vm.bumpCardCustom()
+    }
+    val isDark = isDarkBackdrop(MaterialTheme.colorScheme.background)
+    ModalBottomSheet(onDismissRequest = close, sheetState = sheetState) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, bottom = 32.dp),
         ) {
-            Text("Card settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             if (entity != null) {
-                Text(entity.entityId, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SheetHeader(entity, title.ifBlank { automaticName }, iconKey, presetKey, isDark)
+                Spacer(Modifier.height(24.dp))
             }
-            Spacer(Modifier.height(16.dp))
-            Text("Title", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+
+            SectionTitle("Name")
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(entity?.friendlyName ?: "") },
+                placeholder = { Text(automaticName) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { keepTitle() }),
             )
+
             Spacer(Modifier.height(16.dp))
-            Text("Icon", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            CARD_ICON_OPTIONS.chunked(5).forEach { row ->
-                Row(Modifier.fillMaxWidth()) {
-                    row.forEach { option ->
-                        val selected = option.key == iconKey
-                        Box(
-                            Modifier.weight(1f).padding(4.dp).size(48.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (selected) MaterialTheme.colorScheme.primaryContainer
-                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                )
-                                .border(
-                                    width = if (selected) 2.dp else 0.dp,
-                                    color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    shape = CircleShape,
-                                )
-                                .clickable { iconKey = option.key },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(option.icon, contentDescription = option.label, modifier = Modifier.size(24.dp))
-                        }
-                    }
-                    repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            PressablePillButton(
-                onClick = { iconKey = null },
-                height = 56.dp,
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ) { Text("Use domain icon", fontWeight = FontWeight.SemiBold) }
-            Spacer(Modifier.height(16.dp))
-            Text("Badge shape", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            PressablePillButton(
-                onClick = { vm.openShapePicker(entityId, false) },
-                height = 56.dp,
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ) {
-                Text(
-                    shapeLabel(store.badgeShapeOverrides()[entityId] ?: store.globalBadgeShape) ?: "Domain default",
-                    fontWeight = FontWeight.SemiBold,
+            com.garrietta.haven.ui.components.MenuGroup {
+                com.garrietta.haven.ui.components.MenuRow(
+                    "tile-home", com.garrietta.haven.ui.theme.ExpressiveKind.SUNNY, Icons.Filled.Home, "Show on Home",
+                    if (shownOnHome) "Shown with the others of its kind" else "Hidden from Home. Settings, Hidden from Home brings it back.",
+                    onClick = null,
+                    trailing = {
+                        androidx.compose.material3.Switch(checked = shownOnHome, onCheckedChange = { on ->
+                            shownOnHome = on
+                            store.setHomeLightOverride(entityId, on)
+                            vm.bumpCardCustom()
+                        })
+                    },
+                    flat = true,
                 )
             }
-            Spacer(Modifier.height(16.dp))
-            Text("Tile color", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            TILE_PRESETS.chunked(4).forEach { row ->
-                Row(Modifier.fillMaxWidth()) {
-                    row.forEach { preset ->
-                        val selected = preset.key == presetKey
-                        Column(
-                            Modifier.weight(1f).padding(4.dp).clickable { presetKey = preset.key },
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Box(
-                                Modifier.size(48.dp).clip(CircleShape)
-                                    .background(preset.light)
-                                    .border(
-                                        width = if (selected) 2.dp else 0.dp,
-                                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                        shape = CircleShape,
-                                    ),
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(preset.label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
-                        }
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("Color")
+            Text(
+                "Shown while it is on.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            val automatic = entity?.let { domainCardColors(it, isDark)?.container }
+                ?: MaterialTheme.colorScheme.surfaceContainerHigh
+            val swatches: List<Pair<TilePreset?, Color>> =
+                listOf(null to automatic) + TILE_PRESETS.map { it to tilePresetColor(it, isDark)!! }
+            for (row in swatches.chunked(SWATCHES_PER_ROW)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((preset, color) in row) {
+                        Swatch(
+                            color = color,
+                            label = preset?.let { SWATCH_NAMES[it.key] ?: it.label } ?: "Auto",
+                            selected = presetKey == preset?.key,
+                            onClick = { pickColor(preset?.key) },
+                            modifier = Modifier.weight(1f),
+                        )
                     }
-                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                    repeat(SWATCHES_PER_ROW - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            Spacer(Modifier.height(16.dp))
+            SectionTitle("Icon")
+            Spacer(Modifier.height(12.dp))
+            if (entity != null) {
+                IconRow(listOf(IconChoice(null, "Automatic", domainIcon(entity))), iconKey, ::pickIcon)
+            }
+            for (group in CARD_ICON_GROUPS) {
+                val options = CARD_ICON_OPTIONS.filter { it.group == group }
+                if (options.isEmpty()) continue
+                Text(
+                    group,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                )
+                for (row in options.chunked(ICONS_PER_ROW)) {
+                    IconRow(row.map { IconChoice(it.key, it.label, it.icon) }, iconKey, ::pickIcon)
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            PressablePillButton(
-                onClick = { presetKey = null },
-                height = 56.dp,
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ) { Text("Default tile color", fontWeight = FontWeight.SemiBold) }
-            Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth()) {
+
+            Spacer(Modifier.height(24.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 PressablePillButton(
                     onClick = {
                         store.setCustomTitle(entityId, null)
@@ -199,27 +216,133 @@ fun CardSettingsSheet(vm: HavenViewModel, entityId: String, onDismiss: () -> Uni
                         vm.bumpCardCustom()
                         onDismiss()
                     },
-                    height = 56.dp,
+                    height = 52.dp,
                     modifier = Modifier.weight(1f),
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     contentColor = MaterialTheme.colorScheme.onSurface,
-                ) { Text("Reset", fontWeight = FontWeight.SemiBold) }
-                Spacer(Modifier.width(12.dp))
+                ) { Text("Reset", style = MaterialTheme.typography.labelLarge) }
                 PressablePillButton(
-                    onClick = {
-                        val trimmed = title.trim()
-                        store.setCustomTitle(entityId, if (trimmed.isEmpty() || trimmed == entity?.friendlyName) null else trimmed)
-                        store.setCustomIconKey(entityId, iconKey)
-                        store.setCustomTilePreset(entityId, presetKey)
-                        vm.bumpCardCustom()
-                        onDismiss()
-                    },
-                    height = 56.dp,
+                    onClick = close,
+                    height = 52.dp,
                     modifier = Modifier.weight(1f),
-                ) { Text("Save", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Done", style = MaterialTheme.typography.labelLarge) }
             }
-            Spacer(Modifier.height(32.dp))
         }
+    }
+}
+
+private const val SWATCHES_PER_ROW = 5
+
+/** The swatches go by their color's name; the preset labels say what each color is for. */
+private val SWATCH_NAMES = mapOf(
+    "heating" to "Coral",
+    "cooling" to "Blue",
+    "lock" to "Indigo",
+    "alert" to "Red",
+    "media" to "Lavender",
+    "sage" to "Sage",
+)
+private const val ICONS_PER_ROW = 5
+private val CHOICE_SIZE: Dp = 52.dp
+
+/** The tile's badge as it will look while on, beside its name. */
+@Composable
+private fun SheetHeader(entity: HaEntity, name: String, iconKey: String?, presetKey: String?, isDark: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val preset = presetKey?.let { key -> TILE_PRESETS.firstOrNull { it.key == key } }
+    val (badgeBg, badgeGlyph) = preset?.let { presetBadgeColors(it, isDark) }
+        ?: tileBadgePair(emptyMap(), emptyMap(), entity, isDark, scheme, accentFor(entity.entityId))
+    val shape = polygonShape(shapeForDomain(entity.domain))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(64.dp).background(badgeBg, shape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(cardIconForKey(iconKey) ?: domainIcon(entity), contentDescription = null, tint = badgeGlyph, modifier = Modifier.size(30.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.titleLarge, color = scheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(com.garrietta.haven.data.tileState(entity), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/**
+ * One color to choose. The chosen one sits in the lime capsule, the
+ * app's sign for "this one", with a check on the color itself.
+ */
+@Composable
+private fun Swatch(color: Color, label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(MaterialTheme.shapes.large)
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .semantics { this.selected = selected; contentDescription = label }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(CHOICE_SIZE).background(if (selected) HavenChrome.capsule else Color.Transparent, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier.size(if (selected) CHOICE_SIZE - 12.dp else CHOICE_SIZE - 4.dp).background(color, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    // The swatches are pastel by day and deep by night, as onSurface is the other way round.
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
+private data class IconChoice(val key: String?, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+
+/** A row of icons to choose, each with its name under it; the chosen one is the lime capsule. */
+@Composable
+private fun IconRow(choices: List<IconChoice>, chosen: String?, onPick: (String?) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (choice in choices) {
+            val selected = choice.key == chosen
+            Column(
+                Modifier.weight(1f)
+                    .clip(MaterialTheme.shapes.large)
+                    .clickable(role = Role.RadioButton) { onPick(choice.key) }
+                    .semantics { this.selected = selected; contentDescription = choice.label }
+                    .padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.size(CHOICE_SIZE).background(
+                        if (selected) HavenChrome.capsule else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        CircleShape,
+                    ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        choice.icon,
+                        contentDescription = null,
+                        tint = if (selected) HavenChrome.onCapsule else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    choice.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        repeat(ICONS_PER_ROW - choices.size) { Spacer(Modifier.weight(1f)) }
     }
 }
 
@@ -247,5 +370,33 @@ fun rememberCardCustom(vm: HavenViewModel): CardCustomSnapshot {
     val store = vm.settingsStore
     return remember(version) {
         CardCustomSnapshot(store.customTitles(), store.customIconKeys(), store.customTilePresets(), store.domainTilePresets())
+    }
+}
+
+/**
+ * The name a device goes by everywhere in Haven: the owner's own name for
+ * its tile if there is one, else the name built from its device
+ * ([deviceDisplayName]: "Garage Door", not "Smart Garage Door Opener
+ * Garage Door"), with a camera's feed words taken off. Tiles, sheets,
+ * popups, status cards and the Climate tab all call this, so a device
+ * has one name on every screen.
+ */
+@Composable
+fun rememberEntityNamer(vm: HavenViewModel): (com.garrietta.haven.data.HaEntity) -> String {
+    val custom = rememberCardCustom(vm)
+    val entityDevices by vm.entityDevices.collectAsState()
+    val deviceInfo by vm.deviceInfo.collectAsState()
+    return remember(custom, entityDevices, deviceInfo) {
+        { entity ->
+            custom.titles[entity.entityId]?.trim()?.takeIf { it.isNotEmpty() } ?: when (entity.domain) {
+                // A reading is named for its device and what it reads
+                // ("Front Door Motion"): its part alone would say nothing.
+                "sensor", "binary_sensor", "event", "button" -> entity.friendlyName
+                else -> {
+                    val base = if (entity.domain == "camera") com.garrietta.haven.data.displayCameraName(entity) else entity.friendlyName
+                    com.garrietta.haven.data.deviceDisplayName(base, deviceInfo[entityDevices[entity.entityId]]?.name)
+                }
+            }
+        }
     }
 }

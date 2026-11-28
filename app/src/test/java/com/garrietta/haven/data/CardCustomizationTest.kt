@@ -1,10 +1,12 @@
 package com.garrietta.haven.data
 
-import androidx.compose.ui.graphics.Color
+import com.garrietta.haven.ui.theme.StateFamily
+import com.garrietta.haven.ui.theme.colors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.garrietta.haven.ui.components.contrastRatio
 
 class CardCustomizationTest {
 
@@ -26,25 +28,25 @@ class CardCustomizationTest {
     @Test
     fun tilePresetResolvesBothThemesAndUnknownReadsAsDefault() {
         val preset = tilePresetFor(mapOf("light.lamp" to "media"), "light.lamp")
-        assertEquals(Color(0xFFEFCEFF), tilePresetColor(preset, false))
-        assertEquals(Color(0xFF3B2554), tilePresetColor(preset, true))
+        assertEquals(StateFamily.Media.colors(false).container, tilePresetColor(preset, false))
+        assertEquals(StateFamily.Media.colors(true).container, tilePresetColor(preset, true))
         assertNull(tilePresetFor(mapOf("light.lamp" to "nope"), "light.lamp"))
         assertNull(tilePresetColor(null, false))
     }
 
+    // A domain default covers every entity of that domain (a
+    // socket-named lamp is still a light); a per-entity preset wins
+    // over it; an unknown domain or key reads as default.
     @Test
     fun tilePresetDomainDefaultAppliesButPerEntityWins() {
-        // Feedback round 15, item 5: a domain default covers every
-        // entity of that domain (a socket-named lamp is still a
-        // light); a per-entity preset still wins over it; an
-        // unknown domain or an unknown key reads as default.
         val domainPresets = mapOf("light" to "amber")
         val lamp = tilePresetFor(emptyMap(), "light.lamp_socket_1", domainPresets, "light")
-        assertEquals(Color(0xFFFFE082), tilePresetColor(lamp, false))
+        assertEquals("amber", lamp?.key)
+        assertEquals(StateFamily.Power.colors(false).container, tilePresetColor(lamp, false))
         val overridden = tilePresetFor(
             mapOf("light.lamp_socket_1" to "media"), "light.lamp_socket_1", domainPresets, "light",
         )
-        assertEquals(Color(0xFFEFCEFF), tilePresetColor(overridden, false))
+        assertEquals("media", overridden?.key)
         assertNull(tilePresetFor(emptyMap(), "switch.x", domainPresets, "switch"))
         assertNull(tilePresetFor(emptyMap(), "light.lamp", domainPresets, null))
         assertNull(tilePresetFor(emptyMap(), "light.lamp", mapOf("light" to "nope"), "light"))
@@ -62,35 +64,39 @@ class CardCustomizationTest {
         assertTrue(TILE_PRESETS.all { it.light != it.dark })
     }
 
-    // Feedback round, item 5 + feedback round 4, item 3:
-    // preset-driven badge tints — dark near-black badge, hue
-    // preserved, contrast held for every preset in both themes.
-    // Light glyph = the preset's pastel container (matching the
-    // switch thumb); dark glyph keeps the bright 0.72-lightness
-    // tint (a dark container glyph would fail on the badge).
+    // A pinned tile's badge is its own family's accent pair: a yellow
+    // tile gets a yellow-tinted badge, never the default green. By day
+    // the icon is the tile's own pastel; either way it is readable.
     @Test
-    fun presetBadgeIsDarkTintWithPastelGlyphLightAndBrightGlyphDark() {
+    fun presetBadgeIsThePresetFamilysOwnAccentPair() {
         for (preset in TILE_PRESETS) {
             for (isDark in listOf(false, true)) {
-                val base = if (isDark) preset.dark else preset.light
+                val family = preset.family.colors(isDark)
                 val (bg, glyph) = presetBadgeColors(preset, isDark)
-                val (bh, _, bv) = rgbToHsv(bg.red, bg.green, bg.blue)
-                val (gh, gs, gl) = rgbToHsl(glyph.red, glyph.green, glyph.blue)
-                val (ph, _, _) = rgbToHsv(base.red, base.green, base.blue)
-                assertTrue("badge dark for ${preset.key} dark=$isDark, v=$bv", bv <= 0.2f)
-                if (isDark) {
-                    assertTrue("glyph bright tint for ${preset.key} dark, s=$gs l=$gl", gs >= 0.9f && gl in 0.65f..0.8f)
-                } else {
-                    assertEquals("glyph is the pastel container for ${preset.key} light", base, glyph)
-                }
+                assertEquals("badge for ${preset.key} dark=$isDark", family.accent, bg)
+                assertEquals("icon for ${preset.key} dark=$isDark", family.onAccent, glyph)
+                if (!isDark) assertEquals("icon is the tile's pastel for ${preset.key}", preset.light, glyph)
                 assertTrue(
-                    "glyph contrast for ${preset.key} dark=$isDark",
+                    "icon contrast for ${preset.key} dark=$isDark",
                     contrastRatio(glyph, bg) >= 4.5,
                 )
-                assertTrue("badge hue preserved for ${preset.key}", hueDistance(bh, ph) <= 12f)
-                assertTrue("glyph hue preserved for ${preset.key}", hueDistance(gh, ph) <= 12f)
             }
         }
+    }
+
+    // The stored keys are the user's saved choices: each must keep
+    // meaning the family it was saved as.
+    @Test
+    fun presetKeysKeepTheirFamilies() {
+        val families = TILE_PRESETS.associate { it.key to it.family }
+        assertEquals(
+            mapOf(
+                "lime" to StateFamily.On, "heating" to StateFamily.Heat, "cooling" to StateFamily.Cool,
+                "lock" to StateFamily.Secure, "alert" to StateFamily.Alert, "media" to StateFamily.Media,
+                "amber" to StateFamily.Power, "sage" to StateFamily.Quiet,
+            ),
+            families,
+        )
     }
 
     // Feedback round 4, item 2: detail/sheet/traveler badges use
@@ -161,14 +167,16 @@ class CardCustomizationTest {
     }
 
     @Test
-    fun amberPresetReadsAmberOnYellowTintedNearBlack() {
+    fun amberPresetBadgeIsYellowTintedNotGreen() {
         val amber = TILE_PRESETS.first { it.key == "amber" }
-        val (bg, glyph) = presetBadgeColors(amber, false)
-        val (bh, _, _) = rgbToHsv(bg.red, bg.green, bg.blue)
-        val (gh, _, _) = rgbToHsv(glyph.red, glyph.green, glyph.blue)
-        // Yellow hue ~45°; both land in the amber/gold band.
-        assertTrue("badge hue $bh", bh in 35f..55f)
-        assertTrue("glyph hue $gh", gh in 35f..55f)
+        val lime = TILE_PRESETS.first { it.key == "lime" }
+        for (isDark in listOf(false, true)) {
+            val (bg, glyph) = presetBadgeColors(amber, isDark)
+            // More red than blue in both badge and icon: the yellow family.
+            assertTrue("badge is warm, dark=$isDark", bg.red > bg.blue)
+            assertTrue("icon is warm, dark=$isDark", glyph.red > glyph.blue)
+            assertTrue("not the lime pair", presetBadgeColors(lime, isDark).first != bg)
+        }
     }
 
     // Feedback round 2, item 1: the preset is an ON-state color —
@@ -205,84 +213,51 @@ class CardCustomizationTest {
         assertTrue(!presetAppliesForState("media_player", ""))
     }
 
-    // Feedback round 2, item 2: the switch follows the preset —
-    // checked track = preset badge bg, checked thumb = preset
-    // container; unchecked = the matrix inactive pair.
+    // A pinned tile's switch: checked is the preset's badge tone with
+    // the tile's own color as the thumb; unchecked is the shared
+    // resting pair.
     @Test
     fun presetSwitchColorsFollowPresetWhenChecked() {
         val lime = TILE_PRESETS.first { it.key == "lime" }
-        val colors = presetSwitchColors(lime, false)
-        val (badgeBg, _) = presetBadgeColors(lime, false)
-        assertEquals(badgeBg, colors.trackChecked)
-        assertEquals(Color(0xFFC8F5A6), colors.thumbChecked)
-        assertEquals(Color(0xFF52564E), colors.trackUnchecked)
-        assertEquals(Color.White, colors.thumbUnchecked)
-        val dark = presetSwitchColors(lime, true)
-        assertEquals(Color(0xFF8C9188), dark.trackUnchecked)
-        assertEquals(Color(0xFF9E9E9E), dark.thumbUnchecked)
+        for (isDark in listOf(false, true)) {
+            val colors = presetSwitchColors(lime, isDark)
+            val (badgeBg, _) = presetBadgeColors(lime, isDark)
+            assertEquals(badgeBg, colors.trackChecked)
+            assertEquals(tilePresetColor(lime, isDark), colors.thumbChecked)
+            assertEquals(restingSwitchTrack(isDark), colors.trackUnchecked)
+            assertEquals(restingSwitchThumb(isDark), colors.thumbUnchecked)
+        }
     }
 
-    // Feedback round 3, item 4 (video a3): the Home Status panel
-    // MUST match the home page for custom colors. Verified in code
-    // (not assumed): HomeStatusPanelScreen renders the SAME
-    // HomeRoomCard composable as the home page, reading the SAME
-    // SettingsStore maps through the SAME rememberCardCustom
-    // snapshot, for the SAME entity IDs — there is no panel-only
-    // color path to diverge. This test pins the shared resolution
-    // for the panel's exact inputs (both lamps on, Lamp lime,
-    // Standing Lamp amber, light theme): container + badge +
-    // switch all resolve from the assigned preset on either
-    // surface, because both surfaces call these same functions.
-    // (A panel that showed matrix lime for the amber lamp while
-    // home showed amber cannot come from this resolution — the
-    // store read at panel-open time lacked the amber entry, e.g.
-    // presets lost on a reinstall; re-assigning once restores
-    // every surface, since the store is global by entity ID.)
+    // The Home Status panel draws the same HomeRoomCard as Home and
+    // reads the same stored presets, so a pinned color cannot differ
+    // between the two. This pins that shared resolution for the
+    // panel's inputs: container, badge and switch all come from the
+    // assigned preset.
     @Test
     fun panelInputsResolveSamePresetColorsAsHome() {
         val presets = mapOf(
             "light.lamp_socket_1" to "lime",
             "light.standing_lamp_socket_1" to "amber",
         )
-        for ((entityId, key, container) in listOf(
-            Triple("light.lamp_socket_1", "lime", Color(0xFFC8F5A6)),
-            Triple("light.standing_lamp_socket_1", "amber", Color(0xFFFFE082)),
+        for ((entityId, key, family) in listOf(
+            Triple("light.lamp_socket_1", "lime", StateFamily.On),
+            Triple("light.standing_lamp_socket_1", "amber", StateFamily.Power),
         )) {
+            val expected = family.colors(isDark = false)
             val preset = tilePresetFor(presets, entityId)
             assertEquals("preset key for $entityId", key, preset?.key)
             assertTrue("preset applies while on for $entityId", presetAppliesForState("light", "on"))
-            assertEquals("container for $entityId", container, tilePresetColor(preset, false))
+            assertEquals("container for $entityId", expected.container, tilePresetColor(preset, false))
             val (bg, glyph) = presetBadgeColors(preset!!, false)
-            val (bh, _, bv) = rgbToHsv(bg.red, bg.green, bg.blue)
-            val (gh, _, _) = rgbToHsv(glyph.red, glyph.green, glyph.blue)
-            val (ph, _, _) = rgbToHsv(container.red, container.green, container.blue)
-            assertTrue("badge dark for $entityId", bv <= 0.2f)
-            assertTrue("badge hue matches preset for $entityId", hueDistance(bh, ph) <= 12f)
-            assertTrue("glyph hue matches preset for $entityId", hueDistance(gh, ph) <= 12f)
+            assertEquals("badge for $entityId", expected.accent, bg)
+            assertEquals("icon for $entityId", expected.onAccent, glyph)
             val switch = presetSwitchColors(preset, false)
             assertEquals("switch track follows preset badge for $entityId", bg, switch.trackChecked)
-            assertEquals("switch thumb follows preset container for $entityId", container, switch.thumbChecked)
+            assertEquals("switch thumb follows preset container for $entityId", expected.container, switch.thumbChecked)
         }
-        // And the off-state gate is identical too: a preset card
-        // that is off renders inactive gray on both surfaces.
+        // The off-state gate is the same too: a pinned tile that is off
+        // rests like any other on both surfaces.
         assertTrue(!presetAppliesForState("light", "off"))
-    }
-
-    private fun luminance(c: Color): Double {
-        fun lin(v: Float): Double {
-            val s = v.toDouble()
-            return if (s <= 0.03928) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * lin(c.red) + 0.7152 * lin(c.green) + 0.0722 * lin(c.blue)
-    }
-
-    private fun contrastRatio(a: Color, b: Color): Double {
-        val (l1, l2) = listOf(luminance(a), luminance(b)).sortedDescending()
-        return (l1 + 0.05) / (l2 + 0.05)
-    }
-
-    private fun hueDistance(a: Float, b: Float): Float {
-        val d = kotlin.math.abs(a - b) % 360f
-        return minOf(d, 360f - d)
     }
 }

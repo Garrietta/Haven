@@ -1,55 +1,91 @@
 package com.garrietta.haven.ui.screens
-import androidx.compose.foundation.layout.PaddingValues
 
+import com.garrietta.haven.ui.components.holdToReorder
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.garrietta.haven.DetailTopBar
 import com.garrietta.haven.HavenViewModel
 import com.garrietta.haven.Screen
 import com.garrietta.haven.data.HaEntity
+import com.garrietta.haven.data.UserTab
+import com.garrietta.haven.data.cardType
+import com.garrietta.haven.data.parseCardYaml
+import com.garrietta.haven.ui.components.ColumnReorderHandle
+import com.garrietta.haven.ui.components.LocalWideLayout
+import com.garrietta.haven.ui.components.NavStyle
+import com.garrietta.haven.ui.components.ScreenTitle
+import com.garrietta.haven.ui.components.SectionTitle
+import com.garrietta.haven.ui.components.TAB_ICON_OPTIONS
+import com.garrietta.haven.ui.components.accentFor
+import com.garrietta.haven.ui.components.choiceChipColors
+import com.garrietta.haven.ui.components.columnReorderRow
 import com.garrietta.haven.ui.components.generalCardShape
+import com.garrietta.haven.ui.components.rememberColumnReorder
+import com.garrietta.haven.ui.controls.DialogActionButtons
 import com.garrietta.haven.ui.controls.EntityControlCard
 import com.garrietta.haven.ui.controls.stateText
 import org.json.JSONArray
@@ -85,7 +121,7 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Boards", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+            ScreenTitle("Boards", Modifier.weight(1f))
             OutlinedButton(onClick = { vm.client.refreshLovelace() }) { Text("Refresh") }
             Spacer(Modifier.width(8.dp))
             if (config != null) {
@@ -105,12 +141,14 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val currentPath = vm.client.lovelaceUrlPath
                 FilterChip(
+                    colors = choiceChipColors(),
                     selected = currentPath == null,
                     onClick = { vm.selectDashboard(null) },
                     label = { Text("Default") },
                 )
                 for (d in dashboards) {
                     FilterChip(
+                        colors = choiceChipColors(),
                         selected = d.urlPath != null && d.urlPath == currentPath,
                         onClick = { vm.selectDashboard(d.urlPath) },
                         label = { Text(d.title ?: d.urlPath ?: "Dashboard") },
@@ -146,6 +184,7 @@ fun DashboardsScreen(vm: HavenViewModel, navigate: (Screen) -> Unit) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((i, view) in views.withIndex()) {
                 FilterChip(
+                    colors = choiceChipColors(),
                     selected = i == safeSelected,
                     onClick = { selected = i },
                     label = { Text(view.title.ifEmpty { "View ${i + 1}" }) },
@@ -362,11 +401,12 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
             return@Column
         }
         val safeSelected = selected.coerceIn(views.indices)
-        Text("Views", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        SectionTitle("Views")
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((i, view) in views.withIndex()) {
                 FilterChip(
+                    colors = choiceChipColors(),
                     selected = i == safeSelected,
                     onClick = { selected = i },
                     label = { Text(view.optString("title").ifEmpty { "View ${i + 1}" }) },
@@ -396,9 +436,14 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
             selected = 0
         }) { Text("Remove this view") }
         Spacer(Modifier.height(16.dp))
-        Text("Cards in this view", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        SectionTitle("Cards in this view")
         Spacer(Modifier.height(8.dp))
         val cards = views[safeSelected].optJSONArray("cards") ?: JSONArray()
+        // Hold a card anywhere (or take it by its grip) and drag it; the
+        // order is written when the finger lifts.
+        val cardReorder = com.garrietta.haven.ui.components.rememberColumnReorder(cards.length()) { from, to ->
+            vm.moveCard(safeSelected, from, to)
+        }
         LazyColumn(
             Modifier.weight(1f),
             contentPadding = PaddingValues(bottom = 16.dp),
@@ -406,28 +451,36 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
             for (i in 0 until cards.length()) {
                 val card = cards.optJSONObject(i) ?: continue
                 item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .columnReorderRow(cardReorder, i)
+                            .background(MaterialTheme.colorScheme.background)
+                            .holdToReorder(cardReorder, i)
+                            .padding(vertical = 2.dp),
+                    ) {
+                        com.garrietta.haven.ui.components.ColumnReorderHandle(
+                            cardReorder, i,
+                            label = card.optString("type"),
+                            onStep = { delta -> vm.moveCard(safeSelected, i, i + delta) },
+                            modifier = Modifier.size(40.dp).padding(8.dp),
+                        )
                         Column(Modifier.weight(1f)) {
-                            Text(card.optString("type"), fontWeight = FontWeight.SemiBold)
+                            Text(card.optString("type"), style = MaterialTheme.typography.titleSmall)
+                            // Always two lines, so every row is the same height and a
+                            // drag moves one card per row passed.
                             val summary = card.optString("entity").ifEmpty { card.optString("content").take(40) }
-                            if (summary.isNotEmpty()) Text(summary, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        IconButton(onClick = { vm.moveCard(safeSelected, i, i - 1) }) {
-                            Icon(Icons.Filled.ArrowUpward, contentDescription = "Move up")
-                        }
-                        IconButton(onClick = { vm.moveCard(safeSelected, i, i + 1) }) {
-                            Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down")
+                            Text(summary.ifEmpty { " " }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton(onClick = { vm.removeCard(safeSelected, i) }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Remove")
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
                 }
             }
             item {
                 Spacer(Modifier.height(12.dp))
-                Text("Add a card", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                SectionTitle("Add a card")
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box {
@@ -492,6 +545,104 @@ fun DashboardEditScreen(vm: HavenViewModel, onBack: () -> Unit) {
                     Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+/**
+ * One list of cards that flows across the full width on wide
+ * (unfolded) layouts (Round 6: GridCells.Adaptive at 220dp minimum,
+ * replacing the old fixed 2-column / 3-on-Expanded grid, which
+ * capped dashboard category screens to a narrow strip and left a
+ * stranded single tile on 5-card tabs). Boards and tab screens
+ * share it so wide mode is consistent; the per-card renderer
+ * (including broken-YAML handling) is the caller's.
+ */
+@Composable
+fun <T> AdaptiveCardList(items: List<T>, render: @Composable (T) -> Unit) {
+    if (LocalWideLayout.current) {
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 220.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 16.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(items.size) { i -> render(items[i]) }
+        }
+    } else {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 16.dp),
+        ) {
+            for (item in items) {
+                item {
+                    render(item)
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+            item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+/**
+ * Gauge card (new renderer type): a 270-degree arc plus a big number. Bounds
+ * come from the card (min/max) or the entity's attributes, defaulting to
+ * 0–100; a non-numeric entity gets an honest note instead of a broken arc.
+ */
+@Composable
+fun GaugeCard(card: JSONObject, entity: HaEntity) {
+    val name = card.optString("name").ifEmpty { entity.friendlyName }
+    val value = entity.state.toDoubleOrNull()
+    val min = if (card.has("min")) card.optDouble("min") else entity.attrDouble("min") ?: 0.0
+    val max = if (card.has("max")) card.optDouble("max") else entity.attrDouble("max") ?: 100.0
+    val unit = card.optString("unit").ifEmpty { entity.attrString("unit_of_measurement") ?: "" }
+    Card(
+        shape = generalCardShape(0),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(name, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth())
+            if (value == null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Gauge needs a numeric entity — this one reports \"${entity.state}\".",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                val frac = if (max > min) ((value - min) / (max - min)).coerceIn(0.0, 1.0).toFloat() else 0f
+                val accent = accentFor(entity.entityId)
+                val track = MaterialTheme.colorScheme.surfaceVariant
+                Spacer(Modifier.height(8.dp))
+                Canvas(Modifier.size(160.dp)) {
+                    val stroke = 14.dp.toPx()
+                    drawArc(
+                        color = track,
+                        startAngle = 135f,
+                        sweepAngle = 270f,
+                        useCenter = false,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                    drawArc(
+                        color = accent,
+                        startAngle = 135f,
+                        sweepAngle = 270f * frac,
+                        useCenter = false,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                }
+                Text(
+                    "$value $unit".trim(),
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }

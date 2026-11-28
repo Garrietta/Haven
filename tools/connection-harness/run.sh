@@ -22,7 +22,7 @@ OUT="$(mktemp -d)"
 CO="$KOTLINC/lib/kotlinx-coroutines-core-jvm.jar"
 "$KOTLINC/bin/kotlinc" -jvm-target 17 -cp "$CO:$JSON_JAR" -d "$OUT/main" \
   "$HERE"/stubs/*.kt \
-  "$D/HaClient.kt" "$D/ConnectionPlanner.kt" "$D/TokenExchange.kt" "$D/Round16Logic.kt" \
+  "$D/HaClient.kt" "$D/ConnectionPlanner.kt" "$D/TokenExchange.kt" "$D/ConnectionTargets.kt" "$D/HaJson.kt" \
   "$D/Models.kt" "$D/CameraStream.kt" "$D/DeviceSearch.kt" "$D/HomePrefs.kt" \
   "$D/NotificationRules.kt" "$D/OptimisticStateGuard.kt"
 "$KOTLINC/bin/kotlinc" -jvm-target 17 -cp "$OUT/main:$CO:$JSON_JAR:$JUNIT_CP" -d "$OUT/test" \

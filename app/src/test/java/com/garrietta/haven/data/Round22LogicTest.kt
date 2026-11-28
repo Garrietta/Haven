@@ -1,7 +1,6 @@
 package com.garrietta.haven.data
 
 import com.garrietta.haven.Screen
-import com.garrietta.haven.ui.components.pillBarItems
 import com.garrietta.haven.ui.components.railSelectedIndexWithFallback
 import com.garrietta.haven.ui.components.scrollVisibilityAfter
 import com.garrietta.haven.ui.components.topMorphSourceId
@@ -59,7 +58,7 @@ class Round22LogicTest {
             "sensor.5179_2551_temperature", "56.48",
             mapOf("unit_of_measurement" to "°F"),
         )
-        assertEquals("56.48 °F", sensor.stateText())
+        assertEquals("56.5 °F", sensor.stateText())
     }
 
     @Test
@@ -69,36 +68,14 @@ class Round22LogicTest {
         assertEquals("Unavailable", lamp.dialogHeaderState())
     }
 
-    // Item 6: the rail capsule never disappears.
-    @Test
-    fun railFallbackKeepsOnTabIndex() {
-        val bar = pillBarItems(showScenes = true, showEnergy = true)
-        assertEquals(2, railSelectedIndexWithFallback(2, Screen.Today, bar))
-    }
-
-    @Test
-    fun railFallbackUsesLastTabScreenWhenOffTab() {
-        val bar = pillBarItems(showScenes = true, showEnergy = true)
-        // Settings is last in the default bar (index 3).
-        assertEquals(3, railSelectedIndexWithFallback(null, Screen.Settings, bar))
-    }
-
-    @Test
-    fun railFallbackFallsToHomeWhenLastTabLeftTheBar() {
-        val bar = pillBarItems(showScenes = false, showEnergy = false)
-        // Scenes is not in this bar; Home (index 0) is the fallback.
-        assertEquals(0, railSelectedIndexWithFallback(null, Screen.Scenes, bar))
-    }
-
     // Item 3: the camera dialog is the last morph-source fallback.
     @Test
     fun topMorphSourceIdCameraFallback() {
-        assertEquals("camera.x", topMorphSourceId(null, null, null, "camera.x"))
-        assertEquals("panel", topMorphSourceId("panel", null, null, "camera.x"))
-        assertEquals("detail", topMorphSourceId(null, "detail", null, "camera.x"))
-        assertEquals("popout", topMorphSourceId(null, null, "popout", "camera.x"))
-        assertNull(topMorphSourceId(null, null, null, null))
+        assertEquals("camera.x", topMorphSourceId(null, null, "camera.x"))
+        assertEquals("panel", topMorphSourceId("panel", null, "camera.x"))
+        assertEquals("detail", topMorphSourceId(null, "detail", "camera.x"))
         assertNull(topMorphSourceId(null, null, null))
+        assertNull(topMorphSourceId(null, null))
     }
 
     // Item 5: the at-top leftover (onPostScroll) follows the same

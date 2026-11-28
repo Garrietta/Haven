@@ -7,12 +7,16 @@ import com.garrietta.haven.ui.components.SensorKind
 import com.garrietta.haven.ui.components.chartLineColor
 import com.garrietta.haven.ui.components.resolveLandingShape
 import com.garrietta.haven.ui.components.sensorKind
-import com.garrietta.haven.ui.screens.toggleEntitySelection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.garrietta.haven.ui.theme.StateFamily
+import com.garrietta.haven.ui.theme.signal
+import com.garrietta.haven.ui.components.contrastRatio
+import com.garrietta.haven.ui.theme.havenLightColorScheme
+import com.garrietta.haven.ui.theme.havenDarkColorScheme
 
 /**
  * Feedback round 20: the shape-stability landing rule, the
@@ -60,32 +64,25 @@ class Round20LogicTest {
     }
 
     @Test
-    fun temperatureLineIsBadgeRedOnBothThemes() {
-        val red = Color(0xFFEF5350)
-        assertEquals(red, chartLineColor(SensorKind.TEMPERATURE, isDark = true))
-        assertEquals(red, chartLineColor(SensorKind.TEMPERATURE, isDark = false))
+    fun aChartLineIsItsMeasurementsFamilySignal() {
+        // Keyed by what is measured, never by which entity: two
+        // temperature sensors always draw the same line.
+        for (isDark in listOf(false, true)) {
+            assertEquals(StateFamily.Heat.signal(isDark), chartLineColor(SensorKind.TEMPERATURE, isDark))
+            assertEquals(StateFamily.Water.signal(isDark), chartLineColor(SensorKind.HUMIDITY, isDark))
+            assertEquals(StateFamily.Power.signal(isDark), chartLineColor(SensorKind.POWER, isDark))
+            assertEquals(StateFamily.On.signal(isDark), chartLineColor(SensorKind.BATTERY, isDark))
+            assertEquals(StateFamily.Caution.signal(isDark), chartLineColor(SensorKind.LIGHT, isDark))
+            assertEquals(StateFamily.Cool.signal(isDark), chartLineColor(SensorKind.PRESSURE, isDark))
+        }
     }
 
     @Test
-    fun humidityLineIsBadgeSkyOnBothThemes() {
-        val sky = Color(0xFF29B6F6)
-        assertEquals(sky, chartLineColor(SensorKind.HUMIDITY, isDark = true))
-        assertEquals(sky, chartLineColor(SensorKind.HUMIDITY, isDark = false))
-    }
-
-    @Test
-    fun matrixRowsGiveOneColorPerMeasurement() {
-        // Power, battery, light, pressure: one color each, never
-        // per entity — and the dark/light pair comes from the
-        // same matrix row's badge tones.
-        assertEquals(Color(0xFFFFE082), chartLineColor(SensorKind.POWER, isDark = true))
-        assertEquals(Color(0xFF261900), chartLineColor(SensorKind.POWER, isDark = false))
-        assertEquals(Color(0xFFA6F285), chartLineColor(SensorKind.BATTERY, isDark = true))
-        assertEquals(Color(0xFF143800), chartLineColor(SensorKind.BATTERY, isDark = false))
-        assertEquals(Color(0xFFB8F397), chartLineColor(SensorKind.LIGHT, isDark = true))
-        assertEquals(Color(0xFF1B3708), chartLineColor(SensorKind.LIGHT, isDark = false))
-        assertEquals(Color(0xFFA5C8FF), chartLineColor(SensorKind.PRESSURE, isDark = true))
-        assertEquals(Color(0xFF001C3A), chartLineColor(SensorKind.PRESSURE, isDark = false))
+    fun aChartLineReadsOnThePageInBothThemes() {
+        for (kind in SensorKind.entries) {
+            assertTrue(contrastRatio(chartLineColor(kind, isDark = false), havenLightColorScheme().background) >= 3f)
+            assertTrue(contrastRatio(chartLineColor(kind, isDark = true), havenDarkColorScheme().background) >= 3f)
+        }
     }
 
     @Test
@@ -100,30 +97,6 @@ class Round20LogicTest {
     fun differentMeasurementsGetDifferentLines() {
         val colors = SensorKind.values().map { chartLineColor(it, isDark = true) }.toSet()
         assertEquals(SensorKind.values().size, colors.size)
-    }
-
-    // Item 4: selection survives filtering (it lives outside the
-    // filtered list) and toggling never disturbs other members.
-    @Test
-    fun toggleAddsAndRemoves() {
-        assertEquals(setOf("sensor.a"), toggleEntitySelection(emptySet<String>(), "sensor.a"))
-        assertEquals(emptySet<String>(), toggleEntitySelection(setOf("sensor.a"), "sensor.a"))
-    }
-
-    @Test
-    fun togglePreservesOtherMembers() {
-        val selected = setOf("sensor.a", "sensor.b")
-        assertEquals(setOf("sensor.a", "sensor.b", "sensor.c"), toggleEntitySelection(selected, "sensor.c"))
-        assertEquals(setOf("sensor.b"), toggleEntitySelection(selected, "sensor.a"))
-    }
-
-    @Test
-    fun doubleToggleIsIdentity() {
-        val selected = setOf("sensor.a", "sensor.b")
-        assertEquals(
-            selected,
-            toggleEntitySelection(toggleEntitySelection(selected, "sensor.c"), "sensor.c"),
-        )
     }
 
     // Item 5: drag-vector snap.

@@ -14,7 +14,12 @@ package com.garrietta.haven.data
  * sensor, and auto-off-at sensor, not a master switch HA never
  * exposed).
  */
-data class HaDeviceInfo(val name: String, val model: String?, val manufacturer: String?)
+/**
+ * What the device registry says about a device. [service] is true for an
+ * entry Home Assistant marks as a service rather than hardware: an
+ * integration, an add-on, a theme.
+ */
+data class HaDeviceInfo(val name: String, val model: String?, val manufacturer: String?, val service: Boolean = false)
 
 /**
  * Feedback round 17, item 4: a device subtitle is only shown

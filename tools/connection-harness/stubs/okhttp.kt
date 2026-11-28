@@ -24,6 +24,7 @@ class Request(val url: String, val headers: Map<String, String>) {
         fun url(url: String): Builder { require(url.startsWith("http") || url.startsWith("ws")) { "bad url" }; u = url; return this }
         fun header(name: String, value: String): Builder { h[name] = value; return this }
         fun post(body: RequestBody): Builder = this
+        fun method(method: String, body: RequestBody?): Builder = this
         fun build(): Request = Request(u, h.toMap())
     }
 }
