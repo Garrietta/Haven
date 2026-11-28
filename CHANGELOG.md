@@ -1,5 +1,28 @@
 # Haven Changelog
 
+## Performance round (2026-11-28 — cameras as fast as Home Assistant, instant controls)
+
+Measured against the live instance from a headless browser running the exact signalling Haven now uses: Tapo 1 first frame **0.41 s** (1080p), Tapo 2 **1.76 s**, Front Door (Ring) **2.86 s and genuinely live** — previously the MJPEG proxy took several seconds and Ring could only show its last recording. Needs a device pass.
+
+**Cameras**
+1. **WebRTC, done the way HA's frontend does it** (`data/HaWebRtc.kt`, `HaWebRtcSession`): `camera/webrtc/get_client_config` ICE servers; offer sent immediately (the old session waited for ICE gathering to complete — seconds of dead time); `session` / `answer` / `candidate` / `error` subscription events; local candidates sent as RTCIceCandidateInit objects (the old code sent bare strings, which current HA rejects, and never captured the session id); the 40–60 server candidates go2rtc trickles after the answer are applied (the old code dropped them, so ICE could not complete); close = `unsubscribe_events`, which ends the provider session.
+2. **Capability routing for every camera**: `camera/capabilities` (`frontend_stream_types`) picks WebRTC → HLS → MJPEG, exactly HA's order. Ring now goes live over WebRTC through the core integration; the recording label appears only if the viewer really falls back to the proxy.
+3. **Front Door without ring-mqtt**: when ring-mqtt's camera/switch are absent (the container is paused on the instance), the panel uses the capability-routed body instead of an attempt chain against entities that no longer exist; the live-stream switch is only toggled when it exists (calling a missing entity raised a service-error banner).
+4. **Native-crash safety net** (`WebRtcCrashGuard`): an "attempt in flight" flag around negotiation; two process deaths mid-negotiation on one app version disable WebRTC for that version and cameras use HLS. Replaces the Round 7 hard gate.
+5. **Instant poster**: the last snapshot shows at full brightness with a small "Connecting…" pill until video lands (was a 25 %-dimmed frame behind "Loading camera…").
+6. **MJPEG parser rewritten**: one growable byte array scanned in place (was a boxed `ArrayDeque<Byte>` copied in full on every extraction — O(n²) and tens of thousands of allocations per frame); the stream decodes only the newest frame of each read so it never falls behind real time.
+7. **HLS** sits ~1.5 s from the live edge (LL-HLS live configuration).
+
+**Controls & connection**
+8. **Coalesced messages**: `supported_features { coalesce_messages: 1 }` after auth; batched JSON-array frames are unpacked — the initial state flood and event bursts arrive in a handful of frames.
+9. **Optimistic continuous controls**: brightness, cover position, climate setpoint(s) and HVAC mode update the local entity at once (reverted on failure), like toggles already did.
+10. **Sliders no longer snap back**: `ServiceSlider` holds the dragged value through the round trip (and 2.5 s after release) instead of resetting on any intermediate server update.
+11. Generic `HaClient.subscribe/unsubscribe` (subscriptions are failed cleanly when their socket drops).
+12. Sprinkler ids updated to the re-added Meross entities (`switch.greenhouse_sprinklers`, `sensor.smart_sprinkler_battery`, `number.smart_sprinkler_duration`).
+
+Tests: `PerformanceRoundTest` (parser exactness under random chunking with 150–190 KB frames, linear-time check, ICE url parsing). 545 unit tests pass.
+
+
 ## 3.4: Move things with your hand; your real home, cleaned up (2026-11-27)
 
 **What you will see**

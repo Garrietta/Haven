@@ -212,9 +212,11 @@ val GREENHOUSE_TIMER_IDS = listOf(
     "timer.greenhouse_morning_water",
 )
 const val GREENHOUSE_WATER_DUE_ID = "counter.greenhouse_water_due"
-const val SPRINKLER_SWITCH_ID = "switch.smart_sprinkler_timer_1b0092afd0b7_watering"
-const val SPRINKLER_DURATION_ID = "number.smart_sprinkler_timer_1b0092afd0b7_watering_duration"
-const val SPRINKLER_BATTERY_ID = "sensor.smart_sprinkler_timer_1b0092afd0b7_battery"
+// Performance round (2026-11-28): Meross LAN was re-added on the instance and
+// the sprinkler timer's entities were renamed; these are the live ids.
+const val SPRINKLER_SWITCH_ID = "switch.greenhouse_sprinklers"
+const val SPRINKLER_DURATION_ID = "number.smart_sprinkler_duration"
+const val SPRINKLER_BATTERY_ID = "sensor.smart_sprinkler_battery"
 
 /** "greenhouse_fan_purge" -> "Greenhouse fan purge" for timers whose friendly name is just the raw object id. Names that already contain spaces pass through untouched. */
 fun prettifyIdName(entity: HaEntity): String {
