@@ -285,6 +285,14 @@ class HaClient(
         }
     }
 
+    /** Optimistic local edit of a whole entity (state + attributes); the next state_changed reconciles it. */
+    fun patchLocalEntity(entityId: String, edit: (HaEntity) -> HaEntity) {
+        _states.update { current ->
+            val old = current[entityId] ?: return@update current
+            current + (entityId to edit(old))
+        }
+    }
+
     /**
      * Sticky optimistic flips (see OptimisticStateGuard): a tap's expected
      * state survives stale or intermediate server events that still say
@@ -858,6 +866,8 @@ class HaClient(
 
     /** Fails every pending call that was sent on link [gen] (asynchronously, never inline). */
     private fun failPending(gen: Int, reason: String) {
+        val deadSubs = subscriptions.entries.filter { it.value.gen == gen }.map { it.key }
+        for (id in deadSubs) subscriptions.remove(id)?.let { sub -> scope.launch(Dispatchers.Default) { sub.onClosed() } }
         val ids = pending.entries.filter { it.value.gen == gen }.map { it.key }
         if (ids.isEmpty()) return
         val removed = ids.mapNotNull { id -> pending.remove(id)?.let { id to it.onResult } }
@@ -915,11 +925,24 @@ class HaClient(
     }
 
     private fun handleMessage(link: Link, text: String) {
+        // Performance round: with coalesce_messages on, HA batches
+        // several messages into one JSON array frame (the initial state
+        // flood and event bursts arrive in a handful of frames instead of
+        // hundreds). Both shapes are handled.
+        if (text.startsWith("[")) {
+            val arr = try { JSONArray(text) } catch (e: Exception) { return }
+            for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { handleMessageObject(link, it) }
+            return
+        }
         val msg = try {
             JSONObject(text)
         } catch (e: Exception) {
             return
         }
+        handleMessageObject(link, msg)
+    }
+
+    private fun handleMessageObject(link: Link, msg: JSONObject) {
         val type = msg.optString("type")
         // Results and pongs route by id from ANY link — a draining link
         // still completes the calls that were sent on it.
@@ -943,6 +966,12 @@ class HaClient(
             "auth_ok" -> {
                 link.authed = true
                 link.timeoutJob?.cancel()
+                // First message after auth, per HA's protocol: opt in to
+                // coalesced (batched) messages. Older cores ignore it.
+                link.send(
+                    JSONObject().put("id", nextId.getAndIncrement()).put("type", "supported_features")
+                        .put("features", JSONObject().put("coalesce_messages", 1)),
+                )
                 if (role == ROLE_UPGRADE) promote(link) else onPrimaryAuthed(link)
             }
             "auth_invalid" -> {
@@ -969,6 +998,13 @@ class HaClient(
     }
 
     private fun handleEvent(msg: JSONObject) {
+        val subId = msg.optInt("id", -1)
+        subscriptions[subId]?.let { sub ->
+            msg.optJSONObject("event")?.let { ev ->
+                try { sub.onEvent(ev) } catch (e: Exception) { Log.w(TAG, "subscription $subId handler: ${e.message}") }
+            }
+            return
+        }
         // Round 5 Bug B: a WebRTC subscription event,
         // correlated by the command id it answers. The old
         // code only handled state_changed here, so the SDP
@@ -1555,6 +1591,87 @@ class HaClient(
         send("camera/webrtc/offer")
     }
 
+    // ---- Generic subscriptions (performance round) -------------------------
+
+    private class Subscription(
+        val gen: Int,
+        val onEvent: (JSONObject) -> Unit,
+        val onClosed: () -> Unit,
+    )
+    private val subscriptions = ConcurrentHashMap<Int, Subscription>()
+
+    /**
+     * Opens a WS subscription command ([type]) and routes every `event`
+     * message carrying its id to [onEvent] (the `event` object). [onResult]
+     * reports the command result; [onClosed] fires if the socket carrying
+     * the subscription drops (subscriptions do not survive a reconnect).
+     * Returns the subscription id for [unsubscribe].
+     */
+    fun subscribe(
+        type: String,
+        build: (JSONObject) -> Unit,
+        onEvent: (JSONObject) -> Unit,
+        onResult: (ok: Boolean, error: String?) -> Unit = { _, _ -> },
+        onClosed: () -> Unit = {},
+    ): Int {
+        val id = nextId.getAndIncrement()
+        val obj = JSONObject().put("id", id).put("type", type)
+        build(obj)
+        val gen = synchronized(lock) { primary?.gen } ?: -1
+        subscriptions[id] = Subscription(gen, onEvent, onClosed)
+        dispatch(id, obj) { msg ->
+            if (msg.optBoolean("success", false)) {
+                onResult(true, null)
+            } else {
+                subscriptions.remove(id)
+                val err = msg.optJSONObject("error")
+                onResult(false, err?.optString("message")?.ifEmpty { null } ?: err?.optString("code"))
+            }
+        }
+        return id
+    }
+
+    /** Ends a subscription opened with [subscribe]; HA closes whatever it backed (e.g. a WebRTC session). */
+    fun unsubscribe(subscriptionId: Int) {
+        if (subscriptions.remove(subscriptionId) == null) return
+        sendCommand("unsubscribe_events", build = { it.put("subscription", subscriptionId) })
+    }
+
+    /**
+     * `camera/capabilities`: the stream types HA's frontend would use for
+     * this camera (e.g. ["web_rtc", "hls"]). Null when the call fails
+     * (older core, unknown entity). Callback on the main thread.
+     */
+    fun cameraCapabilities(entityId: String, onResult: (List<String>?) -> Unit) {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        sendCommand("camera/capabilities", build = { it.put("entity_id", entityId) }, onResult = { msg ->
+            val types = if (msg.optBoolean("success", false)) {
+                msg.optJSONObject("result")?.optJSONArray("frontend_stream_types")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { arr.optString(it).ifEmpty { null } }
+                }
+            } else null
+            main.post { onResult(types) }
+        })
+    }
+
+    /** `camera/webrtc/get_client_config` result (ICE servers etc.), or null. Callback on the main thread. */
+    fun webRtcClientConfig(entityId: String, onResult: (JSONObject?) -> Unit) {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        sendCommand("camera/webrtc/get_client_config", build = { it.put("entity_id", entityId) }, onResult = { msg ->
+            val result = if (msg.optBoolean("success", false)) msg.optJSONObject("result") else null
+            main.post { onResult(result) }
+        })
+    }
+
+    /** Trickle ICE: one local candidate as HA's RTCIceCandidateInit object. Fire-and-forget. */
+    fun sendWebRtcCandidate(entityId: String, sessionId: String, candidate: JSONObject) {
+        sendCommand("camera/webrtc/candidate", build = {
+            it.put("entity_id", entityId)
+            it.put("session_id", sessionId)
+            it.put("candidate", candidate)
+        })
+    }
+
     /**
      * Best-effort trickle ICE send: a local candidate gathered after
      * the answer, via `camera/webrtc/candidate`. Failures are ignored
@@ -1875,7 +1992,7 @@ class HaClient(
                     val lastFrameAt = java.util.concurrent.atomic.AtomicLong(startedAt)
                     val sawFrame = AtomicBoolean(false)
                     val failed = AtomicBoolean(false)
-                    val buf = ByteArray(16 * 1024)
+                    val buf = ByteArray(64 * 1024)
                     // Watchdog: a CHILD of the stream job, so cancelling the
                     // stream (viewer closed, Retry pressed) kills it too. A
                     // timeout cancels the call, which unblocks the read.
@@ -1901,12 +2018,13 @@ class HaClient(
                             val read = body.read(buf)
                             if (read < 0) break
                             if (read == 0) continue
-                            for (jpeg in parser.feed(buf.copyOf(read))) {
-                                val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: continue
-                                lastFrameAt.set(System.currentTimeMillis())
-                                sawFrame.set(true)
-                                post(CameraStreamState.Playing(bitmap))
-                            }
+                            val frames = parser.feed(buf, 0, read)
+                            if (frames.isEmpty()) continue
+                            lastFrameAt.set(System.currentTimeMillis())
+                            val jpeg = frames.last()
+                            val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: continue
+                            sawFrame.set(true)
+                            post(CameraStreamState.Playing(bitmap))
                         }
                         // Stream ended cleanly without ever producing a frame.
                         if (isActive && !sawFrame.get() && !failed.get()) post(CameraStreamState.Error("Camera stream ended"))
@@ -1980,9 +2098,19 @@ class HaClient(
      */
     fun createHlsPlayer(context: android.content.Context, playlistUrl: String): androidx.media3.exoplayer.ExoPlayer {
         val absolute = resolveAgainstInstance(playlistUrl)
+        val item = androidx.media3.common.MediaItem.Builder()
+            .setUri(absolute)
+            .setLiveConfiguration(
+                androidx.media3.common.MediaItem.LiveConfiguration.Builder()
+                    .setTargetOffsetMs(1_500)
+                    .setMinPlaybackSpeed(0.97f)
+                    .setMaxPlaybackSpeed(1.04f)
+                    .build(),
+            )
+            .build()
         val source = androidx.media3.exoplayer.hls.HlsMediaSource.Factory(mediaDataSourceFactory(absolute))
             .setAllowChunklessPreparation(true)
-            .createMediaSource(androidx.media3.common.MediaItem.fromUri(absolute))
+            .createMediaSource(item)
         return androidx.media3.exoplayer.ExoPlayer.Builder(context)
             .setLoadControl(liveLoadControl())
             .build()

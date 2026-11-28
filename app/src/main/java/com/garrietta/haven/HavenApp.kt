@@ -205,6 +205,8 @@ import com.garrietta.haven.data.FRONT_DOOR_LIVE_VIEW_ID
 import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.HaEntity
 import com.garrietta.haven.data.RingWebRtcSession
+import com.garrietta.haven.data.HaWebRtcSession
+import com.garrietta.haven.data.FRONT_DOOR_RING_MQTT_CAMERA_ID as RING_MQTT_CAMERA_ID
 import com.garrietta.haven.data.frontDoorShowsLiveBadge
 import com.garrietta.haven.data.resolveFrontDoorCameraSource
 import com.garrietta.haven.data.isRingCamera
@@ -2889,21 +2891,23 @@ private fun CameraFullscreen(vm: HavenViewModel, onClose: () -> Unit, enterProgr
     // via a Generic Camera entity, or the frontend's actual
     // transport once diagnosed), not this one.
     val isRing = entity?.let { isRingCamera(it) } == true
+    // Performance round: Ring is live over WebRTC now; the recording
+    // caption appears only if the viewer really fell back to the proxy.
+    var transport by remember(cameraId) { mutableStateOf<String?>(null) }
     BackHandler { onClose() }
     Box(Modifier.fillMaxSize().background(Color.Black)) { // video surface: black by design, not a scheme role
-        // Feedback round, item 4: HLS-first for stream-capable
-        // non-Ring cameras; Ring keeps the MJPEG recording body
-        // with its labels, byte for byte (CameraLiveBody routes).
         CameraLiveBody(
             vm, cameraId, enterProgress, recording = isRing, onClose = onClose,
-            connectingText = if (isRing) "Loading recording…" else null,
             errorPrefix = if (isRing) "MJPEG proxy" else null,
+            onTransport = { transport = it },
         )
-        // Ring carries its recording caption persistently (see
-        // above); other cameras never carried a badge here either.
         CameraHeader(
             entity?.let { displayCameraName(it) } ?: "Camera",
-            badgeText = if (isRing) "Latest motion recording · Not live" else null,
+            badgeText = when {
+                isRing && transport == "mjpeg" -> "Latest motion recording · Not live"
+                transport == "web_rtc" || transport == "hls" -> "Live"
+                else -> null
+            },
         )
     }
 }
@@ -2974,6 +2978,16 @@ private fun FrontDoorCameraPanel(
     onClose: () -> Unit,
 ) {
     val states by vm.states.collectAsState()
+    // Performance round: without ring-mqtt (its camera + live-stream
+    // switch), the official Ring integration streams live over WebRTC —
+    // the same path HA's own app uses — so the panel takes the modern
+    // capability-routed body instead of the ring-mqtt attempt chain.
+    val ringMqttInstalled = states.containsKey(RING_MQTT_CAMERA_ID) ||
+        states.containsKey(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+    if (!ringMqttInstalled) {
+        FrontDoorLivePanel(vm, cameraId, enterProgress, onClose)
+        return
+    }
     val entity = states[cameraId]
     val switchOn = states[FRONT_DOOR_LIVE_STREAM_SWITCH_ID]?.state == "on"
     // Camera fallback round: the resolved front-door video source,
@@ -3553,6 +3567,92 @@ private fun FrontDoorCameraPanel(
     }
 }
 
+/**
+ * Performance round: the Front Door panel for an instance without
+ * ring-mqtt. Live View = the capability-routed body (WebRTC through
+ * HA's Ring integration, falling back to the labeled recording);
+ * Event History = the recording proxy. The LIVE badge is earned only
+ * by frames from a live transport.
+ */
+@Composable
+private fun FrontDoorLivePanel(
+    vm: HavenViewModel,
+    cameraId: String,
+    enterProgress: () -> Float,
+    onClose: () -> Unit,
+) {
+    val entity = vm.entityFlow(cameraId).collectAsState().value
+    var tab by remember { mutableStateOf(FrontDoorTab.LIVE) }
+    var transport by remember { mutableStateOf<String?>(null) }
+    var liveKey by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tab) { if (tab == FrontDoorTab.LIVE) { transport = null; liveKey += 1 } }
+    val live = tab == FrontDoorTab.LIVE && (transport == "web_rtc" || transport == "hls")
+    val pathLine = when {
+        tab == FrontDoorTab.HISTORY -> "Latest motion recording · Not live"
+        live -> "Live"
+        transport == "mjpeg" -> "Live view unavailable — showing latest motion recording"
+        else -> "Connecting to live view…"
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (tab == FrontDoorTab.HISTORY) {
+            CameraMjpegBody(vm, cameraId, enterProgress, recording = true, onClose = onClose)
+        } else {
+            key(liveKey) {
+                CameraLiveBody(
+                    vm, cameraId, enterProgress, recording = true, onClose = onClose,
+                    onTransport = {
+                        transport = it
+                        // The Home quadrant reads LIVE once a live
+                        // transport has proven itself this session.
+                        if (it == "web_rtc" || it == "hls") vm.markFrontDoorRtspProven()
+                    },
+                )
+            }
+        }
+        Box(
+            Modifier.align(Alignment.TopStart).fillMaxWidth().height(240.dp)
+                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent))),
+        )
+        Column(
+            Modifier.align(Alignment.TopStart).fillMaxWidth()
+                .statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    entity?.let { displayCameraName(it) } ?: "Front Door",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (live) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFD32F2F))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(Color.White))
+                        Spacer(Modifier.width(4.dp))
+                        Text("LIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.15f)).padding(4.dp),
+            ) {
+                FrontDoorTabOption("Live View", tab == FrontDoorTab.LIVE) { tab = FrontDoorTab.LIVE }
+                FrontDoorTabOption("Event History", tab == FrontDoorTab.HISTORY) { tab = FrontDoorTab.HISTORY }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(pathLine, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+        }
+    }
+}
+
 @Composable
 private fun RowScope.FrontDoorTabOption(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
@@ -3614,14 +3714,54 @@ private fun CameraLiveBody(
     errorPrefix: String? = null,
     onFirstFrame: (() -> Unit)? = null,
     onError: ((String) -> Unit)? = null,
+    // Performance round: which transport produced the first frame
+    // ("web_rtc", "hls" or "mjpeg"), so callers can label live vs.
+    // recording truthfully.
+    onTransport: ((String) -> Unit)? = null,
 ) {
     // Reliability round: this camera's own flow, not the whole states
     // map — the live body used to recompose on every state change in
     // the house while the video played.
     val entity = vm.entityFlow(cameraId).collectAsState().value
-    // Ring + non-stream cameras + unknown entities: MJPEG, unchanged.
-    if (entity == null || isRingCamera(entity) || !cameraSupportsStream(entity)) {
-        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, onFirstFrame, onError)
+    val mjpegFirstFrame: () -> Unit = { onTransport?.invoke("mjpeg"); onFirstFrame?.invoke() }
+    if (entity == null) {
+        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, mjpegFirstFrame, onError)
+        return
+    }
+    // Performance round: the transport comes from HA's own
+    // camera/capabilities (what the HA frontend uses): WebRTC first —
+    // go2rtc / Ring / Nest, sub-second — then HLS, then the MJPEG proxy.
+    var streamTypes by remember(cameraId) { mutableStateOf(vm.cachedCameraStreamTypes(cameraId)) }
+    LaunchedEffect(cameraId) {
+        if (streamTypes != null) return@LaunchedEffect
+        var done = false
+        val timeout = launch {
+            delay(3000)
+            if (!done) { done = true; streamTypes = emptyList() }
+        }
+        vm.requestCameraStreamTypes(cameraId) { types ->
+            if (!done) { done = true; timeout.cancel(); streamTypes = types }
+        }
+    }
+    var webrtcFailed by remember(cameraId) { mutableStateOf(false) }
+    val types = streamTypes
+    if (types == null) {
+        CameraConnectingPoster(vm, cameraId, connectingText ?: "Connecting…")
+        return
+    }
+    if (!webrtcFailed && vm.webRtcAllowed && "web_rtc" in types) {
+        CameraWebRtcBody(
+            vm, cameraId, enterProgress,
+            onFirstFrame = { onTransport?.invoke("web_rtc"); onFirstFrame?.invoke() },
+            onFailed = { stage ->
+                Log.w("Haven", "camera $cameraId WebRTC failed ($stage) — falling back")
+                webrtcFailed = true
+            },
+        )
+        return
+    }
+    if ("hls" !in types) {
+        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, mjpegFirstFrame, onError)
         return
     }
     var hlsUrl by remember(cameraId) { mutableStateOf<String?>(null) }
@@ -3646,31 +3786,16 @@ private fun CameraLiveBody(
         }
     }
     if (hlsFailed) {
-        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, onFirstFrame, onError)
+        CameraMjpegBody(vm, cameraId, enterProgress, recording, onClose, connectingText, errorPrefix, mjpegFirstFrame, onError)
         return
     }
     val url = hlsUrl
     if (url == null) {
-        // Attempting: mirror the MJPEG Connecting stage (cached
-        // frame dimmed + loading text) so the wait reads the same.
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            val last = vm.cameraPoster(cameraId)
-            if (last != null) {
-                Image(
-                    bitmap = last.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.25f },
-                )
-            }
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Loading camera…", color = Color.White, fontSize = 16.sp)
-            }
-        }
+        CameraConnectingPoster(vm, cameraId)
         return
     }
     CameraHlsPlayerBody(
-        vm, cameraId, url, enterProgress, onFirstFrame,
+        vm, cameraId, url, enterProgress, { onTransport?.invoke("hls"); onFirstFrame?.invoke() },
         // Player error → MJPEG fallback, terminal for this mount.
         // onError is deliberately NOT forwarded: the fallback body
         // owns error display from here (same content, MJPEG).
@@ -3742,20 +3867,6 @@ private fun CameraHlsPlayerBody(
         onDispose { player.release() }
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (!rendered) {
-            val last = vm.cameraPoster(cameraId)
-            if (last != null) {
-                Image(
-                    bitmap = last.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.25f },
-                )
-            }
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Loading camera…", color = Color.White, fontSize = 16.sp)
-            }
-        }
         // Fit: the largest rect of the video aspect inside the
         // Box, centered, so the black Box area becomes the bars.
         // Aspect unknown yet -> full-size surface (black until
@@ -3781,6 +3892,109 @@ private fun CameraHlsPlayerBody(
                 },
             )
         }
+        // Performance round: the last snapshot at FULL brightness
+        // (drawn over the surface) until the first frame — the view
+        // reads as instant instead of a dimmed wait.
+        if (!rendered) CameraConnectingPoster(vm, cameraId)
+    }
+}
+
+/**
+ * Performance round: the connecting state. The cached snapshot is shown
+ * at full brightness with a small status pill (HA's frontend does the
+ * same with its poster), instead of a 25%-dimmed frame behind
+ * "Loading camera…" — so opening a camera looks instant and the live
+ * video simply takes over when it lands.
+ */
+@Composable
+private fun CameraConnectingPoster(vm: HavenViewModel, cameraId: String, text: String = "Connecting…") {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        val poster = vm.cameraPoster(cameraId)
+        if (poster != null) {
+            Image(
+                bitmap = poster.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Row(
+            Modifier.align(if (poster != null) Alignment.BottomCenter else Alignment.Center)
+                .padding(bottom = if (poster != null) 40.dp else 0.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                color = Color.White,
+                strokeWidth = 2.dp,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(text, color = Color.White, fontSize = 13.sp)
+        }
+    }
+}
+
+/**
+ * Performance round: WebRTC live video through Home Assistant (see
+ * HaWebRtcSession). The renderer letterboxes itself (SCALE_ASPECT_FIT)
+ * and is centered; the poster covers it until the first decoded frame.
+ * Any failure — and a 12s no-frame timeout — is posted (never applied
+ * inline from a WebRTC callback) so the caller can fall back to HLS or
+ * MJPEG after this body's session has been torn down exactly once.
+ */
+@Composable
+private fun CameraWebRtcBody(
+    vm: HavenViewModel,
+    cameraId: String,
+    enterProgress: () -> Float,
+    onFirstFrame: () -> Unit,
+    onFailed: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var rendered by remember(cameraId) { mutableStateOf(false) }
+    val holder = remember(cameraId) { object { var renderer: SurfaceViewRenderer? = null; var failed = false } }
+    val failOnce: (String) -> Unit = { stage ->
+        if (!holder.failed) {
+            holder.failed = true
+            mainHandler.post { onFailed(stage) }
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        AndroidView(
+            factory = { ctx -> SurfaceViewRenderer(ctx).also { holder.renderer = it } },
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                val p = enterProgress().coerceIn(0f, 1f)
+                val sc = 0.94f + 0.06f * p
+                scaleX = sc
+                scaleY = sc
+            },
+        )
+        if (!rendered) CameraConnectingPoster(vm, cameraId)
+    }
+    DisposableEffect(cameraId) {
+        val renderer = holder.renderer
+        if (renderer == null) {
+            onDispose { }
+        } else {
+            val session = HaWebRtcSession(context.applicationContext, vm.client, cameraId)
+            session.start(
+                renderer,
+                onFirstFrame = {
+                    rendered = true
+                    onFirstFrame()
+                },
+                onFailed = { failOnce(it) },
+            )
+            onDispose { session.close(renderer) }
+        }
+    }
+    LaunchedEffect(cameraId) {
+        delay(12_000)
+        if (!rendered) failOnce("no video within 12s")
     }
 }
 

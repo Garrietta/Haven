@@ -270,7 +270,21 @@ fun ServiceSlider(
     modifier: Modifier = Modifier,
     formatValue: ((Float) -> String)? = null,
 ) {
-    var local by remember(value) { mutableStateOf(value) }
+    // Performance round: the thumb no longer snaps back. The old
+    // remember(value) reset the local value on ANY server update — so an
+    // intermediate state (a light's transition, a cover in motion, or just
+    // the pre-change value echoing back) yanked the thumb to the old
+    // position before the confirming update moved it again. Now the local
+    // value is held while dragging and for a short window after release,
+    // then re-synced to whatever the server says.
+    var local by remember { mutableStateOf(value) }
+    var dragging by remember { mutableStateOf(false) }
+    var holdUntil by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    androidx.compose.runtime.LaunchedEffect(value, holdUntil) {
+        val wait = holdUntil - System.currentTimeMillis()
+        if (wait > 0) kotlinx.coroutines.delay(wait)
+        if (!dragging) local = value
+    }
     Column(modifier) {
         if (formatValue != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -279,9 +293,13 @@ fun ServiceSlider(
         }
         Slider(
             value = local,
-            onValueChange = { local = it },
+            onValueChange = { dragging = true; local = it },
             valueRange = range,
-            onValueChangeFinished = { onFinished(local) },
+            onValueChangeFinished = {
+                dragging = false
+                holdUntil = System.currentTimeMillis() + 2_500
+                onFinished(local)
+            },
             colors = SliderDefaults.colors(activeTrackColor = accent, thumbColor = accent),
         )
     }

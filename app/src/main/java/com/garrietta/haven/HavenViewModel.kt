@@ -742,8 +742,13 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         if (frontDoorLiveEngaged) return
         frontDoorLiveEngaged = true
         frontDoorLiveStopReason = null
-        Log.d("Haven", "FrontDoorLive: engage — switch.turn_on $FRONT_DOOR_LIVE_STREAM_SWITCH_ID")
-        turnOn(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+        // Performance round: ring-mqtt is optional. Without its switch the
+        // live view is WebRTC through HA's Ring integration, so there is
+        // nothing to engage (calling a missing entity just raised an error).
+        if (states.value.containsKey(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)) {
+            Log.d("Haven", "FrontDoorLive: engage — switch.turn_on $FRONT_DOOR_LIVE_STREAM_SWITCH_ID")
+            turnOn(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+        }
         frontDoorLiveWatchdog?.cancel()
         frontDoorLiveWatchdog = viewModelScope.launch {
             delay(FRONT_DOOR_LIVE_MAX_MS)
@@ -758,8 +763,10 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         frontDoorLiveStopReason = reason
         frontDoorLiveWatchdog?.cancel()
         frontDoorLiveWatchdog = null
-        Log.d("Haven", "FrontDoorLive: disengage ($reason) — switch.turn_off $FRONT_DOOR_LIVE_STREAM_SWITCH_ID")
-        turnOff(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+        if (states.value.containsKey(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)) {
+            Log.d("Haven", "FrontDoorLive: disengage ($reason) — switch.turn_off $FRONT_DOOR_LIVE_STREAM_SWITCH_ID")
+            turnOff(FRONT_DOOR_LIVE_STREAM_SWITCH_ID)
+        }
     }
 
     /** App backgrounded (MainActivity.onStop): a backgrounded live session must never hold the switch. */
@@ -824,10 +831,58 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Starts Home Assistant's stream worker ahead of the viewer (no-op for MJPEG cameras). */
+    /**
+     * Performance round: warms whatever the viewer will use. Stream types
+     * are discovered first (cached); WebRTC cameras need nothing more (the
+     * handshake itself is sub-second), HLS-only cameras get the stream
+     * worker started so the first segment is ready when the morph lands.
+     */
     fun prewarmCameraStream(entityId: String) {
-        if (!connection.value.isLive() || !cameraUsesHls(entityId)) return
-        requestCameraHlsUrl(entityId) { }
+        if (!connection.value.isLive()) return
+        requestCameraStreamTypes(entityId) { types ->
+            val webrtc = "web_rtc" in types && webRtcAllowed
+            if (!webrtc && "hls" in types) requestCameraHlsUrl(entityId) { }
+        }
+    }
+
+    // ---- Camera transports (performance round) ----
+    //
+    // HA's frontend picks a camera's transport from `camera/capabilities`
+    // (frontend_stream_types): WebRTC (go2rtc / Ring / Nest — sub-second
+    // start) first, then HLS, then the MJPEG proxy. Haven now does the same.
+
+    /** False after repeated native WebRTC crashes on this app version (see WebRtcCrashGuard). */
+    val webRtcAllowed: Boolean = com.garrietta.haven.data.WebRtcCrashGuard.checkOnLaunch(application)
+
+    private val streamTypesCache = mutableMapOf<String, List<String>>()
+    private val streamTypesWaiters = mutableMapOf<String, MutableList<(List<String>) -> Unit>>()
+
+    /** Cached stream types for [entityId], or null if not discovered yet. */
+    fun cachedCameraStreamTypes(entityId: String): List<String>? = streamTypesCache[entityId]
+
+    /**
+     * The camera's stream types, deduplicated and cached. Falls back to the
+     * legacy `frontend_stream_type` attribute / SUPPORT_STREAM bit when the
+     * capabilities command is unavailable. Callback on the main thread.
+     */
+    fun requestCameraStreamTypes(entityId: String, onResult: (List<String>) -> Unit) {
+        streamTypesCache[entityId]?.let { onResult(it); return }
+        streamTypesWaiters[entityId]?.let { it += onResult; return }
+        streamTypesWaiters[entityId] = mutableListOf(onResult)
+        client.cameraCapabilities(entityId) { types ->
+            val resolved = types ?: run {
+                val entity = states.value[entityId]
+                val legacy = entity?.attrString("frontend_stream_type")
+                when {
+                    legacy != null -> listOf(legacy)
+                    entity != null && cameraSupportsStream(entity) -> listOf("hls")
+                    else -> emptyList()
+                }
+            }
+            if (types != null) streamTypesCache[entityId] = resolved
+            Log.d("Haven", "camera $entityId stream types: $resolved")
+            streamTypesWaiters.remove(entityId).orEmpty().forEach { it(resolved) }
+        }
     }
 
     override fun onCleared() {
@@ -2108,8 +2163,36 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
     fun callService(domain: String, service: String, entityId: String? = null, data: JSONObject? = null) =
         client.callService(domain, service, entityId, data)
 
-    fun setLightBrightness(id: String, pct: Int) =
-        client.callService("light", "turn_on", id, JSONObject().put("brightness_pct", pct))
+    /**
+     * Performance round: continuous controls update the local entity at
+     * once (like toggles already did), so every surface showing the value
+     * — tiles, heroes, the slider itself — moves with the finger instead of
+     * waiting for the round trip. A failed call restores the old entity.
+     */
+    private fun actuateAttrs(
+        id: String,
+        state: String? = null,
+        attrs: Map<String, Any?>,
+        call: ((Boolean) -> Unit) -> Unit,
+    ) {
+        localActuations[id] = System.currentTimeMillis()
+        val prev = client.states.value[id]
+        client.patchLocalEntity(id) { e -> e.copy(state = state ?: e.state, attributes = e.attributes + attrs) }
+        if (state != null) client.expectOptimistic(id, state)
+        call { ok ->
+            if (!ok && prev != null) {
+                client.patchLocalEntity(id) { prev }
+                if (state != null) client.clearOptimistic(id)
+            }
+        }
+    }
+
+    fun setLightBrightness(id: String, pct: Int) {
+        if (pct <= 0) { turnOff(id); return }
+        actuateAttrs(id, "on", mapOf("brightness" to (pct * 255 + 50) / 100)) { done ->
+            client.callService("light", "turn_on", id, JSONObject().put("brightness_pct", pct), done)
+        }
+    }
 
     fun setLightColorTemp(id: String, kelvin: Int) =
         client.callService("light", "turn_on", id, JSONObject().put("color_temp_kelvin", kelvin))
@@ -2118,22 +2201,30 @@ class HavenViewModel(application: Application) : AndroidViewModel(application) {
         client.callService("light", "turn_on", id, JSONObject().put("hs_color", JSONArray().put(hue).put(saturation)))
 
     fun setCoverPosition(id: String, position: Int) =
-        client.callService("cover", "set_cover_position", id, JSONObject().put("position", position))
+        actuateAttrs(id, attrs = mapOf("current_position" to position)) { done ->
+            client.callService("cover", "set_cover_position", id, JSONObject().put("position", position), done)
+        }
 
     fun setClimateTemperature(id: String, temperature: Double, hvacMode: String? = null) {
         val data = JSONObject().put("temperature", temperature)
         if (hvacMode != null) data.put("hvac_mode", hvacMode)
-        client.callService("climate", "set_temperature", id, data)
+        actuateAttrs(id, hvacMode, mapOf("temperature" to temperature)) { done ->
+            client.callService("climate", "set_temperature", id, data, done)
+        }
     }
 
     /** Heat/cool pair version of [setClimateTemperature]. */
     fun setClimateTemperatureRange(id: String, low: Double, high: Double) {
         val data = JSONObject().put("target_temp_low", low).put("target_temp_high", high)
-        client.callService("climate", "set_temperature", id, data)
+        actuateAttrs(id, attrs = mapOf("target_temp_low" to low, "target_temp_high" to high)) { done ->
+            client.callService("climate", "set_temperature", id, data, done)
+        }
     }
 
     fun setClimateHvacMode(id: String, mode: String) =
-        client.callService("climate", "set_hvac_mode", id, JSONObject().put("hvac_mode", mode))
+        actuate(id, mode) { done ->
+            client.callService("climate", "set_hvac_mode", id, JSONObject().put("hvac_mode", mode), done)
+        }
 
     fun setClimateFanMode(id: String, mode: String) =
         client.callService("climate", "set_fan_mode", id, JSONObject().put("fan_mode", mode))
